@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 
@@ -48,12 +49,12 @@ func testCredentialNaming(t *testing.T, holder *ecdsa.PrivateKey, extraClaims ma
 		"iat": 1234567890,
 		"exp": 9999999999,
 		"vct": "https://example.com/TestCredential",
-		"cnf": map[string]any{"jwk": map[string]any{
-			"kty": "EC",
-			"crv": "P-256",
-			"x":   base64.RawURLEncoding.EncodeToString(holder.PublicKey.X.Bytes()),
-			"y":   base64.RawURLEncoding.EncodeToString(holder.PublicKey.Y.Bytes()),
-		}},
+		// publicJWK, not a hand-rolled map: RFC 7518 requires P-256
+		// coordinates to be exactly 32 bytes, big.Int.Bytes() drops
+		// leading zeroes, and a strict parser rejects the short result -
+		// so hand-rolling makes this suite fail for roughly one generated
+		// key in 128.
+		"cnf": map[string]any{"jwk": publicJWK(t, holder.Public())},
 	}
 	for k, v := range extraClaims {
 		payload[k] = v
@@ -98,7 +99,9 @@ func createTestVPToken(t *testing.T, nonce, aud string, includeBinding bool) str
 	return testPresentation(t, credential, holder, map[string]any{
 		"nonce": nonce,
 		"aud":   aud,
-		"iat":   1234567890,
+		// The moment of presentation, which is what iat means on a
+		// KB-JWT and what the validator now bounds.
+		"iat": time.Now().Unix(),
 	})
 }
 
@@ -460,7 +463,7 @@ func TestVPTokenValidator_ValidateAudience_MissingInKeyBinding(t *testing.T) {
 	holder := testHolderKey(t)
 	vpToken := testPresentation(t, testCredentialNaming(t, holder, nil), holder, map[string]any{
 		"nonce": "test-nonce",
-		"iat":   123,
+		"iat":   time.Now().Unix(),
 	})
 
 	validator := &VPTokenValidator{
@@ -500,7 +503,7 @@ func createTestVPTokenWithTxHashes(t *testing.T, nonce, aud string, hashes []str
 	kbClaims := map[string]any{
 		"nonce": nonce,
 		"aud":   aud,
-		"iat":   1234567890,
+		"iat":   time.Now().Unix(),
 	}
 	if hashes != nil {
 		kbClaims["transaction_data_hashes"] = hashes

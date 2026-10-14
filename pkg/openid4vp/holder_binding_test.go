@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -410,5 +411,145 @@ func TestHolderBinding_RefusesAnUnreadableSDAlg(t *testing.T) {
 			presentationProvedWith(t, credential, jwtv5.SigningMethodES256, holderKey, nonce, audience, "sha-256"))
 		require.Error(t, err, "an unreadable _sd_alg must not be read as sha-256")
 		assert.Contains(t, err.Error(), "_sd_alg")
+	})
+}
+
+// The fixtures' cnf JWK must carry fixed-width coordinates.
+//
+// RFC 7518 §6.2.1.2 requires the octet string for a P-256 coordinate to
+// be exactly 32 bytes, and jwx enforces it (ecdsaValidateKey: `invalid
+// "x" length`). big.Int.Bytes() drops leading zeroes, so a hand-rolled
+// JWK is one byte short whenever a freshly generated key's coordinate
+// happens to start with a zero - about one key in 128 across the two
+// coordinates. A suite built that way fails a few runs in a thousand for
+// a reason that has nothing to do with the code under test, which is the
+// worst kind of failure to debug.
+func TestHolderBinding_FixtureJWKsCarryFixedWidthCoordinates(t *testing.T) {
+	const (
+		nonce    = "request-nonce"
+		audience = "x509_san_dns:issuer.example.com"
+	)
+
+	// A key whose X would encode short. Found by search rather than
+	// hoped for, so this test exercises the case every run.
+	var holderKey *ecdsa.PrivateKey
+	for i := 0; i < 20000 && holderKey == nil; i++ {
+		candidate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		if len(candidate.PublicKey.X.Bytes()) < 32 {
+			holderKey = candidate
+		}
+	}
+	require.NotNil(t, holderKey, "no P-256 key with a short X coordinate in 20000 tries")
+
+	jwkMap := publicJWK(t, holderKey.Public())
+	for _, coord := range []string{"x", "y"} {
+		raw, err := base64.RawURLEncoding.DecodeString(jwkMap[coord].(string))
+		require.NoError(t, err)
+		assert.Len(t, raw, 32, "P-256 %q must be 32 bytes, left-padded", coord)
+	}
+
+	// And the whole path works with it, which is what the fixtures are
+	// for: a short coordinate fails at the JWK parser, long before any
+	// signature is checked.
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	credential := issuedCredentialFor(t, issuerKey, jwkMap, "")
+	validator := &VPTokenValidator{Nonce: nonce, ClientID: audience}
+	require.NoError(t, validator.Validate(
+		presentationProvedWith(t, credential, jwtv5.SigningMethodES256, holderKey, nonce, audience, "sha-256")))
+}
+
+// iat is REQUIRED on a KB-JWT and says when the proof was made. Leaving
+// it unread means a proof with no iat at all, or one dated years out,
+// is accepted exactly as readily as an honest one.
+func TestHolderBinding_BoundsTheKeyBindingTimestamp(t *testing.T) {
+	const (
+		nonce    = "request-nonce"
+		audience = "x509_san_dns:issuer.example.com"
+	)
+
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	credential := issuedCredentialFor(t, issuerKey, publicJWK(t, holderKey.Public()), "")
+
+	// Everything except iat is correct in every case below: the real
+	// holder's key, this request's nonce, this verifier's audience and an
+	// sd_hash over what is actually presented. Only the timestamp varies,
+	// so nothing here can pass or fail for another reason.
+	presentWith := func(t *testing.T, iat any) error {
+		t.Helper()
+
+		sdJWT := credential + "~"
+		sum := sha256.Sum256([]byte(sdJWT))
+		claims := jwtv5.MapClaims{
+			"nonce":   nonce,
+			"aud":     audience,
+			"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:]),
+		}
+		if iat != nil {
+			claims["iat"] = iat
+		}
+		kb := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
+		kb.Header["typ"] = "kb+jwt"
+		signed, err := kb.SignedString(holderKey)
+		require.NoError(t, err)
+
+		return (&VPTokenValidator{Nonce: nonce, ClientID: audience}).Validate(sdJWT + signed)
+	}
+
+	t.Run("now is accepted", func(t *testing.T) {
+		require.NoError(t, presentWith(t, time.Now().Unix()))
+	})
+
+	t.Run("a wallet clock slightly fast is still accepted", func(t *testing.T) {
+		require.NoError(t, presentWith(t, time.Now().Add(20*time.Second).Unix()),
+			"a holder whose phone is seconds fast is not an attacker")
+	})
+
+	t.Run("no iat at all is refused", func(t *testing.T) {
+		err := presentWith(t, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no iat")
+	})
+
+	t.Run("an iat that is not a timestamp is refused", func(t *testing.T) {
+		err := presentWith(t, "yesterday")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "iat")
+	})
+
+	t.Run("far in the future is refused", func(t *testing.T) {
+		err := presentWith(t, time.Now().Add(48*time.Hour).Unix())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "future")
+	})
+
+	t.Run("long stale is refused", func(t *testing.T) {
+		err := presentWith(t, time.Now().Add(-48*time.Hour).Unix())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ago")
+	})
+
+	t.Run("the window is overridable", func(t *testing.T) {
+		// A deployment that knows its wallets' clocks are worse widens
+		// it rather than going unchecked.
+		sdJWT := credential + "~"
+		sum := sha256.Sum256([]byte(sdJWT))
+		kb := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, jwtv5.MapClaims{
+			"nonce":   nonce,
+			"aud":     audience,
+			"iat":     time.Now().Add(-48 * time.Hour).Unix(),
+			"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:]),
+		})
+		kb.Header["typ"] = "kb+jwt"
+		signed, err := kb.SignedString(holderKey)
+		require.NoError(t, err)
+
+		require.NoError(t, (&VPTokenValidator{
+			Nonce: nonce, ClientID: audience, MaxKeyBindingAge: 72 * time.Hour,
+		}).Validate(sdJWT+signed))
 	})
 }

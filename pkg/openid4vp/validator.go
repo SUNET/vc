@@ -8,11 +8,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	jwt "github.com/golang-jwt/jwt/v5"
+)
+
+const (
+	// keyBindingClockSkew is the tolerance applied to both ends of the
+	// KB-JWT iat check. The timestamp is the wallet's, so a holder whose
+	// clock is slightly off is not an attacker. Matches
+	// pkg/openid4vci's proofIatClockSkew for the same kind of
+	// client-supplied iat.
+	keyBindingClockSkew = 30 * time.Second
+
+	// defaultMaxKeyBindingAge bounds how long after making a proof a
+	// holder may present it. Generous, because the honest gap is network
+	// latency and a wallet's clock error, not user think-time: iat is
+	// stamped when the KB-JWT is signed, which is the moment of sending.
+	// Overridable per validator for deployments that know their clocks
+	// are worse.
+	defaultMaxKeyBindingAge = 10 * time.Minute
 )
 
 // VPTokenValidator validates VP Token according to Section 8.6
@@ -46,6 +64,10 @@ type VPTokenValidator struct {
 
 	// TransactionData from the Authorization Request (raw base64url strings). When non-empty, the validator checks that the KB-JWT contains matching transaction_data_hashes.
 	TransactionData []string
+
+	// MaxKeyBindingAge bounds how old a Key Binding JWT's iat may be.
+	// Zero means defaultMaxKeyBindingAge.
+	MaxKeyBindingAge time.Duration
 }
 
 // Validate validates the VP Token according to OpenID4VP spec Section 8.6
@@ -178,10 +200,10 @@ func (v *VPTokenValidator) validateHolderBinding(vpToken string, parsed *sdjwtvc
 
 	kbJWT := strings.Join(parsed.KeyBinding, ".")
 
-	// Claims validation is off here deliberately: iat on a KB-JWT is the
-	// moment of presentation, and a clock skew between wallet and verifier
-	// would otherwise reject an honest holder. What this call is for is
-	// the signature.
+	// The library's own claims validation is off because a KB-JWT has
+	// none of the claims it would check - no exp, and an aud this package
+	// checks itself against the client_id. iat it would not check at all.
+	// The temporal check that does belong here is made below, explicitly.
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
 	token, err := parser.Parse(kbJWT, func(*jwt.Token) (any, error) { return holderKey, nil })
 	if err != nil {
@@ -194,6 +216,10 @@ func (v *VPTokenValidator) validateHolderBinding(vpToken string, parsed *sdjwtvc
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return fmt.Errorf("key binding JWT carries no claims")
+	}
+
+	if err := v.validateKeyBindingAge(claims); err != nil {
+		return err
 	}
 
 	// sd_hash ties the proof to THIS presentation. Without it a KB-JWT
@@ -224,6 +250,46 @@ func (v *VPTokenValidator) validateHolderBinding(vpToken string, parsed *sdjwtvc
 		return fmt.Errorf("key binding JWT's sd_hash does not cover the presentation it arrived in")
 	}
 
+	return nil
+}
+
+// validateKeyBindingAge checks the KB-JWT's iat, which SD-JWT §4.3 makes
+// REQUIRED and which says when the holder made this proof.
+//
+// Freshness is the nonce's job and the nonce does it well: it is this
+// request's, so a proof carrying it cannot predate the request whatever
+// its iat says. What iat adds is a bound that does not depend on the
+// verifier having issued a nonce at all - this validator runs with Nonce
+// empty in some flows - and a refusal for the proof that is simply not
+// well formed. Leaving a required claim entirely unread means a KB-JWT
+// with no iat, a string where a number belongs, or a timestamp years out
+// is accepted as readily as an honest one.
+//
+// Both bounds carry a skew tolerance, because the timestamp comes from
+// the wallet's clock and not ours: an honest holder whose phone is a
+// minute fast is still an honest holder. The same reasoning, and the same
+// 30 seconds, as the proof JWT check in pkg/openid4vci.
+func (v *VPTokenValidator) validateKeyBindingAge(claims jwt.MapClaims) error {
+	iat, err := claims.GetIssuedAt()
+	if err != nil {
+		return fmt.Errorf("key binding JWT's iat is not a timestamp: %w", err)
+	}
+	if iat == nil {
+		return fmt.Errorf("key binding JWT carries no iat, which it is required to carry")
+	}
+
+	maxAge := v.MaxKeyBindingAge
+	if maxAge <= 0 {
+		maxAge = defaultMaxKeyBindingAge
+	}
+
+	now := time.Now()
+	if iat.After(now.Add(keyBindingClockSkew)) {
+		return fmt.Errorf("key binding JWT is dated %s into the future", iat.Sub(now).Round(time.Second))
+	}
+	if age := now.Sub(iat.Time); age > maxAge+keyBindingClockSkew {
+		return fmt.Errorf("key binding JWT was made %s ago, beyond the %s a presentation is accepted within", age.Round(time.Second), maxAge)
+	}
 	return nil
 }
 
