@@ -169,7 +169,105 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 		return err
 	}
 	q.Extra = extra
+
+	// The same question the JSON decode asks, and for the same reason:
+	// did it decode, or did it keep everything? A template carrying
+	// `req: []`, an item with no `id`, or `params: null` decodes into zero
+	// values that are then re-emitted with members added or removed - and
+	// those are exactly the negative requests an operator configures this
+	// verifier to send.
+	//
+	// Compared on SHAPE rather than value, which is the one difference
+	// from the JSON path. yaml.v2 coerces a scalar to the field's type -
+	// `id: 7` becomes "7" - for every configuration struct in this
+	// repository, and that policy is deliberate; treating it as loss here
+	// would send every template with a numeric-looking scalar down the raw
+	// path and quietly reverse it. Presence, absence and nesting are what
+	// the typed model changes, and what this catches.
+	original, rawErr := rawFromYAML(unmarshal)
+	if rawErr != nil {
+		return rawErr
+	}
+	reencoded, encErr := json.Marshal(*q)
+	if encErr != nil {
+		return encErr
+	}
+	if !jsonShapeEquivalent(original, reencoded) {
+		fallback := CredentialQuery{Raw: original}
+		fallback.adoptRawShadow()
+		*q = fallback
+	}
 	return nil
+}
+
+// jsonShapeEquivalent reports whether two JSON documents have the same
+// members, nesting and array lengths - ignoring scalar types.
+//
+// Scalars are not compared because yaml.v2's coercion is this
+// repository's settled policy, not a loss: `id: 7` arriving as "7" is how
+// every other configuration struct here behaves, and diverging for this
+// one type would be worse than the coercion. What a typed decode DOES
+// lose is structural - an empty array dropped by omitempty, an absent
+// member becoming an empty string, a null becoming nothing at all - and
+// that is what this sees.
+func jsonShapeEquivalent(a, b json.RawMessage) bool {
+	decode := func(data []byte) (any, bool) {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	left, ok := decode(a)
+	if !ok {
+		return false
+	}
+	right, ok := decode(b)
+	if !ok {
+		return false
+	}
+	return sameJSONShape(left, right)
+}
+
+func sameJSONShape(a, b any) bool {
+	switch left := a.(type) {
+	case map[string]any:
+		right, ok := b.(map[string]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for name, value := range left {
+			other, present := right[name]
+			if !present || !sameJSONShape(value, other) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		right, ok := b.([]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for i := range left {
+			if !sameJSONShape(left[i], right[i]) {
+				return false
+			}
+		}
+		return true
+	case nil:
+		// null is a value an operator wrote, not an absence. Dropping it
+		// is the loss this exists to catch, so it only matches null.
+		return b == nil
+	default:
+		// A scalar matches any other scalar: see the doc comment.
+		switch b.(type) {
+		case map[string]any, []any, nil:
+			return false
+		}
+		return true
+	}
 }
 
 // rawFromYAML reads a whole YAML value and returns it as JSON, keeping

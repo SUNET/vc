@@ -658,3 +658,74 @@ func TestExtensionMembersRefuseUnrepresentableScalars(t *testing.T) {
 		})
 	}
 }
+
+// An operator configures the negative requests this verifier exists to
+// send, so a TEMPLATE has to be able to express them. The typed decode
+// turns them into zero values and re-emits something else: req: [] is
+// dropped by omitempty, an item with no id comes back carrying one, a
+// null param disappears.
+//
+// Checked on shape rather than value - see jsonShapeEquivalent - so
+// yaml.v2's scalar coercion, which is this repository's settled policy,
+// is not mistaken for loss.
+func TestTemplatesCanExpressTheNegativeShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, wantJSON string
+	}{
+		{
+			name:     "an empty req array",
+			in:       "id: q\nformat: circuit_zk\nmeta:\n  doctype_value: d\nreq: []\n",
+			wantJSON: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[]}`,
+		},
+		{
+			name:     "an item with no id",
+			in:       "id: q\nformat: circuit_zk\nmeta:\n  doctype_value: d\nreq:\n  - return: h\n",
+			wantJSON: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"return":"h"}]}`,
+		},
+		{
+			name:     "an item with no return",
+			in:       "id: q\nformat: circuit_zk\nmeta:\n  doctype_value: d\nreq:\n  - id: age_check\n",
+			wantJSON: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"age_check"}]}`,
+		},
+		{
+			name:     "a null params",
+			in:       "id: q\nformat: circuit_zk\nmeta:\n  doctype_value: d\nreq:\n  - id: f\n    return: h\n    params: null\n",
+			wantJSON: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"f","return":"h","params":null}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var query CredentialQuery
+			require.NoError(t, yamlv2.Unmarshal([]byte(tc.in), &query))
+
+			encoded, err := json.Marshal(query)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.wantJSON, string(encoded),
+				"a template has to send what it says, including the shapes a typed model cannot hold")
+		})
+	}
+}
+
+// And the coercion policy survives: a scalar of the wrong type is still
+// coerced by yaml.v2 exactly as it is everywhere else in this
+// repository's configuration, rather than being treated as loss and
+// pushed down the raw path.
+func TestScalarCoercionIsNotMistakenForLoss(t *testing.T) {
+	const in = "id: q\nformat: circuit_zk\nmeta:\n  doctype_value: d\nreq:\n  - id: 7\n    return: h\n"
+	var query CredentialQuery
+	require.NoError(t, yamlv2.Unmarshal([]byte(in), &query))
+
+	assert.Nil(t, query.Raw, "coercion is this repository's policy, not a shape the model cannot hold")
+	require.Len(t, query.Req, 1)
+	assert.Equal(t, "7", query.Req[0].ID, "coerced, as every other configuration struct here coerces")
+}
+
+// An ordinary template is unaffected: it must still decode typed, or the
+// distinction stops meaning anything.
+func TestOrdinaryTemplatesStayTyped(t *testing.T) {
+	const in = "id: q\nformat: circuit_zk\nmeta:\n  doctype_value: d\nreq:\n  - id: pseudonym-v1-sha256\n    return: nym-1\n    params:\n      config: known-offender-matching-ssc\n"
+	var query CredentialQuery
+	require.NoError(t, yamlv2.Unmarshal([]byte(in), &query))
+	assert.Nil(t, query.Raw)
+	require.Len(t, query.Req, 1)
+	assert.Equal(t, FunctionPseudonym, query.Req[0].ID)
+}
