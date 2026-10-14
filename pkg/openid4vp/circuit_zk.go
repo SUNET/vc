@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
+	"math/big"
 	"reflect"
 	"slices"
 	"strconv"
@@ -509,5 +511,72 @@ func mergeExtraYAML(m map[string]any, extra map[string]any, reserved map[string]
 		}
 		m[key] = extra[key]
 	}
+	if err := checkYAMLRendersNumbersExactly(m, what, nil); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+// checkYAMLRendersNumbersExactly refuses to emit a number yaml.v2 would
+// round on its way out.
+//
+// The YAML marshal path bridges through JSON, so an exactly-preserved
+// param arrives here as a json.Number - and yaml.v2 encodes one by trying
+// Int64 and falling back to Float64 (vendor/gopkg.in/yaml.v2/encode.go).
+// An integer beyond int64, or a decimal with more digits than a float64
+// holds, is therefore RENDERED DIFFERENTLY than it was configured.
+//
+// An error rather than a silent rounding, and rather than a repair.
+// These numbers are inputs to a proof: a changed one yields a different
+// pseudonym, and the symptom is two systems disagreeing about who someone
+// is with nothing malformed to point at. Every other path keeps them
+// exact - the YAML decode keeps the lexeme, JSON keeps the literal - so
+// this is the one place where the honest answer is to stop.
+func checkYAMLRendersNumbersExactly(value any, what string, path []string) error {
+	switch typed := value.(type) {
+	case json.Number:
+		if yamlRendersNumberExactly(typed.String()) {
+			return nil
+		}
+		where := "a number"
+		if len(path) > 0 {
+			where = strings.Join(path, ".")
+		}
+		return fmt.Errorf("%s: %s is %s, which YAML cannot write without changing it; "+
+			"a proof input has to survive the round trip, so quote it as a string if the exact digits are what you mean",
+			what, where, typed.String())
+	case map[string]any:
+		for _, key := range slices.Sorted(maps.Keys(typed)) {
+			if err := checkYAMLRendersNumbersExactly(typed[key], what, append(path, key)); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, item := range typed {
+			if err := checkYAMLRendersNumbersExactly(item, what, append(path, strconv.Itoa(i))); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// yamlRendersNumberExactly reports whether yaml.v2 writes literal back as
+// the same number: exactly for an integer it can hold in an int64, and
+// otherwise via a float64, whose shortest rendering has to denote the
+// same value.
+func yamlRendersNumberExactly(literal string) bool {
+	if _, err := strconv.ParseInt(literal, 10, 64); err == nil {
+		return true
+	}
+	exact, ok := new(big.Rat).SetString(literal)
+	if !ok {
+		return false
+	}
+	asFloat, err := strconv.ParseFloat(literal, 64)
+	if err != nil || math.IsInf(asFloat, 0) || math.IsNaN(asFloat) {
+		return false
+	}
+	rendered, ok := new(big.Rat).SetString(strconv.FormatFloat(asFloat, 'g', -1, 64))
+	return ok && rendered.Cmp(exact) == 0
 }

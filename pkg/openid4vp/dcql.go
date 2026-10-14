@@ -196,11 +196,102 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	//
 	// So the test is not "did it decode" but "does it encode back to what
 	// arrived". Anything that does not is kept as it stands.
-	if !q.encodesBackTo(data) {
+	if hasDuplicateMembers(data) || !q.encodesBackTo(data) {
 		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
 		q.adoptRawShadow()
 	}
 	return nil
+}
+
+// hasDuplicateMembers reports whether any object in data names the same
+// member twice, at any depth.
+//
+// encoding/json keeps the last one, and so does every other decoder in
+// this repository, which makes a duplicate INVISIBLE to the
+// encode-back-to comparison: {"id":"first","id":"last"} re-encodes as
+// just "last" and compares equal to itself. The query is then sent with
+// the duplicate silently removed.
+//
+// Two reasons that is not acceptable here. It is a changed request, and
+// this serialiser does not change requests - a duplicate member is
+// exactly the kind of malformed input a Verifier sends on purpose to see
+// what a wallet does with it. And it is a parser differential: JSON
+// decoders disagree about which value wins, so a request where that
+// matters has to reach the wallet as written rather than as this build
+// happens to read it.
+//
+// Detected rather than refused, because refusing would make the malformed
+// request unsendable, which is the same loss by another route. A query
+// carrying one simply goes down the raw path, where the bytes stand.
+func hasDuplicateMembers(data []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	duplicate, err := scanForDuplicateMembers(decoder)
+	if err != nil {
+		// Malformed, which is not this function's business to report -
+		// the caller has already established the bytes are valid JSON, or
+		// is about to refuse them for being invalid.
+		return false
+	}
+	return duplicate
+}
+
+// scanForDuplicateMembers consumes exactly one JSON value from decoder
+// and reports whether it, or anything inside it, names a member twice.
+//
+// Written as a descent rather than a flat token loop because
+// Decoder.Token reports member names and string values identically; only
+// the structure says which is which.
+func scanForDuplicateMembers(decoder *json.Decoder) (bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return false, err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return false, nil // a scalar, now consumed
+	}
+
+	duplicate := false
+	switch delim {
+	case '{':
+		seen := map[string]bool{}
+		for decoder.More() {
+			name, err := decoder.Token()
+			if err != nil {
+				return false, err
+			}
+			text, ok := name.(string)
+			if !ok {
+				return false, fmt.Errorf("object member name is not a string")
+			}
+			if seen[text] {
+				duplicate = true
+			}
+			seen[text] = true
+
+			inner, err := scanForDuplicateMembers(decoder)
+			if err != nil {
+				return false, err
+			}
+			duplicate = duplicate || inner
+		}
+	case '[':
+		for decoder.More() {
+			inner, err := scanForDuplicateMembers(decoder)
+			if err != nil {
+				return false, err
+			}
+			duplicate = duplicate || inner
+		}
+	default:
+		return false, fmt.Errorf("unexpected delimiter %q", delim)
+	}
+
+	if _, err := decoder.Token(); err != nil { // the closing delimiter
+		return false, err
+	}
+	return duplicate, nil
 }
 
 // encodesBackTo reports whether re-encoding q reproduces data, compared

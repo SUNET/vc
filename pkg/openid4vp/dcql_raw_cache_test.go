@@ -399,3 +399,53 @@ func TestRawPreservesTheValueAndNotTheBytes(t *testing.T) {
 		assert.Equal(t, "a&b", shape.Credentials[0].Meta.DoctypeValue)
 	})
 }
+
+// A duplicate member is invisible to the encode-back-to comparison:
+// encoding/json keeps the last one, so {"id":"first","id":"last"}
+// re-encodes as just "last" and compares equal to itself. The query would
+// go out with the duplicate silently removed.
+//
+// Two reasons that is wrong here. It is a changed request, and a
+// duplicate member is exactly the kind of malformed input a Verifier
+// sends on purpose to see what a wallet does with it. And it is a parser
+// differential - decoders disagree about which value wins - so a request
+// where that matters has to arrive as written rather than as this build
+// happens to read it.
+func TestDuplicateMembersGoRawAndSurvive(t *testing.T) {
+	for _, tc := range []struct {
+		name, query string
+		wantRaw     bool
+	}{
+		{"a duplicate at the top level", `{"id":"first","id":"last","format":"circuit_zk","meta":{"doctype_value":"d"}}`, true},
+		{"a duplicate nested inside a req param", `{"id":"q","format":"circuit_zk","meta":{},"req":[{"id":"f","return":"h","params":{"p":1,"p":2}}]}`, true},
+		{"a duplicate inside meta", `{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"a","doctype_value":"b"}}`, true},
+
+		// The same NAME in two different objects is not a duplicate. A
+		// scanner that missed this would push every ordinary req down the
+		// raw path.
+		{"the same name in sibling objects", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"a","return":"h"},{"id":"b","return":"h2"}]}`, false},
+		{"and the same name at different depths", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"a","return":"h","params":{"id":"inner"}}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var query CredentialQuery
+			require.NoError(t, json.Unmarshal([]byte(tc.query), &query))
+
+			if !tc.wantRaw {
+				assert.Nil(t, query.Raw, "this query has no duplicate and must still decode typed")
+				return
+			}
+			require.NotNil(t, query.Raw, "a duplicate member has nowhere to live in the typed model")
+
+			// And it reaches the wire intact, BOTH members present.
+			//
+			// Compared as text, not with JSONEq: that parses both sides,
+			// which collapses the duplicate on each, so it would pass
+			// just as happily if one member had been dropped. These
+			// inputs are already compact and carry nothing
+			// encoding/json escapes, so the bytes stand.
+			out, err := json.Marshal(query)
+			require.NoError(t, err)
+			assert.Equal(t, tc.query, string(out))
+		})
+	}
+}

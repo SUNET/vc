@@ -442,3 +442,55 @@ func TestReqItemParamsFallBackForNonJSONSpellings(t *testing.T) {
 		})
 	}
 }
+
+// Writing the configuration back out must not change a proof input
+// either. The YAML marshal path bridges through JSON, so an
+// exactly-preserved param arrives as a json.Number - and yaml.v2 encodes
+// one through Int64 and then Float64, which rounds an integer beyond
+// int64 and a decimal with more digits than a float64 holds.
+//
+// Every other path keeps these exact, so the honest answer here is to
+// stop rather than to round quietly or to repair.
+func TestYAMLRefusesToWriteANumberItWouldChange(t *testing.T) {
+	for _, tc := range []struct {
+		name, literal string
+		ok            bool
+	}{
+		{"a small integer", "7", true},
+		{"the largest int64", "9223372036854775807", true},
+		{"an integer beyond int64", "123456789012345678901234567890", false},
+		{"an ordinary decimal", "0.1", true},
+		{"a decimal beyond float64 precision", "1.00000000000000001", false},
+		{"a large integer inside float64's exact range", "9007199254740993", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := CredentialQuery{
+				ID: "q", Format: FormatCircuitZk,
+				Req: []ReqItem{{ID: "f", Return: "h", Params: map[string]any{"p": json.Number(tc.literal)}}},
+			}
+			encoded, err := yamlv2.Marshal(query)
+			if !tc.ok {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "without changing it")
+				assert.Contains(t, err.Error(), tc.literal, "the error has to name the value an operator must fix")
+				return
+			}
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), tc.literal,
+				"an accepted number has to come back out as the digits that went in")
+		})
+	}
+}
+
+// Nested, and named by path so an operator can find it.
+func TestYAMLNumberRefusalNamesThePath(t *testing.T) {
+	query := CredentialQuery{
+		ID: "q", Format: FormatCircuitZk,
+		Req: []ReqItem{{ID: "f", Return: "h", Params: map[string]any{
+			"outer": map[string]any{"inner": json.Number("1.00000000000000001")},
+		}}},
+	}
+	_, err := yamlv2.Marshal(query)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outer.inner")
+}
