@@ -61,24 +61,85 @@ func TestInvalidJSONIsStillRejected(t *testing.T) {
 }
 
 // The escape hatch has to get PAST the ingress, not just through the
-// serialiser. UIInteraction and the two VC 2.0 paths run every query it
-// is handed through ValidateCredentialQuery, and a raw query carries no
-// Format - which every other reader in this package reads as SD-JWT. Left
-// unguarded, the hatch fails on "vct_values is required" at the one door
-// a browser-built query arrives by.
-func TestValidateDoesNotJudgeARawQuery(t *testing.T) {
-	for _, tc := range []struct{ name, query string }{
-		{"the WIP shape, claims as an object", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`},
-		{"an sd-jwt query with no vct_values, which is what the SD-JWT branch refuses", `{"id":"q","format":"vc+sd-jwt","claims":{"_req":[]}}`},
-		{"meta itself of a type the model does not expect", `{"id":"q","format":"mso_mdoc","meta":"not an object"}`},
+// serialiser. UIInteraction and the two VC 2.0 paths run every query they
+// are handed through ValidateCredentialQuery.
+//
+// What it must NOT do is become a way around the format rules. A raw
+// query is therefore judged by its own bytes: the format and the
+// constraint are re-read from them, so the hatch covers a member whose
+// shape this build does not model and nothing else.
+func TestValidateJudgesARawQueryByItsOwnBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, wantErr string
+	}{
+		{
+			name:  "circuit_zk, which this build does not constrain either way",
+			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+		},
+		{
+			name:  "an mdoc query whose doctype survived the member that did not",
+			query: `{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+		},
+		{
+			name:    "an sd-jwt query with no vct_values is still an unconstrained request",
+			query:   `{"id":"q","format":"vc+sd-jwt","claims":{"_req":[]}}`,
+			wantErr: "vct_values",
+		},
+		{
+			name:    "and an mdoc one with no doctype",
+			query:   `{"id":"q","format":"mso_mdoc","claims":{"_req":[]}}`,
+			wantErr: "doctype_value",
+		},
+		{
+			name:  "meta itself unreadable: no constraint this build can judge",
+			query: `{"id":"q","format":"vc+sd-jwt","meta":"not an object"}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var query CredentialQuery
 			require.NoError(t, json.Unmarshal([]byte(tc.query), &query))
 			require.NotNil(t, query.Raw, "the point of this case is that it fell back to raw")
-			assert.NoError(t, ValidateCredentialQuery(query))
+
+			err := ValidateCredentialQuery(query)
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
+}
+
+// Raw is authoritative for the wire and nothing else. The rest of the
+// stack routes by id - UIInteraction copies it into the authorization
+// context's scopes, and the response path matches a presentation back to
+// it - so a raw query that kept an empty id would be sent correctly and
+// then match nothing that came back.
+func TestRawRetainsTheMembersTheStackRoutesBy(t *testing.T) {
+	const in = `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`
+	var query CredentialQuery
+	require.NoError(t, json.Unmarshal([]byte(in), &query))
+
+	require.NotNil(t, query.Raw)
+	assert.Equal(t, "q", query.ID, "the response path looks a presentation up by this")
+	assert.Equal(t, FormatCircuitZk, query.Format, "every format decision after this reads it")
+
+	// And the wire is still the bytes that arrived, not a re-encoding of
+	// the two members just adopted.
+	out, err := json.Marshal(query)
+	require.NoError(t, err)
+	assert.JSONEq(t, in, string(out))
+}
+
+// Best effort, both ways: a routing member of a type this build does not
+// expect is left alone rather than coerced, and does not stop the rest.
+func TestRawRoutingIgnoresMembersItCannotRead(t *testing.T) {
+	var query CredentialQuery
+	require.NoError(t, json.Unmarshal([]byte(`{"id":7,"format":"circuit_zk","claims":{"_req":[]}}`), &query))
+	require.NotNil(t, query.Raw)
+	assert.Empty(t, query.ID)
+	assert.Equal(t, FormatCircuitZk, query.Format)
 }
 
 // Not judging is not the same as not looking. Raw is emitted verbatim, so

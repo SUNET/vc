@@ -161,6 +161,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
+		q.adoptRawRouting()
 		return nil
 	}
 	*q = CredentialQuery(known)
@@ -172,6 +173,61 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	}
 	q.Extra = extra
 	return nil
+}
+
+// adoptRawRouting copies the members the REST of the stack routes by out
+// of the raw bytes and into the struct.
+//
+// Raw is authoritative for the wire, but it is not the only reader.
+// UIInteraction copies ID into the authorization context's scopes and the
+// response path looks a presentation up by it, so a query that arrives
+// raw and keeps an empty ID is sent correctly and then cannot be matched
+// to anything that comes back. Format is read the same way, by
+// ValidateCredentialQuery and by every format decision after it.
+//
+// Best effort by design: each member is taken only if it is there and is
+// a string. A query whose "id" is a number is a query this build has no
+// opinion about, which is the whole reason it went down this path.
+func (q *CredentialQuery) adoptRawRouting() {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(q.Raw, &members); err != nil {
+		return // not an object at all; nothing to route by
+	}
+	for name, into := range map[string]*string{"id": &q.ID, "format": &q.Format} {
+		var value string
+		if err := json.Unmarshal(members[name], &value); err == nil {
+			*into = value
+		}
+	}
+}
+
+// rawMeta re-reads just the meta member of a raw query, and reports
+// whether it could.
+//
+// The typed decode of the whole query failed - that is why these bytes
+// are raw - but the member that CARRIES THE CONSTRAINT usually survives
+// intact: the WIP rulebook shape, for instance, only changes "claims".
+// Re-reading it means a raw query is still judged by its format's rule
+// rather than waved through, which is what keeps an unconstrained SD-JWT
+// request from being signed and served just because some other member
+// had a shape this build does not model.
+func (q CredentialQuery) rawMeta() (MetaQuery, bool) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(q.Raw, &members); err != nil {
+		return MetaQuery{}, false
+	}
+	raw, present := members["meta"]
+	if !present {
+		// Absent, not unreadable. An absent meta is an ABSENT CONSTRAINT,
+		// which is exactly the case the format rules exist to refuse, so
+		// this reports a zero MetaQuery as readable rather than giving up.
+		return MetaQuery{}, true
+	}
+	var meta MetaQuery
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return MetaQuery{}, false
+	}
+	return meta, true
 }
 
 type CredentialSetQuery struct {
@@ -754,12 +810,16 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // ValidateCredentialQuery validates that a CredentialQuery has the required fields
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
-	// A raw query is not judged here. Its members are bytes this build does
-	// not model, so Format is empty on it - and empty Format means SD-JWT to
-	// every other reader in this package, which would make the escape hatch
-	// fail the one check standing on the live ingress (UIInteraction) with
-	// "vct_values is required". Refusing to validate is the honest answer:
-	// nothing here knows what these bytes mean.
+	// A raw query is judged by its own bytes, not by the empty struct the
+	// failed typed decode left behind.
+	//
+	// The escape hatch is for a member whose SHAPE this build does not
+	// model; it is not a way around the constraint rules, and it is not
+	// specific to one format. Reading format and meta back out of the raw
+	// bytes keeps both true at once: an SD-JWT query with no vct_values is
+	// still refused here even though it arrived raw, and a circuit_zk one
+	// still falls to the permissive default below, as every format this
+	// build does not constrain does.
 	if query.Raw != nil {
 		if !json.Valid(query.Raw) {
 			return &DCQLValidationError{
@@ -767,7 +827,16 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 				Message: "a raw credential query must be valid JSON",
 			}
 		}
-		return nil
+		meta, readable := query.rawMeta()
+		if !readable {
+			// meta itself is a shape this build cannot read, so there is
+			// no constraint here to judge - saying otherwise would be
+			// inventing a verdict. Narrow on purpose: an ABSENT meta is
+			// readable (see rawMeta), so the unconstrained-request case
+			// the rules exist for is still caught.
+			return nil
+		}
+		query = CredentialQuery{ID: query.ID, Format: query.Format, Meta: meta}
 	}
 	switch query.Format {
 	// Not FormatJwtVCJson: UIInteraction calls this on the live ingress, and
