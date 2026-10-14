@@ -206,3 +206,71 @@ func TestEndpointOAuthAuthorizationChallenge_RateLimited(t *testing.T) {
 	assert.Equal(t, 3, api.calls,
 		"a rate limited request must not reach OAuthAuthorizationChallenge")
 }
+
+// prepareAPI records the request the transport layer built.
+type prepareAPI struct {
+	unimplementedApiv1
+	seen *apiv1.PrepareIssuanceRequest
+}
+
+func (a *prepareAPI) PrepareIssuance(_ context.Context, req *apiv1.PrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
+	a.seen = req
+	return &apiv1.PrepareIssuanceReply{IssuerState: "prepared"}, nil
+}
+
+// The scope this endpoint acts on must be the scope the authorization
+// middleware checked.
+//
+// httphelpers.Binding.Request binds headers BEFORE the JSON body, and
+// gin's header binder falls back to the FIELD NAME when there is no
+// header tag - so a "Scope:" header set the field, and a body that simply
+// omits the member left it set. The SPOCP middleware extracts the resource
+// pairs it authorizes from the query string and the JSON body and never
+// reads headers, so a scope smuggled through one was acted on without
+// having been authorized at all.
+func TestEndpointPrepareIssuance_ScopeCannotComeFromAHeader(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-endpoint-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-endpoint-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	body := `{"identity_match":{"claims":{"given_name":{"equals":"Alice"}}},"scope":"allowed_scope"}`
+	req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Scope", "forbidden_scope")
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	require.NotNil(t, api.seen, "the request should have reached the handler; body: %s", w.Body.String())
+	assert.Equal(t, "allowed_scope", api.seen.Scope,
+		"a Scope header must not decide which credential is prepared")
+
+	// And a body with no scope at all must not inherit the header's,
+	// which is the shape that actually slipped past the middleware.
+	api.seen = nil
+	bodyWithoutScope := `{"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}}`
+	req = httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(bodyWithoutScope))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Scope", "forbidden_scope")
+
+	w = httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	if api.seen != nil {
+		assert.Empty(t, api.seen.Scope,
+			"a scope the authorization middleware never saw must not reach the handler")
+	}
+}

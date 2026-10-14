@@ -131,3 +131,42 @@ func TestIsInteractiveAuthorization(t *testing.T) {
 		assert.False(t, IsInteractiveAuthorization(mode), mode)
 	}
 }
+
+// The Interactive Authorization request must advertise exactly what the
+// Authorization Challenge Endpoint will accept.
+//
+// The Digital Credentials API request this is derived from offers A256GCM
+// and A128GCM, and a wallet is entitled to pick either. The challenge
+// endpoint accepts only A256GCM, so a wallet that chose the second
+// advertised option was refused AFTER its auth_session had been claimed -
+// losing the whole exchange for doing exactly what the request permitted,
+// with no way to know in advance and nothing to retry.
+func TestInteractiveAuthorizationAdvertisesOnlyWhatItAccepts(t *testing.T) {
+	base := &RequestObject{
+		ClientID:     "x509_san_dns:issuer.example",
+		ResponseMode: ResponseModeDirectPostJWT,
+		ResponseURI:  "https://issuer.example/verification/direct_post",
+		ClientMetadata: &ClientMetadata{
+			EncryptedResponseEncValuesSupported: []string{"A256GCM", "A128GCM"},
+			AuthorizationEncryptedResponseENC:   "A256GCM",
+		},
+	}
+
+	variant := base.WithInteractiveAuthorization(ResponseModeIAPostJWT, "https://issuer.example")
+	require.NotNil(t, variant)
+	require.NotNil(t, variant.ClientMetadata)
+
+	assert.Equal(t, InteractiveAuthorizationEncValues, variant.ClientMetadata.EncryptedResponseEncValuesSupported)
+	assert.NotContains(t, variant.ClientMetadata.EncryptedResponseEncValuesSupported, "A128GCM")
+
+	// The base request is untouched: the browser flow still offers both,
+	// and the copy is shallow, so narrowing in place would have changed
+	// the channel this was derived from.
+	assert.Equal(t, []string{"A256GCM", "A128GCM"}, base.ClientMetadata.EncryptedResponseEncValuesSupported)
+	assert.NotSame(t, base.ClientMetadata, variant.ClientMetadata)
+
+	// And the returned slice is a copy, so a caller cannot edit the
+	// package-level list through it.
+	variant.ClientMetadata.EncryptedResponseEncValuesSupported[0] = "A128GCM"
+	assert.Equal(t, []string{"A256GCM"}, InteractiveAuthorizationEncValues)
+}

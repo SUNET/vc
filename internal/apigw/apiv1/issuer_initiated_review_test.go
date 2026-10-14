@@ -8,6 +8,8 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -107,12 +109,60 @@ func TestPrepareIssuance_AcceptsAMatchOneAuthScopeCanSatisfy(t *testing.T) {
 		"thin_auth":        {AuthClaims: []string{"given_name"}},
 	}
 	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
+	// The second auth scope needs credential metadata like any other: a
+	// DCQL query is built per auth scope, and one with no format is not a
+	// query. Without this the fixture is a configuration the server now
+	// refuses outright, which would make this test pass or fail for a
+	// reason that has nothing to do with the match.
+	client.cfg.Common.CredentialMetadata["thin_auth"] = &model.CredentialMetadata{
+		Format: openid4vp.FormatSDJWTVC,
+		VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:thin:1"},
+	}
 
 	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope:         challengeScope,
 		IdentityMatch: portalMatch(),
 	})
 	require.NoError(t, err)
+}
+
+// Matching claim NAMES does not establish that a presentation request can
+// be built from the scope at all.
+//
+// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
+// query, and it is not reached until a wallet resumes the offer - so a
+// configuration problem the caller could have been told about at
+// preparation time instead became a failure in front of a Holder with a
+// QR code open, with the prepared issuance already printed.
+func TestPrepareIssuance_RefusesAScopeThatCannotBeAsked(t *testing.T) {
+	t.Run("an auth scope with no credential metadata", func(t *testing.T) {
+		client := newChallengeClient(t)
+		scopes := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
+		scopes.AuthScopes = map[string]model.AuthScopeEntry{
+			challengeAuthScope: {AuthClaims: []string{"given_name", "family_name"}},
+			"unconfigured":     {AuthClaims: []string{"given_name"}},
+		}
+		client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
+
+		_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+			Scope:         challengeScope,
+			IdentityMatch: portalMatch(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "scope_not_presentable")
+	})
+
+	t.Run("the credential metadata of the auth scope going missing", func(t *testing.T) {
+		client := newChallengeClient(t)
+		delete(client.cfg.Common.CredentialMetadata, challengeAuthScope)
+
+		_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+			Scope:         challengeScope,
+			IdentityMatch: portalMatch(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "scope_not_presentable")
+	})
 }
 
 // A prepared issuance is the product of someone authenticating at a

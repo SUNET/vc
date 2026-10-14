@@ -1035,5 +1035,36 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
 	}
 
+	// Enabling the mechanism exposes POST /api/v1/issuance/prepare, which
+	// prepares an issuance bound to a Holder the CALLER names. On a
+	// deployment with no API authentication configured that is an open
+	// endpoint for minting credential offers against any identity rule the
+	// caller likes - precisely the trusted-portal step the mechanism
+	// exists to represent, available to anyone who can reach the port.
+	//
+	// Refused here rather than guarded in the handler, because the handler
+	// has no better answer available: with neither JWKS nor OIDC
+	// configured the API-auth middleware is a pass-through, and the admin
+	// session it would otherwise look for is granted anonymously when OIDC
+	// is absent. There is no authenticated principal to require, so the
+	// only honest check is on the configuration that left none.
+	if model.BoolVal(ia.Enable, false) && !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+		return errors.New(
+			"apigw.delivery.interactive_authorization.enable is true but apigw.api_server.api_auth " +
+				"configures neither jwks nor oidc: enabling it exposes /api/v1/issuance/prepare, " +
+				"which prepares an issuance for a Holder the caller names, and without API " +
+				"authentication anyone who can reach the port may call it")
+	}
+
 	return nil
+}
+
+// apiAuthenticationConfigured reports whether a caller reaching the admin
+// API has to be anybody in particular.
+//
+// Only the two Bearer modes count. An admin session does not: it is
+// granted anonymously when OIDC is absent, so requiring one would be a
+// check that passes for everyone.
+func apiAuthenticationConfigured(apiAuth model.APIAuth) bool {
+	return apiAuth.JWKS.Enable || apiAuth.OIDC.Enable
 }

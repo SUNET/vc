@@ -26,9 +26,20 @@ import (
 // company they represent, and asked for a credential about it. What it
 // cannot do is reach into the wallet; so it hands the user an offer, and
 // tells this server which Holder that offer is for.
+// Every field is `header:"-"`, and that is load-bearing rather than tidy.
+//
+// httphelpers.Binding.Request binds headers BEFORE the JSON body, and
+// gin's header binder falls back to the FIELD NAME when a struct carries
+// no header tag - so a "Scope:" header would populate Scope, and a body
+// that simply omits the member leaves it there. The SPOCP authorization
+// middleware extracts the resource pairs it checks from the query string
+// and the JSON body and never looks at headers, so a scope smuggled
+// through one is acted on without having been authorized. Refusing the
+// header source keeps the value the middleware checks and the value this
+// handler acts on the same value.
 type PrepareIssuanceRequest struct {
 	// Scope is the credential being prepared.
-	Scope string `json:"scope" validate:"required"`
+	Scope string `json:"scope" header:"-" validate:"required"`
 
 	// IdentityMatch decides whether the Holder who turns up is the one
 	// this issuance was prepared for.
@@ -37,11 +48,11 @@ type PrepareIssuanceRequest struct {
 	// wallet may complete, which is what the pre-authorized grant already
 	// provides and what this endpoint exists to improve on. A caller that
 	// wants that should ask for it by name rather than by omission.
-	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match" validate:"required"`
+	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match" header:"-" validate:"required"`
 
 	// TTLSeconds bounds how long the offer may be left unredeemed.
 	// Optional; the server's default applies when it is absent.
-	TTLSeconds int `json:"ttl_seconds,omitempty" validate:"omitempty,gt=0"`
+	TTLSeconds int `json:"ttl_seconds,omitempty" header:"-" validate:"omitempty,gt=0"`
 }
 
 // PrepareIssuanceReply is the prepared issuance.
@@ -129,6 +140,23 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	// A rule naming a claim the request will not ask for can never pass.
 	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
 		return nil, err
+	}
+
+	// And the request itself has to be buildable, which matching claim
+	// NAMES does not establish.
+	//
+	// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
+	// query and one whose credential metadata is missing, and it is not
+	// reached until a wallet resumes the offer - by which point the
+	// failure belongs to a Holder standing in front of a QR code, for a
+	// configuration problem the caller could have been told about at the
+	// moment it prepared the issuance. Built here and thrown away: it is
+	// rebuilt when the exchange opens, from configuration that may have
+	// changed, so storing this one would only make the two disagree.
+	if _, err := c.issuanceAuthDCQL(req.Scope); err != nil {
+		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.Scope)
+		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
+			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.Scope, err), 400)
 	}
 
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
