@@ -443,3 +443,26 @@ func TestVCTMPathSegmentsAreNotFlattened(t *testing.T) {
 	_, err = meta.ResolveCommitmentTargets(CredentialSchemas{VCTM: declaresNested})
 	assert.NoError(t, err, "the nested declaration is the one that matches")
 }
+
+// The disclosure machinery's own claims are reserved, and that beats a
+// VCTM declaring them disclosable: _sd_alg and _sd are written by the
+// builder regardless, so a commitment there is replaced whatever the type
+// metadata says. The reserved check therefore has to run before the
+// disclosability one, and this pins that ordering.
+func TestDisclosureMachineryClaimsAreReservedEvenWhenDeclared(t *testing.T) {
+	always := func(p string) sdjwtvc.Claim { return sdjwtvc.Claim{Path: []*string{&p}, SD: "always"} }
+	vctm := &sdjwtvc.VCTM{
+		VCT:    "urn:example:1",
+		Claims: []sdjwtvc.Claim{always("_sd_alg"), always("_sd")},
+	}
+
+	for _, claim := range []string{"_sd_alg", "_sd"} {
+		meta := &CredentialMetadata{
+			Format:      openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{claim: sscClaim()},
+		}
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+		require.Error(t, err, "%s is written by the builder whatever the VCTM says", claim)
+		assert.Contains(t, err.Error(), "silently replaced")
+	}
+}

@@ -235,6 +235,12 @@ func isSDJWTFormat(format string) bool {
 // SD-JWT list is what BuildCredentialWithSigner assigns unconditionally
 // (pkg/sdjwtvc/methods.go), and the W3C one is the subject identifier
 // MakeVC20 fills from the request's SubjectDID.
+//
+// TestReservedSDJWTClaimsCoverTheBuilder derives the SD-JWT half from that
+// file rather than trusting this list, because this list was wrong twice:
+// I built it by grepping for one variable name and missed _sd_alg, which
+// is assigned to another, and _sd, which is written into whatever object
+// a disclosure's parent is - the root, for a top-level claim.
 var reservedTargets = map[string]map[string]string{
 	formatFamilySDJWT: {
 		"iat":           "the SD-JWT builder sets the issuance time",
@@ -246,6 +252,8 @@ var reservedTargets = map[string]map[string]string{
 		"vct#integrity": "the SD-JWT builder sets the type-metadata integrity hash",
 		"cnf":           "the SD-JWT builder sets the holder key confirmation",
 		"status":        "the SD-JWT builder sets the revocation status reference",
+		"_sd_alg":       "the SD-JWT builder sets the disclosure hash algorithm",
+		"_sd":           "the SD-JWT builder writes the disclosure digests of this object",
 	},
 	formatFamilyW3C: {
 		"id": "MakeVC20 sets the credential subject identifier from the request",
