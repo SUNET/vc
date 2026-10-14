@@ -321,6 +321,80 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Nil(t, claimed)
 	})
 
+	// ExtendExpiry never shortens, and nothing else may shorten behind it.
+	//
+	// The guarantee is implemented with $max in MongoDB, which protects
+	// concurrent ExtendExpiry calls against each other - and protects
+	// nothing at all from a whole-document write that carries an older
+	// expires_at. /authorize does exactly that a moment later when it
+	// records the auth provider, so the two have to be tested together or
+	// the guarantee is only true in isolation.
+	t.Run("SetAuthProviderPreservesExtendedExpiry", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:  "contract-provider-1",
+			RequestURI: "https://example.com/req-provider-1",
+			Code:       "contract-provider-code-1",
+			ExpiresAt:  time.Now().Add(time.Minute).Unix(),
+		}))
+
+		// The deadline as a slower concurrent request would have read it,
+		// before the extension. Copied out by value: the memory store
+		// hands back the pointer it holds, so the document itself would
+		// follow the extension and prove nothing.
+		before, err := store.GetByID(ctx, "contract-provider-1")
+		require.NoError(t, err)
+		staleExpiresAt := before.ExpiresAt
+
+		extended := time.Now().Add(10 * time.Minute).Unix()
+		require.NoError(t, store.ExtendExpiry(ctx,
+			&AuthorizationContext{RequestURI: "https://example.com/req-provider-1"}, extended))
+
+		require.NoError(t, store.SetAuthProvider(ctx, "contract-provider-1", AuthProviderFields{
+			AuthProvider:    "openid4vp",
+			DataSource:      "datastore",
+			RemoteName:      "remote",
+			AuthenticSource: "source",
+		}))
+
+		result, err := store.GetByID(ctx, "contract-provider-1")
+		require.NoError(t, err)
+		assert.Equal(t, "openid4vp", result.AuthProvider)
+		assert.Equal(t, "datastore", result.DataSource)
+		assert.Equal(t, "remote", result.RemoteName)
+		assert.Equal(t, "source", result.AuthenticSource)
+		assert.Equal(t, extended, result.ExpiresAt,
+			"recording the auth provider must not write back an older deadline")
+		assert.Less(t, staleExpiresAt, result.ExpiresAt,
+			"the test is only meaningful if the extension actually moved the deadline")
+	})
+
+	// ExtendExpiry has to answer to a session_id as well as a request_uri:
+	// an Interactive Authorization exchange has just had its auth_session
+	// claimed when its code's life begins, so there is no handle left to
+	// name it by.
+	t.Run("ExtendExpiryBySessionID", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "contract-extend-1",
+			Code:      "contract-extend-code-1",
+			ExpiresAt: time.Now().Add(time.Minute).Unix(),
+		}))
+
+		extended := time.Now().Add(10 * time.Minute).Unix()
+		require.NoError(t, store.ExtendExpiry(ctx,
+			&AuthorizationContext{SessionID: "contract-extend-1"}, extended))
+
+		result, err := store.GetByID(ctx, "contract-extend-1")
+		require.NoError(t, err)
+		assert.Equal(t, extended, result.ExpiresAt)
+
+		// And still never shortens.
+		require.NoError(t, store.ExtendExpiry(ctx,
+			&AuthorizationContext{SessionID: "contract-extend-1"}, time.Now().Add(time.Second).Unix()))
+		result, err = store.GetByID(ctx, "contract-extend-1")
+		require.NoError(t, err)
+		assert.Equal(t, extended, result.ExpiresAt, "ExtendExpiry must never shorten")
+	})
+
 	t.Run("ClaimAuthSession_Empty", func(t *testing.T) {
 		_, err := store.ClaimAuthSession(ctx, "")
 		assert.Error(t, err)

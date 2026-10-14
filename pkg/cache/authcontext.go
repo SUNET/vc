@@ -375,17 +375,16 @@ func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) 
 // ExtendExpiry moves the expiry of the context request_uri names out to
 // expiresAt. See AuthContextStore.ExtendExpiry.
 func (c *MemoryStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
-	if query == nil || query.RequestURI == "" {
-		return errors.New("request_uri cannot be empty")
+	if query == nil {
+		return errors.New("query cannot be nil")
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	indexKey := fmt.Sprintf("request_uri:%s", query.RequestURI)
-	sessionID, ok := c.indices[indexKey]
-	if !ok {
-		return ErrNoDocuments
+	sessionID, err := c.resolveSessionIDLocked(query)
+	if err != nil {
+		return err
 	}
 
 	item := c.cache.Get(sessionID)
@@ -838,4 +837,55 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
 
 	return &claimed, nil
+}
+
+// resolveSessionIDLocked turns a query into the session it names, by the
+// same fields Get accepts. The caller must hold the lock.
+func (c *MemoryStore) resolveSessionIDLocked(query *AuthorizationContext) (string, error) {
+	if query.SessionID != "" {
+		return query.SessionID, nil
+	}
+	for _, index := range []struct{ name, value string }{
+		{"request_uri", query.RequestURI},
+		{"code", query.Code},
+		{"state", query.State},
+		{"auth_session", query.AuthSession},
+	} {
+		if index.value == "" {
+			continue
+		}
+		sessionID, ok := c.indices[index.name+":"+index.value]
+		if !ok {
+			return "", ErrNoDocuments
+		}
+		return sessionID, nil
+	}
+	return "", errors.New("no searchable field set on the query")
+}
+
+// SetAuthProvider records the provider and credential source on a context.
+// See AuthContextStore.SetAuthProvider for why it is not an Update.
+func (c *MemoryStore) SetAuthProvider(ctx context.Context, sessionID string, fields AuthProviderFields) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	doc := item.Value()
+	doc.AuthProvider = fields.AuthProvider
+	doc.DataSource = fields.DataSource
+	doc.RemoteName = fields.RemoteName
+	doc.AuthenticSource = fields.AuthenticSource
+
+	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.updateIndices(doc)
+
+	return nil
 }

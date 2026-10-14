@@ -224,3 +224,44 @@ func TestDefaultAuthSessionTTLIsWithinTheCeiling(t *testing.T) {
 	assert.LessOrEqual(t, int((&InteractiveAuthorization{}).AuthSessionTTL().Seconds()), MaxAuthSessionTTLSeconds)
 	assert.GreaterOrEqual(t, MaxAuthSessionTTLSeconds, 300, "an exchange needs room for a person to answer")
 }
+
+// interaction_types_supported can only ever NARROW what this build
+// implements, so an entry naming anything else does nothing useful and
+// something harmful: it passes startup validation and then leaves the
+// affected scope unservable at an endpoint the metadata still advertises,
+// which looks like a broken deployment rather than a typo.
+//
+// The tag is read back rather than asserted by behaviour because that is
+// where the rule lives, and because a new interaction type added to the
+// build must be added here too - this is the test that says so.
+func TestInteractionTypesSupportedAcceptsOnlyImplementedSuffixes(t *testing.T) {
+	field, ok := reflect.TypeOf(InteractiveAuthorization{}).FieldByName("InteractionTypesSupported")
+	require.True(t, ok)
+
+	tag := field.Tag.Get("validate")
+	assert.Contains(t, tag, "dive,oneof=",
+		"each entry must be constrained, not merely non-empty")
+	for _, suffix := range []string{InteractionOpenID4VPPresentation, InteractionAuthViaWeb} {
+		assert.Contains(t, tag, suffix,
+			"every interaction type this build implements must be configurable")
+	}
+
+	// Entries are suffixes, and the full URN is what a careless operator
+	// would copy out of the metadata. It must not be accepted as one.
+	assert.NotContains(t, tag, "urn:openid:dcp:ia:")
+}
+
+// Offers reads the same list, so the two have to agree about what a value
+// in it means.
+func TestOffersMatchesTheConfiguredSuffixes(t *testing.T) {
+	ia := &InteractiveAuthorization{
+		InteractionTypesSupported: []string{InteractionOpenID4VPPresentation},
+	}
+	assert.True(t, ia.Offers(InteractionOpenID4VPPresentation))
+	assert.False(t, ia.Offers(InteractionAuthViaWeb))
+
+	// A full URN would never match, which is why the tag refuses one.
+	assert.False(t, (&InteractiveAuthorization{
+		InteractionTypesSupported: []string{"urn:openid:dcp:ia:" + InteractionOpenID4VPPresentation},
+	}).Offers(InteractionOpenID4VPPresentation))
+}

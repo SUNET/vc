@@ -2022,7 +2022,14 @@ type InteractiveAuthorization struct {
 	// not of configuration. Set it to narrow that - to run an interop test
 	// against one interaction, or to stop offering one whose counterparty
 	// has a known problem.
-	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,required"`
+	//
+	// Entries are the two SUFFIXES this build implements, not full URNs:
+	// the namespace comes from InteractionTypePrefix, so writing one here
+	// would never match. Restricted to those two because this list can only
+	// ever narrow what the code can do - a typo or an unimplemented name
+	// adds nothing, and silently leaves the affected scope unservable at an
+	// endpoint the metadata still advertises.
+	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,oneof=openid4vp_presentation auth_via_web"`
 }
 
 // MaxAuthSessionTTLSeconds is the longest an Interactive Authorization

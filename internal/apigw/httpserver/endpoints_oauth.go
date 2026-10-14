@@ -161,16 +161,20 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 
 	// Persist the auth provider into the authorization context so the
 	// credential endpoint (which has no gin session) can read it back.
-	authCtx, err := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: reply.SessionID})
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("failed to get auth context for session %s: %w", reply.SessionID, err)
-	}
-	authCtx.AuthProvider = authProvider
-	authCtx.DataSource = string(credSource.DataSource)
-	authCtx.RemoteName = credSource.RemoteName
-	authCtx.AuthenticSource = credSource.AuthenticSource
-	if err := s.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+	//
+	// A targeted write of exactly these four fields, not a read-modify-
+	// Update of the whole document. OAuthAuthorize has just extended this
+	// context's deadline through ExtendExpiry, which never shortens - and
+	// a whole-document replace built from a copy read afterwards would
+	// carry whatever expires_at that copy happened to see, so two requests
+	// entering /authorize at once could have the slower one write back the
+	// earlier deadline and cut the code's life short.
+	if err := s.cacheService.AuthContext.SetAuthProvider(ctx, reply.SessionID, cache.AuthProviderFields{
+		AuthProvider:    authProvider,
+		DataSource:      string(credSource.DataSource),
+		RemoteName:      credSource.RemoteName,
+		AuthenticSource: credSource.AuthenticSource,
+	}); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("failed to update auth provider on session %s: %w", reply.SessionID, err)
 	}

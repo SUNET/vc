@@ -1,8 +1,10 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	stdcrypto "crypto"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -262,6 +264,22 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 		return nil, oauth2.OAuthErrPKCERequired
 	}
 
+	// A Wallet that OFFERS auth_via_web must send a code_challenge,
+	// whichever interaction this server then picks.
+	//
+	// Checked on what the Wallet advertised rather than on what the server
+	// selected, because that is where the draft puts it and because the
+	// alternative has a hole: a confidential client listing both
+	// interactions and asking for a presentation-backed scope never
+	// reaches requireWebInteraction, so the rule there never ran and the
+	// exchange was accepted with no PKCE at all. The Wallet has told us it
+	// is prepared to be sent into a browser; the code is redeemed over a
+	// channel this endpoint cannot see either way.
+	if req.CodeChallenge == "" &&
+		interactionTypeOffered(req.InteractionTypesSupported, ia.InteractionType(model.InteractionAuthViaWeb)) {
+		return nil, oauth2.OAuthErrPKCERequired
+	}
+
 	// S256 and nothing else, checked HERE because this is the only place
 	// that can: oauth2.ValidatePKCE derives the challenge with
 	// CreateCodeChallenge, which treats every method it does not recognise
@@ -457,6 +475,29 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		return nil, c.interactiveAuthorizationFailure(err)
 	}
 
+	// The auth_session's life ends here; the authorization code's begins.
+	//
+	// Both are kept in one ExpiresAt, and the Token Endpoint checks that
+	// same field - so without this the code a wallet is about to be handed
+	// expires whenever the EXCHANGE was going to, however long the
+	// presentation actually took. A holder who spent two minutes choosing
+	// a credential on a 300-second exchange gets a code with a hundred
+	// seconds on it, and at the configured maximum the code and the
+	// context expire together.
+	//
+	// This is the same handover /authorize makes for the browser leg, at
+	// the moment the short deadline has done its job, and through the same
+	// never-shortening ExtendExpiry - so a presentation that finished
+	// early cannot pull the deadline in.
+	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
+		&cache.AuthorizationContext{SessionID: authCtx.SessionID}, codeExpiresAt); err != nil {
+		c.log.Error(err, "CHALLENGE: failed to start the authorization code's lifetime",
+			"session_id", authCtx.SessionID)
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"interactive authorization could not be completed", 500, err)
+	}
+
 	c.log.Info("CHALLENGE: authorization complete", "session_id", authCtx.SessionID, "scopes", authCtx.Scopes)
 
 	return &AuthorizationChallengeResponse{AuthorizationCode: authCtx.Code}, nil
@@ -593,6 +634,13 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 			"session_id", authCtx.SessionID)
 		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
 			"interactive authorization could not be completed", 500, err)
+	}
+
+	if err := validateInteractiveAuthorizationJWE([]byte(envelope.Response)); err != nil {
+		c.log.Error(err, "CHALLENGE: openid4vp_response is not the JWE this request asked for",
+			"session_id", authCtx.SessionID)
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+			"openid4vp_response is not encrypted the way the request required", 400, err)
 	}
 
 	decrypted, err := jwe.Decrypt([]byte(envelope.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
@@ -749,6 +797,16 @@ func (c *Client) requireWebInteraction(ctx context.Context, ia *model.Interactiv
 	// The handle this interaction is associated by, instead of an
 	// auth_session.
 	authCtx.AuthSession = ""
+
+	// The presentation state goes with it. newChallengeAuthContext mints
+	// one so an OpenID4VP response has something to echo, and this
+	// interaction has no OpenID4VP response: nothing ever tells the Wallet
+	// the value, and nothing ever checks it. Left on the context it would
+	// be echoed back as `state` in the Token Response - a random value the
+	// Wallet never sent, which a Wallet correlating its own OAuth state
+	// is entitled to reject. The browser flow leaves this empty when the
+	// Wallet sends no state, and so does this.
+	authCtx.State = ""
 	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
 	authCtx.RequestURI = fmt.Sprintf("urn:ietf:params:oauth:request_uri:%s", uuid.NewString())
 	authCtx.ExpiresAt = time.Now().Add(requestURITTL).Unix()
@@ -854,4 +912,86 @@ func interactionTypeOffered(supported, required string) bool {
 		}
 	}
 	return false
+}
+
+// The encryption an Interactive Authorization response must use. These are
+// the values the request itself advertises - see the request object's
+// encrypted_response_enc_values_supported and the ECDH-ES key agreement
+// the ephemeral key is generated for - and a wallet that followed the
+// request produces exactly them.
+const (
+	iaResponseAlg = "ECDH-ES"
+	iaResponseEnc = "A256GCM"
+)
+
+// validateInteractiveAuthorizationJWE refuses a response that is not the
+// JWE this exchange asked for, BEFORE anything is decrypted.
+//
+// jwe.Decrypt on its own accepts a good deal more than the request
+// advertised: other content-encryption algorithms, the JSON serialization,
+// a compressed payload, and critical header parameters it silently ignores.
+// None of that is what a conformant wallet sends, so accepting it only
+// widens what an attacker may hand the decrypter - and the checks are the
+// ones pkg/openid4vci already makes on encrypted Credential Requests, for
+// the same reasons.
+func validateInteractiveAuthorizationJWE(response []byte) error {
+	// Compact serialization only, checked before anything is parsed.
+	// jwe.Parse also accepts the JSON serialization, where a per-recipient
+	// header can carry parameters the protected header does not - zip
+	// among them, which would put a compressed payload past the check
+	// below and into the decrypter. Refusing the JSON form closes that
+	// whole class rather than chasing one member of it.
+	if !isCompactJWE(response) {
+		return errors.New("the response must use JWE compact serialization")
+	}
+
+	msg, err := jwe.Parse(response)
+	if err != nil {
+		return fmt.Errorf("the response is not a well-formed JWE: %w", err)
+	}
+	headers := msg.ProtectedHeaders()
+
+	if alg, ok := headers.Algorithm(); !ok || alg.String() != iaResponseAlg {
+		return fmt.Errorf("unsupported response encryption alg; this request asked for %s", iaResponseAlg)
+	}
+	if enc, ok := headers.ContentEncryption(); !ok || enc.String() != iaResponseEnc {
+		return fmt.Errorf("unsupported response encryption enc; this request asked for %s", iaResponseEnc)
+	}
+	// No zip is advertised, so none is accepted: refusing here is the
+	// point of not advertising it, rather than letting the library inflate
+	// first.
+	if zip, ok := headers.Compression(); ok && zip.String() != "" {
+		return errors.New("a compressed response is not accepted")
+	}
+	// RFC 7516 §4.1.13, via RFC 7515 §4.1.11: a recipient MUST reject a
+	// JWE whose crit list names an extension it does not understand. This
+	// endpoint understands none, so any crit at all is refused - including
+	// an empty list, which §4.1.11 makes invalid in its own right.
+	//
+	// Not inherited from the library: jwx only makes this check when asked,
+	// with jwe.WithCritValidation(true), and the default is off.
+	if _, ok := headers.Critical(); ok {
+		return errors.New("no critical JWE header extensions are understood by this endpoint")
+	}
+
+	return nil
+}
+
+// isCompactJWE reports whether body is the five-part compact serialization.
+func isCompactJWE(body []byte) bool {
+	parts := bytes.Split(body, []byte("."))
+	if len(parts) != 5 {
+		return false
+	}
+	for i, part := range parts {
+		// Only the encrypted key may be empty, which is what ECDH-ES
+		// direct key agreement produces.
+		if len(part) == 0 && i != 1 {
+			return false
+		}
+		if _, err := base64.RawURLEncoding.DecodeString(string(part)); err != nil {
+			return false
+		}
+	}
+	return true
 }

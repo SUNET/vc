@@ -25,6 +25,17 @@ import (
 func TestAuthorizationCodeTTLFitsTheAuthContextLifetime(t *testing.T) {
 	assert.LessOrEqual(t, requestURITTL+authorizationCodeTTL, apigwcache.AuthContextTTL,
 		"a request_uri's life plus the code's must fit inside the authorization context's")
+
+	// And the other first leg, which is the long one. An Interactive
+	// Authorization exchange may be configured up to
+	// MaxAuthSessionTTLSeconds and hands over to the same code window when
+	// the presentation completes, so the context has to outlast both -
+	// otherwise the endpoint returns a code against a document MongoDB
+	// has already deleted, and only in HA, where nothing else would catch
+	// it.
+	maxAuthSession := time.Duration(model.MaxAuthSessionTTLSeconds) * time.Second
+	assert.LessOrEqual(t, maxAuthSession+authorizationCodeTTL, apigwcache.AuthContextTTL,
+		"the longest auth_session plus the code's life must fit inside the authorization context's")
 }
 
 // TestAuthorizeExtendsTheCodeDeadlinePastTheRequestURI is the bug itself: one
