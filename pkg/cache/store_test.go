@@ -48,6 +48,46 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Equal(t, "contract-session-1", result.SessionID)
 	})
 
+	t.Run("ResumeIssuerState", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-1",
+			IssuerState: "contract-issuer-state-1",
+			Scopes:      []string{"pid"},
+		}))
+
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-1", &IssuerStateResume{
+			AuthSession:               "contract-auth-session-1",
+			AuthSessionDPoPThumbprint: "contract-thumbprint",
+			WalletClientID:            "wallet-1",
+			CodeChallenge:             "contract-challenge",
+			CodeChallengeMethod:       "S256",
+			ExpiresAt:                 time.Now().Add(time.Hour).Unix(),
+			CreatedAt:                 time.Now(),
+		})
+		require.NoError(t, err)
+
+		// One operation: the handle is gone AND the exchange is written.
+		// Observing one without the other is the window this method
+		// exists to close.
+		assert.Empty(t, resumed.IssuerState)
+		assert.Equal(t, "contract-auth-session-1", resumed.AuthSession)
+		assert.Equal(t, "contract-thumbprint", resumed.AuthSessionDPoPThumbprint)
+		assert.Equal(t, "wallet-1", resumed.WalletClientID)
+		assert.Equal(t, []string{"pid"}, resumed.Scopes, "the prepared issuance survives the resume")
+
+		stored, err := store.Get(ctx, &AuthorizationContext{AuthSession: "contract-auth-session-1"})
+		require.NoError(t, err)
+		assert.Equal(t, "contract-resume-1", stored.SessionID)
+
+		// And it is one-shot, for the same reason ClaimIssuerState is:
+		// two wallets scanning one offer must yield exactly one winner.
+		second, err := store.ResumeIssuerState(ctx, "contract-issuer-state-1", &IssuerStateResume{
+			AuthSession: "contract-auth-session-2",
+		})
+		require.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
+	})
+
 	t.Run("GetByQueryFields", func(t *testing.T) {
 		result, err := store.Get(ctx, &AuthorizationContext{State: "state-1"})
 		require.NoError(t, err)

@@ -357,6 +357,14 @@ func credentialTypeMatches(cred *credential.StoredCredential, query openid4vp.Cr
 // without reading it. So the vct claim is recovered from the credential
 // itself when the field is empty, because a wallet that cannot say what
 // it holds cannot answer a DCQL query about it.
+//
+// Only an SD-JWT VC is recovered from. An mdoc's doctype lives in CBOR
+// that would have to be decoded to reach, and this wallet cannot build an
+// mdoc presentation anyway - buildVPToken handles SD-JWT and returns the
+// raw credential for everything else. So an mdoc whose doctype the store
+// did not record fails a doctype_value query by name, which is the
+// failure a test wallet should report rather than quietly presenting
+// something it could not identify.
 func credentialVCT(cred *credential.StoredCredential) string {
 	if cred.VCT != "" {
 		return cred.VCT
