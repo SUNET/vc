@@ -590,3 +590,77 @@ func TestVCI_InteractiveAuthorization_SendsOneRedirectURIThroughout(t *testing.T
 		})
 	}
 }
+
+// An Authorization Challenge Request carrying neither a scope nor an
+// issuer_state describes no authorization at all, and the endpoint
+// refuses it. So a scenario that names only a credential configuration
+// could not open an exchange - including when the wallet took this path
+// because the Issuer's metadata says Interactive Authorization is the
+// only thing it accepts, a case the scenario never asked for and cannot
+// be expected to configure around.
+//
+// OpenID4VCI 1.0 §12.2.3 publishes which scope asks for which credential
+// configuration, so there is nothing to guess.
+func TestVCI_InteractiveAuthorization_UsesTheAdvertisedScope(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+		// Not requested by the scenario: the wallet takes this path
+		// because the Issuer says it accepts nothing else.
+		e.iaRequireIA = true
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-advertised-scope",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL: env.issuerServer.URL,
+			// No Scope and no IssuerState: everything this run needs to
+			// name the authorization is in the Issuer's metadata.
+			CredentialConfigurationID: "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-advertised-scope")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.NotEmpty(t, requests)
+	assert.Equal(t, "test_scope", requests[0].Get("scope"),
+		"the scope the Issuer advertises for this configuration must reach the challenge endpoint")
+}
+
+// A scope the scenario names is the scenario's business and the metadata
+// must not override it.
+func TestVCI_InteractiveAuthorization_ConfiguredScopeWins(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-configured-scope",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-configured-scope")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.NotEmpty(t, requests)
+	assert.Equal(t, "pid", requests[0].Get("scope"))
+}

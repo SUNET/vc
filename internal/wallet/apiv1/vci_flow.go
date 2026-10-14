@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"github.com/SUNET/vc/internal/wallet/config"
+	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // vciFlow is the state one execution of a VCI scenario carries from the
@@ -39,6 +40,11 @@ type vciFlow struct {
 	// wherever the code was obtained to the Token Endpoint that redeems
 	// it.
 	codeVerifier string
+
+	// scope is what this run asks to be issued: the scenario's, or the
+	// one the Issuer advertises for the credential configuration being
+	// requested.
+	scope string
 }
 
 // defaultWalletRedirectURI is where this wallet says to send the Holder
@@ -67,6 +73,30 @@ func newVCIFlow(vci *config.VCIScenario) *vciFlow {
 		issuerState:             vci.IssuerState,
 		issuerStateIsConfigured: vci.IssuerState != "",
 		preAuthorizedCode:       vci.PreAuthorizedCode,
+		scope:                   vci.Scope,
+	}
+}
+
+// adoptAdvertisedScope takes the scope the Issuer publishes for the
+// credential configuration this run is asking for, when the scenario did
+// not name one itself.
+//
+// An Authorization Challenge Request with no scope and no issuer_state
+// describes no authorization at all and is refused, so a scenario that
+// named only a credential_configuration_id could not open an exchange -
+// including when the wallet took that path because the Issuer's metadata
+// said Interactive Authorization is the only one it accepts, which is a
+// case the scenario never asked for and cannot be expected to configure
+// around.
+//
+// OpenID4VCI 1.0 §12.2.3 publishes this exact mapping in
+// credential_configurations_supported, so there is nothing to guess.
+func (f *vciFlow) adoptAdvertisedScope(metadata *openid4vci.CredentialIssuerMetadataParameters, credentialConfigurationID string) {
+	if f.scope != "" || credentialConfigurationID == "" || metadata == nil {
+		return
+	}
+	if config, ok := metadata.CredentialConfigurationsSupported[credentialConfigurationID]; ok {
+		f.scope = config.Scope
 	}
 }
 

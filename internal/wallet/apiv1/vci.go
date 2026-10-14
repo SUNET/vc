@@ -213,6 +213,11 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 	step.Detail = fmt.Sprintf("credential_endpoint=%s configs=%d", metadata.CredentialEndpoint, len(metadata.CredentialConfigurationsSupported))
 	result.Steps = append(result.Steps, step)
 
+	// The Issuer publishes which scope asks for which credential
+	// configuration, so a scenario that named only the configuration does
+	// not have to repeat it.
+	flow.adoptAdvertisedScope(metadata, credentialConfigID)
+
 	// Step 3: Fetch OAuth2 authorization server metadata
 	step = StepResult{Name: "fetch_oauth2_metadata", StartedAt: time.Now()}
 	authServerURL := issuerURL

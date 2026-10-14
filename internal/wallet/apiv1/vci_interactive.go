@@ -59,8 +59,8 @@ func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2Ser
 		"client_id":                   {c.cfg.Wallet.ClientID},
 		"interaction_types_supported": {strings.Join(c.offeredInteractionTypes(vci), ",")},
 	}
-	if vci.Scope != "" {
-		form.Set("scope", vci.Scope)
+	if flow.scope != "" {
+		form.Set("scope", flow.scope)
 	}
 	// Always, and the same value the Token Endpoint will be given. The
 	// Authorization Server validates it against what this client is

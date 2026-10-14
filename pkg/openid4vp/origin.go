@@ -87,6 +87,12 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
+
+		// After the IDNA step, because the URL Standard decides a host is
+		// an IPv4 address by looking at the ASCII form.
+		if ipv4, ok := whatwgIPv4(host); ok {
+			host = ipv4
+		}
 	}
 
 	origin := scheme + "://" + host
@@ -174,4 +180,100 @@ func defaultPortForScheme(scheme string) string {
 	default:
 		return ""
 	}
+}
+
+// whatwgIPv4 applies the WHATWG URL Standard's IPv4 parser and serializer
+// to an already-ASCII host, reporting whether the host was one.
+//
+// A browser does not treat a dotted host as a name when its last part
+// looks numeric: "127.1" is the address 127.0.0.1, "0x7f.1" is the same
+// address, and the Origin a browser reports for either is
+// "http://127.0.0.1". Leaving them alone meant a public_url written in
+// one of those spellings produced an expected_origins entry and an mdoc
+// session transcript that the browser's own Origin never matched.
+//
+// The rules are §3.3 of the standard: at most four parts, each decimal,
+// or octal with a leading "0", or hexadecimal with a leading "0x"; a
+// trailing empty part is dropped; the last part absorbs the remaining
+// octets. Anything that does not parse is not an address, and - because
+// the last part was numeric-looking - the standard says such a host is an
+// error rather than a name. This returns false there and lets the host
+// through as written: refusing would turn a host a browser rejects
+// outright into a comparison failure, which is the same outcome by a
+// clearer route.
+func whatwgIPv4(host string) (string, bool) {
+	parts := strings.Split(host, ".")
+	if len(parts) > 1 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 || len(parts) > 4 {
+		return "", false
+	}
+
+	// Only a host whose LAST part is numeric is an IPv4 address; anything
+	// else is a domain name and must be left exactly as it is.
+	if !isWHATWGNumber(parts[len(parts)-1]) {
+		return "", false
+	}
+
+	numbers := make([]uint64, 0, len(parts))
+	for _, part := range parts {
+		n, ok := parseWHATWGNumber(part)
+		if !ok {
+			return "", false
+		}
+		numbers = append(numbers, n)
+	}
+
+	// Every part but the last is one octet; the last absorbs the rest.
+	for _, n := range numbers[:len(numbers)-1] {
+		if n > 255 {
+			return "", false
+		}
+	}
+	last := numbers[len(numbers)-1]
+	if last >= 1<<(8*(5-uint(len(numbers)))) {
+		return "", false
+	}
+
+	address := last
+	for i, n := range numbers[:len(numbers)-1] {
+		address += n << (8 * (3 - uint(i)))
+	}
+
+	return fmt.Sprintf("%d.%d.%d.%d", address>>24&0xff, address>>16&0xff, address>>8&0xff, address&0xff), true
+}
+
+// isWHATWGNumber reports whether a host part is one the IPv4 parser would
+// read as a number at all.
+func isWHATWGNumber(part string) bool {
+	_, ok := parseWHATWGNumber(part)
+	return ok
+}
+
+// parseWHATWGNumber reads one part of an IPv4 host: decimal, octal with a
+// leading "0", or hexadecimal with a leading "0x".
+func parseWHATWGNumber(part string) (uint64, bool) {
+	if part == "" {
+		return 0, false
+	}
+
+	base := 10
+	digits := part
+	switch {
+	case len(part) >= 2 && (part[0:2] == "0x" || part[0:2] == "0X"):
+		base, digits = 16, part[2:]
+		if digits == "" {
+			// "0x" alone is zero, per the standard's empty-digits case.
+			return 0, true
+		}
+	case len(part) >= 2 && part[0] == '0':
+		base, digits = 8, part[1:]
+	}
+
+	n, err := strconv.ParseUint(digits, base, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }

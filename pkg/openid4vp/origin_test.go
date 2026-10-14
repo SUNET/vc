@@ -50,6 +50,24 @@ func TestCanonicalOrigin(t *testing.T) {
 		{name: "a zero-padded default port on http", in: "http://issuer.example:00080/op", want: "http://issuer.example"},
 		{name: "port zero is a port", in: "https://issuer.example:0", want: "https://issuer.example:0"},
 
+		// A browser does not treat a dotted host as a name when its last
+		// part is numeric: every one of these IS 127.0.0.1, and the
+		// Origin a browser reports for them says so.
+		{name: "an IPv4 address written in full", in: "http://127.0.0.1", want: "http://127.0.0.1"},
+		{name: "a shortened IPv4 address", in: "http://127.1", want: "http://127.0.0.1"},
+		{name: "a three-part IPv4 address", in: "http://127.0.1", want: "http://127.0.0.1"},
+		{name: "a one-part IPv4 address", in: "http://2130706433", want: "http://127.0.0.1"},
+		{name: "an octal IPv4 address", in: "http://0177.0.0.01", want: "http://127.0.0.1"},
+		{name: "a hexadecimal IPv4 address", in: "http://0x7f.0x0.0x0.0x1", want: "http://127.0.0.1"},
+		{name: "a mixed-radix IPv4 address", in: "http://0x7f.1", want: "http://127.0.0.1"},
+		{name: "a zero-padded IPv4 address", in: "http://127.000.000.001", want: "http://127.0.0.1"},
+		{name: "an IPv4 address with a trailing dot", in: "http://127.0.0.1.", want: "http://127.0.0.1"},
+		{name: "an IPv4 address with a port", in: "http://127.1:8080", want: "http://127.0.0.1:8080"},
+
+		// And a host that merely CONTAINS digits is still a name.
+		{name: "a hostname with numeric labels", in: "https://1.example.com", want: "https://1.example.com"},
+		{name: "a hostname ending in a non-numeric label", in: "https://127.0.0.1x", want: "https://127.0.0.1x"},
+
 		// An internationalized host. A browser's URL parser runs UTS #46
 		// ToASCII, so the Origin it reports is the A-label form; a
 		// deployment that writes its public_url in Unicode - which
@@ -116,4 +134,42 @@ func TestSerialiseIPv6AgreesWithNetipExceptWhereItMustNot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "::ffff:192.0.2.1", mapped.String(), "netip renders the dotted tail")
 	assert.Equal(t, "::ffff:c000:201", serialiseIPv6(mapped), "a browser renders eight hex pieces")
+}
+
+// The IPv4 parser is the WHATWG URL Standard's §3.3, not net/netip's, and
+// the two disagree about which spellings exist at all. These are the
+// shapes the standard accepts and the shapes it does not.
+func TestWHATWGIPv4(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{in: "127.0.0.1", want: "127.0.0.1", ok: true},
+		{in: "127.1", want: "127.0.0.1", ok: true},
+		{in: "0x7f000001", want: "127.0.0.1", ok: true},
+		{in: "0377.0.0.1", want: "255.0.0.1", ok: true},
+		{in: "0", want: "0.0.0.0", ok: true},
+		{in: "4294967295", want: "255.255.255.255", ok: true},
+
+		// Out of range: the last part absorbs only the octets left over.
+		{in: "4294967296", ok: false},
+		{in: "256.1.1.1", ok: false},
+		{in: "1.2.3.4.5", ok: false},
+		{in: "08", ok: false}, // 8 is not an octal digit
+		{in: "0x", want: "0.0.0.0", ok: true},
+
+		// Not an address at all, because the last part is not a number.
+		{in: "example.com", ok: false},
+		{in: "127.0.0.1x", ok: false},
+		{in: "1.example", ok: false},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := whatwgIPv4(tc.in)
+			assert.Equal(t, tc.ok, ok)
+			if tc.ok {
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
 }

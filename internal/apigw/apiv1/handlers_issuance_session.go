@@ -131,6 +131,20 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		return nil, err
 	}
 
+	// And the request itself has to be constructible. buildIssuanceAuthDCQL
+	// refuses an authentication scope whose format this flow cannot verify -
+	// a W3C credential, which issuance auth has not been taught to read -
+	// and refuses one with no usable meta constraint. Both are
+	// configuration errors, and discovering them at the Challenge Endpoint
+	// means preparation has already handed the caller a valid-looking offer
+	// to print and distribute whose exchange can never open. Finding out
+	// here costs one call and makes the failure the caller's, at the moment
+	// they can still do something about it.
+	if _, err := c.issuanceAuthDCQL(req.Scope); err != nil {
+		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
+			fmt.Sprintf("scope %q cannot be turned into a presentation request: %s", req.Scope, err.Error()), 400)
+	}
+
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
@@ -233,11 +247,25 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 			fmt.Sprintf("scope %q has no authentication scopes configured, so no claim could be matched on", scope), 400)
 	}
 
+	// Compared in the shape the REQUEST will carry, not the shape the
+	// configuration is written in. For mdoc, buildIssuanceAuthDCQL expands
+	// a bare "family_name" into the namespace-qualified
+	// ["org.iso.18013.5.1", "family_name"] that DCQL requires, so a rule
+	// written the qualified way - the way it has to be written to match an
+	// mdoc's literal key - was being reported as unaskable even though the
+	// request asks for exactly that claim. Putting both sides through
+	// authClaimPathSegments is what makes the comparison about the claim
+	// rather than about how it happened to be spelled.
 	offered := make(map[string][]string, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		claims := vpAuth.AuthScopes[authScope].AuthClaims
 		offered[authScope] = claims
-		if coversAll(claims, paths) {
+
+		// Both sides through the same expansion, against the format of
+		// the credential being PRESENTED - the auth scope's, not the one
+		// being issued.
+		format := c.cfg.GetFormatForScope(authScope)
+		if coversAll(normalisedClaimPaths(format, claims), normalisedClaimPaths(format, paths)) {
 			return nil
 		}
 	}
@@ -246,6 +274,20 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 		fmt.Sprintf("no authentication scope for %q discloses every claim this rule matches on (%s); "+
 			"the authentication scopes offer %v, and the presentation request asks for those and nothing else",
 			scope, strings.Join(paths, ", "), offered), 400)
+}
+
+// normalisedClaimPaths puts claim paths into the shape the presentation
+// request will carry them, so a rule and the request are compared on what
+// they ask for rather than on how it was written.
+//
+// The separator is one that cannot occur in a claim name, so two
+// different segmentations can never collide into the same string.
+func normalisedClaimPaths(format string, claims []string) []string {
+	normalised := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		normalised = append(normalised, strings.Join(authClaimPathSegments(format, claim), "\x00"))
+	}
+	return normalised
 }
 
 // coversAll reports whether every path appears in claims.
