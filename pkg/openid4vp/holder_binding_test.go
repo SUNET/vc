@@ -285,25 +285,39 @@ func TestHolderBinding_AcceptsEveryHolderKeyTypeIssuanceAccepts(t *testing.T) {
 		audience = "x509_san_dns:issuer.example.com"
 	)
 
+	// Each case carries a second key of its OWN type and curve. An
+	// impostor of a different type is refused by the signing method
+	// before any signature is checked ("key is of invalid type"), which
+	// looks like a pass and tests nothing: the question is whether a
+	// WRONG key of the RIGHT type is rejected under each algorithm.
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	rsaImpostor, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
+	p256Impostor, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	p384Impostor, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
 	_, ed, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
+	_, edImpostor, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
 
 	for _, tc := range []struct {
-		name   string
-		method jwtv5.SigningMethod
-		key    crypto.Signer
+		name     string
+		method   jwtv5.SigningMethod
+		key      crypto.Signer
+		impostor crypto.Signer
 	}{
-		{"EC P-256", jwtv5.SigningMethodES256, p256},
-		{"EC P-384", jwtv5.SigningMethodES384, p384},
-		{"RSA", jwtv5.SigningMethodRS256, rsaKey},
-		{"RSA-PSS", jwtv5.SigningMethodPS256, rsaKey},
-		{"Ed25519", jwtv5.SigningMethodEdDSA, ed},
+		{"EC P-256", jwtv5.SigningMethodES256, p256, p256Impostor},
+		{"EC P-384", jwtv5.SigningMethodES384, p384, p384Impostor},
+		{"RSA", jwtv5.SigningMethodRS256, rsaKey, rsaImpostor},
+		{"RSA-PSS", jwtv5.SigningMethodPS256, rsaKey, rsaImpostor},
+		{"Ed25519", jwtv5.SigningMethodEdDSA, ed, edImpostor},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -312,19 +326,42 @@ func TestHolderBinding_AcceptsEveryHolderKeyTypeIssuanceAccepts(t *testing.T) {
 			credential := issuedCredentialFor(t, issuerKey, publicJWK(t, tc.key.Public()), "")
 			validator := &VPTokenValidator{Nonce: nonce, ClientID: audience}
 
-			require.NoError(t, validator.Validate(
-				presentationProvedWith(t, credential, tc.method, tc.key, nonce, audience, "sha-256")),
+			honest := presentationProvedWith(t, credential, tc.method, tc.key, nonce, audience, "sha-256")
+			require.NoError(t, validator.Validate(honest),
 				"a credential issued to this key type must be presentable with it")
 
-			// The signature check is still the thing being exercised: a
-			// different key of the same type must not pass.
-			impostor, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-			require.NoError(t, err)
-			err = validator.Validate(
-				presentationProvedWith(t, credential, jwtv5.SigningMethodES256, impostor, nonce, audience, "sha-256"))
-			require.Error(t, err, "another key must not present this credential")
+			// The signature check is what is being exercised: a different
+			// key of the same type, signing with the same algorithm.
+			forged := presentationProvedWith(t, credential, tc.method, tc.impostor, nonce, audience, "sha-256")
+			require.Error(t, validator.Validate(forged),
+				"another key must not present this credential")
+
+			// And the two differ only in who signed. If the forgery were
+			// made with some other algorithm, its refusal would say
+			// nothing about this one.
+			assert.Equal(t, keyBindingAlg(t, honest), keyBindingAlg(t, forged),
+				"the forged proof must be signed under the same algorithm as the honest one")
+			assert.Equal(t, tc.method.Alg(), keyBindingAlg(t, forged))
 		})
 	}
+}
+
+// keyBindingAlg reads the alg header of the Key Binding JWT at the end of
+// a presentation.
+func keyBindingAlg(t *testing.T, presentation string) string {
+	t.Helper()
+
+	kbJWT := presentation[strings.LastIndex(presentation, "~")+1:]
+	headerB64, _, found := strings.Cut(kbJWT, ".")
+	require.True(t, found, "presentation carries no key binding JWT")
+
+	raw, err := base64.RawURLEncoding.DecodeString(headerB64)
+	require.NoError(t, err)
+
+	var header map[string]any
+	require.NoError(t, json.Unmarshal(raw, &header))
+	alg, _ := header["alg"].(string)
+	return alg
 }
 
 // A symmetric cnf.jwk proves nothing: the "holder key" is a secret the
