@@ -818,10 +818,24 @@ type VerificationPresetScope struct {
 	//                   config: known-offender-matching-ssc
 	//                   verifier_id_type: x509_san_dns
 	//
-	// Passed through to the wire as configured. Nothing validates it
-	// unless Validate names a profile: this verifier is how wallets are
-	// tested, so a request that breaks a rulebook on purpose has to be
-	// sendable, and the specifications underneath are still moving.
+	// Passed through to the wire as configured. Nothing judges what it
+	// MEANS unless Validate names a profile: this verifier is how wallets
+	// are tested, so a request that breaks a rulebook on purpose has to
+	// be sendable, and the specifications underneath are still moving.
+	//
+	// One transport restriction applies regardless, because it is not a
+	// judgement about the request. The picker builds the query in the
+	// browser and posts it back, where every number is a float64 - so a
+	// numeric param the browser cannot carry exactly (an integer past
+	// 2^53, or past what the shortest round-tripping decimal denotes; a
+	// decimal with more digits than a float64 holds) would reach the
+	// wallet CHANGED. A param is an input to a proof, so a changed one
+	// yields a different pseudonym, and the only symptom is two systems
+	// disagreeing about who someone is.
+	//
+	// Such a credential is omitted from the preset and the reason is
+	// logged, rather than published and quietly altered. Quote the value
+	// as a string if the exact digits are what you mean.
 	Req []openid4vp.ReqItem `yaml:"req,omitempty" validate:"omitempty,dive"`
 
 	// Validate names a profile to check this credential's request against
