@@ -1,10 +1,10 @@
 package openid4vp
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -454,8 +454,61 @@ func TestIsCircuitZkFormat(t *testing.T) {
 // sameJSON compares two encodings for semantic equality.
 func sameJSON(t *testing.T, a, b []byte) bool {
 	t.Helper()
-	var x, y any
-	require.NoError(t, json.Unmarshal(a, &x))
-	require.NoError(t, json.Unmarshal(b, &y))
-	return reflect.DeepEqual(x, y)
+	return decodeExactly(t, a) == decodeExactly(t, b)
+}
+
+// decodeExactly renders a JSON document in a form where two documents
+// compare equal only if their VALUES are equal, numbers included.
+//
+// json.Unmarshal into an any decodes every number as a float64, so a
+// comparison built on it reports equality after a value has changed
+// precision - 9007199254740993 against 9007199254740992, say. These
+// helpers carry the all-vectors conformance test's entire claim that a
+// request is emitted unchanged, and a request parameter is an input to a
+// proof, so that is the one thing they must not miss.
+//
+// UseNumber keeps each literal as text; re-encoding then gives a string
+// that differs whenever any value does. Member order does not matter,
+// because the decoded maps are re-encoded by encoding/json, which sorts
+// keys.
+func decodeExactly(t *testing.T, data []byte) string {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	require.NoError(t, decoder.Decode(&value))
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(encoded)
+}
+
+// The helper the all-vectors conformance test rests on has to see a
+// changed number.
+//
+// json.Unmarshal into an any decodes every number as a float64, so the
+// version this replaced reported equality after a value had lost
+// precision - and a req param is an input to a proof, so a comparison
+// that cannot see that is not checking the thing the test exists for.
+func TestSameJSONSeesAChangedNumber(t *testing.T) {
+	for _, tc := range []struct {
+		name, a, b string
+		same       bool
+	}{
+		{"identical", `{"p":1}`, `{"p":1}`, true},
+		{"member order, which is not a difference", `{"a":1,"b":2}`, `{"b":2,"a":1}`, true},
+		{"whitespace, likewise", `{"p":1}`, "{ \"p\" : 1 }", true},
+
+		// The pair a float64 cannot tell apart. This is the case the old
+		// helper passed.
+		{"a value that lost precision", `{"p":9007199254740993}`, `{"p":9007199254740992}`, false},
+		{"and a decimal that did", `{"p":1.00000000000000001}`, `{"p":1}`, false},
+
+		{"an added member", `{"p":1}`, `{"p":1,"q":2}`, false},
+		{"a dropped array", `{"p":[]}`, `{}`, false},
+		{"a number against its string", `{"p":1}`, `{"p":"1"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.same, sameJSON(t, []byte(tc.a), []byte(tc.b)))
+		})
+	}
 }
