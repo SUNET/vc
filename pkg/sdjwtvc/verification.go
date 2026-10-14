@@ -711,16 +711,6 @@ func (c *Client) calculateSDHashForVerification(issuerJWT string, disclosures []
 }
 
 // jwkToPublicKey converts a JWK map to a public key
-// JWKToPublicKey converts a JWK map to a public key.
-//
-// Exported so that the OpenID4VP validator can verify a Key Binding JWT
-// against the key its credential names, without a second implementation
-// of key parsing - two of those drift, and the one that drifts is the one
-// nobody is looking at.
-func JWKToPublicKey(jwkMap map[string]any) (any, error) {
-	return jwkToPublicKey(jwkMap)
-}
-
 func jwkToPublicKey(jwkMap map[string]any) (any, error) {
 	kty, _ := jwkMap["kty"].(string)
 

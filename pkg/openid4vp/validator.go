@@ -1,12 +1,15 @@
 package openid4vp
 
 import (
-	"crypto/sha256"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -156,9 +159,21 @@ func (v *VPTokenValidator) validateHolderBinding(vpToken string, parsed *sdjwtvc
 	if !ok {
 		return fmt.Errorf("credential's cnf claim carries no jwk")
 	}
-	holderKey, err := sdjwtvc.JWKToPublicKey(jwkMap)
+	holderKey, err := jose.ParseJWKToPublicKey(jwkMap)
 	if err != nil {
 		return fmt.Errorf("reading the holder key the credential names: %w", err)
+	}
+	// Issuance accepts EC, RSA, RSA-PSS and Ed25519 proof keys and copies
+	// the proof's JWK into cnf, so all four have to be presentable here.
+	// Anything else is refused by type rather than by what the parser
+	// happened to return: a symmetric JWK would come back as bytes, and a
+	// KB-JWT signed HS256 with those same bytes would then "verify",
+	// proving possession of nothing the issuer did not publish inside the
+	// credential.
+	switch holderKey.(type) {
+	case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey:
+	default:
+		return fmt.Errorf("credential names a %T holder key, which cannot prove possession", holderKey)
 	}
 
 	kbJWT := strings.Join(parsed.KeyBinding, ".")
@@ -184,17 +199,62 @@ func (v *VPTokenValidator) validateHolderBinding(vpToken string, parsed *sdjwtvc
 	// sd_hash ties the proof to THIS presentation. Without it a KB-JWT
 	// made for one presentation of a credential is a KB-JWT for every
 	// presentation of it, with whatever disclosures the sender chooses.
+	//
+	// Under the issuer's _sd_alg, not sha-256: that claim is what says
+	// which hash the holder was told to use, and this repository issues
+	// and key-binds sha-384, sha-512 and the SHA-3 variants too.
+	// Hard-coding sha-256 would reject every honest holder of one of
+	// those.
+	sdAlg, err := issuerSDAlg(vpToken)
+	if err != nil {
+		return err
+	}
+	hashMethod, err := sdjwtvc.HashFromAlgorithm(sdAlg)
+	if err != nil {
+		return fmt.Errorf("credential declares _sd_alg %q: %w", sdAlg, err)
+	}
 	presented := vpToken
 	if idx := strings.LastIndex(vpToken, "~"); idx >= 0 {
 		presented = vpToken[:idx+1]
 	}
-	sum := sha256.Sum256([]byte(presented))
-	want := base64.RawURLEncoding.EncodeToString(sum[:])
+	hashMethod.Reset()
+	hashMethod.Write([]byte(presented))
+	want := base64.RawURLEncoding.EncodeToString(hashMethod.Sum(nil))
 	if got, _ := claims["sd_hash"].(string); got != want {
 		return fmt.Errorf("key binding JWT's sd_hash does not cover the presentation it arrived in")
 	}
 
 	return nil
+}
+
+// issuerSDAlg reads the hash algorithm the issuer declared in _sd_alg,
+// which is the algorithm sd_hash is taken under (SD-JWT §4.3.1).
+//
+// It reads the issuer-signed payload again rather than the parsed claims
+// because parsing resolves the disclosures and then deletes _sd and
+// _sd_alg from the claim tree - by the time the validator sees the
+// credential, the algorithm it was built with is gone.
+//
+// Absent means sha-256, per the spec's default. Present but unreadable is
+// an error, not a fallback to the default.
+func issuerSDAlg(vpToken string) (string, error) {
+	_, body, _, _, _, err := sdjwtvc.Token(vpToken).Split()
+	if err != nil {
+		return "", fmt.Errorf("reading the issuer-signed payload: %w", err)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		return "", fmt.Errorf("decoding the issuer-signed payload: %w", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", fmt.Errorf("parsing the issuer-signed payload: %w", err)
+	}
+	sdAlg, _ := claims["_sd_alg"].(string)
+	if sdAlg == "" {
+		return "sha-256", nil
+	}
+	return sdAlg, nil
 }
 
 // validateNonce verifies the nonce value in the presentation
