@@ -242,3 +242,92 @@ func TestTheCircuitZkRequirementDoesNotTouchOtherFormats(t *testing.T) {
 	require.Contains(t, reply.Presets, "Plain")
 	require.Len(t, reply.Presets["Plain"].Credentials, 1)
 }
+
+// A preset is a NAMED REQUEST. Dropping only the unusable credential
+// publishes "PID + Pseudonym" as PID-only: a button that silently asks
+// for something other than what it says, which is worse than no button -
+// and the configuration reference says the preset is omitted.
+func TestAMixedPresetIsNotPublishedWithoutItsCircuitCredential(t *testing.T) {
+	pidSchema := &mdoc.MDDLSchema{Format: "mso_mdoc", DocType: "eu.europa.ec.eudi.pid.1"}
+	nymSchema := &mdoc.MDDLSchema{Format: "mso_mdoc", DocType: "eu.europa.ec.eudi.nym_auth.1"}
+
+	build := func(scopeCfg *model.VerificationPresetScope, formats *openid4vp.VPFormatsSupported) *model.Cfg {
+		return &model.Cfg{
+			Common: &model.Common{
+				CredentialMetadata: map[string]*model.CredentialMetadata{
+					"pid": {Format: "mso_mdoc", MDDL: pidSchema, Attributes: pidSchema.Attributes()},
+					"nym": {Format: "mso_mdoc", MDDL: nymSchema, Attributes: nymSchema.Attributes()},
+				},
+			},
+			Verifier: &model.Verifier{
+				PreferredVPFormats: formats,
+				Presets: map[string]model.PresetDefinition{
+					"PID + Pseudonym": {Credentials: model.VerificationPreset{
+						"pid": nil,
+						"nym": scopeCfg,
+					}},
+				},
+			},
+		}
+	}
+
+	advertised := &openid4vp.VPFormatsSupported{
+		MsoMdoc:   &openid4vp.MsoMdocFormat{},
+		CircuitZk: &openid4vp.CircuitZkFormat{},
+	}
+
+	for _, tc := range []struct {
+		name     string
+		scopeCfg *model.VerificationPresetScope
+		formats  *openid4vp.VPFormatsSupported
+	}{
+		{
+			name:     "with no req",
+			scopeCfg: &model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk},
+			formats:  advertised,
+		},
+		{
+			name:     "with circuit_zk unadvertised",
+			scopeCfg: &model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk, Req: nymReq},
+			formats:  &openid4vp.VPFormatsSupported{MsoMdoc: &openid4vp.MsoMdocFormat{}},
+		},
+		{
+			name: "with a param the browser would change",
+			scopeCfg: &model.VerificationPresetScope{
+				Format: openid4vp.FormatCircuitZk,
+				Req: []openid4vp.ReqItem{{
+					ID: openid4vp.FunctionPseudonym, Return: "nym-1",
+					Params: map[string]any{"counter": int64(9007199254740993)},
+				}},
+			},
+			formats: advertised,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := build(tc.scopeCfg, tc.formats)
+			client, _ := CreateTestClientWithMock(t, cfg)
+			client.cfg = cfg
+
+			reply, err := client.UIMetadata(t.Context())
+			require.NoError(t, err)
+
+			if preset := reply.Presets["PID + Pseudonym"]; preset != nil {
+				assert.Failf(t, "the preset was published",
+					"it asks for %d credential(s) instead of the 2 configured, under a label promising both",
+					len(preset.Credentials))
+			}
+		})
+	}
+
+	t.Run("and it IS published when the circuit credential is usable", func(t *testing.T) {
+		cfg := build(&model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk, Req: nymReq}, advertised)
+		client, _ := CreateTestClientWithMock(t, cfg)
+		client.cfg = cfg
+
+		reply, err := client.UIMetadata(t.Context())
+		require.NoError(t, err)
+		preset := reply.Presets["PID + Pseudonym"]
+		require.NotNil(t, preset)
+		assert.Len(t, preset.Credentials, 2, "both credentials, as configured")
+	})
+}

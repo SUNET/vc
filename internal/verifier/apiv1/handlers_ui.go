@@ -295,6 +295,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				Featured:    model.BoolVal(def.Featured, false),
 				Credentials: make([]UIPresetCredential, 0, len(preset)),
 			}
+			// Set when a credential cannot be requested in a way that
+			// would change what the preset ASKS FOR rather than merely
+			// which of several credentials it collects. A preset is a
+			// named request: publishing "PID + Pseudonym" as PID-only
+			// gives an operator a button that silently does something
+			// else, which is worse than no button.
+			abandonPreset := false
+
 			scopeKeys := make([]string, 0, len(preset))
 			for scope := range preset {
 				scopeKeys = append(scopeKeys, scope)
@@ -360,9 +368,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					// gets nothing back - which looks like a wallet fault
 					// and is not one.
 					if scopeCfg.Format == openid4vp.FormatCircuitZk && len(scopeCfg.Req) == 0 {
-						c.log.Error(nil, "credential omitted from a verifier UI preset: circuit_zk format override with no req",
+						c.log.Error(nil, "preset omitted from the verifier UI: a circuit_zk credential has no req",
 							"preset", label, "scope", scope)
-						continue
+						abandonPreset = true
+						break
 					}
 					// req crosses the browser, where every number is a
 					// float64. A param that cannot survive that is a proof
@@ -390,14 +399,16 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					// the operator's answer.
 					if scopeCfg.Format == openid4vp.FormatCircuitZk &&
 						vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats).CircuitZk == nil {
-						c.log.Error(nil, "credential omitted from a verifier UI preset: circuit_zk is not advertised in verifier.preferred_vp_formats, so a wallet would be asked for a proof the request declares no support for",
+						c.log.Error(nil, "preset omitted from the verifier UI: circuit_zk is not advertised in verifier.preferred_vp_formats, so a wallet would be asked for a proof the request declares no support for",
 							"preset", label, "scope", scope)
-						continue
+						abandonPreset = true
+						break
 					}
 					if err := reqSurvivesTheBrowser(scopeCfg.Req); err != nil {
-						c.log.Error(err, "credential omitted from a verifier UI preset: a req param cannot survive the browser's JSON round trip",
+						c.log.Error(err, "preset omitted from the verifier UI: a req param cannot survive the browser's JSON round trip",
 							"preset", label, "scope", scope)
-						continue
+						abandonPreset = true
+						break
 					}
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
@@ -469,6 +480,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
+			}
+			// A preset whose circuit_zk credential could not be requested
+			// is not published at all, even when its other credentials
+			// could be. The pseudonym IS what such a preset asks for, so
+			// publishing the rest under the same label is a different
+			// request wearing the configured one's name - and the
+			// configuration reference says the preset is omitted.
+			//
+			// Deliberately unlike the format-family and zk_system_type
+			// drops above, which remove one credential of several that
+			// each stand on their own.
+			if abandonPreset {
+				continue
 			}
 			// An all-dropped preset would ask the wallet for nothing.
 			if len(uiPreset.Credentials) == 0 {
