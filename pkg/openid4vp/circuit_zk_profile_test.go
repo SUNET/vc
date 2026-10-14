@@ -287,3 +287,29 @@ func TestNymAuthProfileRefusesMembersTheRulebookDoesNotAllow(t *testing.T) {
 			nymQuery(pseudonymItem(with("some_future_param", "x")))))
 	})
 }
+
+// An open string let the profile approve an empty verifier_id_type -
+// which nothing can derive a verifier_input from - and an unknown one a
+// wallet must treat as unsatisfiable. Both are requests this verifier
+// would build and no wallet could answer.
+func TestNymAuthProfilePinsTheVerifierIDType(t *testing.T) {
+	for _, tc := range []struct{ name, idType, want string }{
+		{"the one the shared vectors use", "x509_san_dns", ""},
+		{"and the other the rulebook defines", "semantic", ""},
+		{"empty, which nothing can derive an input from", "", "rulebook defines"},
+		{"an unknown kind", "dns", "rulebook defines"},
+		{"and one that merely looks close", "X509_SAN_DNS", "rulebook defines"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(map[string]any{
+				"config": "known-offender-matching-ssc", "verifier_id_type": tc.idType,
+			})))
+			if tc.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}

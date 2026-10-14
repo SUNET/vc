@@ -176,8 +176,13 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 		return fmt.Errorf("%s: %q does not use verifier_input, so params.verifier_id_type must not be present", where, config)
 	}
 	if hasIDType {
-		if _, ok := idType.(string); !ok {
+		value, ok := idType.(string)
+		if !ok {
 			return fmt.Errorf("%s: params.verifier_id_type must be a string", where)
+		}
+		if !slices.Contains(nymAuthVerifierIDTypes, value) {
+			return fmt.Errorf("%s: params.verifier_id_type is %q; the %s rulebook defines %s",
+				where, value, ProfileNymAuth, strings.Join(nymAuthVerifierIDTypes, " and "))
 		}
 	}
 
@@ -199,6 +204,23 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 	}
 	return nil
 }
+
+// nymAuthVerifierIDTypes are the identity kinds the rulebook defines for
+// a pseudonym request.
+//
+// An open string let the profile approve an empty one, which nothing can
+// derive a verifier_input from, and an unknown one that a wallet must
+// treat as unsatisfiable. Both are requests this verifier would build and
+// no wallet could answer.
+//
+// Provenance, because it is not all equal: the shared matcher vectors use
+// x509_san_dns, and carry an empty one only in the vector that exists to
+// show the planner treats these as opaque. "semantic" is from the review
+// that raised this and is not in any artefact I can check here - worth a
+// glance from someone holding the rulebook. The cost of it being wrong is
+// bounded either way: this profile is opt-in, and an operator who needs a
+// value it does not know simply leaves validate unset.
+var nymAuthVerifierIDTypes = []string{"semantic", "x509_san_dns"}
 
 // minAgeSpanDays is the rulebook's floor on an age_check range: a
 // sufficiently narrow range is an exact birth date, which the predicate
