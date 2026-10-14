@@ -176,3 +176,83 @@ func TestProfileRefusesToJudgeARawQuery(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "raw query cannot be checked")
 }
+
+// A profile named after the rulebook has to check the credential the
+// rulebook is about. "Some doctype is present" would pass a request for
+// an unrelated document.
+func TestNymAuthProfilePinsTheDoctype(t *testing.T) {
+	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"})
+
+	for _, tc := range []struct{ name, doctype, want string }{
+		{"the rulebook's own", nymAuthDoctype, ""},
+		{"absent", "", "required"},
+		{"an unrelated document", "org.iso.18013.5.1.mDL", "defines this credential as"},
+		{"a version the rulebook has not minted", "eu.europa.ec.eudi.nym_auth.2", "defines this credential as"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := nymQuery(conforming)
+			query.Meta.DoctypeValue = tc.doctype
+
+			err := ValidateProfile(ProfileNymAuth, query)
+			if tc.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// The shared matcher vectors put an explicit false among the requests
+// that are well-formed and rulebook-UNSATISFIABLE
+// (ok_satisfiability_not_judged.json). The planner passes it by design;
+// the profile is the thing that is supposed to say so.
+//
+// Absent must stay fine: OpenID4VP 1.0 6.1 defaults it to true, and a nil
+// pointer is how that default is preserved.
+func TestNymAuthProfileRejectsExplicitlyDisabledHolderBinding(t *testing.T) {
+	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"})
+	no, yes := false, true
+
+	for _, tc := range []struct {
+		name string
+		set  *bool
+		want string
+	}{
+		{"absent, which means true", nil, ""},
+		{"explicitly true", &yes, ""},
+		{"explicitly false", &no, "require_cryptographic_holder_binding"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := nymQuery(conforming)
+			query.RequireCryptographicHolderBinding = tc.set
+
+			err := ValidateProfile(ProfileNymAuth, query)
+			if tc.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// A -psc configuration is well-defined by the rulebook and cannot be
+// requested: a psc is a commitment the holder already knows, and nothing
+// specifies yet how a Verifier conveys one to a wallet. Accepting it
+// would report a preset as valid that no wallet can be asked for.
+//
+// The error has to say which of the two it is. "Not a configuration the
+// rulebook defines" would be false, and would send an operator looking
+// for a typo.
+func TestNymAuthProfileRefusesPSCConfigurationsAsPending(t *testing.T) {
+	err := ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(map[string]any{
+		"config": "known-offender-matching-psc", "verifier_id_type": "x509_san_dns",
+	})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "defined by the rulebook but cannot be requested yet")
+	assert.Contains(t, err.Error(), "conveying one to a wallet")
+	assert.NotContains(t, err.Error(), "is not a configuration the rulebook defines")
+}

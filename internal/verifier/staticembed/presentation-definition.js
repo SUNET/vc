@@ -140,6 +140,18 @@ const metadataResponseSchema = v.object({
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
             }))),
+            // req is the circuit_zk format's requested calculations. A
+            // query in that format discloses nothing - every value comes
+            // from a function named here - so a stripped req asks the
+            // wallet for nothing and gets nothing back, which reads as a
+            // wallet fault. params is an open map (looseObject below keeps
+            // the item's own extras too): its contents are inputs to a
+            // proof and are passed through exactly as configured.
+            req: v.optional(v.array(v.looseObject({
+                id: v.string(),
+                return: v.string(),
+                params: v.optional(v.record(v.string(), v.any())),
+            }))),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
                 path: v.array(v.string()),
@@ -172,6 +184,11 @@ const dcqlQueryCredentialSchema = v.object({
     }),
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
+    }))),
+    req: v.optional(v.array(v.looseObject({
+        id: v.string(),
+        return: v.string(),
+        params: v.optional(v.record(v.string(), v.any())),
     }))),
 });
 
@@ -648,6 +665,7 @@ Alpine.data("app", () => ({
                 /** @type {any} */
                 const c = { id: cred.id, format: cred.format, meta: cred.meta };
                 if (cred.claims) c.claims = cred.claims;
+                if (cred.req) c.req = cred.req;
                 return c;
             }),
         };

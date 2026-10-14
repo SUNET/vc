@@ -35,13 +35,35 @@ func ValidateProfile(profile string, query CredentialQuery) error {
 	}
 }
 
+// nymAuthDoctype is the credential the rulebook defines.
+//
+// Pinned rather than "any non-empty doctype": a profile named after the
+// rulebook that accepts an unrelated document is not checking the thing
+// it is named for. A later revision of the rulebook will mint a new
+// identifier and this will need updating with it - which is the right
+// cost, since the alternative is a check that passes on anything.
+const nymAuthDoctype = "eu.europa.ec.eudi.nym_auth.1"
+
 // nym_auth pseudonym configurations, and whether each uses verifier_input
 // (and so requires a verifier_id_type) or verifier_context.
+//
+// The rulebook's -psc configurations are deliberately ABSENT. They are
+// well-defined there, but a psc is a commitment the HOLDER already knows,
+// and nothing yet specifies how a Verifier conveys one to a wallet -
+// which means a preset naming one cannot be sent, whatever this profile
+// says about it. Accepting it here would report a request as valid that
+// no wallet can be asked for. See nymAuthPendingConfigs.
 var nymAuthConfigs = map[string]struct{ usesVerifierID, usesContext bool }{
 	"known-offender-matching-ssc":      {usesVerifierID: true},
-	"known-offender-matching-psc":      {usesVerifierID: true},
 	"account-recovery-ssc":             {usesVerifierID: true, usesContext: true},
 	"user-managed-pseudonym-xsite-ssc": {},
+}
+
+// nymAuthPendingConfigs are rulebook configurations this build cannot
+// request yet, named separately so an operator gets told WHY rather than
+// "not a configuration the rulebook defines", which would be false.
+var nymAuthPendingConfigs = map[string]string{
+	"known-offender-matching-psc": "a psc is a commitment the holder already knows, and there is no specified mechanism yet for conveying one to a wallet",
 }
 
 func validateNymAuth(query CredentialQuery) error {
@@ -51,8 +73,20 @@ func validateNymAuth(query CredentialQuery) error {
 	if !IsCircuitZkFormat(query.Format) {
 		return fmt.Errorf("format is %q, and the %s profile describes circuit_zk requests", query.Format, ProfileNymAuth)
 	}
-	if query.Meta.DoctypeValue == "" {
-		return fmt.Errorf("meta.doctype_value is required")
+	if query.Meta.DoctypeValue != nymAuthDoctype {
+		if query.Meta.DoctypeValue == "" {
+			return fmt.Errorf("meta.doctype_value is required, and the %s rulebook defines it as %q", ProfileNymAuth, nymAuthDoctype)
+		}
+		return fmt.Errorf("meta.doctype_value is %q; the %s rulebook defines this credential as %q",
+			query.Meta.DoctypeValue, ProfileNymAuth, nymAuthDoctype)
+	}
+	// The shared matcher vectors list an explicit false among the
+	// well-formed-but-rulebook-unsatisfiable requests
+	// (ok_satisfiability_not_judged.json): the planner passes it and the
+	// rulebook does not. Absent is fine - OpenID4VP 1.0 6.1 defaults it to
+	// true - so only an explicit false is refused.
+	if query.RequireCryptographicHolderBinding != nil && !*query.RequireCryptographicHolderBinding {
+		return fmt.Errorf("require_cryptographic_holder_binding is explicitly false, which the %s rulebook does not allow", ProfileNymAuth)
 	}
 	if len(query.Claims) > 0 || len(query.ClaimSet) > 0 {
 		return fmt.Errorf("a circuit_zk query discloses nothing, so it carries no claims: every value comes from req")
@@ -108,6 +142,9 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 	}
 	spec, known := nymAuthConfigs[config]
 	if !known {
+		if why, pending := nymAuthPendingConfigs[config]; pending {
+			return fmt.Errorf("%s: %q is defined by the rulebook but cannot be requested yet: %s", where, config, why)
+		}
 		return fmt.Errorf("%s: %q is not a configuration the rulebook defines (%s)", where, config,
 			strings.Join(slices.Sorted(maps.Keys(nymAuthConfigs)), ", "))
 	}
