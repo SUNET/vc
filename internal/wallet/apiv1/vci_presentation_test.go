@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/openid4vp"
+
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,4 +137,72 @@ func TestParseInteractiveAuthorizationRequest_AcceptsInlineParameters(t *testing
 	ro, err := c.parseInteractiveAuthorizationRequest(raw)
 	require.NoError(t, err)
 	assert.Equal(t, "inline-nonce", ro.Nonce)
+}
+
+// expected_origins is the Verifier naming where it expects the request to
+// be answered, and the request object's own documentation calls it one of
+// the two defences against a malicious Authorization Server relaying
+// another server's challenge. The wallet verified the signature and never
+// looked at it - so a signed request lifted from one server and replayed
+// by another verified perfectly and was answered, and the Holder's
+// credential is what got spent finding out.
+func TestCheckExpectedOrigins(t *testing.T) {
+	const endpoint = "https://issuer.example/op/authorize-challenge"
+
+	t.Run("an absent member constrains nothing", func(t *testing.T) {
+		require.NoError(t, checkExpectedOrigins(&openid4vp.RequestObject{}, endpoint))
+	})
+
+	t.Run("the origin this endpoint has", func(t *testing.T) {
+		ro := &openid4vp.RequestObject{ExpectedOrigins: []string{"https://issuer.example"}}
+		require.NoError(t, checkExpectedOrigins(ro, endpoint))
+	})
+
+	// Compared as canonical origins, which is the whole reason
+	// CanonicalOrigin exists: these all name the origin this endpoint has.
+	t.Run("the same origin written differently", func(t *testing.T) {
+		for _, spelling := range []string{
+			"https://ISSUER.example",
+			"https://issuer.example:443",
+			"https://issuer.example/some/path",
+		} {
+			ro := &openid4vp.RequestObject{ExpectedOrigins: []string{spelling}}
+			assert.NoError(t, checkExpectedOrigins(ro, endpoint), "spelling %q", spelling)
+		}
+	})
+
+	t.Run("one of several", func(t *testing.T) {
+		ro := &openid4vp.RequestObject{ExpectedOrigins: []string{
+			"https://other.example", "https://issuer.example",
+		}}
+		require.NoError(t, checkExpectedOrigins(ro, endpoint))
+	})
+
+	// The finding itself: a request written for another Authorization
+	// Server, relayed here.
+	t.Run("a request written for somewhere else is refused", func(t *testing.T) {
+		ro := &openid4vp.RequestObject{ExpectedOrigins: []string{"https://relay.example"}}
+		err := checkExpectedOrigins(ro, endpoint)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "another Authorization Server")
+	})
+
+	// A near miss is a miss - the prefix relationship that makes
+	// "issuer.example.evil" look like "issuer.example".
+	t.Run("a lookalike origin is refused", func(t *testing.T) {
+		ro := &openid4vp.RequestObject{ExpectedOrigins: []string{"https://issuer.example.evil"}}
+		require.Error(t, checkExpectedOrigins(ro, endpoint))
+	})
+
+	// One unusable entry must not veto the others, and a list with nothing
+	// usable in it still fails.
+	t.Run("an unparseable entry alongside a good one", func(t *testing.T) {
+		ro := &openid4vp.RequestObject{ExpectedOrigins: []string{"://", "https://issuer.example"}}
+		require.NoError(t, checkExpectedOrigins(ro, endpoint))
+	})
+
+	t.Run("nothing usable in the list", func(t *testing.T) {
+		ro := &openid4vp.RequestObject{ExpectedOrigins: []string{"://", "not-a-url"}}
+		require.Error(t, checkExpectedOrigins(ro, endpoint))
+	})
 }

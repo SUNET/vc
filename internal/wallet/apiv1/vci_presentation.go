@@ -56,6 +56,20 @@ func (c *Client) performPresentationInteraction(ctx context.Context, challengeEn
 		return "", err
 	}
 
+	// Before anything is selected or disclosed.
+	//
+	// expected_origins is the Verifier naming where it expects this
+	// request to be answered. Verifying the signature establishes that the
+	// request was not tampered with; it does not establish that THIS
+	// endpoint is the one it was written for. A signed request lifted from
+	// one Authorization Server and replayed by another verifies perfectly
+	// and is meant for somewhere else, and the Holder's credential is what
+	// gets spent finding that out.
+	if err := checkExpectedOrigins(ro, challengeEndpoint); err != nil {
+		step.Error = err.Error()
+		return "", err
+	}
+
 	vpTokens, presented, err := c.buildIAVPTokens(ctx, ro, vci, audience)
 	if err != nil {
 		step.Error = err.Error()
@@ -160,6 +174,42 @@ func interactiveAuthorizationAudience(challengeEndpoint string) (string, error) 
 		return "", fmt.Errorf("deriving the challenge endpoint origin: %w", err)
 	}
 	return "ia:" + origin, nil
+}
+
+// checkExpectedOrigins refuses a request that was written for somewhere
+// else.
+//
+// The comparison is between canonical origins, not raw strings - which is
+// what CanonicalOrigin exists for, and why its IDNA, IPv6, IPv4 and port
+// handling matters here: a Verifier that wrote "https://ISSUER.example:443"
+// means the same origin this endpoint has, and a wallet that said
+// otherwise would refuse a request it should answer.
+//
+// An absent expected_origins is not a failure. The member is optional and
+// a request that does not constrain the origin has not been relayed
+// anywhere it objects to.
+func checkExpectedOrigins(ro *openid4vp.RequestObject, challengeEndpoint string) error {
+	if len(ro.ExpectedOrigins) == 0 {
+		return nil
+	}
+
+	here, err := openid4vp.CanonicalOrigin(challengeEndpoint)
+	if err != nil {
+		return fmt.Errorf("deriving the challenge endpoint origin: %w", err)
+	}
+
+	for _, expected := range ro.ExpectedOrigins {
+		// An entry that cannot be canonicalised is skipped rather than
+		// fatal: one unusable entry in the list must not veto the others,
+		// and a list with nothing usable in it still fails below.
+		if origin, err := openid4vp.CanonicalOrigin(expected); err == nil && origin == here {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"the openid4vp_request expects to be answered at one of %v, but this is %s - it was written for another Authorization Server",
+		ro.ExpectedOrigins, here)
 }
 
 // encryptToRequestKey encrypts the response to the key the request
@@ -318,9 +368,15 @@ func (c *Client) buildIAVPTokens(ctx context.Context, ro *openid4vp.RequestObjec
 // the Holder happened to carry both credentials.
 //
 // A required set with no satisfiable option is reported, naming the set.
-// An optional one is skipped, which is what optional means. A query no
-// set references stays required: nothing else would ever ask for it, so
-// treating it as optional would silently drop it.
+// An optional one is skipped, which is what optional means.
+//
+// A query no set references is NOT presented. OpenID4VP 1.0 §6.4.2 asks
+// for the required sets to be satisfied and nothing more, so once
+// credential_sets is present it is the whole statement of what the
+// Verifier wants - `credentials` is the pool those sets draw from, not a
+// second list of demands. Presenting an unreferenced credential anyway
+// would disclose one the Verifier never asked for, which is the wrong way
+// round for a Holder.
 func selectCredentialQueries(dcql *openid4vp.DCQL, answerable map[string][]*credential.StoredCredential) (map[string]bool, error) {
 	selected := map[string]bool{}
 
@@ -334,18 +390,12 @@ func selectCredentialQueries(dcql *openid4vp.DCQL, answerable map[string][]*cred
 		return selected, nil
 	}
 
-	referenced := map[string]bool{}
 	for setIndex, set := range dcql.CredentialSets {
 		chosen := []string(nil)
 		for _, option := range set.Options {
-			for _, id := range option {
-				referenced[id] = true
-			}
-			if chosen != nil {
-				continue
-			}
 			if optionIsAnswerable(option, answerable) {
 				chosen = option
+				break
 			}
 		}
 
@@ -359,16 +409,6 @@ func selectCredentialQueries(dcql *openid4vp.DCQL, answerable map[string][]*cred
 		for _, id := range chosen {
 			selected[id] = true
 		}
-	}
-
-	for _, query := range dcql.Credentials {
-		if referenced[query.ID] {
-			continue
-		}
-		if _, ok := answerable[query.ID]; !ok {
-			return nil, fmt.Errorf("no credential in this wallet satisfies the credential query %q", query.ID)
-		}
-		selected[query.ID] = true
 	}
 
 	if len(selected) == 0 {

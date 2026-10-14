@@ -101,21 +101,26 @@ func TestSelectCredentialQueries_RequiredAndOptionalSets(t *testing.T) {
 	assert.Equal(t, map[string]bool{"pid": true}, selected)
 }
 
-// A query no set references stays required: nothing else would ever ask
-// for it, so treating it as optional would silently drop it.
-func TestSelectCredentialQueries_UnreferencedQueryStaysRequired(t *testing.T) {
+// Once credential_sets is present it is the whole statement of what the
+// Verifier wants: OpenID4VP 1.0 §6.4.2 asks for the required sets to be
+// satisfied and nothing more. `credentials` is the pool those sets draw
+// from, not a second list of demands - so a query no set references is
+// neither required nor presented, even when the wallet could answer it.
+func TestSelectCredentialQueries_UnreferencedQueryIsNotPresented(t *testing.T) {
 	dcql := &openid4vp.DCQL{
-		Credentials:    []openid4vp.CredentialQuery{query("pid"), query("always")},
+		Credentials:    []openid4vp.CredentialQuery{query("pid"), query("extra")},
 		CredentialSets: []openid4vp.CredentialSetQuery{{Options: [][]string{{"pid"}}}},
 	}
 
-	selected, err := selectCredentialQueries(dcql, held("pid", "always"))
+	// Available, and still not disclosed: the Verifier did not ask.
+	selected, err := selectCredentialQueries(dcql, held("pid", "extra"))
 	require.NoError(t, err)
-	assert.Equal(t, map[string]bool{"pid": true, "always": true}, selected)
+	assert.Equal(t, map[string]bool{"pid": true}, selected)
 
-	_, err = selectCredentialQueries(dcql, held("pid"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `"always"`)
+	// And its absence is not a failure, because it was never required.
+	selected, err = selectCredentialQueries(dcql, held("pid"))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"pid": true}, selected)
 }
 
 // Answering nothing is not an answer: a response with an empty vp_token
