@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -46,6 +47,27 @@ const requestURITTL = 60 * time.Second
 // TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the three to
 // that relationship.
 const authorizationCodeTTL = 5 * time.Minute
+
+// codeDeadlineWithin is the authorization code's deadline for a context
+// created at createdAt: a full authorizationCodeTTL, or the moment the
+// document itself goes away, whichever comes first.
+//
+// The cap is not belt and braces. A request_uri stays resolvable, so
+// /authorize can be entered repeatedly and each visit would otherwise
+// push the deadline another five minutes out - visits at minutes 0, 4, 8
+// and 12 all pass the expiry check and the last one extends to minute 17.
+// MongoDB's TTL index is anchored to created_at and is not moved by
+// extending expires_at, so beyond that the server is advertising a code
+// against a document already scheduled for deletion. Holding every
+// extension to the retention window makes the logical deadline a promise
+// the store can keep, however many times it is extended.
+func codeDeadlineWithin(createdAt time.Time) int64 {
+	deadline := time.Now().Add(authorizationCodeTTL)
+	if retention := createdAt.Add(apigwcache.AuthContextTTL); !createdAt.IsZero() && retention.Before(deadline) {
+		deadline = retention
+	}
+	return deadline.Unix()
+}
 
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
@@ -235,7 +257,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	// /authorize cannot shorten a deadline, and authorizationCodeTTL is
 	// bounded so the extended deadline stays inside the store's own
 	// lifetime - see the constant.
-	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	codeExpiresAt := codeDeadlineWithin(authorizationContext.CreatedAt)
 	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
 		&cache.AuthorizationContext{RequestURI: req.RequestURI}, codeExpiresAt); err != nil {
 		c.log.Error(err, "failed to extend authorization context expiry", "request_uri", req.RequestURI)

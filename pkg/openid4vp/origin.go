@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/idna"
@@ -110,10 +111,32 @@ func CanonicalOrigin(rawURL string) (string, error) {
 	}
 
 	origin := scheme + "://" + host
-	if port := u.Port(); port != "" && port != defaultPortForScheme(scheme) {
+	port, err := normalizePort(u.Port())
+	if err != nil {
+		return "", fmt.Errorf("the port of %q is not a port: %w", rawURL, err)
+	}
+	if port != "" && port != defaultPortForScheme(scheme) {
 		origin += ":" + port
 	}
 	return origin, nil
+}
+
+// normalizePort strips the leading zeroes a URL parser does not keep.
+//
+// A port is a NUMBER, so "0443" and "443" are the same port and a browser
+// emits neither the zeroes nor the port itself when it is the scheme's
+// default. Comparing the written form would publish an origin containing
+// ":0443" against a browser that reports none, and ":08443" against one
+// that reports ":8443".
+func normalizePort(port string) (string, error) {
+	if port == "" {
+		return "", nil
+	}
+	n, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return "", fmt.Errorf("%q is not a port number: %w", port, err)
+	}
+	return strconv.FormatUint(n, 10), nil
 }
 
 // defaultPortForScheme returns the port a browser leaves out of an origin,
@@ -145,7 +168,59 @@ func canonicalIPv6(host string) (string, error) {
 	if !addr.Is6() || addr.Is4() {
 		return "", fmt.Errorf("%q is not an IPv6 address", host)
 	}
-	return "[" + addr.String() + "]", nil
+	return "[" + serializeIPv6(addr) + "]", nil
+}
+
+// serializeIPv6 writes addr the way the WHATWG URL Standard's IPv6
+// serializer does: eight hexadecimal pieces, lowercase, with the longest
+// run of two or more zero pieces compressed to "::".
+//
+// netip.Addr.String() is RFC 5952 and agrees with that everywhere except
+// one case, which is why this exists: for an IPv4-MAPPED address it emits
+// the dotted-decimal tail, so "::ffff:c000:201" comes back as
+// "::ffff:192.0.2.1". A browser has no such special case and reports the
+// hexadecimal form, so the dotted one is an origin nothing will match.
+func serializeIPv6(addr netip.Addr) string {
+	octets := addr.As16()
+	var pieces [8]uint16
+	for i := range pieces {
+		pieces[i] = uint16(octets[2*i])<<8 | uint16(octets[2*i+1])
+	}
+
+	// The longest run of zeroes, and only when it is longer than one -
+	// a single zero piece is written out, not compressed.
+	bestStart, bestLen := -1, 1
+	for i := 0; i < len(pieces); {
+		if pieces[i] != 0 {
+			i++
+			continue
+		}
+		j := i
+		for j < len(pieces) && pieces[j] == 0 {
+			j++
+		}
+		if j-i > bestLen {
+			bestStart, bestLen = i, j-i
+		}
+		i = j
+	}
+
+	var b strings.Builder
+	for i := 0; i < len(pieces); i++ {
+		if i == bestStart {
+			if i == 0 {
+				b.WriteByte(':')
+			}
+			b.WriteByte(':')
+			i += bestLen - 1
+			continue
+		}
+		b.WriteString(strconv.FormatUint(uint64(pieces[i]), 16))
+		if i < len(pieces)-1 {
+			b.WriteByte(':')
+		}
+	}
+	return b.String()
 }
 
 // canonicalIPv4 accepts host only when it is already the dotted-quad

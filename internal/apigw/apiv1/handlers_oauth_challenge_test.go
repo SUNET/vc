@@ -1414,6 +1414,14 @@ func TestAuthorizationChallenge_SuccessfulPresentationYieldsTheCode(t *testing.T
 	assert.Equal(t, audience, seenBinding.Audience)
 	assert.Equal(t, stored.State, seenBinding.ExpectedState)
 
+	// And it asked the pipeline to verify WHO presented this, not merely
+	// that a credential a trusted Issuer signed was sent. Without it, a
+	// copied credential plus a proof the copier signs themselves opens an
+	// exchange under their own DPoP key - which is the one thing this
+	// endpoint exists to prevent.
+	assert.True(t, seenBinding.VerifyHolderBinding,
+		"an exchange that establishes who is asking cannot accept an unverified holder proof")
+
 	// The handle is spent either way, so the code cannot be collected twice.
 	again := challengeErr(t, client, continueExchange(t, opened.AuthSession, response))
 	assert.Equal(t, errInvalidSession, again.ErrorCode)
@@ -1788,4 +1796,89 @@ func TestAuthorizationChallenge_BothHandlesIsInvalidRequest(t *testing.T) {
 	_, err := client.OAuthAuthorizationChallenge(t.Context(), issuerStateOnly)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "mutually exclusive")
+}
+
+// A dangerous redirect_uri scheme must be refused here, as it is at
+// /op/par, and for a reason that only bites on this endpoint.
+//
+// A wallet authenticated by attestation has no redirect_uri allowlist to
+// be checked against, so whatever it sends is recorded as WalletURI. The
+// auth_via_web interaction then carries that context into the browser
+// leg, and the consent page renders it as a template.URL - which
+// deliberately turns off html/template's scheme sanitisation so custom
+// wallet schemes survive. "javascript:" therefore becomes script
+// execution in the APIGW's own origin once the user consents.
+func TestAuthorizationChallenge_RefusesADangerousRedirectURI(t *testing.T) {
+	for _, redirectURI := range []string{
+		"javascript:alert(document.domain)//",
+		"JavaScript:alert(1)",
+		"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+	} {
+		t.Run(redirectURI, func(t *testing.T) {
+			client := newChallengeClient(t)
+
+			req := initialChallenge(t)
+			req.RedirectURI = redirectURI
+
+			oauthErr := oauthErrFromChallenge(t, client, req)
+			assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+			assert.Contains(t, oauthErr.Error(), "invalid redirect_uri")
+		})
+	}
+
+	// Refused before anything is stored, so there is no context carrying
+	// the value for a later leg to render.
+	t.Run("nothing is stored for a refused request", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		req := initialChallenge(t)
+		req.RedirectURI = "javascript:alert(1)//"
+		_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
+		require.Error(t, err)
+
+		stored, err := client.cacheService.AuthContext.Get(t.Context(),
+			&cache.AuthorizationContext{Code: ""})
+		assert.Error(t, err)
+		assert.Nil(t, stored)
+	})
+}
+
+// A request_uri stays resolvable, so /authorize can be entered more than
+// once - and each visit extended the deadline another authorizationCodeTTL
+// from now. Visits at minutes 0, 4, 8 and 12 all pass the expiry check and
+// the last pushes expiry to minute 17, past the retention MongoDB anchors
+// to created_at. Beyond that the server advertises a code against a
+// document already scheduled for deletion, and only in HA, where nothing
+// else would notice.
+func TestCodeDeadlineNeverOutlivesTheDocument(t *testing.T) {
+	t.Run("a fresh context gets the full code lifetime", func(t *testing.T) {
+		deadline := codeDeadlineWithin(time.Now())
+		assert.InDelta(t, time.Now().Add(authorizationCodeTTL).Unix(), deadline, 2)
+	})
+
+	t.Run("a context near the end of its retention gets what is left", func(t *testing.T) {
+		// Twelve minutes into a fifteen-minute retention: three minutes
+		// left, not five.
+		createdAt := time.Now().Add(-12 * time.Minute)
+		deadline := codeDeadlineWithin(createdAt)
+
+		assert.InDelta(t, createdAt.Add(apigwcache.AuthContextTTL).Unix(), deadline, 2)
+		assert.Less(t, deadline, time.Now().Add(authorizationCodeTTL).Unix(),
+			"the deadline must be cut short rather than run past the document")
+	})
+
+	t.Run("however many times it is extended", func(t *testing.T) {
+		createdAt := time.Now().Add(-14 * time.Minute)
+		retention := createdAt.Add(apigwcache.AuthContextTTL).Unix()
+		for range 5 {
+			assert.LessOrEqual(t, codeDeadlineWithin(createdAt), retention)
+		}
+	})
+
+	// A context with no creation time recorded is left alone rather than
+	// given a deadline in the past.
+	t.Run("an unknown creation time is not a zero deadline", func(t *testing.T) {
+		deadline := codeDeadlineWithin(time.Time{})
+		assert.InDelta(t, time.Now().Add(authorizationCodeTTL).Unix(), deadline, 2)
+	})
 }

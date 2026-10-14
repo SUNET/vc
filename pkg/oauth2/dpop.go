@@ -290,7 +290,15 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
 	}
-	if port := u.Port(); port != "" && port != defaultPortFor(scheme) {
+	// A port is a number, so leading zeroes are not part of it: ":0443" is
+	// the https default and a wallet's parser drops it entirely, while
+	// ":08443" and ":8443" are one port written two ways. Comparing the
+	// written form refuses a proof that names this very endpoint.
+	port := strings.TrimLeft(u.Port(), "0")
+	if u.Port() != "" && port == "" {
+		port = "0"
+	}
+	if port != "" && port != defaultPortFor(scheme) {
 		host += ":" + port
 	}
 

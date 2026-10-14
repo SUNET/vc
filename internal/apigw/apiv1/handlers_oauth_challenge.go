@@ -275,6 +275,21 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 			"interaction_types_supported is required", 400)
 	}
 
+	// The same check /op/par makes, for the same reason and in the same
+	// place: before either path, and before anything stores the value.
+	//
+	// A wallet authenticated by attestation has no redirect_uri allowlist
+	// to be checked against, so whatever it sends is what gets recorded as
+	// WalletURI. The auth_via_web interaction then carries that context
+	// into the browser leg, where the consent page renders it as a
+	// template.URL - which deliberately disables html/template's own
+	// scheme sanitisation, so that custom wallet schemes survive. A
+	// "javascript:" value therefore becomes script execution in the
+	// APIGW's own origin once the user consents.
+	if err := oauth2.ValidateRedirectURIScheme(req.RedirectURI); err != nil {
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid redirect_uri", 400, err)
+	}
+
 	oauthClient, err := c.authenticateOAuthClient(ctx, &walletClientAuth{
 		ClientID:             req.ClientID,
 		RedirectURI:          req.RedirectURI,
@@ -502,6 +517,12 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		// which is a different transcript from either of the browser
 		// flow's - see interactiveAuthorizationSessionTranscript.
 		MdocSessionTranscript: c.interactiveAuthorizationSessionTranscript(ia, authCtx, privateEphemeralJWK),
+
+		// The whole exchange exists to establish WHO is asking for an
+		// issuance, so a check that cannot tell the Holder from someone
+		// holding a copy of their credential would not do its job. See
+		// issuanceAuthBinding.VerifyHolderBinding.
+		VerifyHolderBinding: true,
 	}); err != nil {
 		return nil, c.interactiveAuthorizationFailure(err)
 	}
@@ -520,7 +541,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	// the moment the short deadline has done its job, and through the same
 	// never-shortening ExtendExpiry - so a presentation that finished
 	// early cannot pull the deadline in.
-	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	codeExpiresAt := codeDeadlineWithin(authCtx.CreatedAt)
 	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
 		&cache.AuthorizationContext{SessionID: authCtx.SessionID}, codeExpiresAt); err != nil {
 		c.log.Error(err, "CHALLENGE: failed to start the authorization code's lifetime",
