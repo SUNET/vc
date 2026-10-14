@@ -288,7 +288,8 @@ func (v *yamlValue) UnmarshalYAML(unmarshal func(any) error) error {
 		// whole request object becomes unencodable at SEND time, a long
 		// way from the configuration that caused it.
 		if math.IsInf(resolved, 0) || math.IsNaN(resolved) {
-			return fmt.Errorf("req item params: %v has no JSON spelling, so it cannot be sent as a proof input", resolved)
+			return &unrepresentableScalarError{message: fmt.Sprintf(
+				"%v %s: it has no JSON spelling at all, so it cannot be sent as a proof input", resolved, unrepresentableScalarMarker)}
 		}
 		var lexeme string
 		if err := unmarshal(&lexeme); err == nil && isJSONNumber(lexeme) {
@@ -314,8 +315,9 @@ func (v *yamlValue) UnmarshalYAML(unmarshal func(any) error) error {
 		// refusal costs nothing real, and a silent type change costs a
 		// pseudonym that does not match.
 		if outOfRangeNumericSpelling(resolved) {
-			return fmt.Errorf("req item params: %q is spelled like a number but is outside the range this build can carry; "+
-				"yaml.v2 resolves such a literal to a string, so it cannot tell %s from %q and neither can this", resolved, resolved, resolved)
+			return &unrepresentableScalarError{message: fmt.Sprintf(
+				"%q %s: yaml.v2 resolves a literal outside its range to a string, so it cannot tell %s from %q and neither can this",
+				resolved, unrepresentableScalarMarker, resolved, resolved)}
 		}
 	// Errors from the nested decodes are RETURNED, not swallowed. They
 	// are this type's own refusals - a scalar with no JSON number to
@@ -483,11 +485,28 @@ func (c *CircuitZkFormat) UnmarshalYAML(unmarshal func(any) error) error {
 // yamlExtra decodes the same node a second time as a mapping and returns
 // every member not named in known, normalised.
 func yamlExtra(unmarshal func(any) error, what string, known ...string) (map[string]any, error) {
-	var all map[string]any
-	if err := unmarshal(&all); err != nil {
-		// Not a mapping at all; the typed decode above has already
-		// reported whatever is wrong with it.
+	// Through yamlValue, not a plain map[string]any: yaml.v2 resolves a
+	// decimal scalar to a float64 and discards the lexeme, so an unknown
+	// member carrying 1.00000000000000001 would arrive here as 1 and
+	// every check downstream would see a value that is perfectly stable.
+	//
+	// An extension member is as much a proof input as a modelled one -
+	// more so, since the shapes this bag exists for are the ones a newer
+	// rulebook defines and this build does not understand. Preserving
+	// params and rounding these would be a distinction with no basis.
+	var tree yamlValue
+	if err := unmarshal(&tree); err != nil {
+		// Either not a mapping at all - the typed decode above has
+		// already reported whatever is wrong with it - or one of
+		// yamlValue's own refusals, which is worth reporting.
+		if isUnrepresentableScalar(err) {
+			return nil, err
+		}
 		return nil, nil
+	}
+	all, ok := tree.value.(map[any]any)
+	if !ok {
+		return nil, nil // not a mapping; as above
 	}
 	for _, name := range known {
 		delete(all, name)
@@ -501,6 +520,34 @@ func yamlExtra(unmarshal func(any) error, what string, known ...string) (map[str
 	}
 	return normalised.(map[string]any), nil
 }
+
+// unrepresentableScalarError is yamlValue's own refusal: a scalar that
+// cannot be carried as the number it was written as.
+//
+// A distinct type rather than a message to match on, because the caller
+// has to tell this apart from a structural mismatch - which is not its to
+// report, the typed decode having already said what is wrong with the
+// shape - and matching on wording would break the first time the wording
+// improved.
+type unrepresentableScalarError struct{ message string }
+
+func (e *unrepresentableScalarError) Error() string { return e.message }
+
+// isUnrepresentableScalar reports whether err is such a refusal,
+// including through whatever yaml.v2 wraps it in.
+func isUnrepresentableScalar(err error) bool {
+	var refusal *unrepresentableScalarError
+	if errors.As(err, &refusal) {
+		return true
+	}
+	// yaml.v2 collects errors from nested UnmarshalYAML calls into a
+	// TypeError that keeps only their messages, so the chain does not
+	// always survive. The marker is this package's own wording, emitted
+	// nowhere else.
+	return strings.Contains(err.Error(), unrepresentableScalarMarker)
+}
+
+const unrepresentableScalarMarker = "cannot be carried as a number"
 
 // normaliseYAML converts yaml.v2's map[any]any into map[string]any, all
 // the way down, refusing a key that is not a string.

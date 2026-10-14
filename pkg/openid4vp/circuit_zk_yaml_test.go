@@ -609,3 +609,52 @@ func TestYAMLDoesNotLaunderInvalidModelledMembers(t *testing.T) {
 	require.Error(t, yamlv2.Unmarshal([]byte(in), &query),
 		"an empty claim path is refused by the model, and YAML is not a way around that")
 }
+
+// The extension bag needs the lexeme-preserving decode as much as params
+// does - more so, since the shapes it exists for are the ones a newer
+// rulebook defines and this build does not understand. Preserving params
+// and rounding these would be a distinction with no basis.
+func TestExtensionMembersKeepTheConfiguredDigits(t *testing.T) {
+	for _, tc := range []struct{ name, in, wantLiteral string }{
+		{
+			name:        "an unknown member of a req item",
+			in:          "id: f\nreturn: h\nfuture: 1.00000000000000001\n",
+			wantLiteral: "1.00000000000000001",
+		},
+		{
+			name:        "nested inside an unknown member",
+			in:          "id: f\nreturn: h\nfuture:\n  inner: 1.00000000000000001\n",
+			wantLiteral: "1.00000000000000001",
+		},
+		{
+			name:        "and in a sequence under one",
+			in:          "id: f\nreturn: h\nfuture:\n  - 1.00000000000000001\n",
+			wantLiteral: "[1.00000000000000001]",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			require.NoError(t, yamlv2.Unmarshal([]byte(tc.in), &item))
+			encoded, err := json.Marshal(item)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), tc.wantLiteral,
+				"an extension member is a proof input too; a float64's rendering is not what was configured")
+		})
+	}
+}
+
+// And the refusals reach it, rather than being swallowed as "not a
+// mapping" the way a structural mismatch rightly is.
+func TestExtensionMembersRefuseUnrepresentableScalars(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"an overflowing literal", "id: f\nreturn: h\nfuture: 1e400\n", "cannot tell"},
+		{"infinity", "id: f\nreturn: h\nfuture: .inf\n", "no JSON spelling"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			err := yamlv2.Unmarshal([]byte(tc.in), &item)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
