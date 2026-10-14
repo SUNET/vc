@@ -173,7 +173,59 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	q.Extra = extra
+
+	// A decode that SUCCEEDED is not necessarily one that kept
+	// everything. `"req": []` decodes to an empty slice and is then
+	// dropped by omitempty; an item missing "id" decodes to "" and comes
+	// back as a member that was not there. Those shapes are exactly the
+	// ones a Verifier sends on purpose to see what a wallet does with
+	// them, and the HA cache round trip would quietly repair them.
+	//
+	// So the test is not "did it decode" but "does it encode back to what
+	// arrived". Anything that does not is kept verbatim.
+	if !q.encodesBackTo(data) {
+		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
+		q.adoptRawShadow()
+	}
 	return nil
+}
+
+// encodesBackTo reports whether re-encoding q reproduces data, compared
+// as JSON values rather than as bytes - member order and whitespace are
+// not something this type promises to preserve, and treating them as loss
+// would send every ordinary query down the raw path.
+func (q CredentialQuery) encodesBackTo(data []byte) bool {
+	reencoded, err := json.Marshal(q)
+	if err != nil {
+		return false
+	}
+	return jsonEquivalent(data, reencoded)
+}
+
+// jsonEquivalent compares two JSON documents by value.
+//
+// Numbers are compared as their literals (UseNumber), so a value that
+// re-encoded with different precision counts as changed - which for a
+// req param, an input to a proof, is exactly what it is.
+func jsonEquivalent(a, b []byte) bool {
+	decode := func(data []byte) (any, bool) {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	left, ok := decode(a)
+	if !ok {
+		return false
+	}
+	right, ok := decode(b)
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 // adoptRawShadow fills in every modelled member the raw bytes can be read

@@ -139,21 +139,26 @@ func TestTheModelProducesEveryAcceptedShape(t *testing.T) {
 	}
 }
 
-// What a Go struct cannot say, named so it is a boundary rather than a
-// surprise.
+// What a Go struct cannot SAY, and what this type nevertheless carries.
 //
 // A string field cannot distinguish an absent member from an empty one,
 // and a slice with omitempty cannot distinguish an absent array from an
-// empty one. So four shapes in the shared set cannot be emitted through
-// the typed model: an item with no "id" or no "return", a query with no
-// "meta", and a query whose "req" is []. All four are rejected by every
-// planner anyway - they are fixtures for wallet behaviour, not requests a
-// verifier has a reason to send - and Raw emits them exactly when one is
-// wanted.
+// empty one. So four shapes in the shared set have no typed
+// representation: an item with no "id" or no "return", a query with no
+// "meta", and a query whose "req" is []. Making the fields pointers would
+// move that limitation rather than remove it - an empty-string handle
+// would then be the shape with nowhere to live.
 //
-// Making the fields pointers would move the limitation rather than remove
-// it: an empty-string handle would then be the shape that needs Raw.
-func TestAbsentAndEmptyAreNotDistinguishedInTheTypedModel(t *testing.T) {
+// They survive anyway, because decoding does not ask "did this parse" but
+// "does it encode back to what arrived". A shape the typed model would
+// change is kept verbatim in Raw instead, so it reaches the wallet as
+// configured and survives the HA cache on the way.
+//
+// Which matters precisely because these are not requests a verifier has a
+// reason to send: they are fixtures for wallet behaviour, every planner
+// rejects them, and a serialiser that quietly repaired them would make
+// the negative tests untestable.
+func TestShapesWithNoTypedRepresentationSurviveAnyway(t *testing.T) {
 	for _, tc := range []struct{ name, in string }{
 		{"an item with no id", `{"id":"q","format":"circuit_zk","meta":{},"req":[{"return":"h"}]}`},
 		{"an item with no return", `{"id":"q","format":"circuit_zk","meta":{},"req":[{"id":"age_check"}]}`},
@@ -162,17 +167,40 @@ func TestAbsentAndEmptyAreNotDistinguishedInTheTypedModel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var query CredentialQuery
 			require.NoError(t, json.Unmarshal([]byte(tc.in), &query))
+			require.NotNil(t, query.Raw,
+				"the typed form of this shape is not the shape, so it has to be kept verbatim")
+
 			encoded, err := json.Marshal(query)
 			require.NoError(t, err)
-			assert.False(t, sameJSON(t, []byte(tc.in), encoded),
-				"if this now round-trips, the model gained a distinction it did not have "+
-					"and this boundary can be deleted")
+			assert.True(t, sameJSON(t, []byte(tc.in), encoded),
+				"what was configured has to be what is sent")
 
-			// And Raw emits it exactly.
-			viaRaw, err := json.Marshal(CredentialQuery{Raw: json.RawMessage(tc.in)})
+			// Including across the HA cache, which is the round trip that
+			// made this worth fixing rather than documenting.
+			stored, err := json.Marshal(&DCQL{Credentials: []CredentialQuery{query}})
 			require.NoError(t, err)
-			assert.True(t, sameJSON(t, []byte(tc.in), viaRaw))
+			var loaded DCQL
+			require.NoError(t, json.Unmarshal(stored, &loaded))
+			require.Len(t, loaded.Credentials, 1)
+			out, err := json.Marshal(loaded.Credentials[0])
+			require.NoError(t, err)
+			assert.True(t, sameJSON(t, []byte(tc.in), out))
 		})
+	}
+}
+
+// The counterpart: a shape the typed model DOES represent faithfully must
+// not be pushed down the raw path, or the distinction stops meaning
+// anything and every query becomes opaque bytes.
+func TestFaithfulShapesStayTyped(t *testing.T) {
+	for _, in := range []string{
+		`{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"age_check","return":"h"}]}`,
+		`{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"d"}}`,
+		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"multiple":true}`,
+	} {
+		var query CredentialQuery
+		require.NoError(t, json.Unmarshal([]byte(in), &query))
+		assert.Nilf(t, query.Raw, "this shape is modelled exactly and must decode typed: %s", in)
 	}
 }
 
