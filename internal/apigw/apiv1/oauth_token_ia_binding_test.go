@@ -1,15 +1,18 @@
 package apiv1
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -176,4 +179,57 @@ func TestOAuthToken_IACodeIsBoundToTheExchangesKey(t *testing.T) {
 			assert.NotContains(t, err.Error(), "key its authorization was obtained under")
 		}
 	})
+}
+
+// flakyLookupStore answers the first Get and fails every one after it,
+// which is what a datastore blip between two reads of the same document
+// looks like from in here.
+type flakyLookupStore struct {
+	cache.AuthContextStore
+	gets int
+}
+
+func (s *flakyLookupStore) Get(ctx context.Context, query *cache.AuthorizationContext) (*cache.AuthorizationContext, error) {
+	s.gets++
+	if s.gets > 1 {
+		return nil, errors.New("connection reset by peer")
+	}
+	return s.AuthContextStore.Get(ctx, query)
+}
+
+// The binding check must be made on a document this request has already
+// read, not on a second read of it.
+//
+// A second read can fail on its own, and a check that is skipped when its
+// lookup fails is not a check. The damage is specific: forfeiture happens
+// a few lines later and is irreversible, so a wrong-key request that got
+// past the skipped check burns the code - and the wallet that legitimately
+// obtained it is then refused, having done nothing wrong. That is exactly
+// the harm the pre-consumption check exists to prevent, reachable by
+// nothing more than a blip between two reads.
+func TestOAuthToken_IABindingSurvivesAFlakyLookup(t *testing.T) {
+	walletKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	thiefKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	client, code := newIATokenClient(t, thumbprintOf(t, walletKey))
+	client.cacheService.AuthContext = &flakyLookupStore{AuthContextStore: client.cacheService.AuthContext}
+
+	_, err = client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+		GrantType:    "authorization_code",
+		Code:         code,
+		ClientID:     "wallet-1",
+		RedirectURI:  "https://wallet.example.com/cb",
+		CodeVerifier: "unused-but-present",
+		DPOP:         tokenDPoPProof(t, thiefKey),
+	})
+	require.Error(t, err)
+
+	// The code is what this is about: refusing the thief is not enough if
+	// the refusal arrives after the code has been spent.
+	stored, err := client.cacheService.AuthContext.GetByID(t.Context(), code)
+	require.NoError(t, err)
+	assert.False(t, stored.Forfeited,
+		"a request refused by the binding check must not have consumed the code")
 }

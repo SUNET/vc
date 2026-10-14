@@ -43,6 +43,17 @@ func TestCanonicalOrigin(t *testing.T) {
 		// be one no comparison could ever match.
 		{name: "an underscore, which browsers accept", in: "https://my_host.example", want: "https://my_host.example"},
 		{name: "a label browsers see in the wild", in: "https://r3---sn-apo3qvuoxuxbt-j5pe.example", want: "https://r3---sn-apo3qvuoxuxbt-j5pe.example"},
+
+		// An IPv6 literal is the same address however it is written, and
+		// a browser emits the one spelling RFC 5952 prescribes. Compared
+		// as a plain string, every other spelling is a mismatch.
+		{name: "an IPv6 literal written out in full", in: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]", want: "https://[2001:db8::1]"},
+		{name: "an IPv6 literal with a run to compress", in: "https://[2001:db8:0:0:0:0:2:1]", want: "https://[2001:db8::2:1]"},
+		{name: "uppercase hextets fold", in: "https://[2001:DB8::ABCD]", want: "https://[2001:db8::abcd]"},
+		{name: "the loopback", in: "https://[0:0:0:0:0:0:0:1]", want: "https://[::1]"},
+
+		// A dotted-quad IPv4 address is already what a browser emits.
+		{name: "a dotted-quad address", in: "https://127.0.0.1:8443", want: "https://127.0.0.1:8443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := CanonicalOrigin(tc.in)
@@ -61,6 +72,25 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 		{name: "no host", in: "https:///op/par"},
 		{name: "not a URL at all", in: "://"},
 		{name: "a punycode label that decodes to nothing valid", in: "https://xn--a.example"},
+
+		// url.Parse gives these a non-empty Host and an empty Hostname,
+		// so a check on Host alone let them through and returned
+		// "https://" as an origin.
+		{name: "a port with no host", in: "https://:443"},
+		{name: "a port with no host and a path", in: "https://:8443/op/par"},
+
+		// A browser parses a host whose last label is a number with its
+		// IPv4 parser and reports the dotted-quad form, so any other
+		// spelling would be compared against something it never emits.
+		{name: "a short-form IPv4 address", in: "https://127.1"},
+		{name: "an IPv4 address with an octal octet", in: "https://127.0.0.01"},
+		{name: "a hexadecimal IPv4 address", in: "https://0x7f.0.0.1"},
+		{name: "a single-number IPv4 address", in: "https://2130706433"},
+		{name: "a domain-looking host with a numeric last label", in: "https://example.1"},
+
+		// A zone identifier names an interface on one machine, so it is
+		// not something two parties can compare, and no browser emits one.
+		{name: "an IPv6 literal with a zone", in: "https://[fe80::1%25eth0]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := CanonicalOrigin(tc.in)

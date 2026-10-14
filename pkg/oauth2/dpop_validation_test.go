@@ -406,3 +406,50 @@ func TestDPoP_ValidateWithWindow(t *testing.T) {
 	err = dpop.ValidateWithWindow(120*time.Second, 5*time.Second)
 	assert.NoError(t, err)
 }
+
+// A wallet builds htu from the URL it requested and an operator writes the
+// endpoint in configuration. RFC 9449 §4.3 says to compare the two after
+// URI normalization precisely because the two spellings legitimately
+// differ; a byte comparison refuses correct proofs over differences RFC
+// 3986 §6.2.2 defines as insignificant, and the wallet has no way to find
+// out which spelling this deployment wrote down.
+func TestSameHTU(t *testing.T) {
+	const endpoint = "https://issuer.example.com/token"
+
+	for _, tc := range []struct {
+		name string
+		htu  string
+		want bool
+	}{
+		{name: "identical", htu: "https://issuer.example.com/token", want: true},
+		{name: "an uppercase host", htu: "https://Issuer.Example.COM/token", want: true},
+		{name: "an uppercase scheme", htu: "HTTPS://issuer.example.com/token", want: true},
+		{name: "an explicit default port", htu: "https://issuer.example.com:443/token", want: true},
+		{name: "a Unicode host against its A-label", htu: "https://xn--mnchen-3ya.example/token", want: false},
+
+		// The path is where two endpoints on one host differ, so nothing
+		// about it is normalized away.
+		{name: "another endpoint on the same host", htu: "https://issuer.example.com/authorize-challenge", want: false},
+		{name: "a different case in the path", htu: "https://issuer.example.com/Token", want: false},
+		{name: "a different host", htu: "https://attacker.example.com/token", want: false},
+		{name: "a different scheme", htu: "http://issuer.example.com/token", want: false},
+		{name: "a non-default port", htu: "https://issuer.example.com:8443/token", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, SameHTU(tc.htu, endpoint))
+		})
+	}
+
+	t.Run("a Unicode host matches its A-label", func(t *testing.T) {
+		assert.True(t, SameHTU("https://münchen.example/token", "https://xn--mnchen-3ya.example/token"))
+	})
+
+	t.Run("an empty path is the root path", func(t *testing.T) {
+		assert.True(t, SameHTU("https://issuer.example.com", "https://issuer.example.com/"))
+	})
+
+	t.Run("something unparseable is compared as written", func(t *testing.T) {
+		assert.False(t, SameHTU("not a uri", endpoint))
+		assert.True(t, SameHTU("not a uri", "not a uri"))
+	})
+}

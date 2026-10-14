@@ -86,6 +86,25 @@ type Client struct {
 	// status is the shared readiness aggregator: local probes + downstream
 	// Status RPCs, cached + single-flighted. Configured in New.
 	statusAggregator *status.Aggregator
+
+	// issuanceAuth overrides the issuance-auth pipeline the Authorization
+	// Challenge Endpoint feeds. nil everywhere but in tests, where it is
+	// the only way to reach the endpoint's own code on a presentation that
+	// VERIFIES: everything past decryption - SD-JWT or mdoc verification,
+	// issuer trust via the PDP, identity resolution, the datastore lookup -
+	// needs a signing authority, a trust deployment and documents, none of
+	// which say anything about the wiring between this endpoint and the
+	// pipeline.
+	//
+	// That wiring is what breaks silently: the audience a presentation is
+	// bound to, the state it must echo, the mdoc session transcript it was
+	// signed over, and whether an authorization code comes back at all.
+	// Only the challenge endpoint has one, because only it builds a binding
+	// that has no other test - the browser flow's is exercised end to end
+	// through /verification/direct_post.
+	//
+	// See issuanceAuthPipeline.
+	issuanceAuth issuanceAuthConsumer
 }
 
 // New creates a new instance of the public api

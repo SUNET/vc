@@ -252,11 +252,30 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	rgOAuthSession := rgRoot.Group("")
 	rgOAuthSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "op/par", http.StatusCreated, s.endpointOAuthPar)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, strings.TrimPrefix(model.AuthorizationChallengePath, "/"), http.StatusOK, s.endpointOAuthAuthorizationChallenge)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorize", http.StatusPermanentRedirect, s.endpointOAuthAuthorize)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent", http.StatusNotModified, s.endpointOAuthAuthorizationConsent)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/callback", http.StatusNotModified, s.endpointOAuthAuthorizationConsentCallback)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/svg-template", http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
+
+	// The Authorization Challenge Endpoint gets its own limit rather than
+	// sharing the session group above.
+	//
+	// Every accepted initial request persists an authorization context and
+	// an ephemeral P-256 key for the auth_session lifetime, and the request
+	// that does it carries nothing an attacker cannot mint: a public
+	// client's own parameters, replayed, with a fresh DPoP proof each time.
+	// So request volume is directly cache and database growth, and without
+	// a bound here the only thing limiting it is how fast a caller can
+	// send.
+	challengeRPM := 20
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.AuthorizationChallengeRequestsPerMinute > 0 {
+		challengeRPM = s.cfg.APIGW.RateLimit.AuthorizationChallengeRequestsPerMinute
+	}
+	challengeRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, challengeRPM)
+	rgChallenge := rgRoot.Group("")
+	rgChallenge.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+	rgChallenge.Use(challengeRL.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgChallenge, http.MethodPost, strings.TrimPrefix(model.AuthorizationChallengePath, "/"), http.StatusOK, s.endpointOAuthAuthorizationChallenge)
 
 	// Token endpoint with rate limiting (most restrictive — sensitive operation)
 	tokenRPM := 20
