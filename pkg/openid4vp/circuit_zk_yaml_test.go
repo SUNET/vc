@@ -816,3 +816,54 @@ func TestYAMLValueRecoversALexemeFromATimestamp(t *testing.T) {
 	assert.Equal(t, `"2008-10-10T00:00:00Z"`, string(encoded),
 		"which is what a time.Time encodes as, and what the matcher rejects as not a full-date")
 }
+
+// The number check walked only any-valued containers, so a TYPED one -
+// map[string]json.Number, []json.Number - was skipped entirely and
+// yaml.v2 rounded what was inside it with nothing said.
+//
+// CredentialQuery.MarshalYAML happened to be safe, because it bridges
+// through JSON before the check runs. ReqItem.MarshalYAML builds its map
+// directly and was not - so this goes through ReqItem, which is the
+// caller that was actually broken, and through CredentialQuery, which
+// must stay safe for a better reason than luck.
+func TestTypedContainersDoNotHideANumberYAMLWouldRound(t *testing.T) {
+	const unrepresentable = "1.00000000000000001"
+
+	for _, tc := range []struct {
+		name    string
+		params  map[string]any
+		refused bool
+	}{
+		{"a typed map", map[string]any{"nested": map[string]json.Number{"p": unrepresentable}}, true},
+		{"a typed slice", map[string]any{"list": []json.Number{unrepresentable}}, true},
+		{"a typed map nested in a typed slice", map[string]any{
+			"list": []map[string]json.Number{{"p": unrepresentable}},
+		}, true},
+		// Representable, so it passes - the walk descends typed
+		// containers rather than refusing them on sight.
+		{"a typed map of representable numbers", map[string]any{"nested": map[string]float64{"p": 1.5}}, false},
+		{"and a typed map of strings", map[string]any{"nested": map[string]string{"p": unrepresentable}}, false},
+		{"the any-valued form, which was already caught", map[string]any{
+			"nested": map[string]any{"p": json.Number(unrepresentable)},
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := ReqItem{ID: "f", Return: "h", Params: tc.params}
+			_, err := yamlv2.Marshal(item)
+			if !tc.refused {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err, "a proof input YAML would round must be refused wherever it is nested")
+			assert.Contains(t, err.Error(), "without changing it")
+		})
+	}
+
+	// And through the whole query, which normalises on its own account.
+	query := CredentialQuery{ID: "q", Format: FormatCircuitZk, Req: []ReqItem{{
+		ID: "f", Return: "h",
+		Params: map[string]any{"nested": map[string]json.Number{"p": unrepresentable}},
+	}}}
+	_, err := yamlv2.Marshal(query)
+	require.Error(t, err)
+}

@@ -656,6 +656,28 @@ func mergeExtraYAML(m map[string]any, extra map[string]any, reserved map[string]
 // exact - the YAML decode keeps the lexeme, JSON keeps the literal - so
 // this is the one place where the honest answer is to stop.
 func checkYAMLRendersNumbersExactly(value any, what string, path []string) error {
+	// Normalised first, so the walk below sees one shape of container
+	// whatever the caller assembled. Without this it descended only
+	// map[string]any and []any, and a TYPED container - a
+	// map[string]json.Number, a []json.Number - was skipped: yaml.v2 then
+	// rounded what was inside it with nothing said.
+	//
+	// CredentialQuery.MarshalYAML happened to be safe, because it bridges
+	// through JSON before calling this. ReqItem.MarshalYAML builds its
+	// map directly and was not. Relying on which caller normalises is the
+	// kind of correctness that holds until someone adds a third caller.
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	var normalised any
+	if err := decodeExact(encoded, &normalised); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	return walkYAMLNumbers(normalised, what, path)
+}
+
+func walkYAMLNumbers(value any, what string, path []string) error {
 	switch typed := value.(type) {
 	case json.Number:
 		if yamlRendersNumberExactly(typed.String()) {
@@ -670,13 +692,13 @@ func checkYAMLRendersNumbersExactly(value any, what string, path []string) error
 			what, where, typed.String())
 	case map[string]any:
 		for _, key := range slices.Sorted(maps.Keys(typed)) {
-			if err := checkYAMLRendersNumbersExactly(typed[key], what, append(path, key)); err != nil {
+			if err := walkYAMLNumbers(typed[key], what, append(path, key)); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for i, item := range typed {
-			if err := checkYAMLRendersNumbersExactly(item, what, append(path, strconv.Itoa(i))); err != nil {
+			if err := walkYAMLNumbers(item, what, append(path, strconv.Itoa(i))); err != nil {
 				return err
 			}
 		}
