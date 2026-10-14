@@ -3,7 +3,7 @@ These vectors are vendored verbatim from
     https://github.com/sirosfoundation/siros-dc-matcher
     crates/siros-dc-matcher-core/tests/vectors/circuit_zk
 
-commit f7d240b46605267725fb15e2421565450f1f7a80 (v0.7.0-2-gf7d240b)
+commit d68cf52b77e62b0dd0b37311dcff37d1e8fd5362 (v0.8.0)
 
 They are the shared conformance set for every implementation of the
 circuit_zk query planner - the Rust matcher, the Kotlin and Swift SDKs, and

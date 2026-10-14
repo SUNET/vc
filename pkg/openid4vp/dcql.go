@@ -7,6 +7,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
 )
@@ -161,7 +162,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
-		q.adoptRawRouting()
+		q.adoptRawShadow()
 		return nil
 	}
 	*q = CredentialQuery(known)
@@ -175,79 +176,58 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// adoptRawRouting copies the members the REST of the stack routes by out
-// of the raw bytes and into the struct.
+// adoptRawShadow fills in every modelled member the raw bytes can be read
+// for, and reports the names of those that are present but unreadable.
 //
-// Raw is authoritative for the wire, but it is not the only reader.
-// UIInteraction copies ID into the authorization context's scopes and the
-// response path looks a presentation up by it, so a query that arrives
-// raw and keeps an empty ID is sent correctly and then cannot be matched
-// to anything that comes back. Format is read the same way, by
-// ValidateCredentialQuery and by every format decision after it.
+// Raw is authoritative for the WIRE and for nothing else. Plenty of this
+// stack reads the struct: UIInteraction copies ID into the authorization
+// context's scopes and the response path matches a presentation back to
+// it; matching reads Meta.TypeValues; Multiple and
+// RequireCryptographicHolderBinding change what a response is allowed to
+// contain. A query that arrived raw and kept the zero value for those was
+// sent correctly and then judged against defaults nobody chose.
 //
-// Best effort by design: each member is taken only if it is there and is
-// a string. A query whose "id" is a number is a query this build has no
-// opinion about, which is the whole reason it went down this path.
-func (q *CredentialQuery) adoptRawRouting() {
-	id, format := q.rawRouting()
-	if id != "" {
-		q.ID = id
-	}
-	if format != "" {
-		q.Format = format
-	}
-}
-
-// rawRouting reads id and format out of the raw bytes, which are the
-// source of truth for both.
+// Derived from the struct tags rather than written as a list of members,
+// because the list is what goes stale - that is exactly how this started
+// with only id and format. A member added to CredentialQuery is shadowed
+// by the commit that adds it.
 //
-// Read here rather than trusted from the struct because the struct's
-// copies are only populated by UnmarshalJSON. A query built in code -
-// CredentialQuery{Raw: ...}, which is how the escape hatch is meant to be
-// used directly - carries none, and an empty Format means SD-JWT to every
-// reader, so a raw circuit_zk query would be refused for a missing
-// vct_values it was never going to have.
-func (q CredentialQuery) rawRouting() (id, format string) {
+// Best effort per member: one that is absent, or of a shape this build
+// cannot read, is left at its zero value rather than failing the whole
+// decode. A query with a member this code has never seen is the reason
+// these bytes are raw in the first place.
+func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(q.Raw, &members); err != nil {
-		return "", "" // not an object at all; nothing to route by
+		return nil // not an object at all; nothing to shadow
 	}
-	for name, into := range map[string]*string{"id": &id, "format": &format} {
-		var value string
-		if err := json.Unmarshal(members[name], &value); err == nil {
-			*into = value
+
+	type plain CredentialQuery // no methods, so no recursion
+	shadow := plain{}
+	value := reflect.ValueOf(&shadow).Elem()
+	structure := value.Type()
+	for i := range structure.NumField() {
+		name, _, _ := strings.Cut(structure.Field(i).Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue
 		}
+		encoded, present := members[name]
+		if !present {
+			continue
+		}
+		field := reflect.New(structure.Field(i).Type)
+		if err := json.Unmarshal(encoded, field.Interface()); err != nil {
+			unreadable = append(unreadable, name)
+			continue
+		}
+		value.Field(i).Set(field.Elem())
 	}
-	return id, format
-}
 
-// rawMeta re-reads just the meta member of a raw query, and reports
-// whether it could.
-//
-// The typed decode of the whole query failed - that is why these bytes
-// are raw - but the member that CARRIES THE CONSTRAINT usually survives
-// intact: the WIP rulebook shape, for instance, only changes "claims".
-// Re-reading it means a raw query is still judged by its format's rule
-// rather than waved through, which is what keeps an unconstrained SD-JWT
-// request from being signed and served just because some other member
-// had a shape this build does not model.
-func (q CredentialQuery) rawMeta() (MetaQuery, bool) {
-	var members map[string]json.RawMessage
-	if err := json.Unmarshal(q.Raw, &members); err != nil {
-		return MetaQuery{}, false
-	}
-	raw, present := members["meta"]
-	if !present {
-		// Absent, not unreadable. An absent meta is an ABSENT CONSTRAINT,
-		// which is exactly the case the format rules exist to refuse, so
-		// this reports a zero MetaQuery as readable rather than giving up.
-		return MetaQuery{}, true
-	}
-	var meta MetaQuery
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		return MetaQuery{}, false
-	}
-	return meta, true
+	raw := q.Raw
+	*q = CredentialQuery(shadow)
+	q.Raw = raw
+	slices.Sort(unreadable)
+	return unreadable
 }
 
 type CredentialSetQuery struct {
@@ -903,13 +883,21 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// passes the permissive default exactly where there is no rule to
 		// fail. A format that grows one later is covered without anything
 		// here being updated.
-		// From the BYTES, not from the struct's copies of them: those are
-		// populated by UnmarshalJSON, and a query built in code has none.
-		id, format := query.rawRouting()
-		meta, readable := query.rawMeta()
-
-		query = CredentialQuery{ID: id, Format: format, Meta: meta}
-		if !readable {
+		// Re-read from the BYTES rather than trusting the struct's
+		// shadow: that is populated by UnmarshalJSON, and a query built in
+		// code - CredentialQuery{Raw: ...}, which is how the escape hatch
+		// is meant to be used directly - carries none of it.
+		shadow := CredentialQuery{Raw: query.Raw}
+		unreadable := shadow.adoptRawShadow()
+		if !json.Valid(query.Raw) || !isJSONObject(query.Raw) {
+			// A credential query that is not an object carries no members
+			// at all, which is the strongest form of "the constraint
+			// cannot be read" rather than a separate case.
+			unreadable = append(unreadable, "meta")
+		}
+		query = shadow
+		query.Raw = nil
+		if slices.Contains(unreadable, "meta") {
 			if err := ValidateCredentialQuery(query); err != nil {
 				// Reported as what it is. "vct_values is required" would
 				// send an operator looking for a member that may well be
@@ -1017,6 +1005,13 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// Unknown format - allow but don't validate
 	}
 	return nil
+}
+
+// isJSONObject reports whether data is a JSON object, which is what a
+// credential query has to be before any member can be read from it.
+func isJSONObject(data []byte) bool {
+	var object map[string]json.RawMessage
+	return json.Unmarshal(data, &object) == nil
 }
 
 // formatOrDefault names a format for an error message, spelling out the

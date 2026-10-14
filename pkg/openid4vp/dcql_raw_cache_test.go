@@ -2,6 +2,8 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -204,6 +206,93 @@ func TestValidateReadsTheFormatFromRawNotFromTheStruct(t *testing.T) {
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// Raw is authoritative for the WIRE and nothing else. Plenty of this
+// stack reads the struct - matching reads Meta.TypeValues, Multiple and
+// RequireCryptographicHolderBinding change what a response may contain -
+// so a query that arrived raw and kept zero values for those was sent
+// correctly and then judged against defaults nobody chose.
+//
+// Derived from the struct tags, so this test also fails if a new member
+// is added to CredentialQuery and left out of the shadow.
+func TestRawShadowsEveryReadableModelledMember(t *testing.T) {
+	const in = `{
+		"id": "w3c",
+		"format": "ldp_vc",
+		"multiple": true,
+		"require_cryptographic_holder_binding": false,
+		"meta": {"type_values": [["https://www.w3.org/2018/credentials#VerifiableCredential","https://example.org#Diploma"]]},
+		"claim_sets": [["a"]],
+		"claims": {"_req": [{"fn_id": "age_check"}]}
+	}`
+	var query CredentialQuery
+	require.NoError(t, json.Unmarshal([]byte(in), &query))
+	require.NotNil(t, query.Raw, "claims as an object is what sends this down the raw path")
+
+	assert.Equal(t, "w3c", query.ID)
+	assert.Equal(t, FormatLdpVCDCQL, query.Format)
+	assert.True(t, query.Multiple, "a response is allowed more than one credential because of this")
+	require.NotNil(t, query.RequireCryptographicHolderBinding)
+	assert.False(t, *query.RequireCryptographicHolderBinding, "an explicit false must not revert to the spec default")
+	require.Len(t, query.Meta.TypeValues, 1, "matching reads this; empty matches nothing")
+	assert.Equal(t, [][]string{{"a"}}, query.ClaimSet)
+
+	// The member that could not be read is simply absent, not fatal.
+	assert.Empty(t, query.Claims)
+
+	// And the wire is still exactly what arrived.
+	out, err := json.Marshal(query)
+	require.NoError(t, err)
+	assert.JSONEq(t, in, string(out))
+}
+
+// The shadow is derived from the tags, so every json-tagged member of
+// CredentialQuery has to be reachable through it. A member added without
+// being shadowed is the bug this catches on the commit that adds it.
+func TestEveryModelledMemberIsShadowed(t *testing.T) {
+	structure := reflect.TypeOf(CredentialQuery{})
+	var shadowed int
+	for i := range structure.NumField() {
+		name, _, _ := strings.Cut(structure.Field(i).Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue // Raw and Extra, which are not wire members
+		}
+		shadowed++
+	}
+	// Fail closed: a walk that found nothing proves nothing.
+	require.NotZero(t, shadowed)
+
+	// Every one of them set to a non-zero value in the raw bytes must
+	// come back out of the shadow.
+	raw := map[string]any{
+		"id": "q", "format": "mso_mdoc", "multiple": true,
+		"meta":                                 map[string]any{"doctype_value": "d"},
+		"trusted_authorities":                  []any{map[string]any{"type": "aki", "values": []string{"x"}}},
+		"require_cryptographic_holder_binding": false,
+		"claim_sets":                           [][]string{{"a"}},
+		"req":                                  []any{map[string]any{"id": "f", "return": "h"}},
+		// claims is the member that forces the raw path.
+		"claims": map[string]any{"_req": []any{}},
+	}
+	encoded, err := json.Marshal(raw)
+	require.NoError(t, err)
+
+	var query CredentialQuery
+	require.NoError(t, json.Unmarshal(encoded, &query))
+	require.NotNil(t, query.Raw)
+
+	value := reflect.ValueOf(query)
+	for i := range structure.NumField() {
+		name, _, _ := strings.Cut(structure.Field(i).Tag.Get("json"), ",")
+		if name == "" || name == "-" || name == "claims" {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			assert.Falsef(t, value.Field(i).IsZero(),
+				"%s is set in the raw bytes but zero on the struct, so everything reading the struct sees a default nobody chose", name)
 		})
 	}
 }

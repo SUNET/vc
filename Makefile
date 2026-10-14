@@ -587,6 +587,17 @@ vendor-circuit-zk-vectors: ## Refresh the vendored circuit_zk conformance vector
 	$(info Refreshing circuit_zk vectors from $(MATCHER))
 	@test -d "$(MATCHER)/crates/siros-dc-matcher-core/tests/vectors/circuit_zk" || \
 		{ echo "no matcher checkout at $(MATCHER); set MATCHER=<path>"; exit 1; }
+# The SOURCE file names a commit as the provenance of these vectors, so the
+# files copied have to BE that commit. Copying from a dirty or
+# partially-untracked working tree records a commit that cannot reproduce
+# them, which is a provenance claim that is simply false - and the vectors
+# are the authority this package settles wire-shape questions against.
+	@cd "$(MATCHER)" && git diff --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has uncommitted changes under tests/vectors/circuit_zk; commit or stash them first"; exit 1; }
+	@cd "$(MATCHER)" && git diff --cached --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has staged changes under tests/vectors/circuit_zk; commit them first"; exit 1; }
+	@cd "$(MATCHER)" && test -z "$$(git ls-files --others --exclude-standard -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk)" || \
+		{ echo "$(MATCHER) has untracked files under tests/vectors/circuit_zk; commit or remove them first"; exit 1; }
 	@rm -f pkg/openid4vp/testdata/circuit_zk/*.json
 	@cp "$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/*.json \
 		"$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/README.md \
