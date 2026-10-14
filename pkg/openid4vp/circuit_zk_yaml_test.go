@@ -494,3 +494,63 @@ func TestYAMLNumberRefusalNamesThePath(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outer.inner")
 }
+
+// Two YAML scalars that have no JSON number to become, each failing in a
+// different and quiet way before this refused them.
+func TestReqItemParamsRefuseScalarsWithNoJSONNumber(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			// yaml.v2 resolves an overflowing literal to a STRING, and
+			// nothing in what it hands back says whether the operator
+			// wrote 1e400 or "1e400". A proof input quietly changing type
+			// is invisible downstream: a string always looks stable.
+			name: "a literal too large for yaml.v2 to hold",
+			in:   "id: f\nreturn: h\nparams:\n  p: 1e400\n",
+			want: "cannot tell",
+		},
+		{
+			// These reach json.Marshal, which refuses them - so the whole
+			// request object becomes unencodable at SEND time, far from
+			// the configuration that caused it.
+			name: "infinity",
+			in:   "id: f\nreturn: h\nparams:\n  p: .inf\n",
+			want: "no JSON spelling",
+		},
+		{
+			name: "negative infinity",
+			in:   "id: f\nreturn: h\nparams:\n  p: -.inf\n",
+			want: "no JSON spelling",
+		},
+		{
+			name: "not a number",
+			in:   "id: f\nreturn: h\nparams:\n  p: .nan\n",
+			want: "no JSON spelling",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			err := yamlv2.Unmarshal([]byte(tc.in), &item)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// And the neighbours that must keep working, so the refusal above is not
+// quietly a ban on exponents or on strings.
+func TestReqItemParamsKeepWhatIsRepresentable(t *testing.T) {
+	for _, tc := range []struct{ name, in, wantJSON string }{
+		{"an underflowing literal, which yaml.v2 does resolve", "id: f\nreturn: h\nparams:\n  p: 1e-400\n", `{"p":1e-400}`},
+		{"an ordinary exponent", "id: f\nreturn: h\nparams:\n  p: 1e10\n", `{"p":1e10}`},
+		{"a string that is not a number spelling", "id: f\nreturn: h\nparams:\n  p: \"inf\"\n", `{"p":"inf"}`},
+		{"an ordinary string", "id: f\nreturn: h\nparams:\n  p: x509_san_dns\n", `{"p":"x509_san_dns"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			require.NoError(t, yamlv2.Unmarshal([]byte(tc.in), &item))
+			encoded, err := json.Marshal(item.Params)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.wantJSON, string(encoded))
+		})
+	}
+}

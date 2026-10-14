@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -280,36 +281,86 @@ func (v *yamlValue) UnmarshalYAML(unmarshal func(any) error) error {
 	if err := unmarshal(&typed); err != nil {
 		return err
 	}
-	switch typed.(type) {
-	case int, int64, uint64, float64:
+	switch resolved := typed.(type) {
+	case float64:
+		// .inf and .nan are YAML numbers with no JSON spelling at all.
+		// Left alone they reach json.Marshal, which refuses them - so the
+		// whole request object becomes unencodable at SEND time, a long
+		// way from the configuration that caused it.
+		if math.IsInf(resolved, 0) || math.IsNaN(resolved) {
+			return fmt.Errorf("req item params: %v has no JSON spelling, so it cannot be sent as a proof input", resolved)
+		}
 		var lexeme string
 		if err := unmarshal(&lexeme); err == nil && isJSONNumber(lexeme) {
 			v.value = json.Number(lexeme)
 			return nil
 		}
+	case int, int64, uint64:
+		var lexeme string
+		if err := unmarshal(&lexeme); err == nil && isJSONNumber(lexeme) {
+			v.value = json.Number(lexeme)
+			return nil
+		}
+	case string:
+		// yaml.v2 resolves a numeric literal it cannot hold - 1e400 -
+		// into a STRING, and nothing in the value it hands back says
+		// whether the operator wrote 1e400 or "1e400". So a number
+		// quietly becomes a string, which for a proof input is a changed
+		// request that no check downstream can see: a string always looks
+		// perfectly stable.
+		//
+		// Refused rather than guessed. A value at this magnitude is not
+		// usable as a proof input whichever of the two was meant, so a
+		// refusal costs nothing real, and a silent type change costs a
+		// pseudonym that does not match.
+		if outOfRangeNumericSpelling(resolved) {
+			return fmt.Errorf("req item params: %q is spelled like a number but is outside the range this build can carry; "+
+				"yaml.v2 resolves such a literal to a string, so it cannot tell %s from %q and neither can this", resolved, resolved, resolved)
+		}
+	// Errors from the nested decodes are RETURNED, not swallowed. They
+	// are this type's own refusals - a scalar with no JSON number to
+	// become - and a fallback here would discard the refusal and keep
+	// exactly the value it exists to reject. (A shape yaml.v2 can put in
+	// a map[any]any it can also put in a map[any]yamlValue, since
+	// yamlValue accepts anything, so there is no structural error to fall
+	// back from either.)
 	case map[any]any:
 		var mapping map[any]yamlValue
-		if err := unmarshal(&mapping); err == nil {
-			out := make(map[any]any, len(mapping))
-			for key, item := range mapping {
-				out[key] = item.value
-			}
-			v.value = out
-			return nil
+		if err := unmarshal(&mapping); err != nil {
+			return err
 		}
+		out := make(map[any]any, len(mapping))
+		for key, item := range mapping {
+			out[key] = item.value
+		}
+		v.value = out
+		return nil
 	case []any:
 		var sequence []yamlValue
-		if err := unmarshal(&sequence); err == nil {
-			out := make([]any, len(sequence))
-			for i, item := range sequence {
-				out[i] = item.value
-			}
-			v.value = out
-			return nil
+		if err := unmarshal(&sequence); err != nil {
+			return err
 		}
+		out := make([]any, len(sequence))
+		for i, item := range sequence {
+			out[i] = item.value
+		}
+		v.value = out
+		return nil
 	}
 	v.value = typed
 	return nil
+}
+
+// outOfRangeNumericSpelling reports whether a value yaml.v2 handed back
+// as a string is in fact a JSON number spelling that overflows a float64 -
+// which is how yaml.v2 reports one it cannot resolve.
+func outOfRangeNumericSpelling(value string) bool {
+	if !json.Valid([]byte(value)) {
+		return false // not a number spelling at all
+	}
+	var numeric *strconv.NumError
+	_, err := strconv.ParseFloat(value, 64)
+	return errors.As(err, &numeric) && errors.Is(numeric.Err, strconv.ErrRange)
 }
 
 // isJSONNumber reports whether literal is spelled the way JSON spells a
@@ -346,7 +397,10 @@ func (r *ReqItem) UnmarshalYAML(unmarshal func(any) error) error {
 	var lexemes struct {
 		Params yamlValue `yaml:"params"`
 	}
-	if err := unmarshal(&lexemes); err == nil && lexemes.Params.value != nil {
+	if err := unmarshal(&lexemes); err != nil {
+		return err
+	}
+	if lexemes.Params.value != nil {
 		if params, ok := lexemes.Params.value.(map[any]any); ok {
 			r.Params = nil
 			for key, item := range params {
