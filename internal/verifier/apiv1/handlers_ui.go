@@ -364,6 +364,18 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 							"preset", label, "scope", scope)
 						continue
 					}
+					// req crosses the browser, where every number is a
+					// float64. A param that cannot survive that is a proof
+					// input the wallet would compute over a DIFFERENT value
+					// than the one configured - and the only symptom is two
+					// systems disagreeing about who someone is, with nothing
+					// malformed to point at. Refused here, where the
+					// operator can still fix it.
+					if err := reqSurvivesTheBrowser(scopeCfg.Req); err != nil {
+						c.log.Error(err, "credential omitted from a verifier UI preset: a req param cannot survive the browser's JSON round trip",
+							"preset", label, "scope", scope)
+						continue
+					}
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
 					uiCred.Req = scopeCfg.Req
