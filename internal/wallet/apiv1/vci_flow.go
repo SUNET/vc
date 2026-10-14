@@ -49,11 +49,22 @@ type vciFlow struct {
 	// requested.
 	scope string
 
-	// authorizationServer is the Authorization Server the offer's grant
-	// named, when it named one. An Issuer may advertise several, and the
-	// handle in that grant belongs to exactly one of them.
-	authorizationServer string
+	// authorizationServer is the Authorization Server named by each GRANT
+	// that named one, kept per grant rather than as a single value.
+	//
+	// OpenID4VCI 1.0 puts the member on both grants, and an offer may
+	// carry both grants naming different servers - the Issuer is
+	// describing two different ways to be authorized, not one. Collapsing
+	// them means whichever grant happened to be parsed last decides where
+	// the other grant's secret is sent.
+	authorizationServerByGrant map[string]string
 }
+
+// The grant names, as OpenID4VCI 1.0 §4.1.1 spells them.
+const (
+	grantAuthorizationCode = "authorization_code"
+	grantPreAuthorizedCode = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+)
 
 // defaultWalletRedirectURI is where this wallet says to send the Holder
 // back to when a scenario does not say.
@@ -120,10 +131,11 @@ func (f *vciFlow) adoptOfferGrants(grants map[string]any) {
 		return
 	}
 
-	if grant, ok := grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]any); ok {
+	if grant, ok := grants[grantPreAuthorizedCode].(map[string]any); ok {
 		if code, ok := grant["pre-authorized_code"].(string); ok && code != "" {
 			f.preAuthorizedCode = code
 		}
+		f.adoptGrantAuthorizationServer(grantPreAuthorizedCode, grant)
 	}
 
 	// OpenID4VCI 1.0 defines issuer_state for the Authorization Endpoint;
@@ -131,26 +143,48 @@ func (f *vciFlow) adoptOfferGrants(grants map[string]any) {
 	// Endpoint, which is the extension reported as openid/OpenID4VCI#815 -
 	// without it, an issuance prepared by an Issuer cannot use Interactive
 	// Authorization at all.
-	if grant, ok := grants["authorization_code"].(map[string]any); ok {
+	if grant, ok := grants[grantAuthorizationCode].(map[string]any); ok {
 		if state, ok := grant["issuer_state"].(string); ok && state != "" && !f.issuerStateIsConfigured {
 			f.issuerState = state
 		}
-
-		// The grant may name WHICH Authorization Server the handle belongs
-		// to, and an Issuer is allowed to advertise several. Keeping the
-		// state while dropping the server sends a one-shot handle to an
-		// endpoint that has never heard of it.
-		if server, ok := grant["authorization_server"].(string); ok && server != "" {
-			f.authorizationServer = server
-		}
+		f.adoptGrantAuthorizationServer(grantAuthorizationCode, grant)
 	}
+}
+
+// adoptGrantAuthorizationServer records WHICH Authorization Server a grant
+// named, against that grant.
+//
+// An Issuer is allowed to advertise several, and the secret a grant
+// carries - a one-shot issuer_state, a pre-authorized code - belongs to
+// exactly one of them. Keeping the secret while dropping the server sends
+// it to an endpoint that has never heard of it.
+func (f *vciFlow) adoptGrantAuthorizationServer(grantName string, grant map[string]any) {
+	server, ok := grant["authorization_server"].(string)
+	if !ok || server == "" {
+		return
+	}
+	if f.authorizationServerByGrant == nil {
+		f.authorizationServerByGrant = map[string]string{}
+	}
+	f.authorizationServerByGrant[grantName] = server
+}
+
+// selectedGrant is the grant this run will actually redeem.
+//
+// The same condition runVCIScenario branches on: a pre-authorized code,
+// configured or offered, is redeemed in preference to anything else.
+func (f *vciFlow) selectedGrant() string {
+	if f.preAuthorizedCode != "" {
+		return grantPreAuthorizedCode
+	}
+	return grantAuthorizationCode
 }
 
 // authorizationServerFor is the Authorization Server this run talks to.
 //
-// The offer's grant decides when it named one, because that is where the
-// issuer_state lives. Otherwise the Issuer's first advertised server, as
-// before.
+// The grant being redeemed decides when it named one, because that is
+// where its secret lives. Otherwise the Issuer's first advertised server,
+// as before.
 //
 // A named server that the Issuer does not advertise is refused rather
 // than followed. The offer is the least trustworthy input in this flow -
@@ -164,13 +198,18 @@ func (f *vciFlow) authorizationServerFor(metadata *openid4vci.CredentialIssuerMe
 		advertised = metadata.AuthorizationServers
 	}
 
-	if f.authorizationServer != "" {
-		if !slices.Contains(advertised, f.authorizationServer) {
+	// The server named by the grant being REDEEMED. An offer carrying both
+	// grants is describing two ways to be authorized, and they may well
+	// live on different servers; taking the authorization-code grant's
+	// server while redeeming the pre-authorized code sends that code to a
+	// token endpoint it is not a secret for.
+	if named := f.authorizationServerByGrant[f.selectedGrant()]; named != "" {
+		if !slices.Contains(advertised, named) {
 			return "", fmt.Errorf(
-				"the credential offer names authorization server %q, which the issuer does not advertise (it advertises %v)",
-				f.authorizationServer, advertised)
+				"the credential offer's %s grant names authorization server %q, which the issuer does not advertise (it advertises %v)",
+				f.selectedGrant(), named, advertised)
 		}
-		return f.authorizationServer, nil
+		return named, nil
 	}
 
 	if len(advertised) > 0 {

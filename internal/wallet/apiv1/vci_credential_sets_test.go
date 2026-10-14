@@ -186,6 +186,61 @@ func TestAuthorizationServerFor(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "attacker.example")
 	})
+
+	// An offer may carry both grants, describing two ways to be
+	// authorized, and they may live on different servers. The run redeems
+	// the pre-authorized code in preference to anything else, so taking
+	// the authorization-code grant's server would send that code to a
+	// token endpoint it is not a secret for.
+	t.Run("both grants, and the one being redeemed decides", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state":         "handle",
+				"authorization_server": "https://as-one.example",
+			},
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code":  "code",
+				"authorization_server": "https://as-two.example",
+			},
+		})
+
+		got, err := flow.authorizationServerFor(metadata, "https://issuer.example")
+		require.NoError(t, err)
+		assert.Equal(t, "https://as-two.example", got,
+			"the pre-authorized code is what gets redeemed, so its grant's server is the one to talk to")
+	})
+
+	// A pre-authorized-only offer names its server on the only grant it
+	// has, which was being ignored entirely.
+	t.Run("a pre-authorized-only offer names its own server", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code":  "code",
+				"authorization_server": "https://as-two.example",
+			},
+		})
+
+		got, err := flow.authorizationServerFor(metadata, "https://issuer.example")
+		require.NoError(t, err)
+		assert.Equal(t, "https://as-two.example", got)
+	})
+
+	// And the validation holds on that grant too.
+	t.Run("a pre-authorized grant naming an unadvertised server is refused", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code":  "code",
+				"authorization_server": "https://attacker.example",
+			},
+		})
+
+		_, err := flow.authorizationServerFor(metadata, "https://issuer.example")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "attacker.example")
+	})
 }
 
 // The member is "authorization_server" in both grants - OpenID4VCI 1.0
