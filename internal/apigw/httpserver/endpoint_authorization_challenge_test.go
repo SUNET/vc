@@ -470,6 +470,21 @@ func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *test
 			contentType: "application/json",
 			body:        "",
 		},
+		{
+			// Decoder.More() is not an end-of-input test: it reports
+			// whether another ELEMENT follows in the current array or
+			// object, so it answers false for a stray closing delimiter.
+			// A trailing-data check written with More() lets these two
+			// through.
+			name:        "a valid object followed by a stray brace",
+			contentType: "application/json",
+			body:        valid + `}`,
+		},
+		{
+			name:        "a valid object followed by a stray bracket",
+			contentType: "application/json",
+			body:        valid + `]`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api.seen = nil
@@ -482,6 +497,29 @@ func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *test
 			assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 		})
 	}
+
+	// A chunked request declares no length, and both other readers skip a
+	// body without one: extractResourcePairs does not look at it, and
+	// Binding.Request skips its JSON and form branches and falls through
+	// to binding from the QUERY STRING by field name. So a harmless "{}"
+	// body plus "?Scope=..." reaches the handler with a scope the
+	// middleware never saw under that spelling.
+	t.Run("a chunked request with its values in the query", func(t *testing.T) {
+		api.seen = nil
+		req := httptest.NewRequest(http.MethodPost,
+			"/issuance/prepare?Scope=forbidden_scope&IdentityMatch=%7B%7D",
+			strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		// What a chunked body looks like to net/http.
+		req.ContentLength = -1
+		req.TransferEncoding = []string{"chunked"}
+
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+
+		assert.Nil(t, api.seen, "a body with no declared length must not reach preparation")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	})
 
 	// And the ordinary request still works, so none of the above is a
 	// blanket refusal.

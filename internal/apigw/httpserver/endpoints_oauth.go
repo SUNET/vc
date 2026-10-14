@@ -752,6 +752,20 @@ func requireCanonicalJSONBody(c *gin.Context, allowed ...string) error {
 		return refuse("this request must be sent as application/json")
 	}
 
+	// A declared length, because both of the other readers insist on one.
+	//
+	// extractResourcePairs skips the body unless ContentLength > 0, and
+	// Binding.Request skips BOTH its JSON and its form branch on the same
+	// condition - and then falls through to binding from the query string
+	// by FIELD NAME. So a chunked request (ContentLength == -1) carrying
+	// a harmless "{}" body reaches binding with its values taken from
+	// "?Scope=...", which the middleware never looked at under that
+	// spelling. Refusing an undeclared length is what keeps all three
+	// reading the same request.
+	if c.Request.ContentLength <= 0 {
+		return refuse("this request must carry a body with a declared length")
+	}
+
 	body, err := io.ReadAll(c.Request.Body)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 	if err != nil {
@@ -799,7 +813,12 @@ func requireCanonicalJSONBody(c *gin.Context, allowed ...string) error {
 	// encoding/json's Decoder reads ONE value and ignores the rest, so a
 	// valid object followed by anything at all would otherwise bind
 	// cleanly while this check looked at a different reading of the body.
-	if decoder.More() {
+	//
+	// Checked by requiring EOF rather than by More(), which is not an
+	// end-of-input test: More reports whether another ELEMENT follows in
+	// the current array or object, so it answers false for a stray "}"
+	// or "]" and would have let "<object>}" through.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return refuse("the request body carries more than one JSON value")
 	}
 
