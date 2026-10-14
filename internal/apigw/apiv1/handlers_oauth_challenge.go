@@ -471,6 +471,12 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		// which is a different transcript from either of the browser
 		// flow's - see interactiveAuthorizationSessionTranscript.
 		MdocSessionTranscript: c.interactiveAuthorizationSessionTranscript(ia, authCtx, privateEphemeralJWK),
+
+		// The whole exchange exists to establish WHO is asking for an
+		// issuance, so a check that cannot tell the Holder from someone
+		// holding a copy of their credential would not do its job. See
+		// issuanceAuthBinding.VerifyHolderBinding.
+		VerifyHolderBinding: true,
 	}); err != nil {
 		return nil, c.interactiveAuthorizationFailure(err)
 	}

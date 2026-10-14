@@ -18,7 +18,9 @@ import (
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -282,6 +284,31 @@ type issuanceAuthBinding struct {
 	// Interactive Authorization mints its own and checks it, because
 	// nothing there makes a state optional.
 	ExpectedState string
+
+	// VerifyHolderBinding requires the SD-JWT VC presentation to carry a
+	// Key Binding JWT that actually VERIFIES against the cnf key the
+	// Issuer bound the credential to.
+	//
+	// It is a flag rather than unconditional because the two channels are
+	// not in the same position. openid4vp.VPTokenValidator checks that a
+	// key binding proof is present and reads its nonce and audience, but
+	// never verifies its signature - so on its own it establishes that
+	// somebody sent a credential and a JWT, not that the Holder presented
+	// it. A copied credential with its disclosures, plus a proof the
+	// copier signs themselves, passes.
+	//
+	// Interactive Authorization sets it: the endpoint is new, nothing
+	// depends on the weaker behaviour, and the whole purpose of the
+	// exchange is to establish WHO is asking for an issuance - a check
+	// that cannot tell the Holder from someone holding a copy does not do
+	// that job at all.
+	//
+	// The browser-mediated flow does not set it yet, and that is a real
+	// gap rather than a decision: it is pre-existing, it affects every
+	// presentation that channel has ever accepted, and turning it on
+	// there changes what an existing deployment accepts. It is named here
+	// rather than quietly left out, and is on the user's list.
+	VerifyHolderBinding bool
 }
 
 // issuanceAuthOutcome says how a presentation that authenticated an
@@ -459,6 +486,39 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		if err := c.jwtTrustVerifier.EvaluateIssuerTrust(ctx, vpToken, scope); err != nil {
 			c.log.Error(err, "Issuer trust evaluation failed", "scope", scope)
 			return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
+		}
+
+		// Who is presenting this, as distinct from whether the claims are
+		// genuine.
+		//
+		// Everything above establishes that a trusted Issuer signed these
+		// claims. A credential and its disclosures are a bearer token to
+		// anyone who obtains them, so that says nothing about the
+		// presenter - and the validator above checks only that a key
+		// binding proof is THERE, reading its nonce and audience without
+		// verifying the signature. The proof has to be checked against
+		// the cnf key the Issuer bound the credential to, and the claims
+		// carrying that key have to be the ones whose signature was just
+		// verified: reading cnf out of an unverified issuer JWT would let
+		// the presenter nominate their own key.
+		if binding.VerifyHolderBinding {
+			issuerToken, _, err := c.jwtTrustVerifier.VerifyJWTSignature(ctx, issuerJWTOf(responseParams.VPToken), scope)
+			if err != nil {
+				c.log.Error(err, "issuer JWT did not verify while checking holder binding", "scope", scope)
+				return nil, fmt.Errorf("issuer signature verification failed: %w", err)
+			}
+			issuerClaims, ok := issuerToken.Claims.(jwt.MapClaims)
+			if !ok {
+				return nil, serverFault(errors.New("verified issuer JWT carries no claims"))
+			}
+			if err := sdjwtvc.VerifyKeyBinding(responseParams.VPToken, issuerClaims, sdjwtvc.KeyBindingExpectations{
+				Nonce:    authCtx.Nonce,
+				Audience: binding.Audience,
+			}); err != nil {
+				c.log.Error(err, "holder binding verification failed", "scope", scope)
+				return nil, fmt.Errorf("holder binding verification failed: %w", err)
+			}
+			c.log.Debug("holder binding verified", "scope", scope)
 		}
 
 		built, err := responseParams.BuildCredential()
@@ -657,4 +717,11 @@ func (c *Client) directPostSessionTranscript(authCtx *cache.AuthorizationContext
 		}
 		return mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 	}
+}
+
+// issuerJWTOf returns the issuer-signed JWT at the head of an SD-JWT VC
+// presentation, without the disclosures or the key binding proof.
+func issuerJWTOf(vpToken string) string {
+	issuerJWT, _, _ := strings.Cut(vpToken, "~")
+	return issuerJWT
 }
