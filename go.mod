@@ -48,7 +48,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/russellhaering/goxmldsig v1.6.1
-	github.com/sirosfoundation/go-cryptoutil v0.7.1
+	github.com/sirosfoundation/go-cryptoutil v0.7.2
 	github.com/sirosfoundation/go-spocp v0.1.0
 	github.com/sirosfoundation/go-trust v0.24.0
 	github.com/sirosfoundation/go-ts11client v0.0.0-20260821071625-a8d5997107d0
