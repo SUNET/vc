@@ -1258,3 +1258,70 @@ func TestAuthorizationChallenge_SuccessfulPresentationYieldsTheCode(t *testing.T
 	assert.Equal(t, errInvalidSession, again.ErrorCode)
 	assert.Equal(t, 1, calls, "a spent auth_session must not reach the pipeline again")
 }
+
+// The transcript test above builds one directly, which says that the
+// builder is right and nothing about whether the ENDPOINT uses it. Wiring
+// the direct-post builder in by mistake - or nil, which refuses mdoc by
+// name - would leave it green, and that substitution is exactly the
+// mistake worth catching: verifying against the wrong transcript fails
+// device-auth with nothing to point at.
+//
+// So this drives a real encrypted response through the endpoint and
+// asserts on the transcript the pipeline is actually handed. The pipeline
+// itself is replaced (Client.issuanceAuth): what it would need to accept a
+// genuine DeviceResponse is an mdoc signed over this transcript by a
+// trusted IACA, which is a fixture about mdoc verification rather than
+// about this endpoint's wiring.
+func TestAuthorizationChallenge_PassesTheInteractiveAuthorizationTranscriptToThePipeline(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	var seen issuanceAuthBinding
+	client.issuanceAuth = func(_ context.Context, ctxArg *cache.AuthorizationContext, _ *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+		seen = binding
+		return &issuanceAuthOutcome{Scope: ctxArg.Scopes[0]}, nil
+	}
+
+	response := encryptedVPResponse(t, client, opened.AuthSession,
+		`{"state":"`+authCtx.State+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+	_, err = client.OAuthAuthorizationChallenge(t.Context(),
+		continueExchange(t, opened.AuthSession, response))
+	require.NoError(t, err)
+
+	// nil is what refused mdoc by name before this PR, so it is the first
+	// thing to rule out.
+	require.NotNil(t, seen.MdocSessionTranscript,
+		"the endpoint must supply a transcript, or every mdoc presentation is refused")
+
+	got, err := seen.MdocSessionTranscript()
+	require.NoError(t, err)
+
+	ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+	require.NoError(t, err)
+	thumbprint, err := ephemeralPublicJWK.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+
+	want, err := mdoc.BuildOID4VCIIAESessionTranscript(
+		"OpenID4VCIIAEHandover",
+		challengeIssuerURL+"/authorize-challenge",
+		authCtx.Nonce,
+		thumbprint,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, got, "the endpoint must pass the Interactive Authorization transcript")
+
+	// And not the browser flow's, which is the substitution the direct
+	// builder test could not see.
+	directPost, err := mdoc.BuildOID4VPSessionTranscript(
+		authCtx.ClientID, authCtx.Nonce, challengeIssuerURL+"/verification/direct_post", thumbprint)
+	require.NoError(t, err)
+	assert.NotEqual(t, directPost, got)
+}
