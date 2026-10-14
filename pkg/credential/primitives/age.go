@@ -42,6 +42,17 @@ func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map
 	return out, nil
 }
 
+// ErrInvalidClaimInput marks a derivation that failed because of the
+// CLAIM it was given rather than because of how it was configured or what
+// the server was doing.
+//
+// The distinction is the caller's answer to the wallet. A birthdate that
+// is empty, malformed or in the future is the Holder's data: no amount of
+// retrying changes it, and reporting a server error says the opposite -
+// which is worse than unhelpful once the auth_session has been consumed
+// and there is nothing left to retry with.
+var ErrInvalidClaimInput = errors.New("invalid claim input")
+
 // AgeOverThresholds parses birthdate (ISO YYYY-MM-DD) and returns a map
 // containing, for every threshold N: age_over_N (true if the subject had
 // completed N years at `now`) and over_N_this_year (true if the subject
@@ -51,17 +62,17 @@ func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map
 // Callers pick which thresholds are meaningful for their credential type.
 func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[string]bool, error) {
 	if birthdate == "" {
-		return nil, errors.New("birthdate is empty")
+		return nil, fmt.Errorf("%w: birthdate is empty", ErrInvalidClaimInput)
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
 	bd, err := time.Parse("2006-01-02", birthdate)
 	if err != nil {
-		return nil, fmt.Errorf("invalid birthdate %q: %w", birthdate, err)
+		return nil, fmt.Errorf("%w: invalid birthdate %q: %w", ErrInvalidClaimInput, birthdate, err)
 	}
 	if bd.After(now) {
-		return nil, fmt.Errorf("birthdate %q is in the future", birthdate)
+		return nil, fmt.Errorf("%w: birthdate %q is in the future", ErrInvalidClaimInput, birthdate)
 	}
 	age := now.Year() - bd.Year()
 	ageThisYear := age
