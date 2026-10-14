@@ -110,14 +110,30 @@ func (c *Client) parseInteractiveAuthorizationRequest(raw json.RawMessage) (*ope
 		Request string `json:"request"`
 	}
 	if err := json.Unmarshal(raw, &signed); err == nil && signed.Request != "" {
-		// Not verified here: this wallet has no trust anchor for the
-		// issuer's request-signing key, and a test wallet that refused
-		// everything it could not verify could not be pointed at a new
-		// deployment at all. A production wallet MUST verify it - that is
-		// what expected_origins and the signature are for.
+		// Verified, with the same key material and the same algorithm
+		// allowlist this wallet already applies to a Verifier's request
+		// object in fetchRequestObject - an Issuer's is the same kind of
+		// JWT arriving over the same kind of channel, and there is no
+		// reason for one to be held to a weaker standard than the other.
+		//
+		// The earlier argument here was that a test wallet has no trust
+		// anchor so verification is pointless. It does not hold: the key
+		// travels in the JWT's own x5c or jwk header, so the signature
+		// can be checked without one, and checking it is what makes the
+		// alg allowlist mean anything. Without it a request header of
+		// {"alg":"none"} was accepted and acted on - the response was
+		// then encrypted to whatever key that unsigned request named.
+		//
+		// What a header key does NOT establish is WHOSE key it is. That
+		// still needs a trust anchor, and a production wallet must have
+		// one; this remains a test wallet. But "cannot establish the
+		// issuer" is not a reason to also skip establishing that the
+		// request arrived intact and was signed with a strong algorithm.
 		claims := jwtv5.MapClaims{}
-		if _, _, err := jwtv5.NewParser().ParseUnverified(signed.Request, claims); err != nil {
-			return nil, fmt.Errorf("parsing the signed openid4vp_request: %w", err)
+		if _, err := jwtv5.NewParser(
+			jwtv5.WithValidMethods(strongSigningAlgorithms),
+		).ParseWithClaims(signed.Request, claims, requestObjectKeyFunc); err != nil {
+			return nil, fmt.Errorf("verifying the signed openid4vp_request: %w", err)
 		}
 		body, err := json.Marshal(claims)
 		if err != nil {
