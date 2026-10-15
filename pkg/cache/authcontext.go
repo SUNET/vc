@@ -865,6 +865,21 @@ func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, 
 	stored := *opened
 	stored.IssuerState = ""
 
+	// The OLD document's indices go first, exactly as Update does it.
+	//
+	// A resume replaces the whole document, and it rotates fields that
+	// are indexed - EphemeralEncryptionKeyID above all, which is minted
+	// afresh so the key's life matches the exchange's. Deleting only the
+	// issuer_state index left the prepared key id pointing at the
+	// replacement, so the old kid went on resolving the live exchange
+	// after the rotation that exists to retire it, and nothing ever
+	// removed the entry: eviction cleans up the indices of the document
+	// it evicts, which by then names only the current kid.
+	//
+	// updateIndices below rebuilds the ones the new document actually
+	// has, so this removes stale entries rather than needed ones.
+	c.deleteIndices(item.Value())
+
 	delete(c.indices, indexKey)
 	c.cache.Set(sessionID, &stored, ttlcache.DefaultTTL)
 	c.updateIndices(&stored)
@@ -911,9 +926,27 @@ func (c *MemoryStore) claimIndexedHandle(indexPrefix, handle string, read func(*
 	claimed := *stored
 	clear(&claimed)
 
-	clear(stored)
+	// A REPLACEMENT document, not a write into the stored one.
+	//
+	// Get returns the cached pointer and then releases the lock, so a
+	// caller that fetched this context before the claim is still reading
+	// the very struct a write here would touch - `go test -race` names
+	// this line against a reader of the handle field. Replacing the
+	// pointer leaves that reader with a consistent pre-claim snapshot and
+	// makes the post-claim state reachable only through the cache, which
+	// is where it belongs.
+	//
+	// Separate from `claimed` on purpose: the caller must not be able to
+	// reach the stored document through the value it is handed either.
+	//
+	// Only the handle is cleared, by the caller's own clear func. The
+	// bindings the authorization code inherits - AuthSessionDPoPThumbprint
+	// among them - are checked when the code is redeemed, and clearing one
+	// here would hand out a code that any key could spend.
+	replacement := *stored
+	clear(&replacement)
 	delete(c.indices, indexKey)
-	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+	c.cache.Set(sessionID, &replacement, ttlcache.DefaultTTL)
 
 	return &claimed, nil
 }

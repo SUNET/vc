@@ -1139,6 +1139,19 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	opened.CodeChallengeMethod = req.CodeChallengeMethod
 	opened.AuthSessionDPoPThumbprint = dpopThumbprint
 	opened.AuthSession = authSession
+
+	// Answerable here and nowhere else, from this moment on.
+	//
+	// A prepared issuance is not yet an Interactive Authorization
+	// exchange, so the context the preparation wrote carries no marker -
+	// and this copy inherited that. The exchange it opens IS one: it
+	// hands the wallet an ephemeral key id in a request answered at the
+	// challenge endpoint, which verifies holder binding and the
+	// credential's validity window. /verification/direct_post resolves a
+	// context by that same key id and does neither, so without the marker
+	// a resumed issuer_state could be answered there instead and have its
+	// presentation-sourced claims overwritten. See the field's comment.
+	opened.InteractiveAuthorization = true
 	opened.DCQLQuery = dcql
 	opened.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
 

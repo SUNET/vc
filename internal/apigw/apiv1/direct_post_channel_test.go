@@ -111,3 +111,56 @@ func TestVerificationDirectPost_StillAcceptsABrowserContext(t *testing.T) {
 	assert.NotContains(t, strings.ToLower(err.Error()), "authorization challenge endpoint",
 		"a browser context must get past the channel check and fail on the presentation instead")
 }
+
+// A resumed issuer_state is an Interactive Authorization exchange too,
+// and has to be marked as one.
+//
+// The prepared issuance is not yet an exchange, so the context the
+// preparation wrote carries no marker - and the resume copies that
+// context. The exchange it opens hands the wallet an ephemeral key id in
+// a request answered at the challenge endpoint, and that key id is what
+// /verification/direct_post resolves a context by. Without the marker, an
+// issuer-initiated flow could be answered at the endpoint that verifies
+// neither the holder binding nor the credential's validity window, and
+// have its presentation-sourced claims overwritten before the wallet
+// redeemed its own code.
+//
+// The resume path also ROTATES the key id, so the test reads the one the
+// opened exchange actually recorded rather than the prepared one.
+func TestVerificationDirectPost_RefusesAResumedIssuerStateExchange(t *testing.T) {
+	client := newChallengeClient(t)
+	issuerState := prepareIssuance(t, client, portalMatch())
+
+	req := initialChallenge(t)
+	req.Scope = ""
+	req.IssuerState = issuerState
+	opened := challengeErr(t, client, req)
+	require.NotEmpty(t, opened.AuthSession)
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+	require.True(t, authCtx.InteractiveAuthorization,
+		"a resumed issuer_state opens an exchange answerable at the challenge endpoint")
+	require.NotEmpty(t, authCtx.EphemeralEncryptionKeyID)
+
+	// Consumed, which is when the other endpoint becomes reachable.
+	claimed, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
+	require.NoError(t, err)
+	require.True(t, claimed.InteractiveAuthorization, "the marker must survive the claim")
+
+	response := encryptedToEphemeralKey(t, client, authCtx.EphemeralEncryptionKeyID,
+		map[string]any{"state": authCtx.State, "vp_token": map[string]any{"pid": "forged"}})
+
+	_, err = client.VerificationDirectPost(t.Context(), &VerificationDirectPostRequest{Response: response})
+	require.Error(t, err)
+	assert.Contains(t, strings.ToLower(err.Error()), "authorization challenge endpoint")
+
+	after, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		EphemeralEncryptionKeyID: authCtx.EphemeralEncryptionKeyID,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, after.VerifiedClaims,
+		"a presentation refused for being on the wrong channel must not have overwritten the claims")
+}

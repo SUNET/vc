@@ -70,8 +70,7 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		return "", fmt.Errorf("%q has no host, so it yields no origin", rawURL)
 	}
 
-	switch {
-	case strings.Contains(host, ":"):
+	if strings.Contains(host, ":") {
 		// An IPv6 literal, which is not a domain name and must not be put
 		// through IDNA - the colons alone would fail it.
 		//
@@ -84,34 +83,36 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-	case endsInANumber(host):
-		if err := refuseRewritableNumericHost(host, rawURL); err != nil {
-			return "", err
-		}
-	default:
+	} else {
+		// The mapping first, then the numeric check, and in that order
+		// for a reason.
+		//
 		// ToASCII does the case folding too, as part of the UTS #46
-		// mapping, so there is no ToLower here to disagree with it.
+		// mapping, so there is no ToLower here to disagree with it - and
+		// it passes a numeric host through unchanged, so nothing is lost
+		// by mapping one.
+		//
+		// What IS lost by checking first is consistency. The check asks
+		// whether the LAST label is a number, and fullwidth digits are
+		// not ASCII digits, so the order of the two steps used to be
+		// decided by the width of the final character alone:
+		// "１２７.0.0.1" was refused while "１２７.0.0.１" and "１２７.０.０.１"
+		// were accepted as "https://127.0.0.1". Those are one host, and a
+		// browser reports the same origin for all three.
 		host, err = browserHost.ToASCII(host)
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-		// The mapping can PRODUCE a numeric host, so the check above has
-		// to be made again on its output.
-		//
-		// The switch asks whether the host as written ends in a number,
-		// and fullwidth digits are not ASCII digits, so "１２７.１" takes
-		// this branch - and UTS #46 maps it to "127.1", a host a browser
-		// parses as 127.0.0.1. Checking only before the mapping published
-		// "https://127.1" as an expected origin and as an Interactive
-		// Authorization audience, which no browser will ever report,
-		// while the ASCII spelling of the very same host was refused.
+		// On the MAPPED host, which is the only spelling that can be
+		// compared to what a browser reports. The mapping both produces
+		// numeric hosts ("１２７.１" becomes "127.1") and leaves written
+		// ones alone, so one check here covers what two used to.
 		if endsInANumber(host) {
 			if err := refuseRewritableNumericHost(host, rawURL); err != nil {
 				return "", err
 			}
 		}
 	}
-
 	origin := scheme + "://" + host
 	port, err := normalizePort(u.Port())
 	if err != nil {

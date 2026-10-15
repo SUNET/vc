@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -617,4 +618,47 @@ func TestEndpointAuthorizationChallenge_MalformedBodyIsAnOAuthError(t *testing.T
 			assert.Zero(t, api.calls, "a request that did not bind must not reach the handler")
 		})
 	}
+}
+
+// A failure the endpoint cannot phrase in the protocol's terms is still an
+// OAuth error, not a nested internal_server_error object.
+//
+// Returned untyped - a context-save failure is the ordinary way it happens
+// - the error reached the generic renderer and came back as
+// {"error":{"title":"internal_server_error","details":{}}}, which no OAuth
+// client parses. From a wallet's side that is the endpoint being broken,
+// which is what server_error means.
+func TestEndpointAuthorizationChallenge_UntypedFailureIsAServerError(t *testing.T) {
+	api := &challengeAPI{err: errors.New("failed to save authorization context: store unavailable")}
+
+	w := postChallenge(t, challengeEngine(t, api), url.Values{"auth_session": {"opaque-handle"}}, nil)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+
+	var oauthErr oauth2.OAuthError
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oauthErr),
+		"the body must be an OAuth error, got %q", w.Body.String())
+	assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+	assert.NotEmpty(t, oauthErr.ErrorDescription)
+
+	assert.NotContains(t, w.Body.String(), "internal_server_error")
+	assert.NotContains(t, w.Body.String(), "store unavailable",
+		"the cause names internal state and belongs in the log, not the response")
+}
+
+// And a failure the endpoint CAN phrase keeps its own words: wrapping
+// every error as server_error would turn a precise refusal into a generic
+// one, which is the opposite mistake.
+func TestEndpointAuthorizationChallenge_TypedFailuresArePassedThrough(t *testing.T) {
+	api := &challengeAPI{err: oauth2.NewOAuthError(
+		oauth2.ErrCodeInvalidGrant, "auth_session is not valid", http.StatusBadRequest)}
+
+	w := postChallenge(t, challengeEngine(t, api), url.Values{"auth_session": {"opaque-handle"}}, nil)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var oauthErr oauth2.OAuthError
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oauthErr))
+	assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
+	assert.Equal(t, "auth_session is not valid", oauthErr.ErrorDescription)
 }

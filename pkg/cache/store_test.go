@@ -500,3 +500,115 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Error(t, err)
 	})
 }
+
+// Get returns the cached pointer and then releases the lock, so a caller
+// that fetched a context is still reading the struct the store holds.
+// Claiming the handle used to WRITE into that struct, which `go test
+// -race` reports as a data race against any such reader - and a race on a
+// field that decides whether an exchange is still claimable is not a
+// theoretical one.
+//
+// The claim now replaces the stored document instead. The reader keeps a
+// consistent pre-claim snapshot; the post-claim state is reachable through
+// the cache, which is where it belongs.
+//
+// This test only means anything under -race, which is how CI runs it.
+func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:   "claim-reader-race",
+		AuthSession: "claim-reader-handle",
+		Code:        "claim-reader-code",
+	}))
+
+	// A caller that fetched the context before the claim, as every
+	// handler does.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	require.Equal(t, "claim-reader-handle", held.AuthSession)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			_ = held.AuthSession
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		claimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+		assert.NoError(t, err)
+		if claimed != nil {
+			assert.Empty(t, claimed.AuthSession, "the returned copy must not carry the handle")
+		}
+	}()
+	wg.Wait()
+
+	// And the claim did take effect in the store, so the absence of a
+	// race is not the absence of the write.
+	reclaimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+	require.ErrorIs(t, err, ErrNoDocuments, "the handle must stop resolving once claimed")
+	require.Nil(t, reclaimed)
+
+	stored, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	assert.Empty(t, stored.AuthSession, "the stored document must have had its handle cleared")
+	assert.Equal(t, "claim-reader-code", stored.Code, "and nothing else")
+}
+
+// A resume replaces the whole document and rotates indexed fields, so the
+// OLD document's indices have to go - exactly as Update does it.
+//
+// EphemeralEncryptionKeyID is the one that matters: it is minted afresh on
+// resume so the key's life matches the exchange's. Deleting only the
+// issuer_state index left the prepared kid resolving the live exchange
+// after the rotation that exists to retire it, and nothing ever cleaned it
+// up - eviction removes the indices of the document it evicts, which names
+// only the current kid.
+func TestClaimIssuerStateRemovesTheOldDocumentsIndices(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	prepared := &AuthorizationContext{
+		SessionID:                "resume-indices",
+		IssuerState:              "resume-istate",
+		EphemeralEncryptionKeyID: "kid-prepared",
+		Code:                     "resume-code",
+	}
+	require.NoError(t, store.Save(ctx, prepared))
+
+	// The fixture's precondition: the prepared kid really does resolve
+	// before the resume, or the assertion below would pass on a context
+	// that was never reachable.
+	found, err := store.Get(ctx, &AuthorizationContext{EphemeralEncryptionKeyID: "kid-prepared"})
+	require.NoError(t, err)
+	require.Equal(t, "resume-indices", found.SessionID)
+
+	opened := *prepared
+	opened.EphemeralEncryptionKeyID = "kid-resumed"
+	opened.AuthSession = "resume-handle"
+
+	claimed, err := store.ClaimIssuerState(ctx, "resume-istate", &opened)
+	require.NoError(t, err)
+	require.Empty(t, claimed.IssuerState)
+
+	stale, err := store.Get(ctx, &AuthorizationContext{EphemeralEncryptionKeyID: "kid-prepared"})
+	require.ErrorIs(t, err, ErrNoDocuments,
+		"the prepared key id must stop resolving once the resume has rotated it")
+	require.Nil(t, stale)
+
+	// And the current one does resolve, so the cleanup did not take the
+	// live index with it.
+	current, err := store.Get(ctx, &AuthorizationContext{EphemeralEncryptionKeyID: "kid-resumed"})
+	require.NoError(t, err)
+	assert.Equal(t, "resume-indices", current.SessionID)
+	assert.Equal(t, "resume-handle", current.AuthSession)
+
+	// The other indices the opened document still carries survive too.
+	byCode, err := store.Get(ctx, &AuthorizationContext{Code: "resume-code"})
+	require.NoError(t, err)
+	assert.Equal(t, "resume-indices", byCode.SessionID)
+}

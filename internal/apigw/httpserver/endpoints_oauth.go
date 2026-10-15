@@ -144,7 +144,30 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 			return nil, nil
 		}
 		s.log.Error(err, "authorization challenge error")
-		return nil, err
+
+		// Anything not already typed as a protocol error reaches the
+		// generic renderer and comes back as
+		// {"error":{"title":"internal_server_error","details":{}}} - a
+		// shape no OAuth client parses. A failure to save the context is
+		// the ordinary way that happens, and from a wallet's side it is
+		// indistinguishable from the endpoint being broken, which is
+		// exactly what server_error is for (RFC 6749 §5.2).
+		//
+		// Existing OAuth and OpenID4VCI errors are passed through
+		// untouched: pkg/httphelpers/server.go renders both, and wrapping
+		// one here would replace a precise refusal with a generic one.
+		var oauthErr *oauth2.OAuthError
+		var vciErr *openid4vci.Error
+		if errors.As(err, &oauthErr) || errors.As(err, &vciErr) {
+			return nil, err
+		}
+
+		// Fixed description. The cause is carried for the log, not for
+		// the wallet - it names internal state, and a failing store is
+		// not something a wallet can act on beyond retrying.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"the authorization challenge could not be completed",
+			http.StatusInternalServerError, err)
 	}
 
 	return reply, nil
