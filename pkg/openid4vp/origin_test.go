@@ -122,3 +122,67 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 		})
 	}
 }
+
+// The numeric-host check has to run on the output of the IDNA mapping as
+// well as on the input, because the mapping can produce a numeric host.
+//
+// The switch asks whether the host AS WRITTEN ends in a number, and
+// fullwidth digits are not ASCII digits, so a host spelled in them takes
+// the domain-name branch - and UTS #46 maps it to ASCII digits. Before
+// this, "https://１２７.１" was published as the origin "https://127.1",
+// which no browser will ever report, while the ASCII spelling of exactly
+// the same host was refused.
+func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
+	for _, tc := range []struct{ name, rawURL string }{
+		{"fullwidth digits, short form", "https://１２７.１"},
+		{"fullwidth digits, hexadecimal", "https://０x７f.１"},
+		{"fullwidth digits, a single number", "https://２１３２7３０６２５"},
+		{"a fullwidth trailing label after an ASCII one", "https://example.１"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin, err := CanonicalOrigin(tc.rawURL)
+			if err == nil {
+				t.Fatalf("a host a browser would rewrite must be refused, got origin %q", origin)
+			}
+		})
+	}
+
+	// The ASCII spellings of the same hosts were already refused; this
+	// pins that the two now agree, which is the actual defect.
+	for _, rawURL := range []string{"https://127.1", "https://0x7f.1", "https://example.1"} {
+		if origin, err := CanonicalOrigin(rawURL); err == nil {
+			t.Fatalf("%q must be refused, got %q", rawURL, origin)
+		}
+	}
+
+	// And a host that maps to a CANONICAL dotted quad is still accepted:
+	// the refusal is of spellings a browser rewrites, not of addresses.
+	for _, tc := range []struct{ rawURL, want string }{
+		{"https://１２７.０.０.１", "https://127.0.0.1"},
+		{"https://127.0.0.1", "https://127.0.0.1"},
+		{"https://127.0.0.1:8443", "https://127.0.0.1:8443"},
+	} {
+		got, err := CanonicalOrigin(tc.rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", tc.rawURL, err)
+		}
+		if got != tc.want {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want %q", tc.rawURL, got, tc.want)
+		}
+	}
+
+	// A name that merely CONTAINS digits is a name, not an address.
+	for _, tc := range []struct{ rawURL, want string }{
+		{"https://1issuer.example.com", "https://1issuer.example.com"},
+		{"https://１issuer.example.com", "https://1issuer.example.com"},
+		{"https://münchen.example", "https://xn--mnchen-3ya.example"},
+	} {
+		got, err := CanonicalOrigin(tc.rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", tc.rawURL, err)
+		}
+		if got != tc.want {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want %q", tc.rawURL, got, tc.want)
+		}
+	}
+}
