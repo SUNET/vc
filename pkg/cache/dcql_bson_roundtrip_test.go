@@ -281,3 +281,54 @@ func TestAuthorizationContextStillFailsWhenTheQueryIsNotTheCause(t *testing.T) {
 	require.ErrorContains(t, err, "1e400",
 		"the failure has to name what actually could not be encoded")
 }
+
+// claims[].values carries integers too, and the exact-JSON copy must not
+// be the thing that loses them.
+//
+// A typed query may legitimately hold 9007199254740993 - the first
+// integer a float64 cannot represent - and it survived BSON storage
+// before the exact copy existed. Making that copy the preferred
+// representation then made such a context UNREADABLE: ClaimQuery decoded
+// its values with a plain json.Unmarshal, so the literal became a
+// float64, lost its last digit, and the validator rejected it for being
+// outside the safe integer range. Saved fine, failed on the way back.
+//
+// The same family as the req[].params tests above, and the same answer:
+// decode with UseNumber and judge the literal.
+func TestAuthorizationContextKeepsExactClaimValuesThroughBSON(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"the first integer a float64 cannot hold", int64(9007199254740993), "9007199254740993"},
+		{"and its negative", int64(-9007199254740993), "-9007199254740993"},
+		{"an integer beyond int64", json.Number("123456789012345678901234567890"), "123456789012345678901234567890"},
+		{"an ordinary one, which must also be untouched", int64(7), "7"},
+		{"a string, which shares the array", "pid", `"pid"`},
+		{"and a boolean", true, "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+				ID: "pid", Format: "dc+sd-jwt",
+				Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:x"}},
+				Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("age"), Values: []any{tc.value}}},
+			}}}
+
+			stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: query})
+			require.NoError(t, err, "a query the typed model accepts has to be storable")
+
+			var loaded AuthorizationContext
+			require.NoError(t, bson.Unmarshal(stored, &loaded),
+				"and readable again; this is the step that used to fail")
+			require.NotNil(t, loaded.DCQLQuery)
+
+			// Compared as TEXT: a float64 comparison is exactly what
+			// cannot see this defect.
+			encoded, err := json.Marshal(loaded.DCQLQuery)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), tc.want,
+				"the other replica has to send the value that was configured")
+		})
+	}
+}

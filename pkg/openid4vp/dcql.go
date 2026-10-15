@@ -349,6 +349,13 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 		if !json.Valid(data) {
 			return err
 		}
+		// Before anything is kept raw. A typed decode failing is exactly
+		// how a duplicate or case-aliased constraint used to get past
+		// these checks: the shadow still reported the constraint, so
+		// validation passed, while the emitted bytes said something else.
+		if checkErr := checkRawConstraints(data); checkErr != nil {
+			return checkErr
+		}
 		fallback := CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
 		if _, invalid := fallback.adoptRawShadowReporting(); len(invalid) > 0 {
 			// A member of the right JSON kind that the model still
@@ -388,6 +395,12 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if hasDuplicateMembers(data) || !q.encodesBackTo(data) {
+		// The same guard on the way in here. A case-aliased member is one
+		// of the things that makes a query fail to encode back, so this
+		// is the path it takes.
+		if err := checkRawConstraints(data); err != nil {
+			return err
+		}
 		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
 		q.adoptRawShadow()
 	}
@@ -447,6 +460,54 @@ func ambiguousConstraintMembers(data []byte) []string {
 	}
 	slices.Sort(ambiguous)
 	return slices.Compact(ambiguous)
+}
+
+// aliasedConstraintMembers names the constraint members written in a case
+// that is not the one the wire uses.
+//
+// Go's encoding/json matches field names case-insensitively, so
+// {"meta":{"VCT_VALUES":["urn:x"]}} decodes into MetaQuery.VCTValues and
+// the shadow reports a constraint - while the bytes this verifier signs
+// carry VCT_VALUES, which no conformant wallet reads as vct_values. The
+// request goes out unconstrained and validation believed otherwise.
+//
+// The same reasoning as the duplicate check beside it: a request whose
+// constraint depends on who is reading it is one this verifier will not
+// sign. Refused rather than quietly un-shadowed, because an alias is
+// almost certainly a typo in a configuration, and a request that silently
+// stops constraining anything is the worst way to discover that.
+//
+// Only the members validation reads. Everything else keeps passing
+// through, because sending a shape this build has never seen is the whole
+// point of the raw path.
+func aliasedConstraintMembers(data []byte) []string {
+	var aliased []string
+
+	check := func(prefix string, document []byte, modelled ...string) {
+		names, ok := topLevelMemberNames(document)
+		if !ok {
+			return
+		}
+		for name := range names {
+			for _, want := range modelled {
+				if name != want && strings.EqualFold(name, want) {
+					aliased = append(aliased, prefix+name)
+				}
+			}
+		}
+	}
+
+	check("", data, "format", "meta", "claims")
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err == nil {
+		if nested, present := envelope["meta"]; present {
+			check("meta.", nested, "vct_values", "doctype_value", "type_values")
+		}
+	}
+
+	slices.Sort(aliased)
+	return slices.Compact(aliased)
 }
 
 // topLevelMemberNames counts how often each member name appears in a JSON
@@ -625,19 +686,41 @@ func jsonEquivalent(a, b []byte) bool {
 //
 // TestRawIsOnlyConstructedThroughTheConstructor keeps that from being
 // advice: production code may not write the literal.
+// checkRawConstraints refuses a raw query whose constraint members this
+// verifier and a wallet would read differently.
+//
+// Shared by the constructor and by both decode fallbacks. The decode
+// paths used to skip it, and that was the hole: an unmodelled member -
+// `"req": {}` - made the typed decode fail, the query went raw, and the
+// duplicate-meta check never ran. The shadow still reported the last
+// meta's constraint, so validation passed while the request was emitted
+// with BOTH, which a first-wins wallet reads as unconstrained. One
+// function, three callers, no path that reaches Raw without passing here.
+func checkRawConstraints(raw json.RawMessage) error {
+	if ambiguous := ambiguousConstraintMembers(raw); len(ambiguous) > 0 {
+		return fmt.Errorf(
+			"credential query: %s named more than once, and JSON decoders disagree about which value wins",
+			strings.Join(ambiguous, ", "))
+	}
+	if aliased := aliasedConstraintMembers(raw); len(aliased) > 0 {
+		return fmt.Errorf(
+			"credential query: %s differs only in case from the member the wire uses, so this verifier and a wallet would read different constraints",
+			strings.Join(aliased, ", "))
+	}
+	return nil
+}
+
 func NewRawCredentialQuery(raw json.RawMessage) (CredentialQuery, error) {
 	if !json.Valid(raw) {
 		return CredentialQuery{}, fmt.Errorf("credential query: raw is not valid JSON")
 	}
-	if ambiguous := ambiguousConstraintMembers(raw); len(ambiguous) > 0 {
-		// Refused here as well as on the decode path. A request whose
-		// constraint depends on the reader is not one to sign on
-		// anybody's behalf, and allowing it here would also mean a query
-		// that works on the replica that built it and nowhere else,
-		// since the decode path refuses to read it back.
-		return CredentialQuery{}, fmt.Errorf(
-			"credential query: %s named more than once, and JSON decoders disagree about which value wins",
-			strings.Join(ambiguous, ", "))
+	// Refused here as well as on the decode paths. A request whose
+	// constraint depends on the reader is not one to sign on anybody's
+	// behalf, and allowing it here would also mean a query that works on
+	// the replica that built it and nowhere else, since the decode paths
+	// refuse to read it back.
+	if err := checkRawConstraints(raw); err != nil {
+		return CredentialQuery{}, err
 	}
 	query := CredentialQuery{Raw: append(json.RawMessage(nil), raw...)}
 	query.adoptRawShadow()
@@ -1036,7 +1119,14 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 		if bytes.Equal(bytes.TrimSpace(raw.Values), []byte("null")) {
 			return fmt.Errorf(`claim "values" must not be null`)
 		}
-		if err := json.Unmarshal(raw.Values, &values); err != nil {
+		// decodeExact, not json.Unmarshal: it keeps numbers as their
+		// literals. A plain decode makes every value a float64, so a
+		// legitimate 9007199254740993 came back as 9007199254740992 and
+		// was then rejected for being outside the safe integer range -
+		// which made a stored context carrying one UNREADABLE once the
+		// exact JSON copy became the preferred representation. Saved
+		// fine, failed on the way back.
+		if err := decodeExact(raw.Values, &values); err != nil {
 			return fmt.Errorf(`claim "values" must be an array of strings, integers, or booleans: %w`, err)
 		}
 	}
@@ -1151,6 +1241,16 @@ func validateClaimValues(values []any, present bool) error {
 	for i, v := range values {
 		switch t := v.(type) {
 		case string, bool, int, int32, int64, uint, uint32, uint64:
+		case json.Number:
+			// Judged AS the literal, with no float64 on the way. The
+			// float arms below stop at 2^53-1 because that is where a
+			// float64 stops being exact; a literal has no such limit, so
+			// imposing one here would be this validator inventing a rule
+			// the specification does not have - and rejecting the very
+			// values the exact-JSON copy exists to preserve.
+			if !isIntegerLiteral(t.String()) {
+				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
+			}
 		case float32:
 			if err := checkIntegralFloat(float64(t), i); err != nil {
 				return err
@@ -1164,6 +1264,26 @@ func validateClaimValues(values []any, present bool) error {
 		}
 	}
 	return nil
+}
+
+// isIntegerLiteral reports whether a JSON number literal spells an
+// integer: an optional minus and then digits, with no fraction and no
+// exponent.
+//
+// Read as text on purpose. Parsing it to decide would reintroduce the
+// very limit this exists to avoid; the point is that the literal is kept
+// whole, however long it is.
+func isIntegerLiteral(literal string) bool {
+	digits := strings.TrimPrefix(literal, "-")
+	if digits == "" {
+		return false
+	}
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func checkIntegralFloat(f float64, i int) error {
