@@ -582,6 +582,13 @@ func createTestSDJWT(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any,
 // (disclosures not referenced in the _sd array). These should be ignored during validation.
 func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, decoys map[string]any, nonce, audience string) string {
 	t.Helper()
+	return createTestSDJWTWithKBClaims(t, key, claims, decoys, nonce, audience, nil)
+}
+
+// createTestSDJWTWithKBClaims is createTestSDJWTWithDecoys with extra claims
+// merged into the Key Binding JWT (transaction_data_hashes, amr, jti, ...).
+func createTestSDJWTWithKBClaims(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, decoys map[string]any, nonce, audience string, extraKB map[string]any) string {
+	t.Helper()
 
 	// Build selective disclosures: [salt, claim_name, value]
 	// and compute their hashes for the _sd array
@@ -650,6 +657,9 @@ func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[s
 		// covers any presentation of the same credential, with whatever
 		// disclosures the sender picked.
 		"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:]),
+	}
+	for k, v := range extraKB {
+		kbClaims[k] = v
 	}
 	kbToken := jwt.NewWithClaims(jwt.SigningMethodES256, kbClaims)
 	kbToken.Header["typ"] = "kb+jwt"

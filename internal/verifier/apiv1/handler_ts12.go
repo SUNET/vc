@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -90,4 +91,38 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 		return nil, fmt.Errorf("encoding transaction_data: %w", err)
 	}
 	return []string{encoded}, nil
+}
+
+// issuedResponseModes are the response_mode values the verifier puts in the
+// requests it issues for /ui/interaction: direct_post.jwt behind the QR code
+// and link, and dc_api.jwt for the Digital Credentials API variant when that
+// is enabled. The response arrives at one endpoint whichever was used, so a
+// TS12 KB-JWT may echo either.
+func (c *Client) issuedResponseModes() []string {
+	modes := []string{openid4vp.ResponseModeDirectPostJWT}
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		modes = append(modes, openid4vp.ResponseModeDCAPIJWT)
+	}
+	return modes
+}
+
+// jtiStore adapts the verifier's replay cache to the validator. With no cache
+// the store is nil, which makes the validator refuse an SCA presentation.
+func (c *Client) jtiStore(ctx context.Context) openid4vp.JTIStore {
+	if c.cacheService == nil || c.cacheService.UsedJTI == nil {
+		return nil
+	}
+	return jtiClaimer{ctx: ctx, cache: c.cacheService.UsedJTI}
+}
+
+type jtiClaimer struct {
+	ctx   context.Context
+	cache interface {
+		SetNX(ctx context.Context, key string, value bool) (bool, error)
+	}
+}
+
+func (j jtiClaimer) Claim(jti string) (bool, error) {
+	// Atomic: a concurrent second submission of the same KB-JWT loses SetNX.
+	return j.cache.SetNX(j.ctx, jti, true)
 }
