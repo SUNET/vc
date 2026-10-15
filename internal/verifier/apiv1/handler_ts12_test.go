@@ -126,3 +126,40 @@ func TestUIInteraction_PaymentSessionsAreNeverReused(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, authCtx.TransactionData)
 }
+
+// The response is checked against the modes the session was issued with, so
+// they are recorded when the request is made, per the config at that time.
+func TestUIInteraction_PaymentRecordsIssuedResponseModes(t *testing.T) {
+	ctx := t.Context()
+	for _, dcAPI := range []bool{false, true} {
+		client := newSigningTestClient(t)
+		client.cfg.Verifier.TS12.Enable = true
+		client.cfg.Verifier.DigitalCredentials.Enable = dcAPI
+		reply, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), Payment: testPayment()})
+		if dcAPI && err != nil {
+			t.Skipf("DC API origin not configurable in this test client: %v", err)
+		}
+		require.NoError(t, err)
+		authCtx, err := client.cacheService.AuthContext.GetByID(ctx, reply.SessionID)
+		require.NoError(t, err)
+		want := []string{"direct_post.jwt"}
+		if dcAPI {
+			want = append(want, "dc_api.jwt")
+		}
+		assert.Equal(t, want, authCtx.TransactionDataResponseModes, "dcAPI=%v", dcAPI)
+	}
+}
+
+// UIInteraction's own DCQL validation already demands vct_values for SD-JWT
+// VC; the payment builder checks it again because the response check compares
+// the presented vct against exactly these values.
+func TestBuildPaymentTransactionData_RequiresVCTValues(t *testing.T) {
+	client := newSigningTestClient(t)
+	client.cfg.Verifier.TS12.Enable = true
+	dcql := scaDCQL("sca")
+	_, err := client.buildPaymentTransactionData(testPayment(), dcql)
+	require.NoError(t, err)
+	dcql.Credentials[0].Meta.VCTValues = nil
+	_, err = client.buildPaymentTransactionData(testPayment(), dcql)
+	require.Error(t, err)
+}
