@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/net/idna"
 )
 
 var (
@@ -340,22 +340,33 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	// and has no business being mapped as one.
 	if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = addr.String()
-	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
-		// A Unicode host and its A-label are the same host.
+	} else if ascii, err := openid4vp.BrowserHost.ToASCII(host); err == nil {
+		// A Unicode host and its A-label are the same host, and the
+		// profile is the browser's rather than a resolver's.
+		//
+		// idna.Lookup turns on StrictDomainName, which rejects an
+		// underscore anywhere in the name - and a wallet building its
+		// htu from a URL has already been through a browser-shaped
+		// parser, so it sends the A-label. Under the strict profile
+		// "İ.my_host.example" failed to map and fell through to the
+		// fold below, so the wallet's correctly normalised
+		// "xn--i-9bb.my_host.example" did not match the endpoint this
+		// deployment had configured. pkg/openid4vp's CanonicalOrigin
+		// reached the right spelling all along; this now uses the same
+		// profile rather than a second opinion about the same question.
 		host = ascii
 	} else {
-		// ToASCII refuses more hosts than a deployment actually uses - an
-		// underscore anywhere in the name is enough - so a failure folds
-		// case rather than rejecting a proof over it. The case of a host
-		// is insignificant either way (RFC 3986 §6.2.2.1).
+		// A mapping failure folds case rather than rejecting a proof
+		// over it: the case of a host is insignificant either way
+		// (RFC 3986 §6.2.2.1).
 		//
 		// ASCII-ONLY, which is the whole point of the helper. Go's
-		// strings.ToLower maps "İ" (U+0130) to "i", so on this path
-		// "İ.my_host.example" and "i.my_host.example" folded to one
-		// string, as did "İ_host.example" and "i_host.example" - and a
-		// proof for either satisfied the other. Those are distinct
-		// authorities whose browser spellings are "xn--i-9bb.my_host.example"
-		// and "xn--i_host-pyd.example", which is neither of them.
+		// strings.ToLower maps "İ" (U+0130) to "i", so a Unicode fold
+		// here would merge "İ…" with "i…" - distinct authorities - and
+		// let a proof for one satisfy the other. The browser profile
+		// above now maps both of those rather than refusing them, so
+		// this is a genuine last resort; folding only ASCII keeps it
+		// one even for whatever still reaches it.
 		//
 		// Folding only A-Z cannot merge two hosts differing by anything
 		// but ASCII letter case, which is exactly the difference
