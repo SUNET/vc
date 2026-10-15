@@ -11,8 +11,7 @@
         "id": "pseudonym-v1-sha256",
         "return": "nym-123",
         "params": {
-          "config": "known-offender-matching-ssc",
-          "verifier_id_type": "x509_san_dns"
+          "config": "known-offender-matching-ssc"
         }
       },
       {
@@ -44,8 +43,7 @@
           "function_id": "pseudonym-v1-sha256",
           "handle": "nym-123",
           "params": {
-            "config": "known-offender-matching-ssc",
-            "verifier_id_type": "x509_san_dns"
+            "config": "known-offender-matching-ssc"
           }
         },
         {

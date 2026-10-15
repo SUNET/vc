@@ -270,7 +270,7 @@ func TestTheTwoShapesTheIssueNames(t *testing.T) {
 			Meta:   MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
 			Req: []ReqItem{
 				{ID: FunctionPseudonym, Return: "nym-123", Params: map[string]any{
-					"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns",
+					"config": "known-offender-matching-ssc",
 				}},
 				{ID: FunctionAgeCheck, Return: "age-range-123", Params: map[string]any{
 					"ge": "2008-10-10", "le": "2013-10-09",
