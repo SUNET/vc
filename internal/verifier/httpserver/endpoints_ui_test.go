@@ -32,6 +32,9 @@ type uiInteractionApiv1 struct {
 	// receivedSessionID is set by UIInteraction; nil = not called yet.
 	receivedSessionID *string
 
+	// receivedPayment is the "payment" member the endpoint forwarded.
+	receivedPayment *apiv1.UIPaymentRequest
+
 	// replySessionID is returned as UIInteractionReply.SessionID. Set per
 	// test to simulate either reuse (same as the hint) or a fresh mint.
 	replySessionID string
@@ -56,6 +59,7 @@ type uiInteractionApiv1 struct {
 func (u *uiInteractionApiv1) UIInteraction(ctx context.Context, req *apiv1.UIInteractionRequest) (*apiv1.UIInteractionReply, error) {
 	got := req.SessionID
 	u.receivedSessionID = &got
+	u.receivedPayment = req.Payment
 	return &apiv1.UIInteractionReply{SessionID: u.replySessionID}, nil
 }
 
