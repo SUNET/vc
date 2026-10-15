@@ -155,6 +155,42 @@ func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
 		}
 	}
 
+	// Mixed width is one host, not two. The numeric check asks about the
+	// LAST label, and fullwidth digits are not ASCII digits, so checking
+	// before the mapping made acceptance depend on the width of the final
+	// character alone: "１２７.0.0.1" was refused while "１２７.0.0.１" and
+	// "１２７.０.０.１" were accepted. A browser reports the same origin for
+	// all three, which is what makes the refusal wrong rather than merely
+	// inconsistent - these are public URLs that could not produce an
+	// expected_origin or a presentation audience at all.
+	for _, rawURL := range []string{
+		"https://１２７.0.0.1",
+		"https://１２７.0.0.１",
+		"https://１２７.０.０.１",
+		"https://127.0.0.１",
+		"https://1２７.0.0.1",
+	} {
+		got, err := CanonicalOrigin(rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", rawURL, err)
+		}
+		if got != "https://127.0.0.1" {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want https://127.0.0.1", rawURL, got)
+		}
+	}
+
+	// And the mixed-width spellings of a host a browser REWRITES are still
+	// refused, so mapping first did not turn the check off.
+	for _, rawURL := range []string{
+		"https://１２７.1",
+		"https://127.１",
+		"https://０x７f.1",
+	} {
+		if origin, err := CanonicalOrigin(rawURL); err == nil {
+			t.Fatalf("%q must be refused, got %q", rawURL, origin)
+		}
+	}
+
 	// And a host that maps to a CANONICAL dotted quad is still accepted:
 	// the refusal is of spellings a browser rewrites, not of addresses.
 	for _, tc := range []struct{ rawURL, want string }{

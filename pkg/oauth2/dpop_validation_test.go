@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/idna"
 )
 
 func TestDPoP_ValidateJTI(t *testing.T) {
@@ -625,6 +626,52 @@ func TestSameHTU_UnicodeCaseIsIDNAsToDo(t *testing.T) {
 	} {
 		if !SameHTU(pair[0], pair[1]) {
 			t.Fatalf("%q and %q are the same host", pair[0], pair[1])
+		}
+	}
+}
+
+// The IDNA-failure path folds ASCII case and nothing else.
+//
+// idna.Lookup refuses more hosts than deployments actually use - an
+// underscore anywhere in the name is enough - so that path is reached by
+// ordinary internal names and has to keep folding their case. What it must
+// NOT do is fold Unicode: strings.ToLower maps "İ" (U+0130) to "i", so
+// "İ.my_host.example" and "i.my_host.example" became one string, as did
+// "İ_host.example" and "i_host.example", and a proof for either satisfied
+// the other. They are distinct authorities, whose browser spellings
+// ("xn--i-9bb.my_host.example", "xn--i_host-pyd.example") are neither.
+func TestSameHTU_IDNAFailureFoldsASCIIOnly(t *testing.T) {
+	// The fixture's precondition: these really do take the fallback, or
+	// the test is about the IDNA path instead and proves nothing here.
+	for _, host := range []string{
+		"İ.my_host.example", "i.my_host.example",
+		"İ_host.example", "i_host.example",
+		"MY_HOST.EXAMPLE",
+	} {
+		if _, err := idna.Lookup.ToASCII(host); err == nil {
+			t.Fatalf("%q no longer fails IDNA, so this test no longer covers the fallback", host)
+		}
+	}
+
+	for _, pair := range [][2]string{
+		{"https://İ.my_host.example/token", "https://i.my_host.example/token"},
+		{"https://İ_host.example/token", "https://i_host.example/token"},
+		{"https://İ.my_host.example/token", "https://xn--i-9bb.my_host.example/token"},
+	} {
+		if SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are different authorities", pair[0], pair[1])
+		}
+	}
+
+	// ASCII case still folds, which is the whole reason this path lowers
+	// anything at all - an underscore host is an ordinary internal name.
+	for _, pair := range [][2]string{
+		{"https://MY_HOST.EXAMPLE/token", "https://my_host.example/token"},
+		{"https://My_Host.Example/token", "https://my_host.example/token"},
+		{"https://İ.MY_HOST.example/token", "https://İ.my_host.example/token"},
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q differ only in ASCII case", pair[0], pair[1])
 		}
 	}
 }
