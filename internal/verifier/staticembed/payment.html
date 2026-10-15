@@ -100,6 +100,7 @@
     async function poll(sessionID) {
         // /ui/completion answers {"status":"pending"} until the wallet's response has been accepted.
         // A refused response leaves it pending: the reason is in the verifier log (invalid_transaction_data).
+        var completed = false;
         for (var i = 0; i < 150; i++) {
             // The session exists whatever happens to one poll: a network or JSON
             // failure is retried within the same limit, not reported as a failed start.
@@ -107,12 +108,14 @@
                 var res = await fetch("/ui/completion?session_id=" + encodeURIComponent(sessionID), { cache: "no-store" });
                 if (res.ok) {
                     var c = await res.json();
-                    if (c.status === "complete") { return await show(c.response_code); }
+                    if (c.status === "complete") { completed = true; return await show(c.response_code); }
                 }
             } catch (e) { /* retry */ }
             await sleep(2000);
         }
-        $("status").textContent = "Timed out waiting for the wallet. If the wallet answered, the verifier refused the response: see its log.";
+        $("status").textContent = completed
+            ? "The verifier accepted the response, but its result could not be fetched. Check the verifier log before starting another request."
+            : "Timed out waiting for the wallet. If the wallet answered, the verifier may have refused the response: see its log.";
     }
 
     async function show(code) {
