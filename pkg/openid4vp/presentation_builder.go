@@ -198,25 +198,70 @@ func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []str
 
 // copyAnyMap deep-copies an opaque JSON tree.
 //
-// Through the encoding rather than by walking it: the values are whatever
-// a Verifier configured, including shapes this build does not model, and a
-// hand-written walk would have to be taught every one of them. Nil in,
-// nil out, so a copied query is indistinguishable from the original.
+// Nil in, nil out, so a copied query is indistinguishable from the
+// original.
+//
+// This copied through the encoding, which was tidy and quietly REPAIRED
+// what it copied. A raw leaf is bytes, and re-parsing bytes is not a copy
+// of them: Params{"payload": json.RawMessage(`{"x":1,"x":2}`)} came back
+// as {"x":2}. The original emits both members - that is what a raw leaf is
+// FOR, since a Verifier sends a deliberately malformed request to see what
+// a wallet does with it - so templating one silently changed the request
+// under test. Member order and a number's spelling were lost the same way.
+//
+// So the tree is walked instead, and the containers a JSON tree is made of
+// are copied structurally. Anything else still goes through the encoding,
+// which keeps the original promise: a shape this build does not model is
+// normalised rather than aliased, and the walk does not have to be taught
+// every type a Verifier might configure.
 func copyAnyMap(src map[string]any) map[string]any {
 	if src == nil {
 		return nil
 	}
-	encoded, err := json.Marshal(src)
-	if err != nil {
-		// Unreachable for a tree that came off the wire or out of
-		// configuration; aliasing the original is better than losing it.
-		return src
-	}
-	var dst map[string]any
-	if err := decodeExact(encoded, &dst); err != nil {
-		return src
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = copyAnyValue(value)
 	}
 	return dst
+}
+
+// copyAnyValue deep-copies one node of an opaque JSON tree.
+func copyAnyValue(src any) any {
+	switch typed := src.(type) {
+	case nil, bool, string, float64, json.Number:
+		// Immutable, so sharing one is not aliasing.
+		return src
+
+	case json.RawMessage:
+		// Bytes, copied as bytes. Everything a raw leaf exists to carry -
+		// a duplicate member, member order, a number written the long way -
+		// survives only if it is never re-parsed.
+		return append(json.RawMessage(nil), typed...)
+
+	case map[string]any:
+		return copyAnyMap(typed)
+
+	case []any:
+		dst := make([]any, len(typed))
+		for i, value := range typed {
+			dst[i] = copyAnyValue(value)
+		}
+		return dst
+
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			// Unreachable for a tree that came off the wire or out of
+			// configuration; aliasing the original is better than losing
+			// it.
+			return src
+		}
+		var value any
+		if err := decodeExact(encoded, &value); err != nil {
+			return src
+		}
+		return value
+	}
 }
 
 // copyDCQL creates a deep copy of a DCQL query

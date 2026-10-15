@@ -655,3 +655,63 @@ func TestCaseAliasedMemberDoesNotRewriteTheModelledOne(t *testing.T) {
 		assert.Contains(t, formats.Extra, "MSO_MDOC")
 	})
 }
+
+// Copying a query must not REPAIR it.
+//
+// A raw leaf is bytes, and copyAnyMap re-parsed them, so a payload a
+// Verifier wrote to be malformed came back well-formed: {"x":1,"x":2}
+// became {"x":2}. The point of such a payload is to see what a wallet does
+// with it, so templating the query quietly changed the request under test.
+// Member order and a number's spelling went the same way.
+//
+// Asserted on the EMITTED TEXT, not the parsed tree, because parsing is
+// exactly the step that hides the difference.
+func TestCopyDCQLPreservesRawLeavesByteForByte(t *testing.T) {
+	const duplicate = `{"x":1,"x":2}`
+	const spelled = `{"b":1,"a":1.50}` // member order and a long-form number
+
+	src := &DCQL{Credentials: []CredentialQuery{{
+		ID:     "q",
+		Format: FormatCircuitZk,
+		Meta:   MetaQuery{DoctypeValue: "d"},
+		Req: []ReqItem{{
+			ID:     FunctionAgeCheck,
+			Return: "a",
+			Params: map[string]any{
+				"payload": json.RawMessage(duplicate),
+				// A raw leaf inside a slice inside a map.
+				"nested": []any{map[string]any{"inner": json.RawMessage(spelled)}},
+			},
+		}},
+	}}}
+
+	dst := copyDCQL(src)
+	require.NotNil(t, dst)
+
+	params := dst.Credentials[0].Req[0].Params
+	emitted, err := json.Marshal(params["payload"])
+	require.NoError(t, err)
+	assert.Equal(t, duplicate, string(emitted),
+		"a raw leaf must be copied as bytes; re-parsing it drops the duplicate member")
+
+	nested := params["nested"].([]any)[0].(map[string]any)
+	nestedEmitted, err := json.Marshal(nested["inner"])
+	require.NoError(t, err)
+	assert.Equal(t, spelled, string(nestedEmitted),
+		"a raw leaf nested inside containers must be copied as bytes too")
+
+	// And it is a COPY: neither direction leaks.
+	srcParams := src.Credentials[0].Req[0].Params
+	srcNested := srcParams["nested"].([]any)[0].(map[string]any)
+
+	params["payload"] = json.RawMessage(`{"changed":true}`)
+	nested["inner"] = json.RawMessage(`{"changed":true}`)
+	assert.Equal(t, duplicate, string(srcParams["payload"].(json.RawMessage)),
+		"writing to the copy must not reach the original")
+	assert.Equal(t, spelled, string(srcNested["inner"].(json.RawMessage)),
+		"the nested container must not be shared with the original")
+
+	srcNested["inner"] = json.RawMessage(`{"other":true}`)
+	assert.Equal(t, `{"changed":true}`, string(nested["inner"].(json.RawMessage)),
+		"writing to the original must not reach the copy")
+}
