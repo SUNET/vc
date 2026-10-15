@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 )
 
@@ -242,6 +243,11 @@ func copyAnyValue(src any) any {
 		return copyAnyMap(typed)
 
 	case []any:
+		if typed == nil {
+			// A nil slice encodes as null and an empty one as [], so
+			// allocating here would send [] where the query said null.
+			return src
+		}
 		dst := make([]any, len(typed))
 		for i, value := range typed {
 			dst[i] = copyAnyValue(value)
@@ -249,19 +255,71 @@ func copyAnyValue(src any) any {
 		return dst
 
 	default:
-		encoded, err := json.Marshal(typed)
-		if err != nil {
-			// Unreachable for a tree that came off the wire or out of
-			// configuration; aliasing the original is better than losing
-			// it.
-			return src
-		}
-		var value any
-		if err := decodeExact(encoded, &value); err != nil {
-			return src
-		}
-		return value
+		return copyTypedContainer(src)
 	}
+}
+
+// copyTypedContainer copies a map or slice whose element type is concrete,
+// which the cases above cannot name.
+//
+// map[string]json.RawMessage and []json.RawMessage are the ones a caller
+// is likely to build, and sending them through the encoding would re-parse
+// the raw leaves inside them - collapsing a duplicate member exactly as
+// copying the whole tree through the encoding used to. The container is
+// copied by reflection while every element goes back through
+// copyAnyValue, so a raw leaf survives at any depth inside a typed one.
+//
+// Anything that is not a map or a slice, or whose elements will not fit
+// back into it, still goes through the encoding: a shape this build does
+// not model is normalised rather than aliased.
+func copyTypedContainer(src any) any {
+	value := reflect.ValueOf(src)
+	kind := value.Kind()
+	if kind != reflect.Map && kind != reflect.Slice {
+		return encodeCopy(src)
+	}
+	if value.IsNil() {
+		return src
+	}
+
+	element := value.Type().Elem()
+	if kind == reflect.Map {
+		dst := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for iter := value.MapRange(); iter.Next(); {
+			copied := reflect.ValueOf(copyAnyValue(iter.Value().Interface()))
+			if !copied.IsValid() || !copied.Type().AssignableTo(element) {
+				return encodeCopy(src)
+			}
+			dst.SetMapIndex(iter.Key(), copied)
+		}
+		return dst.Interface()
+	}
+
+	dst := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+	for i := range value.Len() {
+		copied := reflect.ValueOf(copyAnyValue(value.Index(i).Interface()))
+		if !copied.IsValid() || !copied.Type().AssignableTo(element) {
+			return encodeCopy(src)
+		}
+		dst.Index(i).Set(copied)
+	}
+	return dst.Interface()
+}
+
+// encodeCopy copies through the encoding, normalising a shape this build
+// does not model rather than aliasing it.
+func encodeCopy(src any) any {
+	encoded, err := json.Marshal(src)
+	if err != nil {
+		// Unreachable for a tree that came off the wire or out of
+		// configuration; aliasing the original is better than losing it.
+		return src
+	}
+	var value any
+	if err := decodeExact(encoded, &value); err != nil {
+		return src
+	}
+	return value
 }
 
 // copyDCQL creates a deep copy of a DCQL query

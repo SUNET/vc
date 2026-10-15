@@ -711,10 +711,11 @@ func mergeExtraYAML(m map[string]any, extra map[string]any, reserved map[string]
 		}
 		m[key] = extra[key]
 	}
-	if err := checkYAMLRendersNumbersExactly(m, what, nil); err != nil {
+	normalised, err := checkYAMLRendersNumbersExactly(m, what, nil)
+	if err != nil {
 		return nil, err
 	}
-	return m, nil
+	return normalised, nil
 }
 
 // checkYAMLRendersNumbersExactly refuses to emit a number yaml.v2 would
@@ -732,7 +733,7 @@ func mergeExtraYAML(m map[string]any, extra map[string]any, reserved map[string]
 // is with nothing malformed to point at. Every other path keeps them
 // exact - the YAML decode keeps the lexeme, JSON keeps the literal - so
 // this is the one place where the honest answer is to stop.
-func checkYAMLRendersNumbersExactly(value any, what string, path []string) error {
+func checkYAMLRendersNumbersExactly(value any, what string, path []string) (any, error) {
 	// Normalised first, so the walk below sees one shape of container
 	// whatever the caller assembled. Without this it descended only
 	// map[string]any and []any, and a TYPED container - a
@@ -745,13 +746,26 @@ func checkYAMLRendersNumbersExactly(value any, what string, path []string) error
 	// kind of correctness that holds until someone adds a third caller.
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("%s: %w", what, err)
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	// Before the normalisation below, which would drop one silently. A
+	// raw leaf is embedded verbatim by Marshal, so a duplicate inside one
+	// surfaces here whatever container it sat in and however deep.
+	if hasDuplicateMembers(encoded) {
+		return nil, fmt.Errorf("%s: this names a member more than once, which YAML cannot write without dropping one", what)
 	}
 	var normalised any
 	if err := decodeExact(encoded, &normalised); err != nil {
-		return fmt.Errorf("%s: %w", what, err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
-	return walkYAMLNumbers(normalised, what, path)
+	if err := walkYAMLNumbers(normalised, what, path); err != nil {
+		return nil, err
+	}
+	// The NORMALISED tree, not the caller's. The check above ran on this
+	// shape while the caller went on to hand yaml.v2 its own containers,
+	// where a json.RawMessage is a []byte - written out as a sequence of
+	// byte integers rather than the object it encodes.
+	return normalised, nil
 }
 
 func walkYAMLNumbers(value any, what string, path []string) error {
