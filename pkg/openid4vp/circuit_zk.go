@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	yamlv2 "gopkg.in/yaml.v2"
 )
 
 // FormatCircuitZk is the DCQL format identifier for a zero-knowledge
@@ -549,6 +551,9 @@ func (r ReqItem) MarshalYAML() (any, error) {
 
 // UnmarshalYAML captures every member other than the modelled ones.
 func (r *ReqItem) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseDuplicateYAMLKeys(unmarshal, "req item"); err != nil {
+		return err
+	}
 	type plain ReqItem // no methods, so yaml.v2 uses the struct tags
 	var known plain
 	if err := unmarshal(&known); err != nil {
@@ -630,6 +635,9 @@ func (c CircuitZkFormat) MarshalYAML() (any, error) {
 // including the rulebook example's fn_id and input, which is the shape an
 // operator is most likely to need and the one this could not express.
 func (c *CircuitZkFormat) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseDuplicateYAMLKeys(unmarshal, "circuit_zk client metadata"); err != nil {
+		return err
+	}
 	if err := refuseNullFiltersYAML(unmarshal, "circuit_zk client metadata",
 		"circuit_proof_system_values", "circuit_id_values"); err != nil {
 		return err
@@ -647,6 +655,60 @@ func (c *CircuitZkFormat) UnmarshalYAML(unmarshal func(any) error) error {
 		return err
 	}
 	c.Extra = extra
+	return nil
+}
+
+// refuseDuplicateYAMLKeys reports a mapping key repeated at any depth.
+//
+// yaml.v2's non-strict Unmarshal keeps the LAST of a repeated key, and
+// the configuration loaders use it, so
+//
+//	circuit_id_values: []
+//	circuit_id_values: [urn:unexpected]
+//
+// loaded cleanly and emitted only the second - a filter matching NOTHING
+// replaced by one that permits that circuit, with nothing malformed to
+// point at. A repeated nested parameter went the same way, and a proof
+// input quietly taking its last spelling is the same defect one level
+// down.
+//
+// MapSlice is the one decode target that keeps repeats, and yaml.v2 uses
+// it for nested mappings too once the top level asks for it, so a single
+// decode and one walk cover every depth. The JSON side refuses the same
+// shape in splitMembers; this is that guard for the other format.
+func refuseDuplicateYAMLKeys(unmarshal func(any) error, what string) error {
+	var document yamlv2.MapSlice
+	if err := unmarshal(&document); err != nil {
+		return nil // not a mapping; the typed decode reports it
+	}
+	return walkYAMLDuplicates(document, what, nil)
+}
+
+func walkYAMLDuplicates(value any, what string, path []string) error {
+	switch typed := value.(type) {
+	case yamlv2.MapSlice:
+		seen := make(map[string]bool, len(typed))
+		for _, item := range typed {
+			key := fmt.Sprint(item.Key)
+			if seen[key] {
+				where := key
+				if len(path) > 0 {
+					where = strings.Join(append(path, key), ".")
+				}
+				return fmt.Errorf("%s: %s is named more than once, and YAML keeps only the last", what, where)
+			}
+			seen[key] = true
+			if err := walkYAMLDuplicates(item.Value, what, append(path, key)); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, item := range typed {
+			if err := walkYAMLDuplicates(item, what, append(path, strconv.Itoa(i))); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

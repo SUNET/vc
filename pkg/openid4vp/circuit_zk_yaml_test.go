@@ -1062,3 +1062,49 @@ func TestYAMLEmitsRawLeavesAsTheObjectsTheyEncode(t *testing.T) {
 		assert.Contains(t, err.Error(), "more than once")
 	})
 }
+
+// A repeated YAML key keeps only the last, so it is refused.
+//
+// The configuration loaders use yaml.v2's NON-strict Unmarshal, which
+// takes the last of a repeated key without complaint. An operator writing
+// circuit_id_values twice got the second silently - an empty filter,
+// which matches nothing, replaced by one that permits a circuit. The same
+// applied to a repeated nested parameter, which is a proof input.
+func TestDuplicateYAMLKeysAreRefused(t *testing.T) {
+	t.Run("metadata filter", func(t *testing.T) {
+		var f CircuitZkFormat
+		err := yamlv2.Unmarshal([]byte("circuit_id_values: []\ncircuit_id_values: [urn:unexpected]\n"), &f)
+		require.Error(t, err, "an empty filter must not be replaced by a repeat of itself")
+		assert.Contains(t, err.Error(), "named more than once")
+		assert.Contains(t, err.Error(), "circuit_id_values")
+	})
+
+	t.Run("the other filter", func(t *testing.T) {
+		var f CircuitZkFormat
+		err := yamlv2.Unmarshal([]byte("circuit_proof_system_values: []\ncircuit_proof_system_values: [x]\n"), &f)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "named more than once")
+	})
+
+	t.Run("nested parameter", func(t *testing.T) {
+		var item ReqItem
+		err := yamlv2.Unmarshal([]byte("id: age_check\nreturn: a\nparams:\n  ge: '2013-10-09'\n  ge: '2020-01-01'\n"), &item)
+		require.Error(t, err, "a repeated proof input must not take its last spelling silently")
+		assert.Contains(t, err.Error(), "named more than once")
+		assert.Contains(t, err.Error(), "params.ge", "the path should say where it is")
+	})
+
+	t.Run("inside a sequence", func(t *testing.T) {
+		var f CircuitZkFormat
+		err := yamlv2.Unmarshal([]byte("future:\n  - k: 1\n    k: 2\n"), &f)
+		require.Error(t, err, "depth and sequences must not hide a repeat")
+		assert.Contains(t, err.Error(), "named more than once")
+	})
+
+	t.Run("a document with no repeats still loads", func(t *testing.T) {
+		var item ReqItem
+		require.NoError(t, yamlv2.Unmarshal([]byte("id: age_check\nreturn: a\nparams:\n  ge: '2013-10-09'\n  le: '2020-01-01'\n"), &item))
+		assert.Equal(t, "age_check", item.ID)
+		assert.Len(t, item.Params, 2)
+	})
+}
