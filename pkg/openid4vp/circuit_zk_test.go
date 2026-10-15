@@ -989,3 +989,51 @@ func TestNullFiltersAreRefusedNotRepaired(t *testing.T) {
 		assert.JSONEq(t, `{"circuit_id_values":[]}`, string(encoded))
 	})
 }
+
+// countingHolder is a struct mixing a scalar with a raw leaf - the shape
+// that defeated the struct copy. namedCount checks a NAMED scalar too,
+// which naming concrete types rather than testing the kind would miss.
+type (
+	namedCount     int
+	countingHolder struct {
+		Count   namedCount      `json:"count"`
+		Plain   int             `json:"plain"`
+		Payload json.RawMessage `json:"payload"`
+	}
+)
+
+// A scalar beside a raw leaf must not condemn the whole container.
+//
+// Sending a scalar through the encoding changes its TYPE - an int comes
+// back a json.Number - which is not assignable to the field it came from,
+// so the struct holding it failed the assignability check and went to the
+// encoding whole. The raw payload was then collapsed because of the
+// integer sitting next to it.
+func TestCopyPreservesRawLeavesBesideScalars(t *testing.T) {
+	const duplicate = `{"x":1,"x":2}`
+
+	t.Run("struct", func(t *testing.T) {
+		src := map[string]any{"s": countingHolder{Count: 7, Plain: 9, Payload: json.RawMessage(duplicate)}}
+		out, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Contains(t, string(out), duplicate, "a scalar field must not cost the raw leaf beside it")
+
+		copied, ok := copyAnyMap(src)["s"].(countingHolder)
+		require.True(t, ok, "the struct keeps its type through the copy")
+		assert.Equal(t, namedCount(7), copied.Count, "a named scalar survives as itself")
+		assert.Equal(t, 9, copied.Plain)
+	})
+
+	t.Run("scalars keep their Go type", func(t *testing.T) {
+		assert.Equal(t, 42, copyAnyValue(42), "an int must stay an int, not become a json.Number")
+		assert.Equal(t, namedCount(3), copyAnyValue(namedCount(3)), "a named scalar stays itself")
+		assert.Equal(t, uint8(5), copyAnyValue(uint8(5)))
+	})
+
+	t.Run("typed scalar container", func(t *testing.T) {
+		src := map[string]any{"m": map[string]int{"a": 1}}
+		copied, ok := copyAnyMap(src)["m"].(map[string]int)
+		require.True(t, ok, "a map of scalars keeps its type instead of being normalised")
+		assert.Equal(t, 1, copied["a"])
+	})
+}

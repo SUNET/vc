@@ -287,6 +287,24 @@ func copyTypedContainer(src any) any {
 	value := reflect.ValueOf(src)
 	kind := value.Kind()
 
+	// A SCALAR is immutable, so sharing one is not aliasing - and this
+	// has to come first, because sending one through the encoding changes
+	// its TYPE. An int came back as a json.Number, which is not
+	// assignable to int, so the container holding it failed the
+	// assignability check below and was condemned to the encoding whole:
+	// a struct with a Count int beside a raw payload had the payload
+	// collapsed because of the Count. Testing the KIND rather than naming
+	// types also covers a named scalar, say type Count int.
+	switch kind {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128,
+		reflect.String:
+		return src
+	}
+
 	// A POINTER to a raw leaf is a raw leaf. *json.RawMessage went
 	// straight to the encoding, where re-parsing collapsed a duplicate
 	// member exactly as it did for the value form - so a template
