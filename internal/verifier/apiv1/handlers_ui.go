@@ -427,6 +427,13 @@ type UIInteractionRequest struct {
 	// reload mid-flow does not orphan the wallet's outstanding scan.
 	// Otherwise a fresh session id is minted and returned in the reply.
 	SessionID string `json:"session_id,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// Payment, when set, makes this an EC TS12 payment SCA request: a
+	// urn:eudi:sca:payment:1 transaction_data entry is added to the request
+	// and the response is validated against it. Requires verifier.ts12.enable.
+	// A payment is never served from a reused session: every payment request
+	// is a new transaction.
+	Payment *UIPaymentRequest `json:"payment,omitempty" validate:"omitempty"`
 }
 
 type UIInteractionReply struct {
@@ -467,6 +474,12 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// same shape before we can compare them for equality.
 	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
+	// A payment is a new transaction every time, so it never joins a reused
+	// session; tryReuseInFlightSession in turn refuses to hand a payment
+	// session to a request that did not ask for one.
+	if req.Payment != nil {
+		req.SessionID = ""
+	}
 	if reply, ok, err := c.tryReuseInFlightSession(ctx, req); err != nil {
 		return nil, err
 	} else if ok {
@@ -510,6 +523,20 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		}
 	}
 
+	// The entries are encoded once, here, and these exact strings go into the
+	// request object AND the session: OpenID4VP hashes the string as
+	// received, so what we compare the wallet's hashes against must be the
+	// bytes we sent, not a later re-encoding.
+	var transactionData []string
+	if req.Payment != nil {
+		var err error
+		transactionData, err = c.buildPaymentTransactionData(req.Payment, req.DCQLQuery)
+		if err != nil {
+			c.log.Error(err, "rejected a payment request")
+			return nil, err
+		}
+	}
+
 	// Collect all credential IDs from DCQL query
 	scopes := make([]string, 0, len(req.DCQLQuery.Credentials))
 	for _, credential := range req.DCQLQuery.Credentials {
@@ -530,13 +557,14 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// which types were asked for, whether holder binding was required.
 		// Without it here the request object cache is the only copy, and the
 		// verification path cannot see what it is checking against.
-		DCQLQuery:  req.DCQLQuery,
-		Code:       "",
-		RequestURI: "",
-		WalletURI:  "",
-		Forfeited:  false,
-		State:      state,
-		ClientID:   uiClientID,
+		DCQLQuery:       req.DCQLQuery,
+		TransactionData: transactionData,
+		Code:            "",
+		RequestURI:      "",
+		WalletURI:       "",
+		Forfeited:       false,
+		State:           state,
+		ClientID:        uiClientID,
 		// How long the user has to complete the presentation.
 		//
 		// This was 0, and isSessionActive reads 0 as "never expires" - so
@@ -624,6 +652,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		RedirectURI:      "",
 		Scope:            "",
 		DCQLQuery:        req.DCQLQuery,
+		TransactionData:  transactionData,
 		RequestURIMethod: "",
 		VerifierInfo:     c.registrationCertificate.VerifierInfo(),
 	}
@@ -709,6 +738,11 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 		return nil, false, err
 	}
 	if authCtx == nil {
+		return nil, false, nil
+	}
+	// A payment session belongs to its payment. Serving it to a request that
+	// did not ask for one would present an old transaction as a new request.
+	if len(authCtx.TransactionData) > 0 {
 		return nil, false, nil
 	}
 	if !isReusableAuthContext(authCtx) {

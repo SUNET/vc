@@ -1,0 +1,125 @@
+package apiv1
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/SUNET/vc/pkg/openid4vp"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func scaDCQL(id string) *openid4vp.DCQL {
+	return &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID:     id,
+		Format: openid4vp.FormatSDJWTVC,
+		Meta:   openid4vp.MetaQuery{VCTValues: []string{"https://psp.example/sca"}},
+	}}}
+}
+
+func testPayment() *UIPaymentRequest {
+	return &UIPaymentRequest{Amount: "49.99", Currency: "EUR", PayeeName: "Shop AB", PayeeID: "SE1234567890"}
+}
+
+func TestUIInteraction_PaymentSendsAndRemembersTheSameStrings(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+	client.cfg.Verifier.TS12.Enable = true
+
+	reply, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), Payment: testPayment()})
+	require.NoError(t, err)
+
+	authCtx, err := client.cacheService.AuthContext.GetByID(ctx, reply.SessionID)
+	require.NoError(t, err)
+	require.Len(t, authCtx.TransactionData, 1)
+
+	ro, ok := client.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID)
+	require.True(t, ok)
+	assert.Equal(t, authCtx.TransactionData, ro.TransactionData, "the session must hold the very strings the wallet was sent")
+
+	dec, err := base64.RawURLEncoding.DecodeString(ro.TransactionData[0])
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(dec, &m))
+	assert.Equal(t, openid4vp.TS12TypePayment, m["type"])
+	assert.Equal(t, []any{"sca"}, m["credential_ids"])
+	assert.Equal(t, []any{"sha-256"}, m["transaction_data_hashes_alg"])
+	payload := m["payload"].(map[string]any)
+	assert.Equal(t, 49.99, payload["amount"])
+	assert.Equal(t, "EUR", payload["currency"])
+	assert.NotEmpty(t, payload["transaction_id"])
+}
+
+func TestUIInteraction_PaymentRefusals(t *testing.T) {
+	ctx := t.Context()
+
+	multi := scaDCQL("sca")
+	multi.Credentials = append(multi.Credentials, openid4vp.CredentialQuery{ID: "age", Format: openid4vp.FormatSDJWTVC, Meta: openid4vp.MetaQuery{VCTValues: []string{"x"}}})
+	mdoc := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{ID: "m", Format: "mso_mdoc", Meta: openid4vp.MetaQuery{DoctypeValue: "org.iso.18013.5.1.mDL"}}}}
+	noBinding := scaDCQL("sca")
+	f := false
+	noBinding.Credentials[0].RequireCryptographicHolderBinding = &f
+
+	cases := map[string]struct {
+		enable bool
+		dcql   *openid4vp.DCQL
+		mut    func(p *UIPaymentRequest)
+	}{
+		"feature disabled":                  {false, scaDCQL("sca"), nil},
+		"two queries without credential_id": {true, multi, nil},
+		"unknown credential_id":             {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.CredentialID = "nope" }},
+		"mdoc is out of TS12 scope":         {true, mdoc, nil},
+		"holder binding disabled":           {true, noBinding, nil},
+		"bad currency":                      {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Currency = "euro" }},
+		"zero amount":                       {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Amount = "0" }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newSigningTestClient(t)
+			client.cfg.Verifier.TS12.Enable = tc.enable
+			p := testPayment()
+			if tc.mut != nil {
+				tc.mut(p)
+			}
+			_, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: tc.dcql, Payment: p})
+			require.Error(t, err)
+			oe, ok := errors.AsType[*OAuthError](err)
+			require.True(t, ok, "a client mistake must be a 400, got %v", err)
+			assert.Equal(t, 400, oe.HTTPStatus)
+		})
+	}
+
+	t.Run("multi query accepted when credential_id names the SCA one", func(t *testing.T) {
+		client := newSigningTestClient(t)
+		client.cfg.Verifier.TS12.Enable = true
+		p := testPayment()
+		p.CredentialID = "sca"
+		_, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: multi, Payment: p})
+		require.NoError(t, err)
+	})
+}
+
+// A payment is a new transaction each time: neither a payment request nor a
+// plain request may be answered with another transaction's session.
+func TestUIInteraction_PaymentSessionsAreNeverReused(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+	client.cfg.Verifier.TS12.Enable = true
+
+	first, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), Payment: testPayment()})
+	require.NoError(t, err)
+
+	again, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), Payment: testPayment(), SessionID: first.SessionID})
+	require.NoError(t, err)
+	assert.NotEqual(t, first.SessionID, again.SessionID)
+
+	plain, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), SessionID: first.SessionID})
+	require.NoError(t, err)
+	assert.NotEqual(t, first.SessionID, plain.SessionID, "a non-payment request must not be served a payment session")
+	authCtx, err := client.cacheService.AuthContext.GetByID(ctx, plain.SessionID)
+	require.NoError(t, err)
+	assert.Empty(t, authCtx.TransactionData)
+}

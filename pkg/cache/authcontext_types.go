@@ -155,6 +155,11 @@ type AuthorizationContext struct {
 	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	// TransactionData holds the transaction_data entries exactly as sent in
+	// the request: base64url strings, in request order. OpenID4VP 1.0
+	// Appendix B hashes the string as received, so validation must use these
+	// bytes and never a re-encoding of a decoded object.
+	TransactionData []string `json:"transaction_data,omitempty" bson:"transaction_data,omitempty"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//
