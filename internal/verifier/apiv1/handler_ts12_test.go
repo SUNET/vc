@@ -71,14 +71,17 @@ func TestUIInteraction_PaymentRefusals(t *testing.T) {
 		dcql   *openid4vp.DCQL
 		mut    func(p *UIPaymentRequest)
 	}{
-		"feature disabled":                  {false, scaDCQL("sca"), nil},
-		"two queries without credential_id": {true, multi, nil},
-		"unknown credential_id":             {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.CredentialID = "nope" }},
-		"duplicate credential query id":     {true, dup, func(p *UIPaymentRequest) { p.CredentialID = "sca" }},
-		"mdoc is out of TS12 scope":         {true, mdoc, nil},
-		"holder binding disabled":           {true, noBinding, nil},
-		"bad currency":                      {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Currency = "euro" }},
-		"zero amount":                       {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Amount = "0" }},
+		"feature disabled":                              {false, scaDCQL("sca"), nil},
+		"two queries without credential_id":             {true, multi, nil},
+		"unknown credential_id":                         {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.CredentialID = "nope" }},
+		"duplicate credential query id":                 {true, dup, func(p *UIPaymentRequest) { p.CredentialID = "sca" }},
+		"mdoc is out of TS12 scope":                     {true, mdoc, nil},
+		"holder binding disabled":                       {true, noBinding, nil},
+		"bad currency":                                  {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Currency = "euro" }},
+		"amount is a word that trips the status mapper": {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Amount = "token" }},
+		"amount is a boolean literal":                   {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Amount = "true" }},
+		"amount is an object literal":                   {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Amount = `{"x":1}` }},
+		"zero amount":                                   {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Amount = "0" }},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -190,4 +193,12 @@ func TestUIResume_PaymentDoesNotIssueAnUnrecordedDCAPIVariant(t *testing.T) {
 	resumed, err = client.UIResume(ctx, again.SessionID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, resumed.DCAPIAuthorizationRequest)
+}
+
+func TestPaymentAmount_DecodesNumbersAndStringsWithoutJudging(t *testing.T) {
+	for in, want := range map[string]string{`49.99`: "49.99", `"49.99"`: "49.99", `49.990`: "49.990", `"token"`: "token", `true`: "true", `null`: ""} {
+		var p UIPaymentRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"amount":`+in+`}`), &p), in)
+		assert.Equal(t, PaymentAmount(want), p.Amount, in)
+	}
 }

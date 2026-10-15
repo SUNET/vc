@@ -20,7 +20,7 @@ import (
 // buildPaymentTransactionData, never the other way round.
 type UIPaymentRequest struct {
 	// Amount is the payment amount in major currency units, as a JSON number or a numeric string ("49.99"). Must be greater than zero.
-	Amount json.Number `json:"amount" validate:"required"`
+	Amount PaymentAmount `json:"amount" validate:"required"`
 	// Currency is an ISO 4217 alpha-3 code.
 	Currency string `json:"currency" validate:"required"`
 	// PayeeName and PayeeID are REQUIRED by the TS12 payment schema.
@@ -31,6 +31,31 @@ type UIPaymentRequest struct {
 	TransactionID string `json:"transaction_id,omitempty" validate:"omitempty,max=36"`
 	// CredentialID is the DCQL credential query id of the SCA attestation that authorizes the payment. Required when the DCQL query has more than one credential query.
 	CredentialID string `json:"credential_id,omitempty" validate:"omitempty,max=128"`
+}
+
+// PaymentAmount is the amount as the caller wrote it: a JSON number or a
+// string. Decoding keeps the literal text and judges nothing, so that a bad
+// amount ("token", true, {}) is refused by buildPaymentTransactionData as a
+// 400 invalid_request with a description, instead of failing inside the JSON
+// decoder as an error the status mapper cannot classify.
+type PaymentAmount string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (a *PaymentAmount) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*a = PaymentAmount(s)
+		return nil
+	}
+	if string(b) == "null" {
+		*a = ""
+		return nil
+	}
+	*a = PaymentAmount(b)
+	return nil
 }
 
 func invalidPayment(format string, args ...any) error {
@@ -97,7 +122,7 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 		TransactionID: txID,
 		Payee:         openid4vp.TS12Payee{Name: p.PayeeName, ID: p.PayeeID, Website: p.PayeeWebsite},
 		Currency:      p.Currency,
-		Amount:        openid4vp.RawNumber(p.Amount.String()),
+		Amount:        openid4vp.RawNumber(p.Amount),
 	}, []string{target.ID}, c.cfg.Verifier.TS12.HashAlgs)
 	if err != nil {
 		return nil, invalidPayment("%v", err)
