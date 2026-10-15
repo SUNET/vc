@@ -355,12 +355,20 @@ func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "claim-reader-handle", held.AuthSession)
 
+	// The read is ASSERTED, not discarded. `_ = held.AuthSession` is a
+	// read the compiler may remove, and a removed read races with
+	// nothing: the test would pass even if the claim mutated the context
+	// the store had handed out, which is the whole thing it exists to
+	// catch. Collecting the values and checking them afterwards makes the
+	// read observable, and also pins the snapshot - a caller holding this
+	// pointer must keep seeing the handle it fetched.
 	var wg sync.WaitGroup
+	seen := make([]string, 0, 2000)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 2000; i++ {
-			_ = held.AuthSession
+			seen = append(seen, held.AuthSession)
 		}
 	}()
 	go func() {
@@ -372,6 +380,12 @@ func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+
+	require.Len(t, seen, 2000, "the reads must actually have happened")
+	for _, got := range seen {
+		require.Equal(t, "claim-reader-handle", got,
+			"a caller holding the context it fetched must keep seeing the handle it fetched")
+	}
 
 	// And the claim did take effect in the store, so the absence of a
 	// race is not the absence of the write.
