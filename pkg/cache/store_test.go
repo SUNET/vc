@@ -326,3 +326,61 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Error(t, err)
 	})
 }
+
+// Get returns the cached pointer and then releases the lock, so a caller
+// that fetched a context is still reading the struct the store holds.
+// Claiming the handle used to WRITE into that struct, which `go test
+// -race` reports as a data race against any such reader - and a race on a
+// field that decides whether an exchange is still claimable is not a
+// theoretical one.
+//
+// The claim now replaces the stored document instead. The reader keeps a
+// consistent pre-claim snapshot; the post-claim state is reachable through
+// the cache, which is where it belongs.
+//
+// This test only means anything under -race, which is how CI runs it.
+func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:   "claim-reader-race",
+		AuthSession: "claim-reader-handle",
+		Code:        "claim-reader-code",
+	}))
+
+	// A caller that fetched the context before the claim, as every
+	// handler does.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	require.Equal(t, "claim-reader-handle", held.AuthSession)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			_ = held.AuthSession
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		claimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+		assert.NoError(t, err)
+		if claimed != nil {
+			assert.Empty(t, claimed.AuthSession, "the returned copy must not carry the handle")
+		}
+	}()
+	wg.Wait()
+
+	// And the claim did take effect in the store, so the absence of a
+	// race is not the absence of the write.
+	reclaimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+	require.ErrorIs(t, err, ErrNoDocuments, "the handle must stop resolving once claimed")
+	require.Nil(t, reclaimed)
+
+	stored, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	assert.Empty(t, stored.AuthSession, "the stored document must have had its handle cleared")
+	assert.Equal(t, "claim-reader-code", stored.Code, "and nothing else")
+}

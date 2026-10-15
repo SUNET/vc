@@ -344,10 +344,25 @@ func normalizeURIForComparison(raw string) (string, bool) {
 		// A Unicode host and its A-label are the same host.
 		host = ascii
 	} else {
-		// ToASCII only ever narrows the spelling, so a failure leaves a
-		// lowercased form rather than rejecting a proof over it - the
-		// case of a host is insignificant either way (RFC 3986 §6.2.2.1).
-		host = strings.ToLower(host)
+		// ToASCII refuses more hosts than a deployment actually uses - an
+		// underscore anywhere in the name is enough - so a failure folds
+		// case rather than rejecting a proof over it. The case of a host
+		// is insignificant either way (RFC 3986 §6.2.2.1).
+		//
+		// ASCII-ONLY, which is the whole point of the helper. Go's
+		// strings.ToLower maps "İ" (U+0130) to "i", so on this path
+		// "İ.my_host.example" and "i.my_host.example" folded to one
+		// string, as did "İ_host.example" and "i_host.example" - and a
+		// proof for either satisfied the other. Those are distinct
+		// authorities whose browser spellings are "xn--i-9bb.my_host.example"
+		// and "xn--i_host-pyd.example", which is neither of them.
+		//
+		// Folding only A-Z cannot merge two hosts differing by anything
+		// but ASCII letter case, which is exactly the difference
+		// §6.2.2.1 calls insignificant. A non-ASCII host that IDNA also
+		// refuses then matches only itself - the right answer for a host
+		// this build cannot spell the way a browser would.
+		host = asciiLower(host)
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
@@ -370,6 +385,31 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	}
 
 	return scheme + "://" + host + path, true
+}
+
+// asciiLower folds A-Z and leaves every other byte alone.
+//
+// Not strings.ToLower: Unicode case folding merges characters that are
+// different hosts - U+0130 and "i" among them - and this is used where the
+// IDNA mapping has already failed, so there is nothing left to catch that.
+// RFC 3986 §6.2.2.1 makes ASCII letter case insignificant and says nothing
+// about anything else.
+func asciiLower(s string) string {
+	var folded []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 'A' || c > 'Z' {
+			continue
+		}
+		if folded == nil {
+			folded = []byte(s)
+		}
+		folded[i] = c + ('a' - 'A')
+	}
+	if folded == nil {
+		return s
+	}
+	return string(folded)
 }
 
 // normalizePercentEncoding applies the two percent-encoding rules of RFC
