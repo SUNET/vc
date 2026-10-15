@@ -72,6 +72,12 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 	if target.Format != openid4vp.FormatSDJWTVC {
 		return nil, invalidPayment("credential query %q has format %q; TS12 payment SCA requires %q", target.ID, target.Format, openid4vp.FormatSDJWTVC)
 	}
+	if len(target.Meta.VCTValues) == 0 {
+		// Without a vct constraint any credential the trust policy accepts
+		// could authorize the payment: the response check compares the
+		// presented credential's vct against these values.
+		return nil, invalidPayment("credential query %q must name the SCA attestation with meta.vct_values", target.ID)
+	}
 	if !target.RequiresCryptographicHolderBinding() {
 		return nil, invalidPayment("credential query %q disables cryptographic holder binding, which transaction_data requires", target.ID)
 	}
@@ -94,4 +100,17 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 		return nil, fmt.Errorf("encoding transaction_data: %w", err)
 	}
 	return []string{encoded}, nil
+}
+
+// issuedResponseModes are the response_mode values the verifier puts in the
+// requests it issues for /ui/interaction: direct_post.jwt behind the QR code
+// and link, and dc_api.jwt for the Digital Credentials API variant when that
+// is enabled. The response arrives at one endpoint whichever was used, so a
+// TS12 KB-JWT may echo either. Recorded on the session at issuance.
+func (c *Client) issuedResponseModes() []string {
+	modes := []string{openid4vp.ResponseModeDirectPostJWT}
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		modes = append(modes, openid4vp.ResponseModeDCAPIJWT)
+	}
+	return modes
 }
