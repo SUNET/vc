@@ -291,13 +291,12 @@ type issuanceAuthBinding struct {
 	// Key Binding JWT that actually VERIFIES against the cnf key the
 	// Issuer bound the credential to.
 	//
-	// It is a flag rather than unconditional because the two channels are
-	// not in the same position. openid4vp.VPTokenValidator checks that a
-	// key binding proof is present and reads its nonce and audience, but
-	// never verifies its signature - so on its own it establishes that
-	// somebody sent a credential and a JWT, not that the Holder presented
-	// it. A copied credential with its disclosures, plus a proof the
-	// copier signs themselves, passes.
+	// VPTokenValidator already verifies the KB-JWT signature against the
+	// credential's cnf key on both channels. This flag adds two checks
+	// the validator does not make: the cnf key is taken from the issuer
+	// JWT whose signature was just verified (not from the presented
+	// claims), and the credential must be inside its validity window
+	// (exp/nbf), which signature verification does not enforce.
 	//
 	// Interactive Authorization sets it: the endpoint is new, nothing
 	// depends on the weaker behaviour, and the whole purpose of the
