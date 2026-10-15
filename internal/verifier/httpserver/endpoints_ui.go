@@ -24,6 +24,21 @@ func (s *Service) endpointIndex(ctx context.Context, c *gin.Context) (any, error
 	return nil, nil
 }
 
+// endpointPaymentPage serves the operator test page for EC TS12 payment
+// requests. Not found unless verifier.ts12.enable is set: the page and the
+// "payment" member of /ui/interaction it drives are one feature.
+func (s *Service) endpointPaymentPage(ctx context.Context, c *gin.Context) (any, error) {
+	_, span := s.tracer.Start(ctx, "httpserver:endpointPaymentPage")
+	defer span.End()
+
+	if !s.cfg.Verifier.TS12.Enable {
+		c.AbortWithStatus(http.StatusNotFound)
+		return nil, nil
+	}
+	c.HTML(http.StatusOK, "payment.html", s.cfg.Verifier.TS12)
+	return nil, nil
+}
+
 func (s *Service) endpointUIMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointUIMetadata")
 	defer span.End()

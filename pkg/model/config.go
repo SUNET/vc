@@ -1440,7 +1440,7 @@ type TS12Config struct {
 
 	// SCAVCTValues are the vct values of the SCA attestation the operator test
 	// page requests by default. Optional; the page lets the operator type one.
-	SCAVCTValues []string `yaml:"sca_vct_values,omitempty"`
+	SCAVCTValues []string `yaml:"sca_vct_values,omitempty" json:"sca_vct_values,omitempty"`
 
 	// HashAlgs is the transaction_data_hashes_alg list sent with each payment
 	// request, in order of preference. Default ["sha-256"] (OpenID4VP 1.0

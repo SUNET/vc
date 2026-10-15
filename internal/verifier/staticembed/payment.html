@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifier - test payment (EC TS12)</title>
+    <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+</head>
+<body>
+<section class="section">
+<div class="container" style="max-width: 640px;">
+    <h1 class="title">Test payment request (EC TS12)</h1>
+    <p class="subtitle is-6">Sends a <code>urn:eudi:sca:payment:1</code> transaction_data request for an SCA attestation and shows whether the wallet's response is accepted. Test tool: enabled by <code>verifier.ts12.enable</code>.</p>
+
+    <form id="form" class="box">
+        <div class="field"><label class="label" for="amount">Amount</label>
+            <div class="control"><input class="input" id="amount" inputmode="decimal" pattern="[0-9]+(\.[0-9]+)?" value="49.99" required></div></div>
+        <div class="field"><label class="label" for="currency">Currency (ISO 4217)</label>
+            <div class="control"><input class="input" id="currency" maxlength="3" pattern="[A-Z]{3}" value="EUR" required></div></div>
+        <div class="field"><label class="label" for="payee_name">Payee name</label>
+            <div class="control"><input class="input" id="payee_name" value="Shop AB" required></div></div>
+        <div class="field"><label class="label" for="payee_id">Payee id</label>
+            <div class="control"><input class="input" id="payee_id" value="SE1234567890" required></div></div>
+        <div class="field"><label class="label" for="vct">SCA attestation vct</label>
+            <div class="control"><input class="input" id="vct" placeholder="https://psp.example/sca-attestation" required></div>
+            <p class="help">Exact vct of the attestation the wallet must present (comma separated for several).</p></div>
+        <button class="button is-link" type="submit" id="submit">Start payment</button>
+    </form>
+
+    <div id="pending" class="box" hidden>
+        <p id="summary" class="has-text-weight-bold mb-3"></p>
+        <img id="qr" alt="QR code for the payment request" style="max-width:256px">
+        <p class="mt-3"><a id="link" href="#">Open in wallet on this device</a></p>
+        <p class="help" id="status">Waiting for the wallet...</p>
+    </div>
+
+    <div id="done" class="box" hidden>
+        <p id="verdict" class="title is-5"></p>
+        <pre id="result" style="white-space:pre-wrap"></pre>
+    </div>
+    <p id="error" class="notification is-danger" hidden></p>
+</div>
+</section>
+<script>
+(function () {
+    var defaults = {{json .}};
+    var $ = function (id) { return document.getElementById(id); };
+    if (defaults && defaults.sca_vct_values && defaults.sca_vct_values.length) {
+        $("vct").value = defaults.sca_vct_values.join(",");
+    }
+    function fail(msg) {
+        $("error").textContent = msg;
+        $("error").hidden = false;
+    }
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    $("form").addEventListener("submit", async function (ev) {
+        ev.preventDefault();
+        $("error").hidden = true;
+        $("done").hidden = true;
+        $("submit").disabled = true;
+        var vcts = $("vct").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+        var body = {
+            dcql_query: { credentials: [{ id: "sca", format: "dc+sd-jwt", meta: { vct_values: vcts } }] },
+            payment: {
+                amount: $("amount").value.trim(),
+                currency: $("currency").value.trim(),
+                payee_name: $("payee_name").value.trim(),
+                payee_id: $("payee_id").value.trim(),
+                credential_id: "sca"
+            }
+        };
+        try {
+            var res = await fetch("/ui/interaction", {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+            });
+            var reply = await res.json().catch(function () { return {}; });
+            if (!res.ok) { throw new Error(reply.error_description || reply.error || ("HTTP " + res.status)); }
+            $("summary").textContent = "Pay " + body.payment.amount + " " + body.payment.currency + " to " + body.payment.payee_name;
+            $("qr").src = "data:image/png;base64," + reply.qr_code;
+            $("link").href = reply.authorization_request;
+            $("pending").hidden = false;
+            await poll(reply.session_id);
+        } catch (e) {
+            fail("Could not start the payment request: " + e.message);
+        } finally {
+            $("submit").disabled = false;
+        }
+    });
+
+    async function poll(sessionID) {
+        // /ui/completion answers {"status":"pending"} until the wallet's response has been accepted.
+        // A refused response leaves it pending: the reason is in the verifier log (invalid_transaction_data).
+        for (var i = 0; i < 150; i++) {
+            var res = await fetch("/ui/completion?session_id=" + encodeURIComponent(sessionID), { cache: "no-store" });
+            if (res.ok) {
+                var c = await res.json();
+                if (c.status === "complete") { return show(c.response_code); }
+            }
+            await sleep(2000);
+        }
+        $("status").textContent = "Timed out waiting for the wallet. If the wallet answered, the verifier refused the response: see its log.";
+    }
+
+    async function show(code) {
+        var res = await fetch("/ui/result?response_code=" + encodeURIComponent(code), { cache: "no-store" });
+        $("pending").hidden = true;
+        $("done").hidden = false;
+        if (!res.ok) { $("verdict").textContent = "Result not available (HTTP " + res.status + ")"; return; }
+        $("verdict").textContent = "Payment authorised: the wallet's response was accepted";
+        $("result").textContent = JSON.stringify(await res.json(), null, 2);
+    }
+})();
+</script>
+</body>
+</html>
