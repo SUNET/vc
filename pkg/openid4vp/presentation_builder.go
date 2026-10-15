@@ -353,6 +353,11 @@ func copyTypedContainer(src any) any {
 		for i := range structType.NumField() {
 			field := structType.Field(i)
 			if !field.IsExported() {
+				// Reflection can neither read nor set one, so the whole
+				// struct goes to encodeCopy - which now keeps it as the
+				// bytes it marshals to, so the raw leaves inside survive
+				// anyway. A custom marshaller reading unexported state
+				// takes the same route and keeps its derived output.
 				return encodeCopy(src)
 			}
 			copied, ok := copyReflected(value.Field(i).Interface(), field.Type)
@@ -428,11 +433,13 @@ func encodeCopy(src any) any {
 		// configuration; aliasing the original is better than losing it.
 		return src
 	}
-	var value any
-	if err := decodeExact(encoded, &value); err != nil {
-		return src
-	}
-	return value
+	// As BYTES, not re-parsed. Re-parsing them was the whole defect: a
+	// duplicate member, member order and a number's spelling are all lost
+	// by a decode, and a value that reaches here is precisely the one
+	// nothing else knows how to preserve. Held as a json.RawMessage the
+	// copy marshals to the same bytes as the original, which is all this
+	// copy has ever needed to guarantee.
+	return json.RawMessage(encoded)
 }
 
 // copyDCQL creates a deep copy of a DCQL query

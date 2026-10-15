@@ -922,13 +922,20 @@ func TestCopyPreservesRawLeavesInArraysAndStructs(t *testing.T) {
 			"writing to the copied struct must not reach the original")
 	})
 
-	t.Run("a struct with an unexported field is normalised, not silently truncated", func(t *testing.T) {
-		src := map[string]any{"s": privateHolder{Payload: json.RawMessage(`{"z":1}`), hidden: "x"}}
-		out, err := json.Marshal(copyAnyMap(src))
+	t.Run("an unexported field must not cost the raw leaf beside it", func(t *testing.T) {
+		const duplicate = `{"z":1,"z":2}`
+		src := map[string]any{"s": privateHolder{Payload: json.RawMessage(duplicate), hidden: "x"}}
+
+		// encoding/json ignores an unexported field, so it was never in
+		// the output this copy exists to preserve - and refusing the
+		// whole struct over it cost the payload and saved nothing.
+		before, err := json.Marshal(src)
 		require.NoError(t, err)
-		// Reflection can neither read nor set the unexported field, so
-		// this falls back to the encoding rather than dropping it.
-		assert.Contains(t, string(out), `"payload"`)
+		after, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after),
+			"the copy must marshal exactly as the original did")
+		assert.Contains(t, string(after), duplicate)
 	})
 }
 
@@ -1088,5 +1095,37 @@ func TestDuplicateMembersAreRefusedAcrossEveryBag(t *testing.T) {
 		err := json.Unmarshal([]byte(`{"id":"age_check","ext":{"x":1,"x":2}}`), &item)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "more than once")
+	})
+}
+
+// derivedHolder marshals from unexported state, so its output cannot be
+// rebuilt from its exported fields.
+type derivedHolder struct {
+	Payload json.RawMessage `json:"payload"`
+	hidden  string
+}
+
+func (d derivedHolder) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{"payload": d.Payload, "derived": d.hidden})
+}
+
+// Whatever cannot be copied structurally is kept as the bytes it marshals
+// to, rather than re-parsed.
+//
+// Re-parsing was the defect itself: a value reaching the fallback is
+// exactly the one nothing else knows how to preserve, so decoding it
+// there threw away the duplicate members, member order and number
+// spellings that the fallback was supposed to be protecting.
+func TestFallbackKeepsBytesRatherThanReparsingThem(t *testing.T) {
+	t.Run("a custom marshaller keeps its derived output AND its payload", func(t *testing.T) {
+		src := map[string]any{"d": derivedHolder{Payload: json.RawMessage(`{"y":1,"y":2}`), hidden: "derived-value"}}
+		before, err := json.Marshal(src)
+		require.NoError(t, err)
+		after, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after),
+			"neither the derived member nor the duplicate payload may be lost")
+		assert.Contains(t, string(after), `{"y":1,"y":2}`)
+		assert.Contains(t, string(after), "derived-value")
 	})
 }
