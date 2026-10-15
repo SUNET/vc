@@ -206,3 +206,87 @@ func TestEndpointOAuthAuthorizationChallenge_RateLimited(t *testing.T) {
 	assert.Equal(t, 3, api.calls,
 		"a rate limited request must not reach OAuthAuthorizationChallenge")
 }
+
+// The Authorization Challenge Endpoint speaks JSON in both directions,
+// whatever the Accept header says. It is a protocol endpoint a wallet
+// posts to, not a page a browser navigates to.
+//
+// Without authorize-challenge in the renderer's JSON-only list, Accept:
+// text/plain reached the "%v" branch and a successful exchange came back
+// as "&{the-code}" - a 200 no wallet can read the authorization code out
+// of - and Accept: text/html produced the shared HTML error page.
+func TestEndpointAuthorizationChallenge_IsJSONWhateverTheAcceptHeaderSays(t *testing.T) {
+	for _, accept := range []string{
+		"text/plain",
+		"text/html",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", // a browser's
+		"application/json",
+		"*/*",
+		"",
+	} {
+		t.Run("Accept: "+accept, func(t *testing.T) {
+			api := &challengeAPI{reply: &apiv1.AuthorizationChallengeResponse{AuthorizationCode: "the-code"}}
+
+			headers := map[string]string{}
+			if accept != "" {
+				headers["Accept"] = accept
+			}
+			w := postChallenge(t, challengeEngine(t, api), url.Values{"auth_session": {"opaque-handle"}}, headers)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+
+			body := map[string]any{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body),
+				"the body must be JSON, got %q", w.Body.String())
+			assert.Equal(t, "the-code", body["authorization_code"])
+		})
+	}
+}
+
+// A body this endpoint cannot read is a malformed request, and the wallet
+// is told so in OAuth's own terms.
+//
+// Returned bare, the binding failure went to the generic renderer and came
+// back as {"error":{"title":"internal_server_error","details":{}}} - a 400
+// whose body blames the server, in a shape no OAuth client parses - and
+// with Accept: text/html it came back as an 8 KB HTML error page.
+func TestEndpointAuthorizationChallenge_MalformedBodyIsAnOAuthError(t *testing.T) {
+	for _, tc := range []struct{ name, body, accept string }{
+		{name: "a malformed escape", body: "response_type=%ZZ"},
+		{name: "a malformed escape, asking for HTML", body: "response_type=%ZZ", accept: "text/html"},
+		{name: "a malformed escape, asking for text", body: "response_type=%ZZ", accept: "text/plain"},
+		{name: "a stray percent", body: "client_id=wallet%"},
+		{name: "a semicolon separator, which Go refuses", body: "a=1;b=2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &challengeAPI{}
+			engine := challengeEngine(t, api)
+
+			req := httptest.NewRequest(http.MethodPost, "/authorize-challenge", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if tc.accept != "" {
+				req.Header.Set("Accept", tc.accept)
+			}
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Header().Get("Content-Type"), "application/json",
+				"a protocol endpoint answers in JSON, got %q", w.Header().Get("Content-Type"))
+
+			var oauthErr oauth2.OAuthError
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oauthErr),
+				"the body must be an OAuth error, got %q", w.Body.String())
+			assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+			assert.NotEmpty(t, oauthErr.ErrorDescription)
+
+			assert.NotContains(t, w.Body.String(), "internal_server_error",
+				"a body the server cannot read is the request's fault, not the server's")
+			assert.NotContains(t, w.Body.String(), tc.body,
+				"the description must not echo the bytes it could not read back at the sender")
+
+			assert.Zero(t, api.calls, "a request that did not bind must not reach the handler")
+		})
+	}
+}

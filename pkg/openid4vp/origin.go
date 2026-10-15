@@ -85,21 +85,8 @@ func CanonicalOrigin(rawURL string) (string, error) {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
 	case endsInANumber(host):
-		// A host whose last label is a number is an IPv4 address to a
-		// browser, not a domain name, and it applies its own parser:
-		// "127.1" and "0x7f.1" both become "127.0.0.1". IDNA would leave
-		// either spelling untouched, so the origin published here would
-		// be one no browser ever reports.
-		//
-		// Refused rather than canonicalised. The spellings a browser
-		// accepts are a long tail of octal, hexadecimal and short forms,
-		// and a canonicaliser that got one of them wrong would quietly
-		// produce a WRONG origin - which is worse than none, because an
-		// origin is only ever used to decide that two things match. An
-		// operator who wrote a numeric host meant an address, and the
-		// dotted-quad spelling of it is unambiguous.
-		if _, err := canonicalIPv4(host); err != nil {
-			return "", fmt.Errorf("the host of %q is a numeric address a browser would rewrite: %w", rawURL, err)
+		if err := refuseRewritableNumericHost(host, rawURL); err != nil {
+			return "", err
 		}
 	default:
 		// ToASCII does the case folding too, as part of the UTS #46
@@ -107,6 +94,21 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		host, err = browserHost.ToASCII(host)
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
+		}
+		// The mapping can PRODUCE a numeric host, so the check above has
+		// to be made again on its output.
+		//
+		// The switch asks whether the host as written ends in a number,
+		// and fullwidth digits are not ASCII digits, so "１２７.１" takes
+		// this branch - and UTS #46 maps it to "127.1", a host a browser
+		// parses as 127.0.0.1. Checking only before the mapping published
+		// "https://127.1" as an expected origin and as an Interactive
+		// Authorization audience, which no browser will ever report,
+		// while the ASCII spelling of the very same host was refused.
+		if endsInANumber(host) {
+			if err := refuseRewritableNumericHost(host, rawURL); err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -119,6 +121,27 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		origin += ":" + port
 	}
 	return origin, nil
+}
+
+// refuseRewritableNumericHost refuses a host a browser would parse as an
+// IPv4 address and rewrite.
+//
+// A host whose last label is a number is an address to a browser, not a
+// domain name, and it applies its own parser: "127.1" and "0x7f.1" both
+// become "127.0.0.1". Nothing here rewrites them, so the origin published
+// would be one no browser ever reports.
+//
+// Refused rather than canonicalised. The spellings a browser accepts are a
+// long tail of octal, hexadecimal and short forms, and a canonicaliser
+// that got one of them wrong would quietly produce a WRONG origin - which
+// is worse than none, because an origin is only ever used to decide that
+// two things match. An operator who wrote a numeric host meant an address,
+// and the dotted-quad spelling of it is unambiguous.
+func refuseRewritableNumericHost(host, rawURL string) error {
+	if _, err := canonicalIPv4(host); err != nil {
+		return fmt.Errorf("the host of %q is a numeric address a browser would rewrite: %w", rawURL, err)
+	}
+	return nil
 }
 
 // normalizePort strips the leading zeroes a URL parser does not keep.

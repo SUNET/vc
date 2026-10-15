@@ -131,3 +131,101 @@ func TestIsInteractiveAuthorization(t *testing.T) {
 		assert.False(t, IsInteractiveAuthorization(mode), mode)
 	}
 }
+
+// The Authorization Challenge Endpoint verifies holder binding, so its
+// request has to say so. The query it is built from is shared with the
+// browser channel, which sets require_cryptographic_holder_binding to
+// false - so without this the request invites the wallet to select an
+// unbound credential and the endpoint then refuses it, after the user has
+// consented and answered.
+//
+// Both halves are asserted: the flag the wallet reads, and the original
+// query's preservation. A variant built by mutating the shared query in
+// place would satisfy the first assertion alone while changing what the
+// browser channel asks for.
+func TestWithInteractiveAuthorizationRequiresHolderBinding(t *testing.T) {
+	shared := &DCQL{Credentials: []CredentialQuery{
+		{ID: "pid", Format: "dc+sd-jwt", RequireCryptographicHolderBinding: new(false)},
+		{ID: "eduid", Format: "dc+sd-jwt"}, // omitted: §6.1 default is true
+	}}
+	base := &RequestObject{
+		ResponseURI:  "https://issuer.example.com/verification/direct_post",
+		ClientID:     "x509_san_dns:issuer.example.com",
+		ResponseType: "vp_token",
+		ResponseMode: ResponseModeDirectPostJWT,
+		Nonce:        "nonce-1",
+		DCQLQuery:    shared,
+	}
+
+	variant := base.WithInteractiveAuthorization(ResponseModeIAPostJWT, "https://issuer.example.com")
+	require.NotNil(t, variant)
+	require.NotNil(t, variant.DCQLQuery)
+	require.Len(t, variant.DCQLQuery.Credentials, 2)
+
+	for _, cred := range variant.DCQLQuery.Credentials {
+		require.NotNil(t, cred.RequireCryptographicHolderBinding,
+			"query %q must state the requirement rather than rely on a default that may move", cred.ID)
+		assert.True(t, *cred.RequireCryptographicHolderBinding,
+			"query %q: this endpoint rejects an unbound credential, so the request must not permit one", cred.ID)
+		assert.True(t, cred.RequiresCryptographicHolderBinding(), "query %q", cred.ID)
+	}
+
+	// The browser channel's query is untouched - including the explicit
+	// false, which is that channel's own behaviour and not this one's to
+	// change.
+	require.Len(t, shared.Credentials, 2)
+	require.NotNil(t, shared.Credentials[0].RequireCryptographicHolderBinding)
+	assert.False(t, *shared.Credentials[0].RequireCryptographicHolderBinding,
+		"the browser channel's request must not be mutated by building the IA one")
+	assert.Nil(t, shared.Credentials[1].RequireCryptographicHolderBinding,
+		"an omitted flag must stay omitted on the original")
+	assert.NotSame(t, shared, variant.DCQLQuery, "the IA variant needs its own query")
+
+	// And the DC API variant, which answers at the browser's endpoint, is
+	// not narrowed: this is the IA channel's requirement, not a global one.
+	dcapi := base.WithDCAPIRequest("https://issuer.example.com")
+	require.NotNil(t, dcapi.DCQLQuery)
+	assert.Same(t, shared, dcapi.DCQLQuery,
+		"the DC API channel must keep sharing the query it was built from")
+}
+
+// Everything else about the IA request still matches the DC API one, so a
+// field added to either path cannot quietly differ between the channels.
+func TestWithInteractiveAuthorizationDiffersOnlyInModeAndBinding(t *testing.T) {
+	base := &RequestObject{
+		ResponseURI:  "https://issuer.example.com/verification/direct_post",
+		ClientID:     "x509_san_dns:issuer.example.com",
+		ResponseType: "vp_token",
+		ResponseMode: ResponseModeDirectPostJWT,
+		State:        "state-1",
+		Nonce:        "nonce-1",
+		DCQLQuery:    &DCQL{Credentials: []CredentialQuery{{ID: "pid", Format: "dc+sd-jwt"}}},
+	}
+
+	origin := "https://issuer.example.com"
+	dcapi := base.WithDCAPIRequest(origin)
+	ia := base.WithInteractiveAuthorization(ResponseModeIAPostJWT, origin)
+	require.NotNil(t, dcapi)
+	require.NotNil(t, ia)
+
+	assert.Equal(t, ResponseModeIAPostJWT, ia.ResponseMode)
+	assert.Equal(t, ResponseModeDCAPIJWT, dcapi.ResponseMode)
+
+	normalised := *ia
+	normalised.ResponseMode = dcapi.ResponseMode
+	normalised.DCQLQuery = dcapi.DCQLQuery
+	assert.True(t, reflect.DeepEqual(*dcapi, normalised),
+		"the IA request must differ from the DC API one only in the response mode and the holder-binding requirement")
+}
+
+func TestWithInteractiveAuthorizationNilIsNil(t *testing.T) {
+	assert.Nil(t, (*RequestObject)(nil).WithInteractiveAuthorization(ResponseModeIAPostJWT, "https://issuer.example.com"))
+}
+
+// A request carrying no query at all must not acquire one.
+func TestWithInteractiveAuthorizationWithoutAQuery(t *testing.T) {
+	base := &RequestObject{ResponseMode: ResponseModeDirectPostJWT, Nonce: "n"}
+	variant := base.WithInteractiveAuthorization(ResponseModeIAPostJWT, "https://issuer.example.com")
+	require.NotNil(t, variant)
+	assert.Nil(t, variant.DCQLQuery)
+}
