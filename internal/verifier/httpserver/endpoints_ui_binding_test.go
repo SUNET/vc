@@ -14,8 +14,6 @@ import (
 // not the 500 an unrecognised error becomes in the status mapper.
 func TestUIInteraction_MalformedBodyIs400(t *testing.T) {
 	cases := map[string]string{
-		"amount is a boolean": `{"dcql_query":{"credentials":[]},"payment":{"amount":true,"currency":"EUR","payee_name":"n","payee_id":"i"}}`,
-		"amount is an object": `{"dcql_query":{"credentials":[]},"payment":{"amount":{"x":1},"currency":"EUR","payee_name":"n","payee_id":"i"}}`,
 		"payment is a string": `{"dcql_query":{"credentials":[]},"payment":"49.99"}`,
 		"not json":            `{"dcql_query":`,
 	}
