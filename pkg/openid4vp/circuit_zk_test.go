@@ -772,3 +772,42 @@ func TestCopyDCQLPreservesRawLeavesInTypedContainers(t *testing.T) {
 	assert.Equal(t, inMap, string(srcParams["typed_map"].(map[string]json.RawMessage)["a"]),
 		"writing to the copied typed map must not reach the original")
 }
+
+// namedObject and namedItems are the containers the reflective copy did
+// not survive: a NAMED map or slice of any, holding a nil interface
+// beside a raw leaf.
+type (
+	namedObject map[string]any
+	namedItems  []any
+)
+
+// A nil element must not condemn the whole container.
+//
+// copyAnyValue returns a nil interface unchanged, reflect.ValueOf gives
+// an invalid Value for it, and treating that as "does not fit" sent the
+// entire container through the encoding - re-parsing every raw leaf
+// beside the nil and collapsing the duplicate members inside them.
+//
+// Compared as text: a semantic comparison hides a dropped duplicate.
+func TestCopyDCQLPreservesRawLeavesBesideNilElements(t *testing.T) {
+	const inMap = `{"x":1,"x":2}`
+	const inSlice = `{"y":1,"y":2}`
+
+	src := &DCQL{Credentials: []CredentialQuery{{
+		ID: "q", Format: FormatCircuitZk, Meta: MetaQuery{DoctypeValue: "d"},
+		Req: []ReqItem{{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{
+			"named_map":   namedObject{"absent": nil, "raw": json.RawMessage(inMap)},
+			"named_slice": namedItems{nil, json.RawMessage(inSlice)},
+		}}},
+	}}}
+
+	before, err := json.Marshal(src.Credentials[0].Req[0].Params)
+	require.NoError(t, err)
+	after, err := json.Marshal(copyDCQL(src).Credentials[0].Req[0].Params)
+	require.NoError(t, err)
+
+	assert.Equal(t, string(before), string(after), "copying a named container must change nothing")
+	assert.Contains(t, string(after), inMap, "a raw leaf beside a nil in a named map must survive as bytes")
+	assert.Contains(t, string(after), inSlice, "a raw leaf beside a nil in a named slice must survive as bytes")
+	assert.Contains(t, string(after), `"absent":null`, "the nil element must still be null")
+}

@@ -286,8 +286,8 @@ func copyTypedContainer(src any) any {
 	if kind == reflect.Map {
 		dst := reflect.MakeMapWithSize(value.Type(), value.Len())
 		for iter := value.MapRange(); iter.Next(); {
-			copied := reflect.ValueOf(copyAnyValue(iter.Value().Interface()))
-			if !copied.IsValid() || !copied.Type().AssignableTo(element) {
+			copied, ok := copyReflected(iter.Value().Interface(), element)
+			if !ok {
 				return encodeCopy(src)
 			}
 			dst.SetMapIndex(iter.Key(), copied)
@@ -297,13 +297,37 @@ func copyTypedContainer(src any) any {
 
 	dst := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
 	for i := range value.Len() {
-		copied := reflect.ValueOf(copyAnyValue(value.Index(i).Interface()))
-		if !copied.IsValid() || !copied.Type().AssignableTo(element) {
+		copied, ok := copyReflected(value.Index(i).Interface(), element)
+		if !ok {
 			return encodeCopy(src)
 		}
 		dst.Index(i).Set(copied)
 	}
 	return dst.Interface()
+}
+
+// copyReflected copies one element of a typed container, reporting
+// whether the result fits back into it.
+//
+// A nil interface element is the case worth naming: copyAnyValue returns
+// it unchanged, reflect.ValueOf gives an INVALID Value for it, and
+// treating that as "does not fit" sent the whole container through the
+// encoding - re-parsing every raw leaf sitting beside the nil and
+// collapsing any duplicate member inside them. A named container, say
+// type Object map[string]any, reaches here holding exactly that mix.
+func copyReflected(src any, element reflect.Type) (reflect.Value, bool) {
+	copied := reflect.ValueOf(copyAnyValue(src))
+	if !copied.IsValid() {
+		// Nil, which every element type that can hold it has a zero for.
+		if element.Kind() == reflect.Interface {
+			return reflect.Zero(element), true
+		}
+		return reflect.Value{}, false
+	}
+	if !copied.Type().AssignableTo(element) {
+		return reflect.Value{}, false
+	}
+	return copied, true
 }
 
 // encodeCopy copies through the encoding, normalising a shape this build
