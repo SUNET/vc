@@ -45,6 +45,8 @@ var ts12AMRVocabulary = map[string][]string{
 // JTIStore records KB-JWT jti values so a presentation cannot be accepted
 // twice. Claim reports whether jti was unseen, atomically recording it. An
 // error means the store could not say, and the presentation is refused.
+// Callers claim VPTokenValidator.PresentedJTI after the issuer has been
+// authenticated, never before.
 type JTIStore interface {
 	Claim(jti string) (fresh bool, err error)
 }
@@ -219,20 +221,15 @@ func (v *VPTokenValidator) validateTS12Claims(kb map[string]any) error {
 		return txError("response_mode %q is not one this request was issued with", rm)
 	}
 
-	// jti: fresh, never seen. Entropy cannot be checked from here; uniqueness can.
+	// jti: present. Uniqueness is NOT checked here: recording it is a state
+	// change, and it must not happen before the issuer signature and trust
+	// have been established, or a fabricated credential could reserve chosen
+	// jti values. The caller claims PresentedJTI once the presentation is
+	// authenticated (see JTIStore). Entropy cannot be checked from here.
 	jti, ok := kb["jti"].(string)
 	if !ok || strings.TrimSpace(jti) == "" {
 		return txError("jti missing from KB-JWT")
 	}
-	if v.JTIStore == nil {
-		return txError("cannot verify jti freshness: no replay store configured")
-	}
-	fresh, err := v.JTIStore.Claim(jti)
-	if err != nil {
-		return txError("cannot verify jti freshness: %v", err)
-	}
-	if !fresh {
-		return txError("jti has been used before")
-	}
+	v.PresentedJTI = jti
 	return nil
 }

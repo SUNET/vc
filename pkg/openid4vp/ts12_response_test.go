@@ -11,25 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type memJTIStore struct {
-	seen map[string]bool
-	err  error
-}
-
-func (m *memJTIStore) Claim(jti string) (bool, error) {
-	if m.err != nil {
-		return false, m.err
-	}
-	if m.seen == nil {
-		m.seen = map[string]bool{}
-	}
-	if m.seen[jti] {
-		return false, nil
-	}
-	m.seen[jti] = true
-	return true, nil
-}
-
 func vectorByName(t *testing.T, name string) ts12Vector {
 	t.Helper()
 	for _, v := range loadTS12Vectors(t) {
@@ -50,12 +31,17 @@ var goodAMR = []any{
 type ts12Case struct {
 	entries []string
 	queryID string
-	store   JTIStore
 	modes   []string
 	claims  map[string]any // merged over a good base; a nil value deletes the claim
 }
 
 func (c ts12Case) validate(t *testing.T) error {
+	t.Helper()
+	_, err := c.run(t)
+	return err
+}
+
+func (c ts12Case) run(t *testing.T) (*VPTokenValidator, error) {
 	t.Helper()
 	holder := testHolderKey(t)
 	kb := map[string]any{
@@ -74,10 +60,6 @@ func (c ts12Case) validate(t *testing.T) error {
 		}
 	}
 	tok := testPresentation(t, testCredentialNaming(t, holder, nil), holder, kb)
-	store := c.store
-	if store == nil {
-		store = &memJTIStore{}
-	}
 	modes := c.modes
 	if modes == nil {
 		modes = []string{"direct_post.jwt", "dc_api.jwt"}
@@ -85,9 +67,9 @@ func (c ts12Case) validate(t *testing.T) error {
 	v := &VPTokenValidator{
 		Nonce: "n-1", ClientID: "x509_hash:verifier",
 		TransactionData: c.entries, CredentialQueryID: c.queryID,
-		ResponseModes: modes, JTIStore: store,
+		ResponseModes: modes,
 	}
-	return v.Validate(tok)
+	return v, v.Validate(tok)
 }
 
 func requireTxError(t *testing.T, err error, contains string) {
@@ -239,17 +221,21 @@ func TestTS12Response_JTIAndResponseMode(t *testing.T) {
 	c.claims["jti"] = "  "
 	requireTxError(t, c.validate(t), "jti missing")
 
-	// Replay: same jti twice through one store.
-	store := &memJTIStore{}
+	// The validator reports the jti for the caller to claim after issuer
+	// authentication; it never records it itself.
 	c = base()
-	c.store, c.claims["jti"] = store, "fixed-jti"
-	require.NoError(t, c.validate(t))
-	requireTxError(t, c.validate(t), "used before")
+	c.claims["jti"] = "fixed-jti"
+	v, err := c.run(t)
+	require.NoError(t, err)
+	assert.Equal(t, "fixed-jti", v.PresentedJTI)
 
-	// Fail closed when freshness cannot be established.
+	// A refused presentation reports nothing to claim.
 	c = base()
-	c.store = &memJTIStore{err: errors.New("db down")}
-	requireTxError(t, c.validate(t), "cannot verify jti")
+	c.claims["jti"] = "refused-jti"
+	c.claims["amr"] = nil
+	v, err = c.run(t)
+	require.Error(t, err)
+	assert.Empty(t, v.PresentedJTI)
 
 	c = base()
 	c.claims["response_mode"] = nil
@@ -265,26 +251,15 @@ func TestTS12Response_JTIAndResponseMode(t *testing.T) {
 	require.NoError(t, c.validate(t), "the DC API variant of the same request is a legitimate channel")
 }
 
-// Without a store the validator cannot honour jti uniqueness, so an SCA
-// presentation is refused rather than waved through.
-func TestTS12Response_NoStoreRefuses(t *testing.T) {
-	raw, h := ts12Entry(t)
-	holder := testHolderKey(t)
-	tok := testPresentation(t, testCredentialNaming(t, holder, nil), holder, map[string]any{
-		"nonce": "n", "aud": "a", "iat": time.Now().Unix(), "jti": "j", "response_mode": "direct_post.jwt",
-		"amr": goodAMR, "transaction_data_hashes": []string{h},
-	})
-	err := (&VPTokenValidator{Nonce: "n", ClientID: "a", TransactionData: []string{raw}, CredentialQueryID: "pay", ResponseModes: []string{"direct_post.jwt"}}).Validate(tok)
-	requireTxError(t, err, "no replay store")
-}
-
 // A non-SCA transaction type keeps the generic OID4VP rules only.
 func TestTS12Response_NonSCATypeNeedsNoSCAClaims(t *testing.T) {
 	raw := decodedFor(t, `{"type":"https://example.com/other","credential_ids":["pay"]}`)
 	hs, _ := HashTransactionData([]string{raw}, "sha-256")
-	require.NoError(t, ts12Case{entries: []string{raw}, queryID: "pay", claims: map[string]any{
+	v, err := ts12Case{entries: []string{raw}, queryID: "pay", claims: map[string]any{
 		"transaction_data_hashes": hs, "amr": nil, "jti": nil, "response_mode": nil,
-	}}.validate(t))
+	}}.run(t)
+	require.NoError(t, err)
+	assert.Empty(t, v.PresentedJTI)
 }
 
 func TestTransactionDataCoverage(t *testing.T) {

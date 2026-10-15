@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -188,6 +189,25 @@ func TestVerificationDirectPost_TS12Payment(t *testing.T) {
 		assert.Contains(t, err.Error(), "jti has been used before")
 	})
 
+	// The jti is recorded only once the issuer is authenticated: a credential
+	// the trust policy rejects must not reserve its jti.
+	t.Run("an untrusted issuer does not burn the jti", func(t *testing.T) {
+		r := newTS12Rig(t)
+		r.client.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+			TrustEvaluator: denyAllEvaluator{},
+			JWKSResolver:   trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+			ParseX5C:       func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+			ParseJWK:       jose.ParseJWKToPublicKey,
+			Log:            logger.NewSimple("test"),
+		})
+		err := r.post(r.kbClaims("untrusted-jti"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "issuer trust evaluation failed")
+		fresh, err := r.client.cacheService.UsedJTI.SetNX(t.Context(), "untrusted-jti", true)
+		require.NoError(t, err)
+		assert.True(t, fresh, "the jti of a rejected presentation must still be unclaimed")
+	})
+
 	t.Run("no replay store refuses", func(t *testing.T) {
 		r := newTS12Rig(t)
 		r.client.cacheService.UsedJTI = nil
@@ -236,3 +256,10 @@ func TestVerificationDirectPost_TS12ScopedToTheBoundCredential(t *testing.T) {
 	require.Error(t, err, "the bound credential must carry the hashes even if the other one does not")
 	assert.Contains(t, err.Error(), openid4vp.ErrorInvalidTransactionData)
 }
+
+type denyAllEvaluator struct{}
+
+func (denyAllEvaluator) Evaluate(_ context.Context, _ *trust.EvaluationRequest) (*trust.TrustDecision, error) {
+	return &trust.TrustDecision{Trusted: false, Reason: "test: deny all"}, nil
+}
+func (denyAllEvaluator) SupportsKeyType(trust.KeyType) bool { return true }

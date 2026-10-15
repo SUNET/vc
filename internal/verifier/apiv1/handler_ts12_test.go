@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
@@ -89,7 +90,7 @@ func TestUIInteraction_PaymentRefusals(t *testing.T) {
 			}
 			_, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: tc.dcql, Payment: p})
 			require.Error(t, err)
-			oe, ok := errors.AsType[*OAuthError](err)
+			oe, ok := errors.AsType[*oauth2.OAuthError](err)
 			require.True(t, ok, "a client mistake must be a 400, got %v", err)
 			assert.Equal(t, 400, oe.HTTPStatus)
 		})
@@ -162,4 +163,31 @@ func TestBuildPaymentTransactionData_RequiresVCTValues(t *testing.T) {
 	dcql.Credentials[0].Meta.VCTValues = nil
 	_, err = client.buildPaymentTransactionData(testPayment(), dcql)
 	require.Error(t, err)
+}
+
+// A payment session is checked against the response modes it was issued with,
+// so resuming it must not mint a request variant outside them.
+func TestUIResume_PaymentDoesNotIssueAnUnrecordedDCAPIVariant(t *testing.T) {
+	ctx := t.Context()
+
+	client := newSigningTestClient(t)
+	client.cfg.Verifier.TS12.Enable = true
+	first, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), Payment: testPayment()})
+	require.NoError(t, err)
+	assert.Empty(t, first.DCAPIAuthorizationRequest)
+
+	client.cfg.Verifier.DigitalCredentials.Enable = true // switched on after issuance
+	resumed, err := client.UIResume(ctx, first.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, UIResumePending, resumed.Status)
+	assert.NotEmpty(t, resumed.AuthorizationRequest)
+	assert.Empty(t, resumed.DCAPIAuthorizationRequest, "the session was not issued dc_api.jwt")
+
+	// And a session that WAS issued with it still resumes with it.
+	again, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: scaDCQL("sca"), Payment: testPayment()})
+	require.NoError(t, err)
+	assert.NotEmpty(t, again.DCAPIAuthorizationRequest)
+	resumed, err = client.UIResume(ctx, again.SessionID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resumed.DCAPIAuthorizationRequest)
 }

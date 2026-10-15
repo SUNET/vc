@@ -328,7 +328,6 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				validator.TransactionData = authCtx.TransactionData
 				validator.CredentialQueryID = scopeQueryID
 				validator.ResponseModes = authCtx.TransactionDataResponseModes
-				validator.JTIStore = c.jtiStore(ctx)
 			}
 
 			if err := validator.Validate(responseParams.VPToken); err != nil {
@@ -359,6 +358,16 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			if slices.Contains(answeredTransactionQueries, scopeQueryID) {
 				if err := c.checkBoundCredentialType(authCtx, scopeQueryIDs, scope, parsed.Claims); err != nil {
 					c.log.Error(err, "credential does not match the transaction_data-bound query", "scope", scope)
+					return nil, err
+				}
+			}
+
+			// Last, now that the issuer and the credential are authenticated:
+			// record the jti. Doing it earlier would let a fabricated
+			// credential reserve chosen jti values in the shared cache.
+			if validator.PresentedJTI != "" {
+				if err := c.claimJTI(ctx, validator.PresentedJTI); err != nil {
+					c.log.Error(err, "jti not accepted", "scope", scope)
 					return nil, err
 				}
 			}

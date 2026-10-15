@@ -77,9 +77,11 @@ type VPTokenValidator struct {
 	// be checked, which refuses an SCA presentation.
 	ResponseModes []string
 
-	// JTIStore records the KB-JWT jti of an SCA presentation to refuse replay.
-	// Required for EC TS12 requests; nil refuses them.
-	JTIStore JTIStore
+	// PresentedJTI is an output: after a successful Validate of an EC TS12
+	// SCA presentation it holds the KB-JWT jti. It is empty when no SCA entry
+	// applied. The caller must claim it in a JTIStore after issuer
+	// authentication and treat a non-empty value it cannot claim as a refusal.
+	PresentedJTI string
 
 	// MaxKeyBindingAge bounds how old a Key Binding JWT's iat may be.
 	// Zero means defaultMaxKeyBindingAge.

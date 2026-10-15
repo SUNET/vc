@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/google/uuid"
@@ -33,7 +34,10 @@ type UIPaymentRequest struct {
 }
 
 func invalidPayment(format string, args ...any) error {
-	return &OAuthError{
+	// The shared type: RegEndpoint renders pkg/oauth2.OAuthError (status and
+	// description); the verifier-local OAuthError would fall through to the
+	// generic handler and lose both.
+	return &oauth2.OAuthError{
 		ErrorCode:        ErrCodeInvalidRequest,
 		ErrorDescription: "payment: " + fmt.Sprintf(format, args...),
 		HTTPStatus:       http.StatusBadRequest,
@@ -119,25 +123,24 @@ func (c *Client) issuedResponseModes() []string {
 	return modes
 }
 
-// jtiStore adapts the verifier's replay cache to the validator. With no cache
-// the store is nil, which makes the validator refuse an SCA presentation.
-func (c *Client) jtiStore(ctx context.Context) openid4vp.JTIStore {
+// claimJTI records a presented jti, refusing a repeat. With no replay cache it
+// refuses: jti uniqueness cannot be honoured, so the presentation cannot be.
+func (c *Client) claimJTI(ctx context.Context, jti string) error {
+	refuse := func(format string, args ...any) error {
+		return &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf(format, args...)}
+	}
 	if c.cacheService == nil || c.cacheService.UsedJTI == nil {
-		return nil
+		return refuse("cannot verify jti freshness: no replay store configured")
 	}
-	return jtiClaimer{ctx: ctx, cache: c.cacheService.UsedJTI}
-}
-
-type jtiClaimer struct {
-	ctx   context.Context
-	cache interface {
-		SetNX(ctx context.Context, key string, value bool) (bool, error)
-	}
-}
-
-func (j jtiClaimer) Claim(jti string) (bool, error) {
 	// Atomic: a concurrent second submission of the same KB-JWT loses SetNX.
-	return j.cache.SetNX(j.ctx, jti, true)
+	fresh, err := c.cacheService.UsedJTI.SetNX(ctx, jti, true)
+	if err != nil {
+		return refuse("cannot verify jti freshness: %v", err)
+	}
+	if !fresh {
+		return refuse("jti has been used before")
+	}
+	return nil
 }
 
 // checkBoundCredentialType refuses a presented credential whose vct is not one
