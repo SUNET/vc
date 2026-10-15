@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -36,6 +38,28 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
+		return nil, err
+	}
+
+	// Seed-backed claims, before anything is signed. A no-op for a scope
+	// with no commitments configured, which is every scope in a deployment
+	// that does not use the feature.
+	// The VCTM decides which claims become disclosures, so a commitment
+	// path it does not declare would be signed in the clear - see
+	// CredentialMetadata.checkDisclosable. Parsed here rather than trusted
+	// from configuration, because this is the document actually being
+	// signed.
+	// The same wording the builder's own parse uses, because this now runs
+	// first and an invalid VCTM must be reported the way it always was.
+	vctm := &sdjwtvc.VCTM{}
+	if err := json.Unmarshal(req.VCTM, vctm); err != nil {
+		c.log.Error(err, "failed to parse inline VCTM", "scope", req.Scope)
+		return nil, fmt.Errorf("failed to parse inline VCTM: %w", err)
+	}
+
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{VCTM: vctm})
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
 		return nil, err
 	}
 
@@ -76,7 +100,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
 		req.VCTM,
-		req.DocumentData,
+		documentData,
 		req.JWK,
 		opts,
 	)
@@ -184,6 +208,26 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	}
 	schema.ZkSaltBytes = saltBytes
 
+	// Seed-backed claims. A no-op for a scope with no commitments
+	// configured.
+	//
+	// Below the schema load, because an mdoc signer emits the elements its
+	// schema declares and ignores anything else - so a commitment path the
+	// schema does not declare has to be refused here, and that needs the
+	// schema. Still BEFORE the status list entry is allocated: injection
+	// can refuse a
+	// document - no subject identifier, an upstream commitment, a path
+	// conflict - and the entry is allocated before signing and never
+	// handed back, so each such failure would otherwise burn a revocation
+	// entry that is marked VALID and belongs to no credential. The other
+	// three signing paths already inject before their allocation; this one
+	// did not.
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{MDoc: schema})
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
+		return nil, err
+	}
+
 	// Allocate status list entry for revocation support (if registry is configured)
 	var statusSection, statusIndex int64
 	if c.registryClient != nil {
@@ -202,7 +246,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	// Issue the mdoc
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
-		DocumentData:    req.DocumentData,
+		DocumentData:    documentData,
 		Schema:          schema,
 	}
 

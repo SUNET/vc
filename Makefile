@@ -575,6 +575,15 @@ build-wallet: bbs-native-lib-ensure ## Build wallet test tool
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
 
+# Reads the issuer's own config, so it links the same way the issuer does -
+# pkg/model reaches pkg/bbs, which is cgo.
+build-seed-recover: bbs-native-lib-ensure ## Build the seed_recover developer tool
+	$(info Building seed_recover)
+	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		-tags "$(WORKER_BUILD_TAGS)" \
+		$(BUILD_FLAGS) -o ./bin/seed_recover \
+		$(LDFLAGS) ./developer_tools/scripts/seed_recover/
+
 build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 	$(info Building check_issuer_jwks)
 	$(eval CHECK_ISSUER_JWKS_VERSION := $(or $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//'),dev))

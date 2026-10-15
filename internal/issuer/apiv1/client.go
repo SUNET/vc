@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -56,6 +57,11 @@ type Client struct {
 	signMetadataRL *rate.Limiter
 
 	statusAggregator *status.Aggregator
+
+	// seedSources are the per-subject seed sources, by configured name.
+	// Empty unless Issuer.Seeds is set, in which case every scope naming
+	// one has been checked against it at startup.
+	seedSources map[string]seed.Source
 
 	bbsKeys *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
 	// bbsIssuerOverride replaces the native signer in tests.
@@ -116,6 +122,10 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 	// present but unloadable BBS config means the operator asked for the
 	// format and it is broken, which should not start quietly and fail one
 	// request at a time.
+	if err := c.initSeedSources(); err != nil {
+		return nil, err
+	}
+
 	if err := c.initBBSKeys(); err != nil {
 		return nil, err
 	}

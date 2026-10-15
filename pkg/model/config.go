@@ -575,6 +575,18 @@ type Issuer struct {
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
 	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
+
+	// Seeds are the named per-subject seed sources this issuer can use.
+	//
+	// A seed source turns a stable subject identifier into that subject's
+	// permanent seed; a credential configuration then names one to back a
+	// commitment claim - see CredentialMetadata.Commitments. Empty means
+	// the issuer offers none, and any scope asking for one refuses at
+	// startup.
+	//
+	// Unrelated to PseudonymSeed above, which attaches a fresh random
+	// value per credential and is not a function of the subject at all.
+	Seeds map[string]*SeedSource `yaml:"seeds" validate:"omitempty,dive" doc_key:"seed source name"`
 	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
 	// BBS holds blind BBS issuance configuration. Absent disables the
@@ -594,6 +606,85 @@ type Issuer struct {
 	// Consulted only by schemas that declare zk_systems; a deployment
 	// issuing no ZK-provable mdocs never reaches it.
 	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+}
+
+// Seed models a SeedSource may declare.
+const (
+	// SeedModelDerived computes a subject's seed from a secret and the
+	// subject identifier. Nothing is stored and the seed is recomputable.
+	SeedModelDerived = "derived"
+	// SeedModelStored draws a random seed on first sight of a subject and
+	// keeps it. Needs a per-subject store.
+	SeedModelStored = "stored"
+)
+
+// SeedSource configures one named per-subject seed source.
+//
+// The seed itself is never issued, logged or returned: what reaches a
+// credential is a commitment over it. The issuer keeps the ability to
+// reproduce a subject's seed, which is what makes anything derived from it
+// - a pseudonym, typically - remappable to a person later.
+type SeedSource struct {
+	// Model is how a subject's seed comes about.
+	//
+	// "derived" computes it from Secret and the subject identifier, so
+	// nothing is stored and the seed is recomputable forever.
+	//
+	// "stored" draws a random seed on first sight of a subject and keeps
+	// it. It needs a store, which the issuer does not have, so it is not
+	// implemented here - a configuration naming it is refused at startup
+	// rather than silently treated as "derived", which would hand every
+	// subject a seed the operator did not ask for.
+	Model string `yaml:"model" validate:"required,oneof=derived stored" doc_example:"\"derived\""`
+
+	// SecretPath is a file holding the derivation secret, base64url-encoded
+	// (padding and trailing whitespace are tolerated), whose DECODED value
+	// must be at least 32 bytes. Preferred where a file can be mounted,
+	// since it keeps the secret out of the rendered config entirely.
+	//
+	// Base64url rather than raw bytes, matching BBSConfig.SecretKeyPath:
+	// 32 raw bytes in this file decode to 24 or fail outright, which is a
+	// confusing way to find out the format was not what you assumed.
+	// `head -c 32 /dev/urandom | basenc --base64url | tr -d '='` produces
+	// one.
+	//
+	// THE SECRET IS PERMANENT. Every commitment ever written under it is a
+	// function of it, so replacing it gives every subject a new seed and a
+	// new pseudonym, and losing it destroys the ability to reproduce any
+	// seed this deployment has ever issued over. Back it up; do not rotate
+	// it. There is deliberately no key identifier and no rotation
+	// mechanism, because having one would suggest otherwise.
+	SecretPath string `yaml:"secret_path" validate:"omitempty" doc_example:"\"/etc/vc/seed/issuer.key\""`
+
+	// Secret is the derivation secret, base64url-encoded, decoding to at
+	// least 32 bytes.
+	//
+	// NOT SETTABLE IN THE MAIN CONFIGURATION, by design. It is filled from
+	// issuer.seeds.<name>.secret in the SECRETS FILE, the same way Mongo,
+	// SQL and the HA credentials are, so the most permanent secret an
+	// issuer holds never appears in the rendered config.
+	//
+	// This was an inline config field and is deliberately not one any
+	// more. The justification for it was BBSConfig.SecretKey as
+	// precedent, and that field is an exception to the convention rather
+	// than an example of it - following it meant copying the one place
+	// that already sidesteps the custom. A deployment therefore has two
+	// routes: a mounted file via secret_path, or the secrets file.
+	//
+	// Exactly one of secret_path and this must end up set for a derived
+	// source. Both, or neither, is refused at startup rather than resolved
+	// by precedence - a deployment with two sources of truth for this
+	// secret cannot tell which one is live, and an operator editing the
+	// half that is not would see no effect at all.
+	Secret string `yaml:"-"`
+
+	// SeedBytes is the length of the seeds this source produces. 0 means
+	// 16, which is what the nym_auth rulebook specifies.
+	//
+	// It is part of the derivation, not just its output size, so changing
+	// it changes every seed - the same irreversible act as changing the
+	// secret.
+	SeedBytes int `yaml:"seed_bytes" validate:"omitempty,min=1,max=64" doc_example:"16"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.
@@ -2274,7 +2365,73 @@ func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
 	})
 }
 
+// CommitmentClaim configures one seed-backed claim.
+//
+// What is written into the credential is commit(seed) - never the seed.
+// The seed is not delivered to the Wallet by this server at all: a derived
+// seed is recomputable whenever it is wanted, so there is no moment at
+// which it has to be handed over to avoid losing it.
+type CommitmentClaim struct {
+	// Seed names the entry in issuer.seeds that backs this claim.
+	//
+	// Required for an issuer-held commitment. A claim whose commitment the
+	// HOLDER computes names no seed source - the issuer never sees that
+	// seed - and is configured with Source instead.
+	Seed string `yaml:"seed,omitempty" validate:"required_without=Source" doc_example:"\"primary\""`
+
+	// Source names a party other than this issuer as the origin of the
+	// value. The only value is "holder": the commitment arrives in the
+	// Credential Request and is written as sent.
+	//
+	// Not implemented here - it needs a record of which commitment a
+	// subject already supplied, and the issuer has no store - so a
+	// configuration naming it is refused at startup.
+	Source string `yaml:"source,omitempty" validate:"omitempty,oneof=holder" doc_example:"\"holder\""`
+
+	// Subject is a dotted path into the document data naming the stable
+	// subject identifier this claim's seed is derived from.
+	//
+	// It is the ONE input that separates one person's seed from another's,
+	// so what it points at decides what "the same person" means for every
+	// pseudonym built on this credential. A deployment issuing a Swedish
+	// PID might point it at the personnummer.
+	//
+	// A path that resolves to nothing, or to an empty string, refuses the
+	// issuance. There is no fallback: deriving over "" would hand every
+	// subject whose identity did not resolve the same seed, and therefore
+	// the same pseudonym.
+	Subject string `yaml:"subject,omitempty" validate:"required_with=Seed" doc_example:"\"personal_administrative_number\""`
+
+	// Commit names the commitment function. Empty means "sha-256", which
+	// is the only one registered.
+	Commit string `yaml:"commit,omitempty" validate:"omitempty,oneof=sha-256" doc_example:"\"sha-256\""`
+
+	// Context separates populations that must not share seeds.
+	//
+	// Empty is the ordinary case and the right default: a subject has ONE
+	// seed, so two credential types issued to the same person lead back to
+	// the same person. Setting it per credential would mean they do not.
+	Context string `yaml:"context,omitempty" validate:"omitempty,max=64"`
+
+	// Encoding is how the commitment bytes are written into the document
+	// data. Empty picks by format: base64 for mso_mdoc, whose bstr carrier
+	// is base64 in JSON, and hex for everything else.
+	Encoding string `yaml:"encoding,omitempty" validate:"omitempty,oneof=hex base64" doc_example:"\"hex\""`
+}
+
 type CredentialMetadata struct {
+	// Commitments marks claims of this credential as seed-backed: the
+	// claim's value is a commitment over a per-subject seed rather than a
+	// value from a data source.
+	//
+	// Keyed by where the value goes in the document data the issuer
+	// receives - the element identifier for mso_mdoc, which is flat, and a
+	// dotted path for the other formats.
+	//
+	// Absent means this credential has no such claim and is issued exactly
+	// as it is today.
+	Commitments map[string]*CommitmentClaim `yaml:"commitments,omitempty" json:"-" validate:"omitempty,dive" doc_key:"claim path"`
+
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Used for every format except mso_mdoc.
