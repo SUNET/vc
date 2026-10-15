@@ -108,7 +108,20 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
-		return nil, err
+		// A body this endpoint cannot read is a malformed REQUEST, and a
+		// wallet is entitled to be told so in the protocol's own terms.
+		// Returned bare, the binding failure went to the generic renderer
+		// and came back as {"error":{"title":"internal_server_error"}} -
+		// a 400 whose body blames the server, in a shape no OAuth client
+		// parses (RFC 6749 §5.2).
+		//
+		// The description is the fixed one. A binding error quotes the
+		// input it could not read, and echoing that into the response
+		// would reflect attacker-controlled bytes back; the cause is
+		// carried for the log instead.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+			"the request body could not be read as an authorization challenge request",
+			http.StatusBadRequest, err)
 	}
 
 	// draft-ietf-oauth-attestation-based-client-auth §3.1, and RFC 9449 §4

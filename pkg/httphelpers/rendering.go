@@ -234,6 +234,13 @@ func isJSONOnlyPath(path string) bool {
 		// substrings so the oidc-direct_post and :session_id variants match too.
 		"request-object",
 		"direct_post",
+		// The Authorization Challenge Endpoint (OpenID4VCI 1.1). A wallet
+		// posts to it and reads JSON back, in both directions: the success
+		// body carries the authorization code and the 403 carries the
+		// whole Interaction Required Response. Without this a request with
+		// Accept: text/plain got "&{the-code}" from the %v renderer below,
+		// and one with Accept: text/html got the HTML error page.
+		"authorize-challenge",
 	}
 
 	for _, indicator := range jsonOnlyIndicators {
