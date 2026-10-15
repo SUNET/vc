@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -297,4 +299,94 @@ func TestDerivationsCannotReplacePresentedClaims(t *testing.T) {
 		"a derivation that does not collide is left alone")
 	require.Equal(t, []string{"birth_date"}, conflicts,
 		"the collision must be reported, not resolved in silence")
+}
+
+// The snapshot must not share nested maps with the document.
+//
+// MergeNestedClaims writes INTO existing nested maps, so a snapshot that
+// shares them is changed by the very derivations it exists to survive: a
+// derivation adding address.street_address appeared in the "proved" value
+// too, and restoring it restored the derived object rather than the
+// presented one.
+func TestProvedClaimsSurviveTheRecursiveMerge(t *testing.T) {
+	docData := map[string]any{
+		"address": map[string]any{"country": "DK"}, // from the presentation
+	}
+	proved := provedClaims(docData, []string{"address"})
+
+	// A derivation that writes inside the object, through the same
+	// recursive merge issuance uses.
+	derived := map[string]any{"address": map[string]any{
+		"country":        "SE",
+		"street_address": "derived from the datastore",
+	}}
+	credential.MergeNestedClaims(docData, derived)
+
+	restoreProvedClaims(docData, derived, proved)
+
+	address, ok := docData["address"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, map[string]any{"country": "DK"}, address,
+		"the presented object must be restored whole, not the merged one")
+	require.NotContains(t, address, "street_address",
+		"a member a derivation added inside it must not survive restoration")
+}
+
+// The provenance has to be PERSISTED, and the replace has to carry the
+// identifier.
+//
+// Two separate hazards, modelled the way the handler really meets them.
+// The handler holds a context it loaded BEFORE SetIdentifier wrote the
+// resolved identity straight to the store, so its copy does not have it -
+// and Update is a full replace, not a merge.
+func TestPresentedClaimsPersistenceCarriesTheIdentifier(t *testing.T) {
+	ctx := t.Context()
+	const session = "s1"
+
+	newStore := func(t *testing.T) *cache.MemoryStore {
+		t.Helper()
+		store := cache.NewMemoryStore(time.Minute)
+		require.NoError(t, store.Create(ctx, &cache.AuthorizationContext{
+			SessionID: session, ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		}))
+		require.NoError(t, store.SetIdentifier(ctx, &cache.AuthorizationContext{SessionID: session}, "mapping-1"))
+		return store
+	}
+
+	// What the handler has: a context loaded before SetIdentifier ran, so
+	// Identifier is empty on it even though the store has one.
+	handlerContext := func() *cache.AuthorizationContext {
+		return &cache.AuthorizationContext{
+			SessionID: session, ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		}
+	}
+
+	t.Run("a replace that does not carry the identifier erases it", func(t *testing.T) {
+		store := newStore(t)
+		stale := handlerContext()
+		stale.PresentedClaims = []string{"birth_date"}
+
+		require.NoError(t, store.Update(ctx, stale))
+
+		back, err := store.GetByID(ctx, session)
+		require.NoError(t, err)
+		require.Empty(t, back.Identifier,
+			"Update replaces the stored context; it does not merge into it")
+	})
+
+	t.Run("carrying it keeps both", func(t *testing.T) {
+		store := newStore(t)
+		carried := handlerContext()
+		carried.PresentedClaims = []string{"birth_date"}
+		carried.Identifier = "mapping-1"
+
+		require.NoError(t, store.Update(ctx, carried))
+
+		back, err := store.GetByID(ctx, session)
+		require.NoError(t, err)
+		require.Equal(t, []string{"birth_date"}, back.PresentedClaims,
+			"issuance must be able to read the provenance back")
+		require.Equal(t, "mapping-1", back.Identifier,
+			"and the identity just resolved must survive the replace")
+	})
 }

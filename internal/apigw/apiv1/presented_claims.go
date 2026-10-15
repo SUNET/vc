@@ -284,7 +284,13 @@ func provedClaims(docData map[string]any, presented []string) map[string]any {
 	proved := make(map[string]any, len(presented))
 	for _, claim := range presented {
 		if v, ok := docData[claim]; ok {
-			proved[claim] = v
+			// CLONED, through the package's existing deep copy.
+			// MergeNestedClaims writes INTO existing nested maps, so a
+			// snapshot sharing them is changed by the very derivations it
+			// exists to survive: a derivation adding
+			// address.street_address would appear in the "proved" value
+			// too, and restoring it would restore the derived object.
+			proved[claim] = cloneClaimValue(v)
 		}
 	}
 	return proved

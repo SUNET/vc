@@ -426,7 +426,24 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		// Record which claims the presentation supplied, so issuance can
 		// reapply them after derivations. The matched auth scope that
 		// chose them is known only here.
+		//
+		// PERSISTED, not just assigned. With HA the store decodes into a
+		// fresh value and hands back a copy, so writing to authCtx alone
+		// reaches nothing: the credential request would read an empty
+		// list and let a derivation overwrite a verified claim, which is
+		// the failure this list exists to prevent - restored silently,
+		// and only in the HA deployments.
+		//
+		// The identifier is carried across because Update REPLACES the
+		// stored context (ReplaceOne) while SetIdentifier above wrote
+		// straight to the store, so without this the replace would erase
+		// the identity that was just resolved.
 		authCtx.PresentedClaims = slices.Sorted(maps.Keys(copied))
+		authCtx.Identifier = identityMappingID
+		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+			c.log.Error(err, "cannot persist the presented-claim provenance", "session_id", authCtx.SessionID)
+			return nil, fmt.Errorf("failed to persist presented claims: %w", err)
+		}
 	}
 
 	// Cache PID documents for session
