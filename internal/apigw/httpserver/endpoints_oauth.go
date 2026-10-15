@@ -143,7 +143,8 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 		return nil, err
 	}
 
-	return reply, nil
+	c.JSON(http.StatusOK, reply)
+	return nil, nil
 }
 
 func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (any, error) {
