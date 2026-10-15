@@ -80,16 +80,16 @@ func (r ReqItem) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown members into Extra.
 func (r *ReqItem) UnmarshalJSON(data []byte) error {
-	type plain ReqItem
-	var known plain
-	if err := decodeExact(data, &known); err != nil {
-		return err
-	}
-	*r = ReqItem(known)
-	extra, err := unknownMembers(data, "id", "return", "params")
+	knownObject, extra, err := splitMembers(data, "id", "return", "params")
 	if err != nil {
 		return err
 	}
+	type plain ReqItem
+	var known plain
+	if err := decodeExact(knownObject, &known); err != nil {
+		return err
+	}
+	*r = ReqItem(known)
 	r.Extra = extra
 	return nil
 }
@@ -138,16 +138,16 @@ func (c CircuitZkFormat) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown members into Extra.
 func (c *CircuitZkFormat) UnmarshalJSON(data []byte) error {
-	type plain CircuitZkFormat
-	var known plain
-	if err := decodeExact(data, &known); err != nil {
-		return err
-	}
-	*c = CircuitZkFormat(known)
-	extra, err := unknownMembers(data, "circuit_proof_system_values", "circuit_id_values")
+	knownObject, extra, err := splitMembers(data, "circuit_proof_system_values", "circuit_id_values")
 	if err != nil {
 		return err
 	}
+	type plain CircuitZkFormat
+	var known plain
+	if err := decodeExact(knownObject, &known); err != nil {
+		return err
+	}
+	*c = CircuitZkFormat(known)
 	c.Extra = extra
 	return nil
 }
@@ -235,21 +235,54 @@ func decodeExact(data []byte, v any) error {
 	return decoder.Decode(v)
 }
 
-// unknownMembers returns every top-level member of data that is not named
-// in known, so a shape this build does not understand survives a decode
-// and can be written back out unchanged.
-func unknownMembers(data []byte, known ...string) (map[string]any, error) {
-	var all map[string]any
+// splitMembers separates data's top-level members into the ones named in
+// known, re-encoded as an object for the struct decode, and every other
+// member, which survives as an extension and is written back unchanged.
+//
+// Both halves have to agree on what a member NAME is, and they did not.
+// encoding/json matches a struct field case-insensitively, so
+// "CIRCUIT_ID_VALUES" bound to CircuitIDValues; the extension half matched
+// exactly, so the very same member was ALSO kept as unknown. Re-encoding
+// then wrote both, and an extension nobody modelled silently rewrote a
+// modelled member: {"circuit_id_values":[],"CIRCUIT_ID_VALUES":["urn:x"]}
+// came back with BOTH arrays naming urn:x - a filter that matches nothing
+// turned into one that permits that circuit.
+//
+// Selecting the known members by exact name BEFORE the decode settles it
+// for every type that carries an extension bag: the struct only ever sees
+// members spelled the way it declares them, and a differently cased name
+// is an unknown member like any other. The members are carried across as
+// raw bytes, so a number still reaches the struct exactly as written.
+func splitMembers(data []byte, known ...string) ([]byte, map[string]any, error) {
+	var all map[string]json.RawMessage
 	if err := decodeExact(data, &all); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	selected := make(map[string]json.RawMessage, len(known))
 	for _, name := range known {
-		delete(all, name)
+		if raw, ok := all[name]; ok {
+			selected[name] = raw
+			delete(all, name)
+		}
+	}
+	knownObject, err := json.Marshal(selected)
+	if err != nil {
+		return nil, nil, err
 	}
 	if len(all) == 0 {
-		return nil, nil
+		return knownObject, nil, nil
 	}
-	return all, nil
+
+	extra := make(map[string]any, len(all))
+	for name, raw := range all {
+		var value any
+		if err := decodeExact(raw, &value); err != nil {
+			return nil, nil, err
+		}
+		extra[name] = value
+	}
+	return knownObject, extra, nil
 }
 
 // YAML support for the extension bags.

@@ -347,9 +347,18 @@ func (q CredentialQuery) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown members into Extra.
 func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
+	// A split failure is a decode failure: data that is not an object at
+	// all must reach the escape hatch below exactly as a member of the
+	// wrong kind does, or the fallback stops being total.
+	knownObject, extra, err := splitMembers(data,
+		"id", "format", "multiple", "meta", "trusted_authorities",
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
 	type plain CredentialQuery
 	var known plain
-	if err := decodeExact(data, &known); err != nil {
+	if err == nil {
+		err = decodeExact(knownObject, &known)
+	}
+	if err != nil {
 		// A shape the model cannot hold is kept as it stands rather than
 		// refused. Decoding has to be TOTAL for the escape hatch to be
 		// worth anything: a request object is JSON-encoded into the HA
@@ -384,12 +393,6 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	*q = CredentialQuery(known)
-	extra, err := unknownMembers(data,
-		"id", "format", "multiple", "meta", "trusted_authorities",
-		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
-	if err != nil {
-		return err
-	}
 	q.Extra = extra
 
 	// A decode that SUCCEEDED is not necessarily one that kept
@@ -965,16 +968,16 @@ func (v VPFormatsSupported) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown format entries into Extra.
 func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
-	type plain VPFormatsSupported
-	var known plain
-	if err := decodeExact(data, &known); err != nil {
-		return err
-	}
-	*v = VPFormatsSupported(known)
-	extra, err := unknownMembers(data, "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
+	knownObject, extra, err := splitMembers(data, "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
 	if err != nil {
 		return err
 	}
+	type plain VPFormatsSupported
+	var known plain
+	if err := decodeExact(knownObject, &known); err != nil {
+		return err
+	}
+	*v = VPFormatsSupported(known)
 	v.Extra = extra
 	return nil
 }
