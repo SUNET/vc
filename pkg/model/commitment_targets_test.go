@@ -561,3 +561,104 @@ func TestStructuralNamesDoNotLeakIntoOtherFormats(t *testing.T) {
 	cm := &CredentialMetadata{Format: openid4vp.FormatMsoMdoc}
 	assert.NoError(t, cm.checkNotReserved("namespace._sd"))
 }
+
+// _sd_alg is reserved at EVERY depth, for two different reasons.
+//
+// At the root the builder writes it, which the reserved-claim check
+// already reported. Nested, reconstructNode deletes _sd_alg from every
+// object as it restores disclosures, so a commitment at identity._sd_alg
+// is injected, signed and carried perfectly - and then simply does not
+// exist for any verifier that reconstructs the claims. Nothing fails
+// anywhere; the commitment is absent.
+func TestNestedSDAlgCommitmentIsRefused(t *testing.T) {
+	segment := func(segments ...string) []*string {
+		out := make([]*string, 0, len(segments))
+		for _, s := range segments {
+			out = append(out, &s)
+		}
+		return out
+	}
+	vctm := &sdjwtvc.VCTM{
+		VCT: "urn:example:1",
+		Claims: []sdjwtvc.Claim{
+			{Path: segment("identity", "_sd_alg"), SD: "always"},
+			{Path: segment("_sd_alg"), SD: "always"},
+		},
+	}
+	meta := func(target string) *CredentialMetadata {
+		return &CredentialMetadata{
+			Format:      openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{target: sscClaim()},
+		}
+	}
+
+	_, err := meta("identity._sd_alg").ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+	require.Error(t, err, "a nested _sd_alg commitment would vanish on reconstruction")
+	assert.Contains(t, err.Error(), "removed from every object")
+
+	// The root case keeps its own message: there it is overwritten, not
+	// stripped, and saying the right thing matters more than saying one
+	// thing.
+	_, err = meta("_sd_alg").ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "signing layer")
+}
+
+// A commitment target must not have something disclosed beneath it.
+//
+// A commitment is a string. A VCTM declaring both ["identity"] and
+// ["identity","name"] sd always asks for a disclosure inside a value this
+// feature replaces with one, and MakeCredential sorts deepest-first, so
+// it reaches identity.name while identity is already that string and
+// fails with "invalid path: non-object" - after issuance has allocated a
+// status-list entry, so every attempt burns one.
+func TestDisclosableDescendantOfACommitmentTargetIsRefused(t *testing.T) {
+	segment := func(segments ...string) []*string {
+		out := make([]*string, 0, len(segments))
+		for _, s := range segments {
+			out = append(out, &s)
+		}
+		return out
+	}
+	meta := func(target string) *CredentialMetadata {
+		return &CredentialMetadata{
+			Format:      openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{target: sscClaim()},
+		}
+	}
+
+	withDescendant := &sdjwtvc.VCTM{
+		VCT: "urn:example:1",
+		Claims: []sdjwtvc.Claim{
+			{Path: segment("identity"), SD: "always"},
+			{Path: segment("identity", "name"), SD: "always"},
+		},
+	}
+	_, err := meta("identity").ResolveCommitmentTargets(CredentialSchemas{VCTM: withDescendant})
+	require.Error(t, err, "a disclosure beneath the target cannot survive a commitment there")
+	assert.Contains(t, err.Error(), "identity.name")
+	assert.Contains(t, err.Error(), "non-object")
+
+	// A descendant that is NOT selectively disclosed is not processed by
+	// MakeCredential, so it is not this failure and must still load.
+	notDisclosed := &sdjwtvc.VCTM{
+		VCT: "urn:example:1",
+		Claims: []sdjwtvc.Claim{
+			{Path: segment("identity"), SD: "always"},
+			{Path: segment("identity", "name"), SD: "allowed"},
+		},
+	}
+	_, err = meta("identity").ResolveCommitmentTargets(CredentialSchemas{VCTM: notDisclosed})
+	assert.NoError(t, err, "only a disclosed descendant collides with the commitment")
+
+	// And a sibling is not a descendant.
+	sibling := &sdjwtvc.VCTM{
+		VCT: "urn:example:1",
+		Claims: []sdjwtvc.Claim{
+			{Path: segment("identity"), SD: "always"},
+			{Path: segment("identity_other"), SD: "always"},
+		},
+	}
+	_, err = meta("identity").ResolveCommitmentTargets(CredentialSchemas{VCTM: sibling})
+	assert.NoError(t, err, "a name that merely starts the same is not beneath it")
+}

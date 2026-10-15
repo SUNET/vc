@@ -344,9 +344,25 @@ func (c *CredentialMetadata) checkNotReserved(element string) error {
 	// is itself dots cannot be written - "..." splits into empty segments
 	// and never reaches a comparison. Adding it would be a branch no
 	// input can take, which reads like protection and is not.
-	for segment := range strings.SplitSeq(element, ".") {
+	for i, segment := range strings.Split(element, ".") {
 		if segment == "_sd" {
 			return fmt.Errorf("%q cannot be a claim name at any depth in an SD-JWT (SD-JWT VC 4.2.1.1), so a commitment at %q is refused by the issuer after the credential has been prepared",
+				segment, element)
+		}
+		// _sd_alg is reserved at the ROOT because the builder writes it
+		// there, which the check below reports. Nested, it is a different
+		// failure with the same cause: reconstructNode deletes _sd_alg
+		// from EVERY object as it restores disclosures
+		// (pkg/sdjwtvc/verification.go), so a commitment at
+		// identity._sd_alg is injected, signed and carried perfectly -
+		// and then does not exist for any verifier that reconstructs the
+		// claims. Nothing fails; the commitment is simply not there.
+		//
+		// The root case is left to the reserved-claim check below so its
+		// message keeps saying what actually happens there - overwritten
+		// rather than stripped.
+		if i > 0 && segment == "_sd_alg" {
+			return fmt.Errorf("%q is removed from every object when a verifier reconstructs the claims, so a commitment at %q would be issued and then absent from the reconstructed credential",
 				segment, element)
 		}
 	}
@@ -392,10 +408,66 @@ func (c *CredentialMetadata) checkDisclosable(vctm *sdjwtvc.VCTM, element string
 			return fmt.Errorf("the type metadata declares it with sd %q, so it would be signed in the clear and the holder could not withhold it; a commitment must be sd \"always\"",
 				orDefault(claim.SD, "allowed"))
 		}
-		return nil
+		return checkNoDisclosableDescendants(vctm, element)
 	}
 	return fmt.Errorf("the type metadata for %q does not declare it, so it would be signed in the clear rather than as a disclosure and the holder could not withhold it",
 		vctm.VCT)
+}
+
+// checkNoDisclosableDescendants refuses a commitment target that something
+// else is selectively disclosed BENEATH.
+//
+// A commitment is a string. A VCTM declaring both ["identity"] and
+// ["identity","name"] with sd "always" asks for a disclosure inside a
+// value this feature replaces with one, and MakeCredential sorts claims
+// deepest-first (sortClaimsByDepth), so it reaches identity.name while
+// identity is already that string and fails with "invalid path:
+// non-object".
+//
+// Caught here rather than left to that failure because of WHEN it
+// happens: issuance has already allocated a status-list entry by then
+// (internal/issuer/apiv1/handlers.go), so every attempt burns one for a
+// credential that can never be built. The same reasoning the _sd check
+// above is written from.
+func checkNoDisclosableDescendants(vctm *sdjwtvc.VCTM, element string) error {
+	for _, claim := range vctm.Claims {
+		if claim.SD != "always" || !claimPathDescends(claim.Path, element) {
+			continue
+		}
+		return fmt.Errorf("the type metadata also discloses %q beneath it, and a commitment replaces that object with a string, so the issuer fails with \"invalid path: non-object\" after a status-list entry has been allocated",
+			flattenClaimPath(claim.Path))
+	}
+	return nil
+}
+
+// claimPathDescends reports whether a VCTM claim path lies strictly
+// beneath the configured one, comparing segment by segment for the same
+// reason claimPathMatches does.
+func claimPathDescends(vctmPath []*string, configured string) bool {
+	segments := strings.Split(configured, ".")
+	if len(vctmPath) <= len(segments) {
+		return false
+	}
+	for i, segment := range segments {
+		if vctmPath[i] == nil || *vctmPath[i] != segment {
+			return false
+		}
+	}
+	return true
+}
+
+// flattenClaimPath renders a VCTM path for an error message. A nil
+// segment is the array wildcard, which has no configured spelling.
+func flattenClaimPath(path []*string) string {
+	parts := make([]string, 0, len(path))
+	for _, segment := range path {
+		if segment == nil {
+			parts = append(parts, "[]")
+			continue
+		}
+		parts = append(parts, *segment)
+	}
+	return strings.Join(parts, ".")
 }
 
 // claimPathMatches compares a VCTM claim path with a configured one,
