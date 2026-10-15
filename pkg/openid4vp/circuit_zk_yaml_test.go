@@ -1006,3 +1006,30 @@ func TestYAMLRawPathIsNotAWayPastTheConstraintChecks(t *testing.T) {
 	require.NoError(t, yamlv2.Unmarshal([]byte("id: q\nformat: dc+sd-jwt\nmeta:\n  vct_values: [urn:x]\n"), &ok))
 	assert.Equal(t, []string{"urn:x"}, ok.Meta.VCTValues)
 }
+
+// An extension bag that cannot be read is an error, not an empty bag.
+//
+// yamlExtra decodes the node a second time to collect members the typed
+// model does not know. A structural fault the typed decode IGNORES - a
+// sequence used as a map key under an unknown member - makes that second
+// decode fail, and the failure used to be swallowed: the whole bag was
+// discarded, valid siblings and all, with no error. A metadata block
+// carrying fn_id, input and one malformed sibling loaded with NO
+// extensions, silently, and the verifier sent different metadata than
+// the operator had configured.
+func TestYAMLExtensionsAreNotDiscardedOnADecodeError(t *testing.T) {
+	// The precondition: these siblings really are collected when nothing
+	// else is wrong, so the assertion below is about the error and not
+	// about a bag that was always empty.
+	var ok CircuitZkFormat
+	require.NoError(t, yamlv2.Unmarshal([]byte("fn_id: circuit_zk_longfellow\ninput: abc\n"), &ok))
+	require.Len(t, ok.Extra, 2)
+
+	var broken CircuitZkFormat
+	err := yamlv2.Unmarshal([]byte(
+		"fn_id: circuit_zk_longfellow\ninput: abc\nfuture:\n  ? [a, b]\n  : pair\n"), &broken)
+	require.Error(t, err, "the extensions could not be read, so this must not look like success")
+	assert.Contains(t, err.Error(), "circuit_zk client metadata")
+	assert.Empty(t, broken.Extra,
+		"and nothing half-read is kept; the caller gets the error, not a partial bag")
+}
