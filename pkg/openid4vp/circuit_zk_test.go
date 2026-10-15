@@ -3,11 +3,12 @@ package openid4vp
 import (
 	"bytes"
 	"encoding/json"
-	yamlv2 "gopkg.in/yaml.v2"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	yamlv2 "gopkg.in/yaml.v2"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
