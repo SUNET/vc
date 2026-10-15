@@ -430,17 +430,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		// PERSISTED, not just assigned. With HA the store decodes into a
 		// fresh value and hands back a copy, so writing to authCtx alone
 		// reaches nothing: the credential request would read an empty
-		// list and let a derivation overwrite a verified claim, which is
-		// the failure this list exists to prevent - restored silently,
+		// list and let a derivation overwrite a verified claim - silently,
 		// and only in the HA deployments.
 		//
-		// The identifier is carried across because Update REPLACES the
-		// stored context (ReplaceOne) while SetIdentifier above wrote
-		// straight to the store, so without this the replace would erase
-		// the identity that was just resolved.
+		// Through a TARGETED write, like SetIdentifier above, and
+		// deliberately not through Update. Update is a ReplaceOne, and
+		// authCtx was loaded before verification and the datastore reads;
+		// writing it back whole would discard whatever happened to the
+		// session meanwhile. With two direct-post requests in flight the
+		// slower one would replace the faster one's token state and reset
+		// Forfeited, making a consumed authorization code redeemable
+		// again - a far worse bug than the one being fixed.
 		authCtx.PresentedClaims = slices.Sorted(maps.Keys(copied))
-		authCtx.Identifier = identityMappingID
-		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+		if err := c.cacheService.AuthContext.SetPresentedClaims(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, authCtx.PresentedClaims); err != nil {
 			c.log.Error(err, "cannot persist the presented-claim provenance", "session_id", authCtx.SessionID)
 			return nil, fmt.Errorf("failed to persist presented claims: %w", err)
 		}

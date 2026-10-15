@@ -902,3 +902,51 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		})
 	}
 }
+
+// Recording the presented claims must not write back a stale context.
+//
+// The verifier holds a context loaded before verification and the
+// datastore reads. Update is a ReplaceOne, so persisting through it would
+// write that stale snapshot back whole: with two direct-post requests in
+// flight the slower one would replace the faster one's token state and
+// reset Forfeited, making a consumed authorization code redeemable again.
+// A targeted write touches the one field and leaves the rest alone.
+func TestSetPresentedClaimsDoesNotClobberNewerSessionState(t *testing.T) {
+	ctx := t.Context()
+	store := NewMemoryStore(time.Minute)
+
+	const session = "s1"
+	require.NoError(t, store.Create(ctx, &AuthorizationContext{
+		SessionID: session, ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}))
+
+	// What the verifier is holding: loaded early, so it knows nothing of
+	// the token issuance that happened since.
+	stale := &AuthorizationContext{
+		SessionID: session, ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}
+
+	// Meanwhile the session is redeemed: the code is consumed.
+	current, err := store.GetByID(ctx, session)
+	require.NoError(t, err)
+	current.Forfeited = true
+	current.Code = "consumed"
+	require.NoError(t, store.Update(ctx, current))
+
+	// The targeted write records the provenance and nothing else.
+	require.NoError(t, store.SetPresentedClaims(ctx, &AuthorizationContext{SessionID: session}, []string{"birth_date"}))
+
+	back, err := store.GetByID(ctx, session)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"birth_date"}, back.PresentedClaims)
+	assert.True(t, back.Forfeited,
+		"a consumed authorization code must not become redeemable again")
+
+	// For contrast: writing the stale snapshot back whole is exactly the
+	// hazard, and is why Update is not used here.
+	require.NoError(t, store.Update(ctx, stale))
+	after, err := store.GetByID(ctx, session)
+	require.NoError(t, err)
+	assert.False(t, after.Forfeited,
+		"ReplaceOne semantics: a stale snapshot resets the consumed flag")
+}

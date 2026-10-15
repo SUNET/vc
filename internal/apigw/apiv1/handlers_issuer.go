@@ -359,7 +359,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// never presented.
 				proved := provedClaims(docData, authContext.PresentedClaims)
 
-				derived, err := credential.ApplyDerivations(derivs, docData, time.Now())
+				// Pinned, not merely restored afterwards: each step's
+				// output feeds the next, so a dependent derivation must
+				// read the verified value rather than one a previous step
+				// computed over it.
+				derived, err := credential.ApplyDerivationsPinned(derivs, docData, time.Now(), proved)
 				if err != nil {
 					return nil, err
 				}
