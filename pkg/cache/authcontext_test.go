@@ -233,7 +233,7 @@ func TestGet_NoSearchFields(t *testing.T) {
 	result, err := cache.Get(ctx, query)
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "query must have at least one search field")
+	assert.Contains(t, err.Error(), "no searchable field set on the query")
 }
 
 func TestGet_NotFound(t *testing.T) {

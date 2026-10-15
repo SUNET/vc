@@ -1986,3 +1986,49 @@ func TestCodeDeadlineNeverOutlivesTheDocument(t *testing.T) {
 		assert.InDelta(t, time.Now().Add(authorizationCodeTTL).Unix(), deadline, 2)
 	})
 }
+
+// The Authorization Challenge Endpoint is browserless, so a registered
+// wallet with no callback has to be able to use it.
+//
+// redirect_uri is optional on this request
+// (draft-ietf-oauth-first-party-apps), and there is nowhere to send a user
+// back to - but the client check ran through Clients.Allow, which requires
+// a matching callback, so such a wallet was refused with invalid_client
+// and only a wallet attestation got past it. The fixtures all supply a
+// callback, which is what hid this.
+func TestAuthorizationChallenge_WalletWithoutARedirectURI(t *testing.T) {
+	client := newChallengeClient(t)
+
+	req := initialChallenge(t)
+	req.RedirectURI = ""
+
+	// Past the client gate and on to the presentation, which is the
+	// request this wallet should get.
+	challengeErr := challengeErr(t, client, req)
+	assert.Equal(t, 403, challengeErr.HTTPStatus)
+	assert.Equal(t, "insufficient_authorization", challengeErr.ErrorCode)
+	require.NotEmpty(t, challengeErr.AuthSession)
+	require.NotEmpty(t, challengeErr.OpenID4VPRequest)
+
+	// And the exchange really was opened for this wallet, with a code
+	// waiting at the end of it - the point of the flow, not just a 403.
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: challengeErr.AuthSession,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "wallet-1", authCtx.WalletClientID)
+	assert.Empty(t, authCtx.WalletURI, "there is no callback, and none was invented")
+	assert.NotEmpty(t, authCtx.Code)
+}
+
+// A redirect_uri that IS sent is still checked. Dropping the requirement
+// must not drop the check: a wrong callback is wrong on any endpoint.
+func TestAuthorizationChallenge_AWrongRedirectURIIsStillRefused(t *testing.T) {
+	client := newChallengeClient(t)
+
+	req := initialChallenge(t)
+	req.RedirectURI = "https://attacker.example.com/cb"
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidClient, oauthErr.ErrorCode)
+}

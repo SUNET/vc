@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/idna"
 )
 
 func TestDPoP_ValidateJTI(t *testing.T) {
@@ -630,48 +629,60 @@ func TestSameHTU_UnicodeCaseIsIDNAsToDo(t *testing.T) {
 	}
 }
 
-// The IDNA-failure path folds ASCII case and nothing else.
+// A wallet's browser-normalised hostname has to match the endpoint a
+// deployment configured, underscores and all.
 //
-// idna.Lookup refuses more hosts than deployments actually use - an
-// underscore anywhere in the name is enough - so that path is reached by
-// ordinary internal names and has to keep folding their case. What it must
-// NOT do is fold Unicode: strings.ToLower maps "İ" (U+0130) to "i", so
-// "İ.my_host.example" and "i.my_host.example" became one string, as did
-// "İ_host.example" and "i_host.example", and a proof for either satisfied
-// the other. They are distinct authorities, whose browser spellings
-// ("xn--i-9bb.my_host.example", "xn--i_host-pyd.example") are neither.
-func TestSameHTU_IDNAFailureFoldsASCIIOnly(t *testing.T) {
-	// The fixture's precondition: these really do take the fallback, or
-	// the test is about the IDNA path instead and proves nothing here.
-	for _, host := range []string{
-		"İ.my_host.example", "i.my_host.example",
-		"İ_host.example", "i_host.example",
-		"MY_HOST.EXAMPLE",
+// idna.Lookup turns on StrictDomainName, which rejects an underscore
+// anywhere in the name - so "İ.my_host.example" did not map, fell through
+// to the ASCII fold, and a wallet sending the correct A-label
+// "xn--i-9bb.my_host.example" was answered with invalid_dpop_proof. The
+// comparison now uses the same browser profile CanonicalOrigin does.
+//
+// The negatives are the other half: mapping these hosts rather than
+// refusing them is what keeps "İ…" and "i…" distinct, instead of leaving
+// them to a Unicode fold that merges them.
+func TestSameHTU_UnderscoreHostsMapLikeABrowser(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"https://\u0130.my_host.example/token", "https://xn--i-9bb.my_host.example/token"},
+		{"https://\u0130_host.example/token", "https://xn--i_host-pyd.example/token"},
+		{"https://M\u00dcNCHEN.my_host.example/token", "https://xn--mnchen-3ya.my_host.example/token"},
+		{"https://MY_HOST.EXAMPLE/token", "https://my_host.example/token"},
+		{"https://My_Host.Example/token", "https://my_host.example/token"},
 	} {
-		if _, err := idna.Lookup.ToASCII(host); err == nil {
-			t.Fatalf("%q no longer fails IDNA, so this test no longer covers the fallback", host)
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same authority", pair[0], pair[1])
 		}
 	}
 
+	// Still distinct, which is what the mapping buys: "İ" is not "i".
 	for _, pair := range [][2]string{
-		{"https://İ.my_host.example/token", "https://i.my_host.example/token"},
-		{"https://İ_host.example/token", "https://i_host.example/token"},
-		{"https://İ.my_host.example/token", "https://xn--i-9bb.my_host.example/token"},
+		{"https://\u0130.my_host.example/token", "https://i.my_host.example/token"},
+		{"https://\u0130_host.example/token", "https://i_host.example/token"},
+		{"https://xn--i-9bb.my_host.example/token", "https://i.my_host.example/token"},
 	} {
 		if SameHTU(pair[0], pair[1]) {
 			t.Fatalf("%q and %q are different authorities", pair[0], pair[1])
 		}
 	}
+}
 
-	// ASCII case still folds, which is the whole reason this path lowers
-	// anything at all - an underscore host is an ordinary internal name.
-	for _, pair := range [][2]string{
-		{"https://MY_HOST.EXAMPLE/token", "https://my_host.example/token"},
-		{"https://My_Host.Example/token", "https://my_host.example/token"},
-		{"https://İ.MY_HOST.example/token", "https://İ.my_host.example/token"},
+// The fold that remains is a last resort, and it is ASCII-only so that it
+// cannot merge "İ…" with "i…" the way strings.ToLower would. The browser
+// profile above maps both of those now, so nothing ordinary reaches here -
+// which is exactly why the property is worth pinning rather than assuming.
+func TestAsciiLowerFoldsOnlyASCII(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"MY_HOST.EXAMPLE", "my_host.example"},
+		{"\u0130.Example", "\u0130.example"},
+		{"\u00dcBER.example", "\u00dcber.example"},
+		{"already.lower", "already.lower"},
+		{"", ""},
 	} {
-		if !SameHTU(pair[0], pair[1]) {
-			t.Fatalf("%q and %q differ only in ASCII case", pair[0], pair[1])
+		if got := asciiLower(tc.in); got != tc.want {
+			t.Fatalf("asciiLower(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+	if asciiLower("\u0130") == "i" {
+		t.Fatal("asciiLower must not fold U+0130 to i; that is the merge this helper exists to avoid")
 	}
 }
