@@ -422,6 +422,11 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			return nil, fmt.Errorf("presented claim copy failed: %w", err)
 		}
 		documents = applyPresentedDocumentClaims(documents, copied)
+
+		// Record which claims the presentation supplied, so issuance can
+		// reapply them after derivations. The matched auth scope that
+		// chose them is known only here.
+		authCtx.PresentedClaims = slices.Sorted(maps.Keys(copied))
 	}
 
 	// Cache PID documents for session

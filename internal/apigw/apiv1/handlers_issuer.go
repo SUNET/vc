@@ -350,11 +350,29 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// (e.g. the "identity" sub-map) with the cache and let a
 				// derivation targeting a dotted path corrupt it.
 				docData := credential.CloneNestedClaims(document.DocumentData)
+
+				// What the holder PROVED, kept aside before derivations
+				// run. A derivation writing one of these destinations -
+				// birth_date computed from another stored field, say -
+				// would otherwise replace a verified value with a stored
+				// one, and the credential would assert something that was
+				// never presented.
+				proved := provedClaims(docData, authContext.PresentedClaims)
+
 				derived, err := credential.ApplyDerivations(derivs, docData, time.Now())
 				if err != nil {
 					return nil, err
 				}
 				credential.MergeNestedClaims(docData, derived)
+
+				// Reapplied last. The configuration says these claims come
+				// from the presentation, so they win - but a derivation
+				// aiming at one is a configuration mistake worth seeing,
+				// not something to resolve in silence.
+				for _, claim := range restoreProvedClaims(docData, derived, proved) {
+					c.log.Warn("a derivation targets a claim copied from the presentation; the presented value wins",
+						"scope", scope, "claim", claim)
+				}
 				document = &model.CompleteDocument{
 					Meta:               document.Meta,
 					IdentityMappingIDs: document.IdentityMappingIDs,

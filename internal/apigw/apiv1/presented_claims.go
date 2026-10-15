@@ -69,9 +69,13 @@ func presentedDocumentClaims(sourceFormat string, presented map[string]any, entr
 		default:
 			if s, ok := claimString(raw); ok {
 				out[dst] = s
-			} else {
-				out[dst] = raw
+				continue
 			}
+			value, err := documentValue(raw)
+			if err != nil {
+				return nil, fmt.Errorf("document claim %q -> %q: %w", src, dst, err)
+			}
+			out[dst] = value
 		}
 	}
 	return out, nil
@@ -158,8 +162,82 @@ func normaliseFullDate(v any) (string, error) {
 	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
 }
 
-// applyPresentedDocumentClaims returns copies of docs with claims merged
-// over each document's own data; the datastore's documents are not mutated.
+// documentValue turns a presented claim value into one the issued document
+// can carry: JSON-encodable, and sharing nothing with the presentation.
+//
+// A verified mdoc claim arrives CBOR-decoded, so a container is a
+// map[any]any and not a map[string]any. json.Marshal refuses that outright
+// ("unsupported type"), and the refusal surfaces at the END of issuance,
+// where it reads as a broken credential rather than an unconvertible
+// claim - a valid presentation of driving_privileges could not be issued
+// from at all.
+//
+// Tags are unwrapped here too. A date tag nested inside a container never
+// reached claimString, and json.Marshal renders a cbor.Tag as its struct -
+// {"Number":1004,"Content":"..."} - which would be written into the
+// credential as if it were the value.
+//
+// Anything else that cannot be represented is an error rather than a
+// best effort: this function exists because a wrong value here is a wrong
+// credential.
+func documentValue(v any) (any, error) {
+	switch typed := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			converted, err := documentValue(item)
+			if err != nil {
+				return nil, fmt.Errorf("member %q: %w", key, err)
+			}
+			out[key] = converted
+		}
+		return out, nil
+
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			name, ok := key.(string)
+			if !ok {
+				return nil, fmt.Errorf("map key of type %T cannot be a JSON member name", key)
+			}
+			converted, err := documentValue(item)
+			if err != nil {
+				return nil, fmt.Errorf("member %q: %w", name, err)
+			}
+			out[name] = converted
+		}
+		return out, nil
+
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			converted, err := documentValue(item)
+			if err != nil {
+				return nil, fmt.Errorf("element %d: %w", i, err)
+			}
+			out[i] = converted
+		}
+		return out, nil
+
+	case cbor.Tag, *cbor.Tag:
+		if s, ok := claimString(typed); ok {
+			return s, nil
+		}
+		return nil, fmt.Errorf("value of type %T is a CBOR tag this build cannot represent", v)
+
+	case mdoc.FullDate:
+		return string(typed), nil
+	case mdoc.TDate:
+		return string(typed), nil
+
+	default:
+		return v, nil
+	}
+}
+
+// applyPresentedDocumentClaims returns copies of docs with the copied
+// claims replacing each document's own; the datastore's documents are not
+// mutated.
 func applyPresentedDocumentClaims(docs map[string]*model.CompleteDocument, claims map[string]any) map[string]*model.CompleteDocument {
 	if len(claims) == 0 {
 		return docs
@@ -171,7 +249,19 @@ func applyPresentedDocumentClaims(docs map[string]*model.CompleteDocument, claim
 			continue
 		}
 		data := credential.CloneNestedClaims(doc.DocumentData)
-		credential.MergeNestedClaims(data, claims)
+		// REPLACED, not merged. Destinations are top-level element names
+		// (validate.go refuses a dotted one), and the configuration says
+		// the claim comes from the presentation - so merging an
+		// object-valued source such as an SD-JWT "address" left
+		// datastore-only members like street_address inside it, and the
+		// issued credential carried a mixture of what was proved and what
+		// was stored under one claim name.
+		//
+		// MergeNestedClaims stays as it is: derivations rely on its
+		// recursive behaviour, and this was the wrong caller for it.
+		for dst, value := range claims {
+			data[dst] = value
+		}
 		out[k] = &model.CompleteDocument{
 			Meta:               doc.Meta,
 			IdentityMappingIDs: doc.IdentityMappingIDs,
@@ -179,4 +269,44 @@ func applyPresentedDocumentClaims(docs map[string]*model.CompleteDocument, claim
 		}
 	}
 	return out
+}
+
+// provedClaims snapshots the document values the VERIFIED presentation
+// supplied, before derivations run over the document.
+//
+// The names travel on the authorization context because the auth scope
+// that chose them is known only to the verifier half, while derivations
+// run in the issuance request.
+func provedClaims(docData map[string]any, presented []string) map[string]any {
+	if len(presented) == 0 {
+		return nil
+	}
+	proved := make(map[string]any, len(presented))
+	for _, claim := range presented {
+		if v, ok := docData[claim]; ok {
+			proved[claim] = v
+		}
+	}
+	return proved
+}
+
+// restoreProvedClaims puts the presented values back over whatever the
+// derivations produced, and reports the claims a derivation had tried to
+// write.
+//
+// A derivation computing birth_date from another stored field would
+// otherwise replace a date the holder actually proved, and the credential
+// would be issued asserting something that was never presented - with
+// nothing in it to show the difference. The configuration says these
+// claims come from the presentation, so they win; the returned names are
+// a configuration mistake worth logging rather than resolving in silence.
+func restoreProvedClaims(docData, derived, proved map[string]any) []string {
+	var conflicts []string
+	for _, claim := range slices.Sorted(maps.Keys(proved)) {
+		if _, overwritten := derived[claim]; overwritten {
+			conflicts = append(conflicts, claim)
+		}
+		docData[claim] = proved[claim]
+	}
+	return conflicts
 }

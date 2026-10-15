@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -189,4 +190,111 @@ func TestIssuanceAuthDCQLRequestsTheCopiedClaims(t *testing.T) {
 	}
 	require.Contains(t, paths, []string{"org.iso.18013.5.1", "birth_date"})
 	require.Equal(t, openid4vp.FormatMsoMdoc, dcql.Credentials[0].Format)
+}
+
+// A CBOR container must become something the document can carry.
+//
+// A verified mdoc claim arrives CBOR-decoded, so a container is a
+// map[any]any. Copying it unchanged made json.Marshal of the assembled
+// document fail with "unsupported type" at the END of issuance, so a
+// valid presentation of driving_privileges could not be issued from at
+// all - and the failure read as a broken credential rather than an
+// unconvertible claim.
+func TestPresentedContainerClaimsAreJSONEncodable(t *testing.T) {
+	presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			"driving_privileges": []any{
+				map[string]any{
+					"vehicle_category_code": "B",
+					"issue_date":            mdoc.FullDate("2020-01-01"),
+				},
+			},
+		},
+	})
+
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"org.iso.18013.5.1.driving_privileges"},
+		DocumentClaims: map[string]string{"org.iso.18013.5.1.driving_privileges": "driving_privileges"},
+	}
+
+	copied, err := presentedDocumentClaims("mso_mdoc", presented, entry, nymAuthTarget(t))
+	require.NoError(t, err, "a valid mdoc container must be copyable")
+
+	// The whole point: the assembled document marshals.
+	encoded, err := json.Marshal(map[string]any{"document_data": copied})
+	require.NoError(t, err, "the copied claim must survive the json.Marshal issuance does")
+	require.Contains(t, string(encoded), `"vehicle_category_code":"B"`)
+	require.Contains(t, string(encoded), `"issue_date":"2020-01-01"`,
+		"a date tag inside a container must not be written as its CBOR struct")
+
+	// And it is a map[string]any, not the CBOR map json.Marshal refuses.
+	list, ok := copied["driving_privileges"].([]any)
+	require.True(t, ok)
+	_, ok = list[0].(map[string]any)
+	require.True(t, ok, "a CBOR map must be converted, not passed through")
+}
+
+// A copied claim REPLACES the datastore's, it does not merge with it.
+//
+// Destinations are top-level element names, and the configuration says the
+// value comes from the presentation. Merging an object-valued source left
+// datastore-only members inside it, so one claim carried a mixture of what
+// was proved and what was stored.
+func TestCopiedObjectClaimReplacesTheStoredOne(t *testing.T) {
+	docs := map[string]*model.CompleteDocument{
+		"d": {DocumentData: map[string]any{
+			"address": map[string]any{
+				"country":        "SE",
+				"street_address": "from the datastore",
+			},
+			"untouched": "kept",
+		}},
+	}
+
+	out := applyPresentedDocumentClaims(docs, map[string]any{
+		"address": map[string]any{"country": "DK"},
+	})
+
+	address, ok := out["d"].DocumentData["address"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, map[string]any{"country": "DK"}, address,
+		"the presented object must replace the stored one outright")
+	require.NotContains(t, address, "street_address",
+		"a datastore-only member must not survive inside a presented claim")
+	require.Equal(t, "kept", out["d"].DocumentData["untouched"],
+		"claims the presentation did not name are left alone")
+
+	// The datastore's own document is not mutated.
+	stored := docs["d"].DocumentData["address"].(map[string]any)
+	require.Equal(t, "from the datastore", stored["street_address"])
+}
+
+// A derivation must not replace what the holder proved.
+//
+// Derivations run over the assembled document during issuance, after the
+// presented claims were copied in at verification time. A derivation
+// writing birth_date from another stored field silently replaced a
+// verified date, and the credential asserted something never presented.
+func TestDerivationsCannotReplacePresentedClaims(t *testing.T) {
+	docData := map[string]any{
+		"birth_date":  "1990-01-01", // from the presentation
+		"family_name": "stored",
+	}
+	proved := provedClaims(docData, []string{"birth_date"})
+	require.Equal(t, map[string]any{"birth_date": "1990-01-01"}, proved)
+
+	// A derivation computes a different birth_date, and something else.
+	derived := map[string]any{"birth_date": "1970-01-01", "age_over_18": true}
+	for k, v := range derived {
+		docData[k] = v
+	}
+
+	conflicts := restoreProvedClaims(docData, derived, proved)
+
+	require.Equal(t, "1990-01-01", docData["birth_date"],
+		"the verified value must win over the derived one")
+	require.Equal(t, true, docData["age_over_18"],
+		"a derivation that does not collide is left alone")
+	require.Equal(t, []string{"birth_date"}, conflicts,
+		"the collision must be reported, not resolved in silence")
 }
