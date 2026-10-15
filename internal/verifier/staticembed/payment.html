@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/bulma.min.css">
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="icon" href="/static/favicon.png" type="image/png">
+    <style>[hidden] { display: none !important; }</style>
 </head>
 <body>
 <section class="section">
@@ -60,6 +61,10 @@
         ev.preventDefault();
         $("error").hidden = true;
         $("done").hidden = true;
+        $("pending").hidden = true;
+        $("qr").removeAttribute("src");
+        $("link").href = "#";
+        $("status").textContent = "Waiting for the wallet...";
         $("submit").disabled = true;
         var vcts = $("vct").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
         var body = {
@@ -94,11 +99,15 @@
         // /ui/completion answers {"status":"pending"} until the wallet's response has been accepted.
         // A refused response leaves it pending: the reason is in the verifier log (invalid_transaction_data).
         for (var i = 0; i < 150; i++) {
-            var res = await fetch("/ui/completion?session_id=" + encodeURIComponent(sessionID), { cache: "no-store" });
-            if (res.ok) {
-                var c = await res.json();
-                if (c.status === "complete") { return show(c.response_code); }
-            }
+            // The session exists whatever happens to one poll: a network or JSON
+            // failure is retried within the same limit, not reported as a failed start.
+            try {
+                var res = await fetch("/ui/completion?session_id=" + encodeURIComponent(sessionID), { cache: "no-store" });
+                if (res.ok) {
+                    var c = await res.json();
+                    if (c.status === "complete") { return show(c.response_code); }
+                }
+            } catch (e) { /* retry */ }
             await sleep(2000);
         }
         $("status").textContent = "Timed out waiting for the wallet. If the wallet answered, the verifier refused the response: see its log.";

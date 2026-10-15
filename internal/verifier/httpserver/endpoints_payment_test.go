@@ -56,6 +56,7 @@ func TestPaymentPage(t *testing.T) {
 		body := w.Body.String()
 		assert.Contains(t, body, "urn:eudi:sca:payment:1")
 		assert.Contains(t, body, "https://psp.example/sca")
+		assert.Contains(t, body, "[hidden] { display: none !important; }", "Bulma's .box would otherwise keep hidden panels visible")
 		assert.NotContains(t, body, "{{", "template actions must all have been expanded")
 	})
 }
