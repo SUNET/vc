@@ -235,16 +235,23 @@ func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 	}
 
 	ref, err := statusFromMSO(doc)
-	if err != nil {
-		// The MSO carries a status parameter that cannot be read. That is
-		// not the same as carrying none: the issuer signed something here,
-		// so the credential claims to be revocable and its state is
-		// unknown. Reporting "absent" would make it verify as permanently
-		// valid.
-		return nil, err
-	}
-	if ref != nil {
+	switch {
+	case err == nil && ref != nil:
 		return ref, nil
+	case errors.Is(err, errMSOUnreadable):
+		// Only here, and only because this function is a diagnostic over
+		// documents an operator supplies by hand. "Where does this
+		// document say its status lives" is still a question worth
+		// answering for a document whose MSO will not decode, and the
+		// answer may be in a data element. A verifier asks a different
+		// question and gets a refusal - see ExtractMSOStatusReference.
+	case err != nil:
+		// The MSO decoded and carries a status parameter that cannot be
+		// used. That is not the same as carrying none: the issuer signed
+		// something here, so the credential claims to be revocable and
+		// its state is unknown. Reporting "absent" would make it verify
+		// as permanently valid.
+		return nil, err
 	}
 
 	// Look for status reference in issuer signed items
@@ -350,25 +357,40 @@ func parseStatusElement(value any) (*StatusReference, bool) {
 	}, true
 }
 
+// errMSOUnreadable marks the case where the MSO itself could not be
+// decoded, as distinct from an MSO that decoded and holds an unusable
+// status parameter.
+//
+// The two are told apart for exactly one caller: ExtractStatusReference,
+// a diagnostic, still tries the data-element fallback on an undecodable
+// MSO. Every verification path treats both as the refusal they are.
+var errMSOUnreadable = errors.New("mdoc MSO cannot be read, so its status parameter cannot be read either")
+
 // statusFromMSO reads the MSO's status parameter.
 //
-// (nil, nil) means the MSO carries no status parameter, so the data-element
-// fallback is still worth trying. A non-nil error means it carries one that
-// cannot be used, which must not be reported as absence - see
-// ExtractStatusReference.
+// (nil, nil) means the MSO decoded and carries no status parameter, so the
+// data-element fallback is still worth trying. Everything else is an
+// error, including a failure to decode the MSO at all.
 //
-// A document whose IssuerAuth or MSO will not decode at all is treated as
-// "no status": that document fails verification for its own reasons long
-// before anything asks about revocation, and reporting it here would
-// replace a precise error with a misleading one.
+// That last part used to be a swallow, on the reasoning that such a
+// document fails verification for its own reasons long before anything
+// asks about revocation. That is true TODAY, and only by coincidence:
+// verification happens to decode the MSO with this same DecodeMSOPayload
+// and happens to return early when it fails. But a status member of the
+// wrong CBOR shape is precisely what makes DecodeMSOPayload fail - the
+// MSO's status field is typed - so the swallow turned "this credential's
+// revocation pointer is unreadable" into "this credential is not
+// revocable", which is the one translation a verifier must never make. A
+// helper on a verification path has to fail closed on its own, not
+// because of what its caller happens to do first.
 func statusFromMSO(doc *DocumentMdoc) (*StatusReference, error) {
 	sign1, err := ParseIssuerAuth(doc.IssuerSigned.IssuerAuth)
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("%w: issuer auth will not parse: %w", errMSOUnreadable, err)
 	}
 	mso, err := DecodeMSOPayload(sign1)
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("%w: %w", errMSOUnreadable, err)
 	}
 	if mso.Status == nil {
 		return nil, nil
