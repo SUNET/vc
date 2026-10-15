@@ -16,7 +16,7 @@ import (
 func seedSecret(src *model.SeedSource) ([]byte, error) {
 	switch {
 	case src.SecretPath != "" && src.Secret != "":
-		return nil, fmt.Errorf("the seed source sets both secret_path and secret; the issuer refuses that, so this does too")
+		return nil, fmt.Errorf("the seed source sets both secret_path and a secret in the secrets file; the issuer refuses that, so this does too")
 	case src.SecretPath != "":
 		raw, err := os.ReadFile(filepath.Clean(src.SecretPath))
 		if err != nil {
@@ -26,7 +26,7 @@ func seedSecret(src *model.SeedSource) ([]byte, error) {
 	case src.Secret != "":
 		return decodeBase64URL(src.Secret)
 	default:
-		return nil, fmt.Errorf("the seed source sets neither secret_path nor secret")
+		return nil, fmt.Errorf("the seed source sets neither secret_path nor a secret in the secrets file")
 	}
 }
 

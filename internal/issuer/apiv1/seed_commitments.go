@@ -133,7 +133,7 @@ func (c *Client) checkCommitmentClaims() error {
 func seedSecret(name, path, inline string) ([]byte, error) {
 	switch {
 	case path != "" && inline != "":
-		return nil, fmt.Errorf("issuer.seeds.%s: set secret_path or secret, not both", name)
+		return nil, fmt.Errorf("issuer.seeds.%s: set secret_path or the secret in the secrets file, not both", name)
 	case path != "":
 		decoded, err := readBase64URLFile(path)
 		if err != nil {
@@ -147,7 +147,7 @@ func seedSecret(name, path, inline string) ([]byte, error) {
 		}
 		return decoded, nil
 	default:
-		return nil, fmt.Errorf("issuer.seeds.%s: set either secret_path or secret", name)
+		return nil, fmt.Errorf("issuer.seeds.%s: set secret_path, or issuer.seeds.%s.secret in the secrets file", name, name)
 	}
 }
 

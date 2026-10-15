@@ -44,9 +44,23 @@ issuer:
     primary:
       model: derived
       secret_path: /etc/vc/seed/issuer.key   # base64url; >= 32 bytes DECODED
-      # secret: <base64url>                  # the inline alternative; not both
       # seed_bytes: 16                       # default
 ```
+
+The secret itself is never written in `config.yaml`. Either mount it and
+point `secret_path` at it, as above, or put it in the **secrets file**:
+
+```yaml
+issuer:
+  seeds:
+    primary:
+      secret: <base64url>                    # >= 32 bytes DECODED
+```
+
+Exactly one of the two. Both, or neither, is refused at startup rather
+than resolved by precedence: a deployment with two sources of truth for
+this secret cannot tell which one is live, and an operator editing the
+half that is not would see no effect at all.
 
 and, per credential, the claims that carry a commitment:
 

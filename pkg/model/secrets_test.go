@@ -3,6 +3,8 @@ package model
 import (
 	"testing"
 
+	yamlv2 "gopkg.in/yaml.v2"
+
 	"github.com/SUNET/vc/pkg/pubsub"
 
 	"github.com/stretchr/testify/assert"
@@ -376,4 +378,36 @@ func TestApplySecretsFillsSeedDerivationSecrets(t *testing.T) {
 			}})
 		})
 	})
+}
+
+// The derivation secret is not settable in the main configuration.
+//
+// It was an inline field and is deliberately not one any more: a secret
+// in config.yaml is against the convention everything else here follows,
+// and the precedent cited for it - BBSConfig.SecretKey - is the exception
+// rather than the rule. The two routes are a mounted file via secret_path
+// and the secrets file.
+//
+// The loader is NOT strict, so a config.yaml that still carries the old
+// key is ignored rather than rejected at parse time. That matters: the
+// value must not be picked up, and the deployment must not start with a
+// seed nobody configured. It gets a startup refusal naming where the
+// secret belongs instead.
+func TestSeedSecretIsNotSettableInTheMainConfig(t *testing.T) {
+	const fromSecretsFile = "c2VjcmV0cy1maWxlLXZhbHVlLWF0LWxlYXN0LTMyLWJ5dGVz"
+	const doc = "model: derived\nsecret: " + fromSecretsFile + "\n"
+
+	var source SeedSource
+	require.NoError(t, yamlv2.Unmarshal([]byte(doc), &source),
+		"the loader is not strict, so an old config still parses")
+	assert.Empty(t, source.Secret,
+		"an inline secret in config.yaml must not reach the derivation secret")
+	assert.Equal(t, "derived", source.Model, "the rest of the source still loads")
+
+	// And the secrets file is the route that does fill it.
+	cfg := &Cfg{Issuer: &Issuer{Seeds: map[string]*SeedSource{"pseudonym": {Model: "derived"}}}}
+	cfg.ApplySecrets(&Secrets{Issuer: &IssuerSecrets{
+		Seeds: map[string]SeedSourceSecrets{"pseudonym": {Secret: fromSecretsFile}},
+	}})
+	assert.Equal(t, fromSecretsFile, cfg.Issuer.Seeds["pseudonym"].Secret)
 }

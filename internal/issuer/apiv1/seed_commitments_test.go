@@ -486,7 +486,7 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 		{
 			name:   "no derivation secret",
 			mutate: func(c *Client) { c.cfg.Issuer.Seeds["primary"].Secret = "" },
-			want:   "set either secret_path or secret",
+			want:   "set secret_path, or issuer.seeds.primary.secret in the secrets file",
 		},
 		{
 			name: "two sources of truth for the derivation secret",

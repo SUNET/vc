@@ -36,14 +36,18 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 		require.NotNil(t, source)
 	})
 
-	t.Run("an inline secret still works, and wins", func(t *testing.T) {
+	// The inline field is gone from the main configuration, so recovery
+	// must refuse rather than quietly reproduce a seed from a value the
+	// ISSUER would not have used. A tool that accepted it here would
+	// hand back seeds the issuer never derived.
+	t.Run("an inline secret in the main config is not a source", func(t *testing.T) {
 		dir := t.TempDir()
 		configPath := write(t, dir, "config.yaml",
 			"issuer:\n  seeds:\n    pseudonym:\n      model: derived\n      secret: \""+secret+"\"\n", 0o600)
 
-		source, err := loadSeedSource(configPath, "pseudonym")
-		require.NoError(t, err)
-		require.NotNil(t, source)
+		_, err := loadSeedSource(configPath, "pseudonym")
+		require.Error(t, err, "config.yaml is no longer a place the derivation secret can live")
+		assert.Contains(t, err.Error(), "secret_path")
 	})
 
 	t.Run("a secrets file this tool may not read is an error, not a fallback", func(t *testing.T) {

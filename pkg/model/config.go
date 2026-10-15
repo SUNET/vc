@@ -656,25 +656,27 @@ type SeedSource struct {
 	// mechanism, because having one would suggest otherwise.
 	SecretPath string `yaml:"secret_path" validate:"omitempty" doc_example:"\"/etc/vc/seed/issuer.key\""`
 
-	// Secret is the same value inline, base64url-encoded, decoding to at
+	// Secret is the derivation secret, base64url-encoded, decoding to at
 	// least 32 bytes.
 	//
-	// PREFER THE SECRETS FILE for this: issuer.seeds.<name>.secret there
-	// is backfilled into this field when it is empty, the same way Mongo,
-	// SQL and the HA credentials are, and it keeps the most permanent
-	// secret an issuer holds out of the rendered configuration. This
-	// field remains for a deployment that has no secrets file.
+	// NOT SETTABLE IN THE MAIN CONFIGURATION, by design. It is filled from
+	// issuer.seeds.<name>.secret in the SECRETS FILE, the same way Mongo,
+	// SQL and the HA credentials are, so the most permanent secret an
+	// issuer holds never appears in the rendered config.
 	//
-	// Exists for the same reason BBSConfig.SecretKey does: a Helm chart
-	// that models specific named secret volumes cannot add one for a key
-	// it does not know about. Prefer SecretPath where a file is possible.
+	// This was an inline config field and is deliberately not one any
+	// more. The justification for it was BBSConfig.SecretKey as
+	// precedent, and that field is an exception to the convention rather
+	// than an example of it - following it meant copying the one place
+	// that already sidesteps the custom. A deployment therefore has two
+	// routes: a mounted file via secret_path, or the secrets file.
 	//
-	// Exactly one of secret_path and secret must be set for a derived
+	// Exactly one of secret_path and this must end up set for a derived
 	// source. Both, or neither, is refused at startup rather than resolved
 	// by precedence - a deployment with two sources of truth for this
 	// secret cannot tell which one is live, and an operator editing the
 	// half that is not would see no effect at all.
-	Secret string `yaml:"secret" validate:"omitempty"`
+	Secret string `yaml:"-"`
 
 	// SeedBytes is the length of the seeds this source produces. 0 means
 	// 16, which is what the nym_auth rulebook specifies.
