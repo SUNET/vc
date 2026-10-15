@@ -265,10 +265,14 @@ func copyDCQL(src *DCQL) *DCQL {
 			}
 		}
 		dst.Credentials[i] = CredentialQuery{
-			ID:       cred.ID,
-			Format:   cred.Format,
-			Multiple: cred.Multiple,
-			Meta:     meta,
+			ID:     cred.ID,
+			Format: cred.Format,
+
+			Meta: meta,
+		}
+		if cred.Multiple != nil {
+			v := *cred.Multiple
+			dst.Credentials[i].Multiple = &v
 		}
 		if cred.RequireCryptographicHolderBinding != nil {
 			v := *cred.RequireCryptographicHolderBinding

@@ -40,7 +40,7 @@ func TestCredentialQueryEncodingUnchanged(t *testing.T) {
 		{
 			name: "an SD-JWT query with claim sets and holder binding",
 			query: CredentialQuery{
-				ID: "pid", Format: FormatSDJWTVC, Multiple: true,
+				ID: "pid", Format: FormatSDJWTVC, Multiple: new(true),
 				Meta:                              MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
 				Claims:                            []ClaimQuery{{ID: "a", Path: StringPath("family_name")}},
 				ClaimSet:                          [][]string{{"a"}},
@@ -124,4 +124,77 @@ func TestDecodingAKnownQueryLeavesNoExtra(t *testing.T) {
 	out, err := json.Marshal(query)
 	require.NoError(t, err)
 	assert.JSONEq(t, in, string(out))
+}
+
+// An ordinary query must stay MUTABLE, because something downstream
+// mutates it.
+//
+// Multiple was a plain bool with omitempty, so `"multiple": false` - a
+// valid, unremarkable SD-JWT query - did not encode back to what arrived
+// and was kept as Raw. A raw query is emitted from its original bytes, so
+// augmentDCQLFromVCTM's rewrite of the shadow Claims was silently
+// discarded and the request went out with the un-augmented paths. Nothing
+// failed; the wallet simply got a different query than the one the
+// verifier had decided to send.
+//
+// The decode-augment-serialise cycle is the thing to assert, not the Raw
+// flag on its own: a future member with the same omitempty problem would
+// reintroduce exactly this, and the flag alone would not say what it
+// cost.
+func TestOrdinaryQueriesSurviveDecodeAugmentSerialise(t *testing.T) {
+	for _, body := range []string{
+		`{"id":"pid","format":"dc+sd-jwt","multiple":false,"meta":{"vct_values":["urn:x"]},"claims":[{"path":["address","locality"]}]}`,
+		`{"id":"pid","format":"dc+sd-jwt","multiple":true,"meta":{"vct_values":["urn:x"]},"claims":[{"path":["address","locality"]}]}`,
+		`{"id":"pid","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"claims":[{"path":["address","locality"]}]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			var q CredentialQuery
+			require.NoError(t, json.Unmarshal([]byte(body), &q))
+
+			require.Nil(t, q.Raw,
+				"an ordinary query must not be kept raw; a raw one ignores the edits below")
+
+			// What augmentDCQLFromVCTM does to a query whose parent claim
+			// has configured children.
+			q.Claims = []ClaimQuery{{Path: StringPath("address")}}
+
+			encoded, err := json.Marshal(q)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), `"claims":[{"path":["address"]}]`,
+				"the augmented claims must be what goes on the wire")
+			assert.NotContains(t, string(encoded), `"locality"`,
+				"the pre-augmentation path must not survive")
+		})
+	}
+}
+
+// And the member that caused it round-trips in all three states, which is
+// the property a plain bool could not have: absent, explicitly false, and
+// explicitly true are three different requests.
+func TestMultipleRoundTripsAbsentFalseAndTrue(t *testing.T) {
+	for _, tc := range []struct {
+		body         string
+		wantInOutput string
+		allows       bool
+	}{
+		{`{"id":"q","format":"dc+sd-jwt","meta":{}}`, "", false},
+		{`{"id":"q","format":"dc+sd-jwt","multiple":false,"meta":{}}`, `"multiple":false`, false},
+		{`{"id":"q","format":"dc+sd-jwt","multiple":true,"meta":{}}`, `"multiple":true`, true},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			var q CredentialQuery
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &q))
+			require.Nil(t, q.Raw)
+			assert.Equal(t, tc.allows, q.AllowsMultiple())
+
+			encoded, err := json.Marshal(q)
+			require.NoError(t, err)
+			if tc.wantInOutput == "" {
+				assert.NotContains(t, string(encoded), `"multiple"`,
+					"an omitted member must stay omitted, not become an explicit false")
+				return
+			}
+			assert.Contains(t, string(encoded), tc.wantInOutput)
+		})
+	}
 }

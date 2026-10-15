@@ -29,7 +29,7 @@ func TestCopyDCQLCarriesEveryCredentialQueryField(t *testing.T) {
 	original := CredentialQuery{
 		ID:       "nym_attestation",
 		Format:   FormatCircuitZk,
-		Multiple: true,
+		Multiple: new(true),
 		Meta: MetaQuery{
 			DoctypeValue: "eu.europa.ec.eudi.nym_auth.1",
 			VCTValues:    []string{"urn:example"},

@@ -196,3 +196,88 @@ func TestClearingTheQueryClearsTheExactCopy(t *testing.T) {
 	assert.Nil(t, reloaded.DCQLQuery, "a removed query must not come back")
 	assert.Empty(t, reloaded.DCQLQueryExact)
 }
+
+// A literal past float64's range is the case the rounding above cannot
+// reach: the driver's json.Number encoder fails outright, so before this
+// was handled the WHOLE document was unwritable and session creation
+// failed before the request reached a wallet.
+//
+// It arrives the way a Verifier actually sends one - decoded from the
+// JSON of a direct interaction request - because that is what puts a
+// json.Number in the structured copy. The preset path's browser guard
+// does not cover this: a direct JSON request never passes through it.
+func TestAuthorizationContextStoresNumbersBeyondFloat64Range(t *testing.T) {
+	for _, literal := range []string{"1e400", "-1e400"} {
+		t.Run(literal, func(t *testing.T) {
+			var query openid4vp.DCQL
+			require.NoError(t, json.Unmarshal([]byte(`{"credentials":[{
+				"id":"nym","format":"circuit_zk",
+				"meta":{"doctype_value":"eu.europa.ec.eudi.nym_auth.1"},
+				"req":[{"id":"pseudonym-v1-sha256","return":"nym-1",
+					"params":{"p":`+literal+`}}]}]}`), &query))
+
+			stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: &query})
+			require.NoError(t, err, "a request this verifier accepted has to be storable")
+
+			// The legacy document-valued copy is deliberately absent:
+			// BSON would have taken the value as +Inf, and an old replica
+			// reading that would send a number nobody configured.
+			var document bson.M
+			require.NoError(t, bson.Unmarshal(stored, &document))
+			assert.NotContains(t, document, "dcql_query",
+				"an approximated legacy copy is worse than none")
+			require.Contains(t, document, "dcql_query_exact")
+
+			var loaded AuthorizationContext
+			require.NoError(t, bson.Unmarshal(stored, &loaded))
+			require.NotNil(t, loaded.DCQLQuery)
+			encoded, err := json.Marshal(loaded.DCQLQuery)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), literal,
+				"the other replica has to send the number that was configured")
+		})
+	}
+}
+
+// And the legacy copy is still written for every query that has a BSON
+// representation - dropping it is the exception, not the rule, and a test
+// that only covers the exception would not notice if it became the rule.
+func TestAuthorizationContextKeepsTheLegacyCopyWhenItCan(t *testing.T) {
+	var query openid4vp.DCQL
+	require.NoError(t, json.Unmarshal([]byte(`{"credentials":[{
+		"id":"nym","format":"circuit_zk",
+		"meta":{"doctype_value":"eu.europa.ec.eudi.nym_auth.1"},
+		"req":[{"id":"pseudonym-v1-sha256","return":"nym-1","params":{"p":7}}]}]}`), &query))
+
+	stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: &query})
+	require.NoError(t, err)
+
+	var document bson.M
+	require.NoError(t, bson.Unmarshal(stored, &document))
+	assert.Contains(t, document, "dcql_query", "an old replica still reads this one")
+	assert.Contains(t, document, "dcql_query_exact")
+}
+
+// A document that fails to encode for a reason OTHER than the query is
+// still an error. Without this the retry above would swallow any encoding
+// failure in the rest of the context and store it with the query silently
+// removed.
+func TestAuthorizationContextStillFailsWhenTheQueryIsNotTheCause(t *testing.T) {
+	var query openid4vp.DCQL
+	require.NoError(t, json.Unmarshal([]byte(`{"credentials":[{
+		"id":"nym","format":"circuit_zk",
+		"meta":{"doctype_value":"eu.europa.ec.eudi.nym_auth.1"}}]}`), &query))
+
+	_, err := bson.Marshal(&AuthorizationContext{
+		SessionID:              "s",
+		DCQLQuery:              &query,
+		PresentationSubmission: json.Number("1e400"),
+	})
+	// Asserted on the MESSAGE, not merely on being non-nil. A retry that
+	// swallowed retryErr would still surface an error - the driver
+	// rejects the empty document it would hand back - and a test that
+	// only checked for "an error" would pass on it while the real cause
+	// had been replaced by a confusing one.
+	require.ErrorContains(t, err, "1e400",
+		"the failure has to name what actually could not be encoded")
+}

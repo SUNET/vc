@@ -34,7 +34,43 @@ func (a AuthorizationContext) MarshalBSON() ([]byte, error) {
 		}
 		document.DCQLQueryExact = string(encoded)
 	}
-	return bson.Marshal(document)
+
+	stored, err := bson.Marshal(document)
+	if err == nil {
+		return stored, nil
+	}
+	if document.DCQLQuery == nil {
+		return nil, err
+	}
+
+	// The structured copy has a value BSON cannot hold at all, and
+	// without this the whole document is unwritable: the driver's
+	// json.Number encoder tries Int64 and then Float64, and a literal
+	// past float64's range - 1e400, say - fails both, so bson.Marshal
+	// returns strconv's range error and session creation fails before
+	// the request ever reaches a wallet. The exact JSON above holds that
+	// literal perfectly well, which is the point of it; it is only the
+	// legacy document-valued copy that has nowhere to put it.
+	//
+	// Dropped rather than approximated. BSON would take the value as
+	// +Inf, and an old replica reading that would send a request with a
+	// number nobody configured - a req param is an input to a proof, so
+	// a wrong one is a wrong pseudonym computed in silence. Omitting the
+	// legacy copy instead leaves an old replica with no query, which it
+	// can only fail on. A replica that understands dcql_query_exact is
+	// unaffected either way, since it prefers that copy.
+	//
+	// Note this is strictly better than the behaviour it replaces: before
+	// the exact copy existed, such a request could not be stored by ANY
+	// build, so no old replica is losing a session it used to be able to
+	// serve.
+	document.DCQLQuery = nil
+	retried, retryErr := bson.Marshal(document)
+	if retryErr != nil {
+		// The query was not the cause. Report what actually failed.
+		return nil, err
+	}
+	return retried, nil
 }
 
 // UnmarshalBSON prefers the exact copy when one is there.

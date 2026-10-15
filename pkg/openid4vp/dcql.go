@@ -30,7 +30,16 @@ type CredentialQuery struct {
 	Format string `json:"format" yaml:"format" validate:"required"`
 
 	// Multiple OPTIONAL. A boolean which indicates whether multiple Credentials can be returned for this Credential Query. If omitted, the default value is false.
-	Multiple bool `json:"multiple,omitempty" yaml:"multiple,omitempty"`
+	//
+	// A POINTER, for the same reason RequireCryptographicHolderBinding
+	// below is one: with a plain bool, omitempty cannot tell an absent
+	// member from an explicit false, so `"multiple": false` - an
+	// ordinary, valid query - did not encode back to what arrived and
+	// was kept as Raw. That is not a harmless detour: a raw query is
+	// emitted from its original bytes, so augmentDCQLFromVCTM's rewrite
+	// of the shadow Claims was silently discarded and the request went
+	// out with the un-augmented paths.
+	Multiple *bool `json:"multiple,omitempty" yaml:"multiple,omitempty"`
 
 	// Meta REQUIRED. An object defining additional properties requested by the Verifier that apply to the metadata and validity data of the Credential. The properties of this object are defined per Credential Format. Examples of those are in Appendix B.3.5 and Appendix B.2.3. If empty, no specific constraints are placed on the metadata or validity of the requested Credential.
 	Meta MetaQuery `json:"meta" yaml:"meta" validate:"required"`
@@ -756,6 +765,12 @@ func (q CredentialSetQuery) IsRequired() bool {
 		return true
 	}
 	return *q.Required
+}
+
+// AllowsMultiple returns the effective value of Multiple, applying the
+// OpenID4VP 1.0 §6.1 default (false) when the member was omitted.
+func (q CredentialQuery) AllowsMultiple() bool {
+	return q.Multiple != nil && *q.Multiple
 }
 
 // RequiresCryptographicHolderBinding returns the effective value of
