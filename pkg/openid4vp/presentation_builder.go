@@ -442,7 +442,6 @@ func encodeCopy(src any) any {
 	return json.RawMessage(encoded)
 }
 
-
 // copyDCQL creates a deep copy of a DCQL query
 func copyDCQL(src *DCQL) *DCQL {
 	if src == nil {
