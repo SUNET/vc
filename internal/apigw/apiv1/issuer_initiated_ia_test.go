@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/stretchr/testify/assert"
@@ -308,4 +309,84 @@ func TestIdentityMatch_ArrayClaims(t *testing.T) {
 func TestIdentityMatch_NilRuleIsNotAFailure(t *testing.T) {
 	client := newChallengeClient(t)
 	require.NoError(t, client.matchPresentedIdentity("dc+sd-jwt", map[string]any{}, nil))
+}
+
+// Resuming a prepared offer applies the same request guards as starting
+// an exchange from scratch. The two had drifted, in three ways.
+//
+// A Wallet that OFFERS auth_via_web must send a code_challenge whichever
+// interaction the server then picks - the resume checked PKCE only for a
+// PUBLIC client, so a confidential or attestation-authenticated wallet
+// advertising that interaction could resume with none at all, while the
+// same request without an issuer_state was refused. It also skipped the
+// redirect_uri scheme check, which exists because the auth_via_web
+// consent page renders WalletURI as a template.URL with scheme
+// sanitisation deliberately off; and it still required a callback the
+// browserless endpoint does not need.
+//
+// All three now run through one helper, so a guard added to the endpoint
+// cannot reach only one of its two entrances.
+func TestIssuerInitiated_ResumeAppliesTheSameRequestGuards(t *testing.T) {
+	t.Run("a confidential wallet offering auth_via_web needs PKCE", func(t *testing.T) {
+		client := newChallengeClient(t)
+		issuerState := prepareIssuance(t, client, portalMatch())
+
+		req := initialChallenge(t)
+		req.Scope = ""
+		req.IssuerState = issuerState
+		req.CodeChallenge = ""
+		req.InteractionTypesSupported = "urn:openid:dcp:ia:openid4vp_presentation,urn:openid:dcp:ia:auth_via_web"
+
+		oauthErr := oauthErrFromChallenge(t, client, req)
+		assert.Equal(t, oauth2.OAuthErrPKCERequired.ErrorCode, oauthErr.ErrorCode,
+			"the wallet said it is prepared to be sent into a browser; the code is redeemed where this endpoint cannot see")
+	})
+
+	t.Run("a dangerous redirect_uri is refused", func(t *testing.T) {
+		client := newChallengeClient(t)
+		issuerState := prepareIssuance(t, client, portalMatch())
+
+		req := initialChallenge(t)
+		req.Scope = ""
+		req.IssuerState = issuerState
+		req.RedirectURI = "javascript:alert(1)"
+
+		oauthErr := oauthErrFromChallenge(t, client, req)
+		assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+		assert.Contains(t, oauthErr.ErrorDescription, "redirect_uri")
+	})
+
+	t.Run("and a wallet with no callback can still resume", func(t *testing.T) {
+		client := newChallengeClient(t)
+		issuerState := prepareIssuance(t, client, portalMatch())
+
+		req := initialChallenge(t)
+		req.Scope = ""
+		req.IssuerState = issuerState
+		req.RedirectURI = ""
+
+		opened := challengeErr(t, client, req)
+		assert.Equal(t, 403, opened.HTTPStatus)
+		assert.Equal(t, "insufficient_authorization", opened.ErrorCode)
+		require.NotEmpty(t, opened.AuthSession)
+	})
+
+	// The interaction this scope actually needs is a presentation, so the
+	// PKCE refusal above is about what the WALLET offered rather than what
+	// the server picked - without this, that subtest could be passing for
+	// the wrong reason.
+	t.Run("the same wallet NOT offering auth_via_web resumes without PKCE", func(t *testing.T) {
+		client := newChallengeClient(t)
+		issuerState := prepareIssuance(t, client, portalMatch())
+
+		req := initialChallenge(t)
+		req.Scope = ""
+		req.IssuerState = issuerState
+		req.CodeChallenge = ""
+		req.InteractionTypesSupported = "urn:openid:dcp:ia:openid4vp_presentation"
+
+		opened := challengeErr(t, client, req)
+		assert.Equal(t, 403, opened.HTTPStatus)
+		assert.Equal(t, "insufficient_authorization", opened.ErrorCode)
+	})
 }

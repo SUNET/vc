@@ -255,27 +255,22 @@ func (c *Client) OAuthAuthorizationChallenge(ctx context.Context, req *Authoriza
 	return c.authorizationChallengeInitial(ctx, ia, req)
 }
 
-// authorizationChallengeInitial handles the first request of an exchange: it
-// authenticates the Wallet, works out which interaction the requested scope
-// needs, and answers with an Interaction Required Response.
+// authenticateChallengeWallet applies every request guard this endpoint
+// makes before an exchange is opened, and returns the authenticated
+// client.
 //
-// It never returns an authorization code. Every scope this endpoint serves
-// needs the Holder to be established first, and a code handed out before
-// that would authorize an issuance nobody authenticated.
-func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
-	if req.ResponseType != "code" {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-			`response_type must be "code"`, 400)
-	}
-	if req.Scope == "" {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-			"scope is required", 400)
-	}
-	if req.InteractionTypesSupported == "" {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-			"interaction_types_supported is required", 400)
-	}
-
+// Shared by the initial path and the issuer_state resume because they had
+// drifted: the resume checked PKCE only for a public client, so a
+// confidential or attestation-authenticated wallet advertising
+// auth_via_web could resume a prepared offer with no code_challenge at
+// all - the same request without an issuer_state was refused. It also
+// skipped the redirect_uri scheme check entirely, and still required a
+// callback the browserless endpoint does not need.
+//
+// Three guards that have to hold on both paths, written once. scope is a
+// parameter because the resume takes it from the prepared issuance rather
+// than from the request.
+func (c *Client) authenticateChallengeWallet(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest, scope string) (*oauth2.Client, error) {
 	// The same check /op/par makes, for the same reason and in the same
 	// place: before either path, and before anything stores the value.
 	//
@@ -303,7 +298,7 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 		ClientID:             req.ClientID,
 		RedirectURI:          req.RedirectURI,
 		RedirectOptional:     true,
-		Scope:                req.Scope,
+		Scope:                scope,
 		ClientAttestation:    req.ClientAttestation,
 		ClientAttestationPoP: req.ClientAttestationPoP,
 		ClientAssertion:      req.ClientAssertion,
@@ -347,6 +342,34 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	if req.CodeChallenge != "" && req.CodeChallengeMethod != "S256" {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 			"code_challenge_method must be S256", 400)
+	}
+
+	return oauthClient, nil
+}
+
+// authorizationChallengeInitial handles the first request of an exchange: it
+// authenticates the Wallet, works out which interaction the requested scope
+// needs, and answers with an Interaction Required Response.
+//
+// It never returns an authorization code. Every scope this endpoint serves
+// needs the Holder to be established first, and a code handed out before
+// that would authorize an issuance nobody authenticated.
+func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
+	if req.ResponseType != "code" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			`response_type must be "code"`, 400)
+	}
+	if req.Scope == "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"scope is required", 400)
+	}
+	if req.InteractionTypesSupported == "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"interaction_types_supported is required", 400)
+	}
+
+	if _, err := c.authenticateChallengeWallet(ctx, ia, req, req.Scope); err != nil {
+		return nil, err
 	}
 
 	// Which interaction this scope needs is a property of how the scope is
@@ -1054,24 +1077,8 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 			"scope does not match the issuance this issuer_state was prepared for", 400)
 	}
 
-	oauthClient, err := c.authenticateOAuthClient(ctx, &walletClientAuth{
-		ClientID:             req.ClientID,
-		RedirectURI:          req.RedirectURI,
-		Scope:                scope,
-		ClientAttestation:    req.ClientAttestation,
-		ClientAttestationPoP: req.ClientAttestationPoP,
-		ClientAssertion:      req.ClientAssertion,
-		LogPrefix:            "CHALLENGE",
-	})
-	if err != nil {
+	if _, err := c.authenticateChallengeWallet(ctx, ia, req, scope); err != nil {
 		return nil, err
-	}
-	if oauthClient != nil && oauthClient.Type == oauth2.ClientTypePublic && req.CodeChallenge == "" {
-		return nil, oauth2.OAuthErrPKCERequired
-	}
-	if req.CodeChallenge != "" && req.CodeChallengeMethod != "S256" {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-			"code_challenge_method must be S256", 400)
 	}
 
 	// The source is not taken from here: a prepared issuance recorded its
