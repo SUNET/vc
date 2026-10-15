@@ -481,7 +481,6 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
 			ID:                                authScope,
 			Format:                            format,
-			Multiple:                          false,
 			Meta:                              meta,
 			RequireCryptographicHolderBinding: new(false),
 			Claims:                            scopeClaimQueries,

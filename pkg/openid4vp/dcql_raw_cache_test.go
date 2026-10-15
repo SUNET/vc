@@ -234,7 +234,7 @@ func TestRawShadowsEveryReadableModelledMember(t *testing.T) {
 
 	assert.Equal(t, "w3c", query.ID)
 	assert.Equal(t, FormatLdpVCDCQL, query.Format)
-	assert.True(t, query.Multiple, "a response is allowed more than one credential because of this")
+	assert.True(t, query.AllowsMultiple(), "a response is allowed more than one credential because of this")
 	require.NotNil(t, query.RequireCryptographicHolderBinding)
 	assert.False(t, *query.RequireCryptographicHolderBinding, "an explicit false must not revert to the spec default")
 	require.Len(t, query.Meta.TypeValues, 1, "matching reads this; empty matches nothing")
@@ -308,7 +308,7 @@ func TestNewRawCredentialQueryFillsTheShadow(t *testing.T) {
 
 	assert.Equal(t, "w3c", query.ID, "the response path matches a presentation back to this")
 	assert.Equal(t, FormatLdpVCDCQL, query.Format)
-	assert.True(t, query.Multiple)
+	assert.True(t, query.AllowsMultiple())
 	require.Len(t, query.Meta.TypeValues, 1, "matching reads this; empty matches nothing")
 
 	// And the wire is still exactly the bytes handed in.

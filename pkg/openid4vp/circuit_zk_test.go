@@ -521,3 +521,88 @@ func TestSameJSONSeesAChangedNumber(t *testing.T) {
 		})
 	}
 }
+
+// A request whose REQ this build cannot model must survive the HA cache.
+//
+// NewRawCredentialQuery accepts the vendored negative vectors - that is
+// the escape hatch working - but reading one back refused it: the outer
+// req is an array, so the decode guard classified its item-level failure
+// as an ordinary invalid query rather than an unmodelled shape. A request
+// object is JSON-encoded into the cache and read by another node, so such
+// a request could be published and then reload nowhere but the node that
+// built it.
+//
+// Driven from the vendored vectors rather than hand-written JSON: these
+// are the shapes the shared conformance set says a verifier must be able
+// to send, so if they change, this changes with them.
+func TestMalformedReqSurvivesACacheRoundTrip(t *testing.T) {
+	for _, name := range []string{
+		"err_item_function_id_not_string.json", // a numeric req-item id
+		"err_params_not_object.json",           // array-valued params
+	} {
+		t.Run(name, func(t *testing.T) {
+			query := vectorQuery(t, name)
+
+			built, err := NewRawCredentialQuery(query)
+			require.NoError(t, err, "the constructor accepts it; that is the escape hatch")
+
+			// Out to the cache...
+			encoded, err := json.Marshal(built)
+			require.NoError(t, err)
+
+			// ...and back in on another node.
+			var reloaded CredentialQuery
+			require.NoError(t, json.Unmarshal(encoded, &reloaded),
+				"a request this verifier published must reload")
+			require.NotNil(t, reloaded.Raw,
+				"a shape the model cannot hold must reload raw, not be repaired into it")
+
+			// And what reloaded is what was sent. A reload that silently
+			// normalised the request would pass the assertions above and
+			// still change what the wallet receives.
+			again, err := json.Marshal(reloaded)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(encoded), string(again))
+		})
+	}
+}
+
+// And the strict rule still holds everywhere else, which is the half that
+// must not be lost.
+//
+// meta and claims are what the SD-JWT and mdoc validation reads. A decode
+// error there laundered into Raw would turn an unreadable constraint into
+// a query that validates, because there would be nothing left to judge -
+// so these stay refused on the way back in, even though the constructor
+// accepts them. The asymmetry is deliberate: sending one is a test of a
+// wallet, reloading one as if it were fine is a hole in this verifier.
+func TestMalformedConstraintsAreStillRefusedOnReload(t *testing.T) {
+	for _, name := range []string{
+		"err_meta_doctype_not_string.json",
+		"err_meta_vct_values_not_strings.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			built, err := NewRawCredentialQuery(vectorQuery(t, name))
+			require.NoError(t, err)
+			encoded, err := json.Marshal(built)
+			require.NoError(t, err)
+
+			var reloaded CredentialQuery
+			assert.Error(t, json.Unmarshal(encoded, &reloaded),
+				"a constraint the validation reads must not be laundered into Raw")
+		})
+	}
+}
+
+// vectorQuery reads the "query" member of a vendored conformance vector.
+func vectorQuery(t *testing.T, name string) json.RawMessage {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(vectorDir, name))
+	require.NoError(t, err)
+	var vec struct {
+		Query json.RawMessage `json:"query"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &vec))
+	require.True(t, isJSONObject(vec.Query), "%s does not carry an object query", name)
+	return vec.Query
+}
