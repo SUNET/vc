@@ -117,11 +117,14 @@
 
     async function show(code) {
         var res = await fetch("/ui/result?response_code=" + encodeURIComponent(code), { cache: "no-store" });
+        // A server error is transient: throw so the polling loop retries the same session.
+        if (res.status >= 500) { throw new Error("HTTP " + res.status); }
+        var text = res.ok ? JSON.stringify(await res.json(), null, 2) : "";
         $("pending").hidden = true;
         $("done").hidden = false;
         if (!res.ok) { $("verdict").textContent = "Result not available (HTTP " + res.status + ")"; return; }
         $("verdict").textContent = "Payment authorised: the wallet's response was accepted";
-        $("result").textContent = JSON.stringify(await res.json(), null, 2);
+        $("result").textContent = text;
     }
 })();
 </script>
