@@ -367,6 +367,32 @@ func ListIDFromURL(listURL string) (string, error) {
 		return "", fmt.Errorf("list URL path %q ends in a slash, so it names no list", u.Path)
 	}
 
+	// A dot segment anywhere in the path makes this URL name one resource
+	// and resolve to another, which is the failure this whole function
+	// exists to prevent - and here it happens in both directions at once.
+	//
+	// As the LAST segment it becomes the list ID. "/lists/%2e%2e" parses
+	// to the path "/lists/..", path.Base returns "..", and url.PathEscape
+	// leaves it alone because a dot is unreserved - so the PATCH goes out
+	// with the literal request-URI "/status/../5". Go does not remove dot
+	// segments from a request URI; whatever is in front of the ingestion
+	// service does, and the write lands on "/5".
+	//
+	// EARLIER in the path it is quieter and no better. "/lists/../admin/abc"
+	// yields the list ID "abc" and a PATCH that looks entirely right, while
+	// the credential carries a status_list.uri that a verifier resolves to
+	// "/admin/abc" - a different resource than the one just written, with
+	// the status token's sub bound to the un-normalised string either way.
+	//
+	// No status list URL needs one, so both are refused rather than
+	// normalised away: normalising would mint a credential carrying a URL
+	// the issuer never saw.
+	for _, segment := range strings.Split(u.Path, "/") {
+		if segment == "." || segment == ".." {
+			return "", fmt.Errorf("list URL path %q contains the dot segment %q, which names one resource and resolves to another", u.Path, segment)
+		}
+	}
+
 	id := path.Base(u.Path)
 	if id == "" || id == "." || id == "/" {
 		return "", fmt.Errorf("could not determine list ID from path %q", u.Path)
@@ -381,6 +407,16 @@ type setStatusRequest struct {
 // setStatusOnce performs a single (non-retried) PATCH /status/{listID}/{idx}
 // call.
 func (c *Client) setStatusOnce(ctx context.Context, listID string, idx uint64, status Status) error {
+	// SetStatus is exported and takes the ID directly, so this does not
+	// rely on ListIDFromURL having vetted it. url.PathEscape covers a
+	// separator - a "/" becomes %2F - but not a dot segment, which is
+	// unreserved and passes through to be resolved away by whatever sits
+	// in front of the service. Refused rather than escaped, because there
+	// is no escaping that makes "." mean a list.
+	if listID == "" || listID == "." || listID == ".." {
+		return permanent(fmt.Errorf("list ID %q names no list: a dot segment would send this PATCH to a different path", listID))
+	}
+
 	token, err := c.getToken(ctx)
 	if err != nil {
 		return err

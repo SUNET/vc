@@ -167,6 +167,52 @@ func TestListIDFromURL_RejectsUnusableURLs(t *testing.T) {
 	}
 }
 
+// A dot segment makes the URL name one resource and resolve to another.
+//
+// As the last segment it becomes the list ID itself: url.PathEscape leaves
+// ".." alone, Go sends the literal request-URI "/status/../5", and whatever
+// sits in front of the ingestion service resolves that to "/5" - so the
+// PATCH writes an entry on a list nobody asked for. Earlier in the path it
+// yields a plausible ID while the credential carries a status_list.uri that
+// a verifier resolves somewhere else entirely.
+func TestListIDFromURL_RejectsDotSegments(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"escaped dot-dot as the ID", "https://status.example.org/lists/%2e%2e"},
+		{"upper-case escape", "https://status.example.org/lists/%2E%2E"},
+		{"literal dot-dot as the ID", "https://status.example.org/lists/.."},
+		{"single dot as the ID", "https://status.example.org/lists/."},
+		{"dot-dot earlier in the path", "https://status.example.org/lists/../admin/abc"},
+		{"single dot earlier in the path", "https://status.example.org/lists/./abc"},
+		{"escaped, earlier in the path", "https://status.example.org/lists/%2e%2e/admin/abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if id, err := ListIDFromURL(tc.url); err == nil {
+				t.Fatalf("%q must be rejected, got list ID %q", tc.url, id)
+			}
+		})
+	}
+}
+
+// And a dot in the middle of a segment is an ordinary character - refusing
+// those too would reject list IDs the service is free to hand out.
+func TestListIDFromURL_AcceptsDotsWithinASegment(t *testing.T) {
+	for _, tc := range []struct{ url, want string }{
+		{"https://status.example.org/lists/a.b", "a.b"},
+		{"https://status.example.org/lists/...", "..."},
+		{"https://status.example.org/v1.0/lists/abc", "abc"},
+	} {
+		t.Run(tc.url, func(t *testing.T) {
+			id, err := ListIDFromURL(tc.url)
+			if err != nil {
+				t.Fatalf("%q must be accepted: %v", tc.url, err)
+			}
+			if id != tc.want {
+				t.Fatalf("got %q, want %q", id, tc.want)
+			}
+		})
+	}
+}
+
 // The shape the status service actually returns must still work.
 func TestListIDFromURL_AcceptsAVerifierFacingURL(t *testing.T) {
 	id, err := ListIDFromURL("https://status.example.org/lists/abc123")

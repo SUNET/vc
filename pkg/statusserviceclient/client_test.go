@@ -7,7 +7,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -344,5 +346,73 @@ func TestListIDFromURL_RejectsAFragment(t *testing.T) {
 	}
 	if id != "abc" {
 		t.Fatalf("list id = %q, want abc", id)
+	}
+}
+
+// SetStatus is exported and takes the list ID directly, so the URL
+// validation in ListIDFromURL is not the only way one can arrive. A dot
+// segment here would be escaped by url.PathEscape into itself - a dot is
+// unreserved - and sent as the literal request-URI "/status/../5", which
+// whatever sits in front of the ingestion service resolves to "/5".
+//
+// The assertion is that the ingestion server saw NO /status request at
+// all, observed by a handler with no routing: an error-only check passes
+// on a PATCH that went out and came back 404, by which point the write
+// may already have landed somewhere else, and a counter kept per matched
+// route cannot tell "never sent" from "sent and not recognised" - which
+// is the whole distinction here. A mux would also CLEAN the path before
+// anything could record what was actually on the wire.
+func TestSetStatus_RefusesADotSegmentListID(t *testing.T) {
+	fake := newFakeStatusService(t)
+	key := testKey(t)
+
+	var mu sync.Mutex
+	var seen []string
+	recorder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.RequestURI)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer recorder.Close()
+
+	// Tokens still come from the fake's AS; only the ingestion endpoint is
+	// redirected, so a PATCH that escapes the guard reaches the recorder.
+	cfg := fastConfig(fake, key)
+	cfg.IngestionURL = recorder.URL
+
+	c, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	statusRequests := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		var out []string
+		for _, entry := range seen {
+			// The background pool loop talks to /allocate against this
+			// same server and is none of this test's business.
+			if strings.Contains(entry, "/status/") {
+				out = append(out, entry)
+			}
+		}
+		return out
+	}
+
+	for _, listID := range []string{"..", ".", ""} {
+		t.Run("listID="+listID, func(t *testing.T) {
+			err := c.SetStatus(context.Background(), listID, 5, StatusInvalid)
+			if err == nil {
+				t.Fatalf("list ID %q must be refused", listID)
+			}
+			if !isPermanent(err) {
+				t.Fatalf("a malformed list ID is not worth retrying, got %v", err)
+			}
+			if sent := statusRequests(); len(sent) != 0 {
+				t.Fatalf("the PATCH must not be sent at all, the server saw %q", sent)
+			}
+		})
 	}
 }
