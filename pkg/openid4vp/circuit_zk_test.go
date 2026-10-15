@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1327,4 +1328,30 @@ func TestCopyKeepsAppendTextContainersIntact(t *testing.T) {
 	require.NoError(t, err, "so must the copy")
 	assert.Equal(t, string(before), string(after))
 	assert.Contains(t, string(after), "2026-10-15T12:00:00Z")
+}
+
+// A key is as much of the request as a value is.
+//
+// The reflective map copy walked the values carefully and handed the KEYS
+// over untouched. A key that is a pointer - or holds one - is shared, and
+// keys are part of the wire representation: a map[*big.Int]string key
+// marshals through TextMarshaler, so mutating the original integer after
+// the copy renamed the copy's member.
+func TestCopyIsolatesNonStringMapKeys(t *testing.T) {
+	key := big.NewInt(1)
+	src := map[string]any{"m": map[*big.Int]string{key: "v"}}
+
+	copied := copyAnyMap(src)
+	before, err := json.Marshal(copied)
+	require.NoError(t, err)
+	assert.Contains(t, string(before), `"1":"v"`)
+
+	// Mutate the ORIGINAL key after copying.
+	key.SetInt64(999)
+
+	after, err := json.Marshal(copied)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after),
+		"the copied request's member name must not follow the original key")
+	assert.NotContains(t, string(after), "999")
 }
