@@ -370,7 +370,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if !ok {
 		return nil, fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope)
 	}
-	identityClaims, err := model.ExtractIdentityClaims(credential, authScopeEntry.AuthClaims)
+	authSourceFormat := c.cfg.GetFormatForScope(matchedAuthScope)
+	identityClaims, err := extractAuthScopeIdentity(authSourceFormat, credential, authScopeEntry)
 	if err != nil {
 		c.log.Error(err, "required identity claims missing from presented credential", "matched_auth_scope", matchedAuthScope, "scope", scope)
 		return nil, fmt.Errorf("identity extraction failed: %w", err)
@@ -408,6 +409,43 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if len(documents) == 0 {
 		c.log.Error(nil, "no documents found for identity", "identity_claims", identityClaims)
 		return nil, errors.New("no documents found for the provided identity")
+	}
+
+	// Copy the configured claims of the verified presentation over the
+	// datastore document (e.g. the birth date of a nym_auth attestation is
+	// the one in the PID/mDL/Photo ID the holder just presented, not a
+	// stored copy of it). Fails closed when a configured claim is missing.
+	if len(authScopeEntry.DocumentClaims) > 0 {
+		copied, err := presentedDocumentClaims(authSourceFormat, credential, authScopeEntry, c.cfg.GetCredentialMetadata(scope))
+		if err != nil {
+			c.log.Error(err, "cannot copy presented claims into the issued document", "matched_auth_scope", matchedAuthScope, "scope", scope)
+			return nil, fmt.Errorf("presented claim copy failed: %w", err)
+		}
+		documents = applyPresentedDocumentClaims(documents, copied)
+
+		// Record which claims the presentation supplied, so issuance can
+		// reapply them after derivations. The matched auth scope that
+		// chose them is known only here.
+		//
+		// PERSISTED, not just assigned. With HA the store decodes into a
+		// fresh value and hands back a copy, so writing to authCtx alone
+		// reaches nothing: the credential request would read an empty
+		// list and let a derivation overwrite a verified claim - silently,
+		// and only in the HA deployments.
+		//
+		// Through a TARGETED write, like SetIdentifier above, and
+		// deliberately not through Update. Update is a ReplaceOne, and
+		// authCtx was loaded before verification and the datastore reads;
+		// writing it back whole would discard whatever happened to the
+		// session meanwhile. With two direct-post requests in flight the
+		// slower one would replace the faster one's token state and reset
+		// Forfeited, making a consumed authorization code redeemable
+		// again - a far worse bug than the one being fixed.
+		authCtx.PresentedClaims = slices.Sorted(maps.Keys(copied))
+		if err := c.cacheService.AuthContext.SetPresentedClaims(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, authCtx.PresentedClaims); err != nil {
+			c.log.Error(err, "cannot persist the presented-claim provenance", "session_id", authCtx.SessionID)
+			return nil, fmt.Errorf("failed to persist presented claims: %w", err)
+		}
 	}
 
 	// Cache PID documents for session
@@ -450,9 +488,17 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 	options := make([][]string, 0, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		entry := vpAuth.AuthScopes[authScope]
-		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims)+len(entry.DocumentClaims))
 		format := cfg.GetFormatForScope(authScope)
-		for _, claim := range entry.AuthClaims {
+		// The claims copied into the issued document have to be disclosed
+		// too, so they are requested alongside the identity claims.
+		requested := slices.Clone(entry.AuthClaims)
+		for _, src := range slices.Sorted(maps.Keys(entry.DocumentClaims)) {
+			if !slices.Contains(requested, src) {
+				requested = append(requested, src)
+			}
+		}
+		for _, claim := range requested {
 			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
 				Path: openid4vp.StringPath(authClaimPathSegments(format, claim)...),
 			})

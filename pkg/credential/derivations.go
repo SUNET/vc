@@ -25,8 +25,33 @@ import (
 // identity.email -> {"identity": {"email": "x"}}) does not replace a
 // sibling nested claim (identity.name) produced by an earlier step.
 func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now time.Time) (map[string]any, error) {
+	return ApplyDerivationsPinned(list, claims, now, nil)
+}
+
+// ApplyDerivationsPinned is ApplyDerivations with claims that stay
+// authoritative THROUGHOUT the chain.
+//
+// Each step's output feeds the next, so restoring a value only at the end
+// is not enough: a step converting a stored 19700101 into birth_date, and
+// a later one computing age_over_18 from it, produce an age for the
+// stored date. Putting the real birth_date back afterwards leaves that
+// age behind - a credential asserting an age the presented date does not
+// support, which is worse than the overwrite it was meant to repair,
+// because it looks consistent.
+//
+// Pinned values are restored into the working claims after every step, so
+// a dependent derivation reads the value that will actually be issued.
+// They are left in the returned outputs, so a caller can still see which
+// derivations tried to write them.
+func ApplyDerivationsPinned(list []primitives.Derivation, claims map[string]any, now time.Time, pinned map[string]any) (map[string]any, error) {
 	out := make(map[string]any)
 	working := CloneNestedClaims(claims)
+	restore := func() {
+		for name, value := range pinned {
+			working[name] = value
+		}
+	}
+	restore()
 	for i, d := range list {
 		derived, err := d.Apply(working, now)
 		if err != nil {
@@ -34,6 +59,7 @@ func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now t
 		}
 		MergeNestedClaims(out, derived)
 		MergeNestedClaims(working, derived)
+		restore()
 	}
 	return out, nil
 }

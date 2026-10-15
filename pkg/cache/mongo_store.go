@@ -577,6 +577,34 @@ func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationCont
 	return nil
 }
 
+// SetPresentedClaims records the claims the verified presentation
+// supplied.
+//
+// A targeted $set, not Update. Update is a ReplaceOne, so using it here
+// would write back a context loaded before verification and datastore
+// I/O - and with two direct-post requests in flight the slower one would
+// replace the faster one's token state, resetting Forfeited and making a
+// consumed authorization code redeemable again.
+func (s *MongoStore) SetPresentedClaims(ctx context.Context, query *AuthorizationContext, claims []string) error {
+	if query == nil || query.SessionID == "" {
+		return errors.New("session_id cannot be empty")
+	}
+
+	result, err := s.coll.UpdateOne(
+		ctx,
+		bson.M{"session_id": query.SessionID},
+		bson.M{"$set": bson.M{"presented_claims": claims}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set presented claims: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
+}
+
 // buildFilter constructs a MongoDB filter from an AuthorizationContext query.
 // Returns nil if no searchable fields are set.
 func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
