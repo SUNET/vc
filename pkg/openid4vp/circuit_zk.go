@@ -100,7 +100,7 @@ func (r ReqItem) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown members into Extra.
 func (r *ReqItem) UnmarshalJSON(data []byte) error {
-	knownObject, extra, err := splitMembers(data, "id", "return", "params")
+	knownObject, extra, err := splitMembers(data, "req item", "id", "return", "params")
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (c *CircuitZkFormat) UnmarshalJSON(data []byte) error {
 		"circuit_proof_system_values", "circuit_id_values"); err != nil {
 		return err
 	}
-	knownObject, extra, err := splitMembers(data, "circuit_proof_system_values", "circuit_id_values")
+	knownObject, extra, err := splitMembers(data, "circuit_zk client metadata", "circuit_proof_system_values", "circuit_id_values")
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,22 @@ func decodeExact(data []byte, v any) error {
 // members spelled the way it declares them, and a differently cased name
 // is an unknown member like any other. The members are carried across as
 // raw bytes, so a number still reaches the struct exactly as written.
-func splitMembers(data []byte, known ...string) ([]byte, map[string]any, error) {
+func splitMembers(data []byte, what string, known ...string) ([]byte, map[string]any, error) {
+	// Before the map decode below, which keeps the LAST of a repeated
+	// member and silently drops the rest - and the extension values are
+	// decoded into any, so a duplicate nested inside one does not survive
+	// either.
+	//
+	// Refused rather than quietly reduced, as the YAML side already does:
+	// {"circuit_id_values":[],"circuit_id_values":["urn:x"]} re-encoded
+	// as just ["urn:x"], turning a filter that matches NOTHING into one
+	// that permits that circuit. The credential query was the only bag
+	// that survived this, and only because its decode failure routes the
+	// bytes to Raw, where they are kept verbatim.
+	if hasDuplicateMembers(data) {
+		return nil, nil, fmt.Errorf("%s: this names a member more than once, which cannot survive a decode", what)
+	}
+
 	var all map[string]json.RawMessage
 	if err := decodeExact(data, &all); err != nil {
 		return nil, nil, err

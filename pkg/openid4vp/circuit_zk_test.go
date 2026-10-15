@@ -1037,3 +1037,56 @@ func TestCopyPreservesRawLeavesBesideScalars(t *testing.T) {
 		assert.Equal(t, 1, copied["a"])
 	})
 }
+
+// A repeated member cannot survive a decode, so it is refused.
+//
+// splitMembers decodes into a map, which keeps the LAST of a repeated
+// member, and the extension values are decoded into any, so a duplicate
+// nested inside one went the same way. Three of the four bags silently
+// reduced the request; only the credential query survived, and only
+// because its decode failure routes the bytes to Raw.
+func TestDuplicateMembersAreRefusedAcrossEveryBag(t *testing.T) {
+	t.Run("circuit_zk client metadata", func(t *testing.T) {
+		for _, name := range []string{"circuit_id_values", "circuit_proof_system_values"} {
+			var f CircuitZkFormat
+			err := json.Unmarshal([]byte(`{"`+name+`":[],"`+name+`":["urn:x"]}`), &f)
+			require.Errorf(t, err, "%s: an empty filter must not be replaced by a repeat of itself", name)
+			assert.Contains(t, err.Error(), "more than once")
+		}
+	})
+
+	t.Run("req item", func(t *testing.T) {
+		var item ReqItem
+		err := json.Unmarshal([]byte(`{"id":"age_check","return":"a","return":"b"}`), &item)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "more than once")
+	})
+
+	t.Run("vp_formats_supported", func(t *testing.T) {
+		var formats VPFormatsSupported
+		err := json.Unmarshal([]byte(`{"mso_mdoc":{},"mso_mdoc":{"alg":["ES256"]}}`), &formats)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "more than once")
+	})
+
+	// The credential query keeps its total decode: a duplicate is not a
+	// refusal there, it is a shape the model cannot hold, so the bytes go
+	// to Raw and come back out exactly as they went in.
+	t.Run("credential query keeps it raw instead", func(t *testing.T) {
+		const in = `{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"id":"other"}`
+		var q CredentialQuery
+		require.NoError(t, json.Unmarshal([]byte(in), &q))
+		out, err := json.Marshal(q)
+		require.NoError(t, err)
+		assert.Equal(t, in, string(out), "a duplicate must survive verbatim through Raw")
+	})
+
+	// A duplicate nested inside an extension value is dropped by the same
+	// decode, so it is refused by the same guard.
+	t.Run("nested inside an extension", func(t *testing.T) {
+		var item ReqItem
+		err := json.Unmarshal([]byte(`{"id":"age_check","ext":{"x":1,"x":2}}`), &item)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "more than once")
+	})
+}
