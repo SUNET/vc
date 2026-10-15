@@ -592,3 +592,39 @@ func TestSameHTU_PercentEncoding(t *testing.T) {
 		})
 	}
 }
+
+// IDNA does the case mapping itself, and Go's ToLower disagrees with it.
+//
+// Folding before the mapping turned "İ.example" (U+0130) into
+// "i.example", while UTS #46 maps the original to "xn--i-9bb.example" -
+// so a wallet's correctly canonicalised proof was REFUSED and one naming
+// the distinct authority "i.example" was ACCEPTED. Both directions are
+// asserted, because the accepting one is the security half.
+func TestSameHTU_UnicodeCaseIsIDNAsToDo(t *testing.T) {
+	const dotted = "https://İ.example/token"         // İ.example
+	const aLabel = "https://xn--i-9bb.example/token" // what UTS #46 maps it to
+	const plainI = "https://i.example/token"         // what ToLower makes of it
+
+	if !SameHTU(dotted, aLabel) {
+		t.Fatalf("%q is the A-label of %q; a proof naming either must satisfy the other", aLabel, dotted)
+	}
+	if SameHTU(dotted, plainI) {
+		t.Fatalf("%q and %q are different authorities", dotted, plainI)
+	}
+	if SameHTU(aLabel, plainI) {
+		t.Fatalf("%q and %q are different authorities", aLabel, plainI)
+	}
+
+	// The ordinary foldings still fold - the fix is about which component
+	// does the folding, not about giving it up.
+	for _, pair := range [][2]string{
+		{"https://MÜNCHEN.example/token", "https://xn--mnchen-3ya.example/token"},
+		{"https://München.example/token", "https://münchen.example/token"},
+		{"https://EXAMPLE.COM/token", "https://example.com/token"},
+		{"https://ẞ.example/token", "https://ß.example/token"}, // ẞ and ß
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same host", pair[0], pair[1])
+		}
+	}
+}

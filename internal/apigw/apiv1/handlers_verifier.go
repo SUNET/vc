@@ -195,6 +195,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
+	// An Interactive Authorization exchange is answered at the
+	// Authorization Challenge Endpoint, which verifies holder binding
+	// before it accepts anything. This endpoint does not, and it finds the
+	// same context by the same ephemeral key id - so answering an IA
+	// request here is answering a request that was never made, through
+	// the weaker of the two doors.
+	//
+	// Refused rather than verified-more-strictly. Even with holder binding
+	// enforced here the audience and the mdoc session transcript would be
+	// the browser flow's, not the ones the wallet signed over, so the two
+	// channels are not interchangeable whatever this endpoint checks.
+	if authCtx.InteractiveAuthorization {
+		c.log.Error(nil, "interactive authorization context answered at the browser-mediated endpoint",
+			"session_id", authCtx.SessionID, "kid", kid)
+		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")
+	}
+
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
 	outcome, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, &vpResponse, issuanceAuthBinding{
 		Audience:              authCtx.ClientID,

@@ -467,6 +467,11 @@ func (c *Client) newChallengeAuthContext(ia *model.InteractiveAuthorization, req
 		RemoteName:          source.RemoteName,
 		AuthenticSource:     source.AuthenticSource,
 		ExpiresAt:           time.Now().Add(ia.AuthSessionTTL()).Unix(),
+
+		// Answerable here and nowhere else. See the field's own comment:
+		// the browser-mediated endpoint resolves a context by the same
+		// ephemeral key id and does not verify holder binding.
+		InteractiveAuthorization: true,
 	}
 
 	// 256 bits, which is what the draft's own security considerations ask

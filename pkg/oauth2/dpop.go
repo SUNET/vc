@@ -312,7 +312,14 @@ func normalizeURIForComparison(raw string) (string, bool) {
 
 	scheme := strings.ToLower(u.Scheme)
 
-	host := strings.ToLower(u.Hostname())
+	// NOT lowercased first. IDNA does the case mapping itself, as part of
+	// the UTS #46 mapping, and Go's ToLower disagrees with it: ToLower
+	// turns "İ.example" (U+0130) into "i.example", while UTS #46 maps the
+	// original to "xn--i-9bb.example". Folding first therefore REJECTED a
+	// wallet's correctly canonicalised proof and ACCEPTED one naming the
+	// distinct authority "i.example". pkg/openid4vp's CanonicalOrigin has
+	// said this in its own comment all along; this is the same rule.
+	host := u.Hostname()
 	// An address is normalized as an address, not as a name. IPv6 has many
 	// spellings of one address - 2001:0db8:0:0:0:0:0:1 and 2001:db8::1 are
 	// the same endpoint - and lowercasing alone leaves them different, so a
@@ -334,10 +341,13 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = addr.String()
 	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
-		// A Unicode host and its A-label are the same host. ToASCII only
-		// ever narrows the spelling, so a failure leaves the lowercased
-		// form rather than rejecting a proof over it.
+		// A Unicode host and its A-label are the same host.
 		host = ascii
+	} else {
+		// ToASCII only ever narrows the spelling, so a failure leaves a
+		// lowercased form rather than rejecting a proof over it - the
+		// case of a host is insignificant either way (RFC 3986 §6.2.2.1).
+		host = strings.ToLower(host)
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
