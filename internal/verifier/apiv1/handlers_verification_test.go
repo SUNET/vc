@@ -608,43 +608,55 @@ func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[s
 	}
 
 	// Build issuer JWT with embedded JWK for trust verification
-	issuerClaims := jwt.MapClaims{
-		"iss": "https://issuer.example.com",
-		"iat": time.Now().Unix(),
-		"vct": "urn:test:credential",
-		"_sd": sdHashes,
-	}
-
-	issuerToken := jwt.NewWithClaims(jwt.SigningMethodES256, issuerClaims)
-	// Embed public key as JWK so the trust verifier can extract it
 	keyX, keyY := ecCoordinates(t, &key.PublicKey)
-	issuerToken.Header["jwk"] = map[string]any{
+	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 		"x":   base64.RawURLEncoding.EncodeToString(keyX),
 		"y":   base64.RawURLEncoding.EncodeToString(keyY),
 	}
+
+	issuerClaims := jwt.MapClaims{
+		"iss": "https://issuer.example.com",
+		"iat": time.Now().Unix(),
+		"vct": "urn:test:credential",
+		"_sd": sdHashes,
+		// The holder this credential was issued to. These fixtures use
+		// one key for issuer and holder, so naming it here is what makes
+		// the key binding below a real proof rather than an unchecked
+		// decoration - which is what it was while nothing verified it.
+		"cnf": map[string]any{"jwk": holderJWK},
+	}
+
+	issuerToken := jwt.NewWithClaims(jwt.SigningMethodES256, issuerClaims)
+	// Embed public key as JWK so the trust verifier can extract it
+	issuerToken.Header["jwk"] = holderJWK
 	signedIssuerJWT, err := issuerToken.SignedString(key)
 	require.NoError(t, err)
 
+	// Everything the key binding JWT covers: <issuer-jwt>~<disc>~...~
+	presented := signedIssuerJWT + "~"
+	for _, d := range disclosures {
+		presented += d + "~"
+	}
+
 	// Build key binding JWT (proves holder controls the wallet)
+	sum := sha256.Sum256([]byte(presented))
 	kbClaims := jwt.MapClaims{
 		"nonce": nonce,
 		"aud":   audience,
 		"iat":   time.Now().Unix(),
+		// Ties this proof to this presentation. Without it the proof
+		// covers any presentation of the same credential, with whatever
+		// disclosures the sender picked.
+		"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:]),
 	}
 	kbToken := jwt.NewWithClaims(jwt.SigningMethodES256, kbClaims)
+	kbToken.Header["typ"] = "kb+jwt"
 	signedKBJWT, err := kbToken.SignedString(key)
 	require.NoError(t, err)
 
-	// Assemble: <issuer-jwt>~<disc1>~<disc2>~...~<kb-jwt>
-	parts := signedIssuerJWT + "~"
-	for _, d := range disclosures {
-		parts += d + "~"
-	}
-	parts += signedKBJWT
-
-	return parts
+	return presented + signedKBJWT
 }
 
 // ecCoordinates extracts the X and Y coordinates from a P-256 public key
