@@ -606,3 +606,52 @@ func vectorQuery(t *testing.T, name string) json.RawMessage {
 	require.True(t, isJSONObject(vec.Query), "%s does not carry an object query", name)
 	return vec.Query
 }
+
+// A member spelled in a different case is an UNKNOWN member, not the
+// modelled one.
+//
+// encoding/json matches a struct field case-insensitively, so
+// "CIRCUIT_ID_VALUES" bound to CircuitIDValues, while the extension half
+// matched exactly and kept it as unknown too. Re-encoding wrote both, and
+// an extension nobody modelled rewrote a modelled member - an empty
+// circuit_id_values, which is a filter matching NOTHING, came back
+// permitting the circuit the unknown member named.
+func TestCaseAliasedMemberDoesNotRewriteTheModelledOne(t *testing.T) {
+	t.Run("circuit_zk client metadata", func(t *testing.T) {
+		const in = `{"circuit_id_values":[],"CIRCUIT_ID_VALUES":["urn:unexpected"]}`
+
+		var format CircuitZkFormat
+		require.NoError(t, json.Unmarshal([]byte(in), &format))
+
+		// The modelled member keeps what IT was given: present, and
+		// empty, which is a filter that matches nothing.
+		require.NotNil(t, format.CircuitIDValues, "an explicit [] is a filter, not an absent member")
+		assert.Empty(t, format.CircuitIDValues)
+		assert.Equal(t, map[string]any{"CIRCUIT_ID_VALUES": []any{"urn:unexpected"}}, format.Extra)
+
+		out, err := json.Marshal(format)
+		require.NoError(t, err)
+
+		// Round trips unchanged: the extension survives verbatim and the
+		// modelled filter still matches nothing.
+		var back CircuitZkFormat
+		require.NoError(t, json.Unmarshal(out, &back))
+		require.NotNil(t, back.CircuitIDValues)
+		assert.Empty(t, back.CircuitIDValues, "re-encoding must not let the extension fill the filter: %s", out)
+		assert.Equal(t, format.Extra, back.Extra)
+	})
+
+	t.Run("req item", func(t *testing.T) {
+		var item ReqItem
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"keep","ID":"shadow"}`), &item))
+		assert.Equal(t, "keep", item.ID)
+		assert.Equal(t, map[string]any{"ID": "shadow"}, item.Extra)
+	})
+
+	t.Run("vp_formats_supported", func(t *testing.T) {
+		var formats VPFormatsSupported
+		require.NoError(t, json.Unmarshal([]byte(`{"MSO_MDOC":{"alg":["ES256"]}}`), &formats))
+		assert.Nil(t, formats.MsoMdoc, "a differently cased name must not bind to the modelled entry")
+		assert.Contains(t, formats.Extra, "MSO_MDOC")
+	})
+}
