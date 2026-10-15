@@ -351,7 +351,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	// A split failure is a decode failure: data that is not an object at
 	// all must reach the escape hatch below exactly as a member of the
 	// wrong kind does, or the fallback stops being total.
-	knownObject, extra, err := splitMembers(data,
+	knownObject, extra, err := splitMembers(data, "credential query",
 		"id", "format", "multiple", "meta", "trusted_authorities",
 		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
 	type plain CredentialQuery
@@ -969,7 +969,7 @@ func (v VPFormatsSupported) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown format entries into Extra.
 func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
-	knownObject, extra, err := splitMembers(data, "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
+	knownObject, extra, err := splitMembers(data, "vp_formats_supported", "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
 	if err != nil {
 		return err
 	}
