@@ -1355,3 +1355,41 @@ func TestCopyIsolatesNonStringMapKeys(t *testing.T) {
 		"the copied request's member name must not follow the original key")
 	assert.NotContains(t, string(after), "999")
 }
+
+// copyDCQL's own fields need the care Params got.
+//
+// The walk inside Params and Extra was taken apart repeatedly while the
+// hand-written copy AROUND them kept two of the same defects: a claim
+// value is `any`, and appending copied the slice while sharing what its
+// elements point at; and Raw was appended to a nil slice, so an
+// empty-but-present one came out absent.
+func TestCopyDCQLIsolatesItsOwnFields(t *testing.T) {
+	t.Run("claim values are not shared with the original", func(t *testing.T) {
+		payload := json.RawMessage(`{"x":1,"x":2}`)
+		src := &DCQL{Credentials: []CredentialQuery{{
+			ID: "q", Format: "dc+sd-jwt", Meta: MetaQuery{VCTValues: []string{"urn:x"}},
+			Claims: []ClaimQuery{{Path: StringPath("a"), Values: []any{payload}}},
+		}}}
+
+		dst := copyDCQL(src)
+		before, err := json.Marshal(dst.Credentials[0].Claims[0].Values)
+		require.NoError(t, err)
+		assert.Contains(t, string(before), `{"x":1,"x":2}`, "the duplicate must survive the copy")
+
+		// Mutate the ORIGINAL value's bytes.
+		payload[1] = 'Z'
+
+		after, err := json.Marshal(dst.Credentials[0].Claims[0].Values)
+		require.NoError(t, err, "the copy must still be valid JSON")
+		assert.Equal(t, string(before), string(after),
+			"writing to the original claim value must not reach the copy")
+	})
+
+	t.Run("an empty Raw stays empty, not absent", func(t *testing.T) {
+		src := &DCQL{Credentials: []CredentialQuery{{Raw: json.RawMessage{}}}}
+		copied := copyDCQL(src)
+		require.NotNil(t, copied.Credentials[0].Raw,
+			"an empty-but-present Raw must not come out absent")
+		assert.Empty(t, copied.Credentials[0].Raw)
+	})
+}
