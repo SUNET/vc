@@ -840,3 +840,39 @@ func TestCopyPreservesTheDifferenceBetweenAbsentAndEmptyRawLeaves(t *testing.T) 
 	_, err = json.Marshal(map[string]any{"k": copiedEmpty})
 	require.Error(t, err, "empty must still refuse to marshal, as it did before copying")
 }
+
+// A pointer to a raw leaf is still a raw leaf.
+//
+// *json.RawMessage missed the json.RawMessage case and went to the
+// encoding, where re-parsing collapsed a duplicate member - so the
+// pointered spelling was still repaired while the value form beside it
+// was preserved.
+func TestCopyDCQLPreservesPointerRawLeaves(t *testing.T) {
+	const duplicate = `{"x":1,"x":2}`
+	payload := json.RawMessage(duplicate)
+
+	src := &DCQL{Credentials: []CredentialQuery{{
+		ID: "q", Format: FormatCircuitZk, Meta: MetaQuery{DoctypeValue: "d"},
+		Req: []ReqItem{{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{
+			"payload": &payload,
+		}}},
+	}}}
+
+	params := copyDCQL(src).Credentials[0].Req[0].Params
+	encoded, err := json.Marshal(params)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), duplicate,
+		"a pointer-valued raw leaf must be copied as bytes")
+
+	// Independent of the original: writing through either pointer must
+	// not reach the other.
+	copiedPointer, ok := params["payload"].(*json.RawMessage)
+	require.True(t, ok, "the copy keeps the pointer shape")
+	require.NotSame(t, &payload, copiedPointer, "the copy must not alias the original pointer")
+
+	*copiedPointer = json.RawMessage(`{"changed":true}`)
+	assert.Equal(t, duplicate, string(payload), "writing through the copy must not reach the original")
+
+	payload = json.RawMessage(`{"other":true}`)
+	assert.Equal(t, `{"changed":true}`, string(*copiedPointer), "writing to the original must not reach the copy")
+}

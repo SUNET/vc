@@ -286,6 +286,25 @@ func copyAnyValue(src any) any {
 func copyTypedContainer(src any) any {
 	value := reflect.ValueOf(src)
 	kind := value.Kind()
+
+	// A POINTER to a raw leaf is a raw leaf. *json.RawMessage went
+	// straight to the encoding, where re-parsing collapsed a duplicate
+	// member exactly as it did for the value form - so a template
+	// holding one still had its negative request repaired while the
+	// unpointered spelling beside it was preserved.
+	if kind == reflect.Pointer {
+		if value.IsNil() {
+			return src
+		}
+		copied, ok := copyReflected(value.Elem().Interface(), value.Type().Elem())
+		if !ok {
+			return encodeCopy(src)
+		}
+		pointer := reflect.New(value.Type().Elem())
+		pointer.Elem().Set(copied)
+		return pointer.Interface()
+	}
+
 	if kind != reflect.Map && kind != reflect.Slice {
 		return encodeCopy(src)
 	}
