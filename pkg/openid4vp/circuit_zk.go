@@ -43,6 +43,27 @@ const (
 // query: a function, a handle its result is returned under, and the
 // function's parameters.
 //
+// A circuit_zk preset needs two things to be published - a non-empty req,
+// and verifier.preferred_vp_formats.circuit_zk advertising the format:
+//
+//	```yaml
+//	verifier:
+//	  preferred_vp_formats:
+//	    circuit_zk: {}              # or a circuit filter
+//	  presets:
+//	    "Pseudonym":
+//	      credentials:
+//	        nym_auth:
+//	          format: circuit_zk
+//	          validate: nym_auth     # optional
+//	          req:
+//	            - id: pseudonym-v1-sha256
+//	              return: nym-123
+//	              params:
+//	                config: known-offender-matching-ssc
+//	                verifier_id_type: x509_san_dns
+//	```
+//
 // Params is an open map and is serialised exactly as given. Nothing here
 // coerces a value, drops an empty one, or repairs a malformed one, and
 // that is deliberate twice over. The rulebook and the OpenID4VP and DC API

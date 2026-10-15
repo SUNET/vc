@@ -802,21 +802,9 @@ type VerificationPresetScope struct {
 	// either, the preset is omitted and the reason is logged, rather than
 	// a button being offered that asks a wallet for a proof the request
 	// declares no support for.
-	//
-	//   verifier:
-	//     preferred_vp_formats:
-	//       circuit_zk: {}              # or a circuit filter
-	//     presets:
-	//       "Pseudonym":
-	//         credentials:
-	//           nym_auth:
-	//             format: circuit_zk
-	//             req:
-	//               - id: pseudonym-v1-sha256
-	//                 return: nym-123
-	//                 params:
-	//                   config: known-offender-matching-ssc
-	//                   verifier_id_type: x509_san_dns
+	// A worked example is in the "req entry" section below, which renders
+	// as prose rather than as a table cell - an indented one here is
+	// flattened into a single run-on line an operator cannot copy.
 	//
 	// Passed through to the wire as configured. Nothing judges what it
 	// MEANS unless Validate names a profile: this verifier is how wallets
