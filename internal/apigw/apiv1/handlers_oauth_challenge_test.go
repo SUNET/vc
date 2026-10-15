@@ -666,6 +666,38 @@ func challengeDPoPProofWithHTU(t *testing.T, key *ecdsa.PrivateKey, jti, htu str
 	return signed
 }
 
+// challengeDPoPProofClaiming is challengeDPoPProof with extra claims in
+// the payload, for the cases where what the proof SAYS about itself is the
+// point.
+func challengeDPoPProofClaiming(t *testing.T, key *ecdsa.PrivateKey, jti string, extra map[string]any) string {
+	t.Helper()
+
+	claims := jwt.MapClaims{
+		"jti": jti,
+		"iat": time.Now().Unix(),
+		"htm": "POST",
+		"htu": challengeIssuerURL + "/authorize-challenge",
+	}
+	for name, value := range extra {
+		claims[name] = value
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = "dpop+jwt"
+
+	publicJWK, err := jwk.Import(&key.PublicKey)
+	require.NoError(t, err)
+	jwkJSON, err := json.Marshal(publicJWK)
+	require.NoError(t, err)
+	var jwkMap map[string]any
+	require.NoError(t, json.Unmarshal(jwkJSON, &jwkMap))
+	token.Header["jwk"] = jwkMap
+
+	signed, err := token.SignedString(key)
+	require.NoError(t, err)
+	return signed
+}
+
 // OpenID4VCI 1.1 §5.2: when DPoP is in use the auth_session MUST be
 // associated with the DPoP public key, so that a stolen auth_session alone
 // gets a thief nowhere.
@@ -712,6 +744,36 @@ func TestAuthorizationChallenge_AuthSessionIsBoundToTheDPoPKey(t *testing.T) {
 		// also produces invalid_dpop_proof, so the code alone would not
 		// notice the explicit refusal going away.
 		assert.Equal(t, oauth2.OAuthErrDPoPRequired.ErrorDescription, oauthErr.ErrorDescription)
+	})
+
+	t.Run("another key cannot continue it by CLAIMING the bound thumbprint", func(t *testing.T) {
+		client, authSession := open(t)
+
+		// The exchange's own thumbprint, read from the store, so the
+		// forgery carries the real target rather than a guess.
+		authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+			AuthSession: authSession,
+		})
+		require.NoError(t, err)
+		bound := authCtx.AuthSessionDPoPThumbprint
+		require.NotEmpty(t, bound)
+
+		// A proof genuinely signed by the thief's key, asserting the
+		// victim's thumbprint in its payload. The thumbprint comes from
+		// the proof's jwk HEADER, so a payload claim must not reach it -
+		// it did, and this proof continued an exchange bound to a key the
+		// sender does not hold.
+		proof := challengeDPoPProofClaiming(t, thiefKey,
+			fmt.Sprintf("jti-challenge-test-%d", challengeJTI.Add(1)),
+			map[string]any{"thumbprint": bound})
+
+		oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
+			AuthSession:       authSession,
+			DPOP:              proof,
+			OpenID4VPResponse: `{"response":"x"}`,
+		})
+		assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode,
+			"a payload claim must not stand in for possession of the key")
 	})
 
 	t.Run("the key that opened it gets past the binding check", func(t *testing.T) {
