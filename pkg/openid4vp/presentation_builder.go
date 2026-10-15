@@ -237,7 +237,18 @@ func copyAnyValue(src any) any {
 		// Bytes, copied as bytes. Everything a raw leaf exists to carry -
 		// a duplicate member, member order, a number written the long way -
 		// survives only if it is never re-parsed.
-		return append(json.RawMessage(nil), typed...)
+		//
+		// Allocated with a length, because appending to a nil slice
+		// returns a NIL one: an empty-but-present raw leaf would come out
+		// nil, and the two do not mean the same thing. An empty one fails
+		// to marshal ("unexpected end of JSON input") while nil marshals
+		// as null, so flattening them turns a request that cannot be sent
+		// into one that quietly says null - the copy repairing what it
+		// copies, which is the thing this whole path exists to stop.
+		if typed == nil {
+			return src
+		}
+		return append(make(json.RawMessage, 0, len(typed)), typed...)
 
 	case map[string]any:
 		return copyAnyMap(typed)

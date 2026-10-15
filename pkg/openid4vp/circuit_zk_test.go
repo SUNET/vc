@@ -811,3 +811,32 @@ func TestCopyDCQLPreservesRawLeavesBesideNilElements(t *testing.T) {
 	assert.Contains(t, string(after), inSlice, "a raw leaf beside a nil in a named slice must survive as bytes")
 	assert.Contains(t, string(after), `"absent":null`, "the nil element must still be null")
 }
+
+// An absent raw leaf and an empty one are not the same leaf.
+//
+// Appending to a nil slice returns a nil slice, so an empty-but-present
+// json.RawMessage came out nil. They do not mean the same thing: an empty
+// one fails to marshal, while nil marshals as null - so flattening them
+// turned a request that cannot be sent into one that quietly says null.
+//
+// Found while auditing this function for the absent/empty confusion that
+// the nil-slice and nil-element findings were both instances of.
+func TestCopyPreservesTheDifferenceBetweenAbsentAndEmptyRawLeaves(t *testing.T) {
+	var absent json.RawMessage
+	empty := json.RawMessage{}
+
+	copiedAbsent, ok := copyAnyValue(absent).(json.RawMessage)
+	require.True(t, ok)
+	assert.Nil(t, copiedAbsent, "an absent raw leaf stays absent")
+
+	copiedEmpty, ok := copyAnyValue(empty).(json.RawMessage)
+	require.True(t, ok)
+	assert.NotNil(t, copiedEmpty, "an empty raw leaf must not become an absent one")
+	assert.Empty(t, copiedEmpty)
+
+	// The distinction is observable: one marshals, the other refuses.
+	_, err := json.Marshal(map[string]any{"k": copiedAbsent})
+	require.NoError(t, err, "absent marshals as null")
+	_, err = json.Marshal(map[string]any{"k": copiedEmpty})
+	require.Error(t, err, "empty must still refuse to marshal, as it did before copying")
+}
