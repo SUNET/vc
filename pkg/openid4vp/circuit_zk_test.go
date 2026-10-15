@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"bytes"
 	"encoding/json"
+	yamlv2 "gopkg.in/yaml.v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -927,5 +928,63 @@ func TestCopyPreservesRawLeavesInArraysAndStructs(t *testing.T) {
 		// Reflection can neither read nor set the unexported field, so
 		// this falls back to the encoding rather than dropping it.
 		assert.Contains(t, string(out), `"payload"`)
+	})
+}
+
+// A null filter is neither absent nor empty, and the model cannot hold it.
+//
+// {"circuit_id_values":null} decoded to a nil slice, which omitzero then
+// omitted, so an explicitly supplied filter re-encoded as {} - no filter
+// at all, and the wallet saw an unfiltered request. {"circuit_id_values":
+// [null]} decoded the element to the zero string and re-encoded as [""],
+// turning a filter that names nothing into one that names the empty
+// string. Both are refused rather than repaired.
+func TestNullFiltersAreRefusedNotRepaired(t *testing.T) {
+	for _, name := range []string{"circuit_id_values", "circuit_proof_system_values"} {
+		t.Run(name+" null array (JSON)", func(t *testing.T) {
+			var f CircuitZkFormat
+			err := json.Unmarshal([]byte(`{"`+name+`":null}`), &f)
+			require.Error(t, err, "a null filter must not decode to an absent one")
+			assert.Contains(t, err.Error(), "cannot be told from an absent member")
+		})
+
+		t.Run(name+" null element (JSON)", func(t *testing.T) {
+			var f CircuitZkFormat
+			err := json.Unmarshal([]byte(`{"`+name+`":[null]}`), &f)
+			require.Error(t, err, "a null element must not decode to an empty string")
+			assert.Contains(t, err.Error(), "read back as an empty string")
+		})
+	}
+
+	// The YAML path decodes the same two spellings into the same two
+	// wrong answers, so it carries the same refusal.
+	t.Run("null array (YAML)", func(t *testing.T) {
+		var f CircuitZkFormat
+		err := yamlv2.Unmarshal([]byte("circuit_id_values: null\n"), &f)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be told from an absent member")
+	})
+
+	t.Run("null element (YAML)", func(t *testing.T) {
+		var f CircuitZkFormat
+		err := yamlv2.Unmarshal([]byte("circuit_id_values:\n  - null\n"), &f)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read back as an empty string")
+	})
+
+	// The two spellings that DO have a meaning still work, in both
+	// directions: absent is no filter, empty is a filter matching nothing.
+	t.Run("absent and empty still round-trip", func(t *testing.T) {
+		var absent CircuitZkFormat
+		require.NoError(t, json.Unmarshal([]byte(`{}`), &absent))
+		encoded, err := json.Marshal(absent)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{}`, string(encoded))
+
+		var empty CircuitZkFormat
+		require.NoError(t, json.Unmarshal([]byte(`{"circuit_id_values":[]}`), &empty))
+		encoded, err = json.Marshal(empty)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"circuit_id_values":[]}`, string(encoded))
 	})
 }

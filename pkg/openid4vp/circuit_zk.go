@@ -136,8 +136,88 @@ func (c CircuitZkFormat) MarshalJSON() ([]byte, error) {
 	return marshalWithExtra(plain(c), c.Extra, "circuit_zk client metadata")
 }
 
+// nullFilterError reports a modelled filter array this type cannot hold.
+//
+// Neither spelling survives the round trip. A null ARRAY decodes to a nil
+// slice, which omitzero then omits, so an explicitly supplied filter
+// becomes NO filter and the wallet sees an unfiltered request. A null
+// ELEMENT decodes to the zero string, so a filter naming nothing becomes
+// one naming the empty string. The model has nowhere to keep the
+// difference, so this refuses rather than repairs - as the duplicate and
+// overflow checks beside it do, and for the same reason: a changed
+// request that looks perfectly well formed is the worst thing this
+// serialiser can emit.
+func nullFilterError(what, name string, index int) error {
+	if index < 0 {
+		return fmt.Errorf("%s: %q is null, which cannot be told from an absent member once decoded; "+
+			"omit it for no filter at all, or give [] for a filter that matches nothing", what, name)
+	}
+	return fmt.Errorf("%s: %q[%d] is null, which would be read back as an empty string; "+
+		"remove the element, or write the value you mean", what, name, index)
+}
+
+// refuseNullFiltersJSON refuses a null modelled array, or one holding a
+// null element, in JSON.
+func refuseNullFiltersJSON(data []byte, what string, names ...string) error {
+	var members map[string]json.RawMessage
+	if err := decodeExact(data, &members); err != nil {
+		return nil // not an object; the typed decode reports it
+	}
+	for _, name := range names {
+		raw, present := members[name]
+		if !present {
+			continue
+		}
+		if string(bytes.TrimSpace(raw)) == "null" {
+			return nullFilterError(what, name, -1)
+		}
+		var items []json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			continue // wrong kind; the typed decode reports it
+		}
+		for i, item := range items {
+			if string(bytes.TrimSpace(item)) == "null" {
+				return nullFilterError(what, name, i)
+			}
+		}
+	}
+	return nil
+}
+
+// refuseNullFiltersYAML is the same refusal for the YAML path, which
+// decodes the same two spellings into the same two wrong answers.
+func refuseNullFiltersYAML(unmarshal func(any) error, what string, names ...string) error {
+	var mapping map[string]any
+	if err := unmarshal(&mapping); err != nil {
+		return nil // not a mapping; the typed decode reports it
+	}
+	for _, name := range names {
+		value, present := mapping[name]
+		if !present {
+			continue
+		}
+		if value == nil {
+			return nullFilterError(what, name, -1)
+		}
+		items, ok := value.([]any)
+		if !ok {
+			continue
+		}
+		for i, item := range items {
+			if item == nil {
+				return nullFilterError(what, name, i)
+			}
+		}
+	}
+	return nil
+}
+
 // UnmarshalJSON collects unknown members into Extra.
 func (c *CircuitZkFormat) UnmarshalJSON(data []byte) error {
+	if err := refuseNullFiltersJSON(data, "circuit_zk client metadata",
+		"circuit_proof_system_values", "circuit_id_values"); err != nil {
+		return err
+	}
 	knownObject, extra, err := splitMembers(data, "circuit_proof_system_values", "circuit_id_values")
 	if err != nil {
 		return err
@@ -535,6 +615,10 @@ func (c CircuitZkFormat) MarshalYAML() (any, error) {
 // including the rulebook example's fn_id and input, which is the shape an
 // operator is most likely to need and the one this could not express.
 func (c *CircuitZkFormat) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseNullFiltersYAML(unmarshal, "circuit_zk client metadata",
+		"circuit_proof_system_values", "circuit_id_values"); err != nil {
+		return err
+	}
 	type plain CircuitZkFormat
 	var known plain
 	if err := unmarshal(&known); err != nil {
