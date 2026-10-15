@@ -2032,3 +2032,51 @@ func TestAuthorizationChallenge_AWrongRedirectURIIsStillRefused(t *testing.T) {
 	oauthErr := oauthErrFromChallenge(t, client, req)
 	assert.Equal(t, oauth2.ErrCodeInvalidClient, oauthErr.ErrorCode)
 }
+
+// redirect_uri is optional on this endpoint, but not for the interaction
+// that ends by sending the user through a browser.
+//
+// The optional-redirect rule is about the endpoint being browserless: a
+// presentation comes back to the endpoint itself. A web interaction is
+// the opposite - it ends with the browser being sent to WalletURI - and
+// with none, buildAuthorizationRedirectURL produces
+// "?code=...&iss=...&state=...", a query string with no scheme and no
+// host, which the consent page's new URL() throws on. The user
+// authenticates, consents, and arrives nowhere with the code stranded.
+//
+// Refused at the request, which the wallet can still fix, rather than
+// after it has sent its user into a browser.
+func TestAuthorizationChallenge_WebInteractionNeedsACallback(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
+	req.RedirectURI = ""
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+	assert.Contains(t, oauthErr.ErrorDescription, "redirect_uri")
+
+	// Nothing was created either, but that is not asserted here: the
+	// refusal carries no request_uri and the store has no enumeration
+	// API, so every check available would pass whether or not a context
+	// had been saved. It is the refusal ORDER that guarantees it - the
+	// guard sits above newChallengeAuthContext - and the positive control
+	// below is what makes this test specific rather than a blanket
+	// refusal of web interactions.
+
+	// And the SAME request with a callback still works, so this refuses
+	// the missing redirect_uri rather than the web interaction itself.
+	withCallback := initialChallenge(t)
+	withCallback.CodeChallenge = strings.Repeat("c", 43)
+	withCallback.CodeChallengeMethod = "S256"
+
+	challengeErr := challengeErr(t, client, withCallback)
+	assert.Equal(t, "urn:openid:dcp:ia:auth_via_web", challengeErr.InteractionTypeRequired)
+	assert.Contains(t, challengeErr.RequestURI, "urn:ietf:params:oauth:request_uri:")
+}

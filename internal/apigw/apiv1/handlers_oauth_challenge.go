@@ -879,6 +879,28 @@ func (c *Client) requireWebInteraction(ctx context.Context, ia *model.Interactiv
 		return oauth2.OAuthErrPKCERequired
 	}
 
+	// And a callback, which THIS interaction cannot do without.
+	//
+	// redirect_uri is optional on the challenge request because the
+	// endpoint is browserless - a presentation is answered back at the
+	// endpoint itself. A web interaction is the opposite: it ends with
+	// the browser being sent somewhere, and WalletURI is where.
+	//
+	// Without one, buildAuthorizationRedirectURL produces
+	// "?code=...&iss=...&state=..." - a query string with no scheme and
+	// no host - and the consent page's new URL() throws on it. The user
+	// authenticates, consents, and arrives nowhere, with the code
+	// stranded. Refused here, before the handoff is created, so the
+	// wallet learns it at the request it could still fix rather than
+	// after sending its user through a browser.
+	//
+	// The scheme of a redirect_uri that IS sent was already checked by
+	// authenticateChallengeWallet; this is about there being one at all.
+	if req.RedirectURI == "" {
+		return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"redirect_uri is required for an interaction that sends the user through a browser", 400)
+	}
+
 	authCtx, err := c.newChallengeAuthContext(ia, req, source)
 	if err != nil {
 		return err
