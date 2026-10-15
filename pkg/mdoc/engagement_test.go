@@ -278,7 +278,7 @@ func TestNewSessionEncryptionReader(t *testing.T) {
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
 	// Create session transcript (normally from device engagement)
-	sessionTranscript := []byte("test session transcript")
+	sessionTranscript := testSessionTranscript()
 
 	// Create session encryption as reader
 	session, err := NewSessionEncryptionReader(
@@ -300,7 +300,7 @@ func TestSessionEncryption_EncryptDecrypt(t *testing.T) {
 	readerKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
-	sessionTranscript := []byte("test session transcript")
+	sessionTranscript := testSessionTranscript()
 
 	// Create reader session
 	readerSession, err := NewSessionEncryptionReader(
