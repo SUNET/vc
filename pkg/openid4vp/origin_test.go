@@ -138,6 +138,8 @@ func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
 		{"fullwidth digits, hexadecimal", "https://０x７f.１"},
 		{"fullwidth digits, a single number", "https://２１３２7３０６２５"},
 		{"a fullwidth trailing label after an ASCII one", "https://example.１"},
+		{"fullwidth first label, ASCII rest, short form", "https://１２７.1"},
+		{"ideographic full stop, short form", "https://127。1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			origin, err := CanonicalOrigin(tc.rawURL)
@@ -159,6 +161,8 @@ func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
 	// the refusal is of spellings a browser rewrites, not of addresses.
 	for _, tc := range []struct{ rawURL, want string }{
 		{"https://１２７.０.０.１", "https://127.0.0.1"},
+		{"https://１２７.0.0.1", "https://127.0.0.1"},
+		{"https://127。0.0.1", "https://127.0.0.1"},
 		{"https://127.0.0.1", "https://127.0.0.1"},
 		{"https://127.0.0.1:8443", "https://127.0.0.1:8443"},
 	} {

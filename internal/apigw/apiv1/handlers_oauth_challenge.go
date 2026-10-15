@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -642,12 +643,58 @@ func (c *Client) interactiveAuthorizationFailure(err error) error {
 }
 
 // issuanceAuthDCQL builds the DCQL query the Wallet must satisfy for scope.
+//
+// It is a narrowed copy of the browser flow's query, built fresh so the
+// browser query is unchanged. mdoc alternatives are dropped because this
+// endpoint has no mdoc session transcript, and the credential set is
+// required so a Wallet cannot answer with nothing - the endpoint consumes
+// the auth_session before it can reject an empty response.
 func (c *Client) issuanceAuthDCQL(scope string) (*openid4vp.DCQL, error) {
 	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
 	if vpAuth == nil {
 		return nil, fmt.Errorf("scope %q is not configured for openid4vp authentication", scope)
 	}
-	return buildIssuanceAuthDCQL(vpAuth, c.cfg)
+	dcql, err := buildIssuanceAuthDCQL(vpAuth, c.cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	supported := make(map[string]bool, len(dcql.Credentials))
+	for _, cq := range dcql.Credentials {
+		if cq.Format == openid4vp.FormatMsoMdoc || cq.Format == openid4vp.FormatMsoMdocZk {
+			continue
+		}
+		supported[cq.ID] = true
+	}
+	credentials := make([]openid4vp.CredentialQuery, 0, len(supported))
+	for _, cq := range dcql.Credentials {
+		if supported[cq.ID] {
+			credentials = append(credentials, cq)
+		}
+	}
+	if len(credentials) == 0 {
+		return nil, fmt.Errorf("scope %q has no authentication alternative this endpoint can verify", scope)
+	}
+
+	var options [][]string
+	for _, set := range dcql.CredentialSets {
+		for _, option := range set.Options {
+			if len(option) > 0 && slices.ContainsFunc(option, func(id string) bool { return !supported[id] }) {
+				continue
+			}
+			options = append(options, slices.Clone(option))
+		}
+	}
+	if len(options) == 0 {
+		return nil, fmt.Errorf("scope %q has no authentication alternative this endpoint can verify", scope)
+	}
+
+	return &openid4vp.DCQL{
+		Credentials: credentials,
+		CredentialSets: []openid4vp.CredentialSetQuery{
+			{Options: options, Required: new(true)},
+		},
+	}, nil
 }
 
 // openID4VPCredentialSource finds the data source that backs scope through

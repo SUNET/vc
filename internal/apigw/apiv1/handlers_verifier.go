@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -193,6 +194,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
+	}
+
+	// An Interactive Authorization context is DPoP-bound and must be answered
+	// at the Authorization Challenge Endpoint, which checks that binding.
+	if authCtx.AuthSessionDPoPThumbprint != "" {
+		c.log.Error(nil, "direct-post presentation for an interactive authorization session", "session_id", authCtx.SessionID)
+		return nil, errors.New("presentation is not accepted on this channel for this session")
 	}
 
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
@@ -589,6 +597,9 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	}
 	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
 	if err != nil {
+		if errors.Is(err, helpers.ErrNoIdentityFound) {
+			return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+		}
 		return nil, serverFault(fmt.Errorf("failed to resolve identity from VP claims: %w", err))
 	}
 

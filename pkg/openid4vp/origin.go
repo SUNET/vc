@@ -84,10 +84,6 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-	case endsInANumber(host):
-		if err := refuseRewritableNumericHost(host, rawURL); err != nil {
-			return "", err
-		}
 	default:
 		// ToASCII does the case folding too, as part of the UTS #46
 		// mapping, so there is no ToLower here to disagree with it.
@@ -95,16 +91,11 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-		// The mapping can PRODUCE a numeric host, so the check above has
-		// to be made again on its output.
-		//
-		// The switch asks whether the host as written ends in a number,
-		// and fullwidth digits are not ASCII digits, so "１２７.１" takes
-		// this branch - and UTS #46 maps it to "127.1", a host a browser
-		// parses as 127.0.0.1. Checking only before the mapping published
-		// "https://127.1" as an expected origin and as an Interactive
-		// Authorization audience, which no browser will ever report,
-		// while the ASCII spelling of the very same host was refused.
+		// The numeric check runs on the MAPPED host, because the mapping
+		// is what a browser parses. Fullwidth digits and ideographic full
+		// stops (U+3002) are not ASCII digits or dots as written, but UTS
+		// #46 maps them to "127.1"-style hosts that a browser rewrites
+		// to 127.0.0.1. Checking the host as written let those through.
 		if endsInANumber(host) {
 			if err := refuseRewritableNumericHost(host, rawURL); err != nil {
 				return "", err
