@@ -159,6 +159,9 @@ func (q CredentialQuery) MarshalYAML() (any, error) {
 // one. See the note above ReqItem.UnmarshalYAML for why nothing here
 // passes through JSON on the way.
 func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseDuplicateYAMLKeys(unmarshal, "credential query"); err != nil {
+		return err
+	}
 	type plain CredentialQuery
 	var known plain
 	if err := unmarshal(&known); err != nil {
@@ -1006,6 +1009,9 @@ func (v VPFormatsSupported) MarshalYAML() (any, error) {
 
 // UnmarshalYAML captures format entries this build does not model.
 func (v *VPFormatsSupported) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseDuplicateYAMLKeys(unmarshal, "vp_formats_supported"); err != nil {
+		return err
+	}
 	type plain VPFormatsSupported
 	var known plain
 	if err := unmarshal(&known); err != nil {
