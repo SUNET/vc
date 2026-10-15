@@ -318,6 +318,15 @@ func TestClaimValuesAreJudgedByValueNotSpelling(t *testing.T) {
 		{"1.55e1", false}, // 15.5
 		{"0.001", false},
 		{"1e-20", false},
+
+		// An exponent may sit at the very end of the int range. Both of
+		// these are nonzero magnitudes far below one, so neither is an
+		// integer - but reaching that answer by negating the shift wraps
+		// to a negative cut and panics the slice, and reaching it by
+		// subtracting the fraction length wraps the other way and calls a
+		// fraction integral.
+		{"1e-9223372036854775808", false},
+		{"1.0e-9223372036854775808", false},
 	} {
 		t.Run(tc.literal, func(t *testing.T) {
 			body := `{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},` +

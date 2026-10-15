@@ -1321,15 +1321,21 @@ func isIntegralNumber(literal string) bool {
 		return true
 	}
 
+	// A nonzero value whose every significant digit falls to the right of
+	// the point is not an integer. Deciding that on the exponent alone
+	// keeps the arithmetic below away from the ends of the int range: a
+	// literal may carry an exponent as extreme as math.MinInt64, where
+	// negating the shift wraps round to a negative cut that panics the
+	// slice, and subtracting the fraction length wraps the other way and
+	// reports a fraction as integral.
+	if exponent <= len(fraction)-len(digits) {
+		return false
+	}
 	shift := exponent - len(fraction)
 	if shift >= 0 {
 		return true
 	}
-	cut := -shift
-	if cut >= len(digits) {
-		return false // every significant digit is to the right of the point
-	}
-	return strings.Trim(digits[len(digits)-cut:], "0") == ""
+	return strings.Trim(digits[len(digits)+shift:], "0") == ""
 }
 
 func checkIntegralFloat(f float64, i int) error {
