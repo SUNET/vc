@@ -962,3 +962,47 @@ func TestCircuitZkFormatKeepsEmptyApartFromAbsent(t *testing.T) {
 		})
 	}
 }
+
+// The YAML routes to Raw need the same guard as the JSON ones.
+//
+// A template is as capable of naming a constraint twice, or in the wrong
+// case, as a JSON request is - and a configuration is the MORE likely
+// place for a typo, because nobody runs a JSON schema over it first.
+// Checking only the JSON paths left the whole of this open: a template
+// with a case-aliased constraint reaches Raw through the
+// shape-equivalence fallback, not the decode-failure one.
+//
+// Checked on the NORMALISED bytes, which is what gets emitted and what a
+// wallet reads.
+func TestYAMLRawPathIsNotAWayPastTheConstraintChecks(t *testing.T) {
+	for _, tc := range []struct{ name, template, want string }{
+		{
+			name:     "a case-aliased constraint inside meta",
+			template: "id: q\nformat: dc+sd-jwt\nmeta:\n  VCT_VALUES: [urn:x]\n",
+			want:     "differs only in case",
+		},
+		{
+			name:     "a case-aliased meta itself",
+			template: "id: q\nformat: dc+sd-jwt\nMETA:\n  vct_values: [urn:x]\n",
+			want:     "differs only in case",
+		},
+		{
+			name:     "a case-aliased doctype_value",
+			template: "id: q\nformat: mso_mdoc\nmeta:\n  DocType_Value: org.iso.18013.5.1.mDL\n",
+			want:     "differs only in case",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var q CredentialQuery
+			err := yamlv2.Unmarshal([]byte(tc.template), &q)
+			require.Error(t, err, "this template must not be readable; it decoded to %#v", q)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+
+	// And an ordinary template still reads, with its constraint intact -
+	// the guard refuses aliases, not YAML.
+	var ok CredentialQuery
+	require.NoError(t, yamlv2.Unmarshal([]byte("id: q\nformat: dc+sd-jwt\nmeta:\n  vct_values: [urn:x]\n"), &ok))
+	assert.Equal(t, []string{"urn:x"}, ok.Meta.VCTValues)
+}
