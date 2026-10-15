@@ -49,7 +49,7 @@ var nymNamespace = func() *string { s := "eu.europa.ec.eudi.nym_auth.1"; return 
 var nymReq = []openid4vp.ReqItem{{
 	ID:     openid4vp.FunctionPseudonym,
 	Return: "nym-123",
-	Params: map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"},
+	Params: map[string]any{"config": "known-offender-matching-ssc"},
 }}
 
 // The picker builds the DCQL query in the browser and posts it back, so

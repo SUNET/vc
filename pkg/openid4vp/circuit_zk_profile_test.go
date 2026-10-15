@@ -24,7 +24,7 @@ func pseudonymItem(params map[string]any) ReqItem {
 // The conformant request from the rulebook passes.
 func TestNymAuthProfileAcceptsTheRulebookExample(t *testing.T) {
 	query := nymQuery(
-		pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"}),
+		pseudonymItem(map[string]any{"config": "known-offender-matching-ssc"}),
 		ReqItem{ID: FunctionAgeCheck, Return: "age-1", Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"}},
 	)
 	assert.NoError(t, ValidateProfile(ProfileNymAuth, query))
@@ -61,32 +61,22 @@ func TestNymAuthProfileRejectsEachViolation(t *testing.T) {
 		},
 		{
 			name:  "an unknown pseudonym configuration",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "made-up", "verifier_id_type": "x509_san_dns"})),
+			query: nymQuery(pseudonymItem(map[string]any{"config": "made-up"})),
 			want:  "not a configuration the rulebook defines",
 		},
 		{
-			name:  "no verifier_id_type where the configuration needs one",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "known-offender-matching-ssc"})),
-			want:  "verifier_id_type is required",
-		},
-		{
-			name:  "a verifier_id_type where the configuration does not use one",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "user-managed-pseudonym-xsite-ssc", "verifier_id_type": "x509_san_dns"})),
-			want:  "must not be present",
-		},
-		{
 			name:  "no verifier_context for account recovery",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "account-recovery-ssc", "verifier_id_type": "x509_san_dns"})),
+			query: nymQuery(pseudonymItem(map[string]any{"config": "account-recovery-ssc"})),
 			want:  "requires params.verifier_context",
 		},
 		{
 			name:  "a verifier_context where it is not allowed",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns", "verifier_context": "x"})),
+			query: nymQuery(pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_context": "x"})),
 			want:  "does not allow params.verifier_context",
 		},
 		{
 			name:  "a verifier_context past 64 bytes",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "account-recovery-ssc", "verifier_id_type": "x509_san_dns", "verifier_context": string(make([]byte, 65))})),
+			query: nymQuery(pseudonymItem(map[string]any{"config": "account-recovery-ssc", "verifier_context": string(make([]byte, 65))})),
 			want:  "1 to 64",
 		},
 		{
@@ -182,7 +172,7 @@ func TestProfileRefusesToJudgeARawQuery(t *testing.T) {
 // rulebook is about. "Some doctype is present" would pass a request for
 // an unrelated document.
 func TestNymAuthProfilePinsTheDoctype(t *testing.T) {
-	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"})
+	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc"})
 
 	for _, tc := range []struct{ name, doctype, want string }{
 		{"the rulebook's own", nymAuthDoctype, ""},
@@ -213,7 +203,7 @@ func TestNymAuthProfilePinsTheDoctype(t *testing.T) {
 // Absent must stay fine: OpenID4VP 1.0 6.1 defaults it to true, and a nil
 // pointer is how that default is preserved.
 func TestNymAuthProfileRejectsExplicitlyDisabledHolderBinding(t *testing.T) {
-	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"})
+	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc"})
 	no, yes := false, true
 
 	for _, tc := range []struct {
@@ -250,7 +240,7 @@ func TestNymAuthProfileRejectsExplicitlyDisabledHolderBinding(t *testing.T) {
 // for a typo.
 func TestNymAuthProfileRefusesPSCConfigurationsAsPending(t *testing.T) {
 	err := ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(map[string]any{
-		"config": "known-offender-matching-psc", "verifier_id_type": "x509_san_dns",
+		"config": "known-offender-matching-psc",
 	})))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "defined by the rulebook but cannot be requested yet")
@@ -262,7 +252,7 @@ func TestNymAuthProfileRefusesPSCConfigurationsAsPending(t *testing.T) {
 // from the unknown-member case, which stays permissive: a newer rulebook
 // adding a parameter is what this whole format is built around.
 func TestNymAuthProfileRefusesMembersTheRulebookDoesNotAllow(t *testing.T) {
-	base := map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"}
+	base := map[string]any{"config": "known-offender-matching-ssc"}
 	with := func(name string, value any) map[string]any {
 		params := map[string]any{}
 		maps.Copy(params, base)
@@ -272,7 +262,7 @@ func TestNymAuthProfileRefusesMembersTheRulebookDoesNotAllow(t *testing.T) {
 
 	for _, tc := range []struct{ name, param, want string }{
 		{"a psc, which only a holder has", "psc", "every configuration this profile supports is -ssc"},
-		{"a verifier_id, where the request names the kind", "verifier_id", "the wallet derives the identity itself"},
+		{"a verifier_id, where the request names the kind", "verifier_id", "the wallet derives the verifier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(with(tc.param, "x"))))
@@ -288,28 +278,51 @@ func TestNymAuthProfileRefusesMembersTheRulebookDoesNotAllow(t *testing.T) {
 	})
 }
 
-// An open string let the profile approve an empty verifier_id_type -
-// which nothing can derive a verifier_input from - and an unknown one a
-// wallet must treat as unsatisfiable. Both are requests this verifier
-// would build and no wallet could answer.
-func TestNymAuthProfilePinsTheVerifierIDType(t *testing.T) {
-	for _, tc := range []struct{ name, idType, want string }{
-		{"the one the shared vectors use", "x509_san_dns", ""},
-		{"and the other the rulebook defines", "semantic", ""},
-		{"empty, which nothing can derive an input from", "", "rulebook defines"},
-		{"an unknown kind", "dns", "rulebook defines"},
-		{"and one that merely looks close", "X509_SAN_DNS", "rulebook defines"},
+// verifier_id_type is no longer part of the request
+// (nym_auth_rulebook#5): the wallet decides how to identify the verifier,
+// from its own ordered list of identity kinds, so there is nothing for a
+// request to say about it.
+//
+// This profile therefore says nothing about it either, in BOTH
+// directions, and that is what this pins. A missing one is not a
+// violation - every other case in this file now omits it - and a request
+// still carrying one stays sendable whatever its value, because testing a
+// wallet against the legacy shape is a thing this format exists to allow.
+// An earlier revision of this profile REQUIRED it on some configurations
+// and REFUSED it on others; neither rule survives, so both are exercised
+// here against the configurations that used to carry them.
+func TestNymAuthProfileIgnoresVerifierIDType(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"the kind the legacy requests carried", "x509_san_dns"},
+		{"another the old rulebook named", "semantic"},
+		{"empty", ""},
+		{"an unknown kind", "dns"},
+		{"a different case, which used to be refused", "X509_SAN_DNS"},
+		{"and a value that is not even a string", 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(map[string]any{
-				"config": "known-offender-matching-ssc", "verifier_id_type": tc.idType,
-			})))
-			if tc.want == "" {
-				assert.NoError(t, err)
-				return
+			for _, config := range []string{
+				"known-offender-matching-ssc",      // used to REQUIRE it
+				"user-managed-pseudonym-xsite-ssc", // used to REFUSE it
+			} {
+				assert.NoError(t, ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(
+					map[string]any{"config": config, "verifier_id_type": tc.value}))),
+					"config %q must neither require nor refuse verifier_id_type", config)
 			}
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.want)
 		})
+	}
+
+	// And the request shape the rulebook now defines - no
+	// verifier_id_type at all - validates on every configuration.
+	for _, params := range []map[string]any{
+		{"config": "known-offender-matching-ssc"},
+		{"config": "user-managed-pseudonym-xsite-ssc"},
+		{"config": "account-recovery-ssc", "verifier_context": "ctx"},
+	} {
+		assert.NoError(t, ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(params))),
+			"the normative request form must validate: %v", params)
 	}
 }

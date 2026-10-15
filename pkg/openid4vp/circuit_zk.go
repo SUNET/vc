@@ -61,7 +61,6 @@ const (
 //	              return: nym-123
 //	              params:
 //	                config: known-offender-matching-ssc
-//	                verifier_id_type: x509_san_dns
 //	```
 //
 // Params is an open map and is serialised exactly as given. Nothing here

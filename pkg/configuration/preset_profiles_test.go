@@ -39,7 +39,7 @@ func conformingScope() *model.VerificationPresetScope {
 		Req: []openid4vp.ReqItem{{
 			ID:     openid4vp.FunctionPseudonym,
 			Return: "nym-123",
-			Params: map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"},
+			Params: map[string]any{"config": "known-offender-matching-ssc"},
 		}},
 	}
 }

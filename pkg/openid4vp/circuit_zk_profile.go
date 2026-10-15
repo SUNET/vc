@@ -44,8 +44,16 @@ func ValidateProfile(profile string, query CredentialQuery) error {
 // cost, since the alternative is a check that passes on anything.
 const nymAuthDoctype = "eu.europa.ec.eudi.nym_auth.1"
 
-// nym_auth pseudonym configurations, and whether each uses verifier_input
-// (and so requires a verifier_id_type) or verifier_context.
+// nym_auth pseudonym configurations, and whether each takes a
+// verifier_context.
+//
+// Whether a configuration derives verifier_input is no longer a property
+// of the REQUEST. The rulebook took verifier_id_type out of it
+// (nym_auth_rulebook#5): the wallet decides how to identify the verifier,
+// from its own ordered list of identity kinds and the trust framework's
+// answer, so there is nothing for a request to say and nothing here to
+// check. known-offender-matching-ssc and account-recovery-ssc still
+// derive one; the circuit knows that, and the wallet does.
 //
 // The rulebook's -psc configurations are deliberately ABSENT. They are
 // well-defined there, but a psc is a commitment the HOLDER already knows,
@@ -53,9 +61,9 @@ const nymAuthDoctype = "eu.europa.ec.eudi.nym_auth.1"
 // which means a preset naming one cannot be sent, whatever this profile
 // says about it. Accepting it here would report a request as valid that
 // no wallet can be asked for. See nymAuthPendingConfigs.
-var nymAuthConfigs = map[string]struct{ usesVerifierID, usesContext bool }{
-	"known-offender-matching-ssc":      {usesVerifierID: true},
-	"account-recovery-ssc":             {usesVerifierID: true, usesContext: true},
+var nymAuthConfigs = map[string]struct{ usesContext bool }{
+	"known-offender-matching-ssc":      {},
+	"account-recovery-ssc":             {usesContext: true},
 	"user-managed-pseudonym-xsite-ssc": {},
 }
 
@@ -161,30 +169,24 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 	// around.
 	for name, why := range map[string]string{
 		"psc":         "every configuration this profile supports is -ssc, and a psc is the holder's own commitment",
-		"verifier_id": "the request names verifier_id_type, and the wallet derives the identity itself",
+		"verifier_id": "the wallet derives the verifier's identity itself; a request never carries it",
 	} {
 		if _, present := item.Params[name]; present {
 			return fmt.Errorf("%s: params.%s is not a member the %s rulebook allows on a request: %s", where, name, ProfileNymAuth, why)
 		}
 	}
 
-	idType, hasIDType := item.Params["verifier_id_type"]
-	switch {
-	case spec.usesVerifierID && !hasIDType:
-		return fmt.Errorf("%s: %q derives verifier_input, so params.verifier_id_type is required", where, config)
-	case !spec.usesVerifierID && hasIDType:
-		return fmt.Errorf("%s: %q does not use verifier_input, so params.verifier_id_type must not be present", where, config)
-	}
-	if hasIDType {
-		value, ok := idType.(string)
-		if !ok {
-			return fmt.Errorf("%s: params.verifier_id_type must be a string", where)
-		}
-		if !slices.Contains(nymAuthVerifierIDTypes, value) {
-			return fmt.Errorf("%s: params.verifier_id_type is %q; the %s rulebook defines %s",
-				where, value, ProfileNymAuth, strings.Join(nymAuthVerifierIDTypes, " and "))
-		}
-	}
+	// verifier_id_type is deliberately NOT checked, in either direction.
+	//
+	// It is no longer part of the request (nym_auth_rulebook#5). A
+	// missing one is not a violation, so this does not require it; and a
+	// request still carrying one has to remain sendable, so this does not
+	// refuse it either. A verifier testing a wallet against the legacy
+	// shape is a thing this format exists to allow, and wallets accept
+	// and ignore the member.
+	//
+	// It is named here rather than simply left out, because "the profile
+	// says nothing about it" is a decision and not an oversight.
 
 	context, hasContext := item.Params["verifier_context"]
 	switch {
@@ -204,23 +206,6 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 	}
 	return nil
 }
-
-// nymAuthVerifierIDTypes are the identity kinds the rulebook defines for
-// a pseudonym request.
-//
-// An open string let the profile approve an empty one, which nothing can
-// derive a verifier_input from, and an unknown one that a wallet must
-// treat as unsatisfiable. Both are requests this verifier would build and
-// no wallet could answer.
-//
-// Provenance, because it is not all equal: the shared matcher vectors use
-// x509_san_dns, and carry an empty one only in the vector that exists to
-// show the planner treats these as opaque. "semantic" is from the review
-// that raised this and is not in any artefact I can check here - worth a
-// glance from someone holding the rulebook. The cost of it being wrong is
-// bounded either way: this profile is opt-in, and an operator who needs a
-// value it does not know simply leaves validate unset.
-var nymAuthVerifierIDTypes = []string{"semantic", "x509_san_dns"}
 
 // minAgeSpanDays is the rulebook's floor on an age_check range: a
 // sufficiently narrow range is an exact birth date, which the predicate
