@@ -500,14 +500,29 @@ func TestSameHTU_IPv6(t *testing.T) {
 		})
 	}
 
-	// An IPv4-mapped address and its dotted quad are one address, so they
-	// name one endpoint. RFC 5952 renders the mapped form as the quad,
-	// which is what makes the two agree.
-	if !SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.1/token") {
-		t.Fatal("an IPv4-mapped IPv6 literal names the same endpoint as its dotted quad")
+	// An IPv4-mapped literal and the dotted quad are ONE ADDRESS and TWO
+	// AUTHORITIES, and htu binds the authority. The two reach a server
+	// with different Host headers and can select different virtual hosts,
+	// so merging them would weaken the binding this comparison exists to
+	// make. net.IP.String would have merged them, by unmapping; netip
+	// preserves the family, which is why it is used.
+	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.1/token") {
+		t.Fatal("an IPv4-mapped IPv6 literal is a different authority from the dotted quad")
 	}
 	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.2/token") {
 		t.Fatal("different addresses must stay different however they are spelled")
+	}
+
+	// Equivalent spellings of the mapped literal itself still agree: the
+	// refusal above is about the family, not about giving up on IPv6.
+	for _, pair := range [][2]string{
+		{"https://[::ffff:127.0.0.1]/token", "https://[::FFFF:127.0.0.1]/token"},
+		{"https://[::ffff:127.0.0.1]/token", "https://[0:0:0:0:0:ffff:127.0.0.1]/token"},
+		{"https://[::ffff:127.0.0.1]/token", "https://[::ffff:7f00:1]/token"},
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same authority", pair[0], pair[1])
+		}
 	}
 }
 
