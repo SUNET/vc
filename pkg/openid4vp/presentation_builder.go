@@ -659,9 +659,18 @@ func copyDCQL(src *DCQL) *DCQL {
 						pathCopy[k] = &s
 					}
 				}
+				// Through copyAnyValue, not a shallow append. A claim
+				// value is `any`, so it can hold a raw leaf or a
+				// container just as Params can, and appending copies the
+				// SLICE while sharing what its elements point at: a
+				// json.RawMessage here was the original's bytes, so
+				// mutating them changed the copied request.
 				var valuesCopy []any
 				if claim.Values != nil {
-					valuesCopy = append([]any{}, claim.Values...)
+					valuesCopy = make([]any, len(claim.Values))
+					for k, v := range claim.Values {
+						valuesCopy[k] = copyAnyValue(v)
+					}
 				}
 				dst.Credentials[i].Claims[j] = ClaimQuery{
 					ID:     claim.ID,
@@ -687,7 +696,10 @@ func copyDCQL(src *DCQL) *DCQL {
 		}
 		dst.Credentials[i].Extra = copyAnyMap(cred.Extra)
 		if cred.Raw != nil {
-			dst.Credentials[i].Raw = append(json.RawMessage(nil), cred.Raw...)
+			// Allocated with a length: appending to a NIL slice returns a
+			// nil one, so an empty-but-present Raw came out absent, and
+			// those do not mean the same thing.
+			dst.Credentials[i].Raw = append(make(json.RawMessage, 0, len(cred.Raw)), cred.Raw...)
 		}
 
 		// Copy claim sets
