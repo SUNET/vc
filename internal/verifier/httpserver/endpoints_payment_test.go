@@ -75,7 +75,7 @@ func TestUIInteractionBindsPayment(t *testing.T) {
 		engine.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		require.NotNil(t, mock.receivedPayment, "amount %s", amount)
-		assert.Equal(t, "49.99", mock.receivedPayment.Amount.String())
+		assert.Equal(t, "49.99", string(mock.receivedPayment.Amount))
 		assert.Equal(t, "sca", mock.receivedPayment.CredentialID)
 		assert.True(t, strings.HasPrefix(mock.receivedPayment.PayeeName, "Shop"))
 	}
