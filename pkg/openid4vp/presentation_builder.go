@@ -305,6 +305,47 @@ func copyTypedContainer(src any) any {
 		return pointer.Interface()
 	}
 
+	// An ARRAY is a slice that cannot grow: the same elements, the same
+	// raw leaves, but reflect.Array is not reflect.Slice, so
+	// [2]json.RawMessage went to the encoding and had its duplicates
+	// collapsed. Arrays are values, so there is no nil to preserve.
+	if kind == reflect.Array {
+		dst := reflect.New(value.Type()).Elem()
+		for i := range value.Len() {
+			copied, ok := copyReflected(value.Index(i).Interface(), value.Type().Elem())
+			if !ok {
+				return encodeCopy(src)
+			}
+			dst.Index(i).Set(copied)
+		}
+		return dst.Interface()
+	}
+
+	// A STRUCT holding a raw leaf has the same problem, and the encoding
+	// fallback was collapsing it. Copied field by field so the leaf stays
+	// bytes.
+	//
+	// A single unexported field sends the whole struct back to the
+	// encoding: reflection can neither read nor set one, so copying field
+	// by field would silently drop it, and losing a field outright is
+	// worse than normalising the raw leaves inside it.
+	if kind == reflect.Struct {
+		structType := value.Type()
+		dst := reflect.New(structType).Elem()
+		for i := range structType.NumField() {
+			field := structType.Field(i)
+			if !field.IsExported() {
+				return encodeCopy(src)
+			}
+			copied, ok := copyReflected(value.Field(i).Interface(), field.Type)
+			if !ok {
+				return encodeCopy(src)
+			}
+			dst.Field(i).Set(copied)
+		}
+		return dst.Interface()
+	}
+
 	if kind != reflect.Map && kind != reflect.Slice {
 		return encodeCopy(src)
 	}
