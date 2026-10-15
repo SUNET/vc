@@ -59,6 +59,8 @@ func TestUIInteraction_PaymentRefusals(t *testing.T) {
 	multi := scaDCQL("sca")
 	multi.Credentials = append(multi.Credentials, openid4vp.CredentialQuery{ID: "age", Format: openid4vp.FormatSDJWTVC, Meta: openid4vp.MetaQuery{VCTValues: []string{"x"}}})
 	mdoc := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{ID: "m", Format: "mso_mdoc", Meta: openid4vp.MetaQuery{DoctypeValue: "org.iso.18013.5.1.mDL"}}}}
+	dup := scaDCQL("sca")
+	dup.Credentials = append(dup.Credentials, openid4vp.CredentialQuery{ID: "sca", Format: openid4vp.FormatSDJWTVC, Meta: openid4vp.MetaQuery{VCTValues: []string{"other"}}})
 	noBinding := scaDCQL("sca")
 	f := false
 	noBinding.Credentials[0].RequireCryptographicHolderBinding = &f
@@ -71,6 +73,7 @@ func TestUIInteraction_PaymentRefusals(t *testing.T) {
 		"feature disabled":                  {false, scaDCQL("sca"), nil},
 		"two queries without credential_id": {true, multi, nil},
 		"unknown credential_id":             {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.CredentialID = "nope" }},
+		"duplicate credential query id":     {true, dup, func(p *UIPaymentRequest) { p.CredentialID = "sca" }},
 		"mdoc is out of TS12 scope":         {true, mdoc, nil},
 		"holder binding disabled":           {true, noBinding, nil},
 		"bad currency":                      {true, scaDCQL("sca"), func(p *UIPaymentRequest) { p.Currency = "euro" }},
