@@ -296,9 +296,23 @@ test-pkg: bbs-native-lib-staged ## Test the shared packages under pkg/
 	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
 		$(CGO_ENABLED_DYNAMIC) go test ./pkg/...
 
-test-js: ## Run JS unit tests for staticembed helpers
+test-js: test-js-deps ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
 	@node --test $(APIGW_STATIC)/tests/*.test.js $(VERIFIER_STATIC)/tests/*.test.js
+
+# node_modules is gitignored, so a clean checkout has none - and a test
+# that imports a dependency (req-schema.test.js needs valibot, the
+# library whose behaviour it pins) then fails for a reason that has
+# nothing to do with the code. Installed only when missing, so the common
+# case costs nothing and an offline run of an already-installed tree still
+# works.
+test-js-deps: ## Install the staticembed JS dev dependencies when missing
+	@for dir in $(APIGW_STATIC) $(VERIFIER_STATIC); do \
+		test -f "$$dir/package.json" || continue; \
+		test -d "$$dir/node_modules" && continue; \
+		echo "Installing JS dev dependencies in $$dir"; \
+		(cd "$$dir" && npm install --silent --no-audit --no-fund) || exit 1; \
+	done
 
 # Test targets with build tags
 # The SoftHSM integration tests in pkg/pki and pkg/jose shell out to
