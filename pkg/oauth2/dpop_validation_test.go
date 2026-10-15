@@ -406,3 +406,283 @@ func TestDPoP_ValidateWithWindow(t *testing.T) {
 	err = dpop.ValidateWithWindow(120*time.Second, 5*time.Second)
 	assert.NoError(t, err)
 }
+
+// A wallet builds htu from the URL it requested and an operator writes the
+// endpoint in configuration. RFC 9449 §4.3 says to compare the two after
+// URI normalization precisely because the two spellings legitimately
+// differ; a byte comparison refuses correct proofs over differences RFC
+// 3986 §6.2.2 defines as insignificant, and the wallet has no way to find
+// out which spelling this deployment wrote down.
+func TestSameHTU(t *testing.T) {
+	const endpoint = "https://issuer.example.com/token"
+
+	for _, tc := range []struct {
+		name string
+		htu  string
+		want bool
+	}{
+		{name: "identical", htu: "https://issuer.example.com/token", want: true},
+		{name: "an uppercase host", htu: "https://Issuer.Example.COM/token", want: true},
+		{name: "an uppercase scheme", htu: "HTTPS://issuer.example.com/token", want: true},
+		{name: "an explicit default port", htu: "https://issuer.example.com:443/token", want: true},
+		{name: "a Unicode host against its A-label", htu: "https://xn--mnchen-3ya.example/token", want: false},
+
+		// The path is where two endpoints on one host differ, so nothing
+		// about it is normalized away.
+		{name: "another endpoint on the same host", htu: "https://issuer.example.com/authorize-challenge", want: false},
+		{name: "a different case in the path", htu: "https://issuer.example.com/Token", want: false},
+		{name: "a different host", htu: "https://attacker.example.com/token", want: false},
+		{name: "a different scheme", htu: "http://issuer.example.com/token", want: false},
+		{name: "a non-default port", htu: "https://issuer.example.com:8443/token", want: false},
+
+		// A port is a number. Leading zeroes are not part of it, so these
+		// name the same endpoint as the one with no port at all - and a
+		// proof refused over them is one the wallet cannot correct,
+		// because the spelling is this deployment's, not the wallet's.
+		{name: "the default port with a leading zero", htu: "https://issuer.example.com:0443/token", want: true},
+		{name: "the default port with several", htu: "https://issuer.example.com:000443/token", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, SameHTU(tc.htu, endpoint))
+		})
+	}
+
+	t.Run("a Unicode host matches its A-label", func(t *testing.T) {
+		assert.True(t, SameHTU("https://münchen.example/token", "https://xn--mnchen-3ya.example/token"))
+	})
+
+	t.Run("a non-default port with a leading zero is the same port", func(t *testing.T) {
+		assert.True(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com:8443/token"))
+		assert.False(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com/token"))
+	})
+
+	t.Run("an empty path is the root path", func(t *testing.T) {
+		assert.True(t, SameHTU("https://issuer.example.com", "https://issuer.example.com/"))
+	})
+
+	t.Run("something unparseable is compared as written", func(t *testing.T) {
+		assert.False(t, SameHTU("not a uri", endpoint))
+		assert.True(t, SameHTU("not a uri", "not a uri"))
+	})
+}
+
+// IPv6 has many spellings of one address, and the htu comparison has to
+// see through them: a wallet that compressed the endpoint URL it was given
+// was answered with invalid_dpop_proof for a proof naming this very
+// endpoint, and nothing on its side could fix that.
+//
+// The negative cases are the point of the positive ones - a canonicaliser
+// that collapsed everything would pass the first half alone.
+func TestSameHTU_IPv6(t *testing.T) {
+	const endpoint = "https://[2001:db8::1]/token"
+
+	for _, tc := range []struct {
+		name string
+		htu  string
+		want bool
+	}{
+		{name: "identical", htu: "https://[2001:db8::1]/token", want: true},
+		{name: "fully expanded", htu: "https://[2001:0db8:0:0:0:0:0:1]/token", want: true},
+		{name: "expanded with every group padded", htu: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]/token", want: true},
+		{name: "upper case hextets", htu: "https://[2001:DB8::1]/token", want: true},
+		{name: "a partially compressed form", htu: "https://[2001:db8:0:0::1]/token", want: true},
+		{name: "with the default port written out", htu: "https://[2001:db8::1]:443/token", want: true},
+
+		{name: "a different address", htu: "https://[2001:db8::2]/token", want: false},
+		{name: "an address that merely looks similar", htu: "https://[2001:db80::1]/token", want: false},
+		{name: "a different path on the same address", htu: "https://[2001:db8::1]/authorize-challenge", want: false},
+		{name: "a non-default port", htu: "https://[2001:db8::1]:8443/token", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SameHTU(tc.htu, endpoint); got != tc.want {
+				t.Fatalf("SameHTU(%q, %q) = %v, want %v", tc.htu, endpoint, got, tc.want)
+			}
+		})
+	}
+
+	// An IPv4-mapped literal and the dotted quad are ONE ADDRESS and TWO
+	// AUTHORITIES, and htu binds the authority. The two reach a server
+	// with different Host headers and can select different virtual hosts,
+	// so merging them would weaken the binding this comparison exists to
+	// make. net.IP.String would have merged them, by unmapping; netip
+	// preserves the family, which is why it is used.
+	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.1/token") {
+		t.Fatal("an IPv4-mapped IPv6 literal is a different authority from the dotted quad")
+	}
+	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.2/token") {
+		t.Fatal("different addresses must stay different however they are spelled")
+	}
+
+	// Equivalent spellings of the mapped literal itself still agree: the
+	// refusal above is about the family, not about giving up on IPv6.
+	for _, pair := range [][2]string{
+		{"https://[::ffff:127.0.0.1]/token", "https://[::FFFF:127.0.0.1]/token"},
+		{"https://[::ffff:127.0.0.1]/token", "https://[0:0:0:0:0:ffff:127.0.0.1]/token"},
+		{"https://[::ffff:127.0.0.1]/token", "https://[::ffff:7f00:1]/token"},
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same authority", pair[0], pair[1])
+		}
+	}
+}
+
+// RFC 3986 §6.2.2 makes /%74oken and /token one path, and the hex case of
+// an escape insignificant. A wallet that normalized the endpoint URL it
+// was configured with was refused for naming it that way.
+//
+// The refusals matter more than the acceptances here: this is the
+// comparison that keeps a proof for /token from satisfying a request to
+// another endpoint, so only the spellings the RFC calls equal may merge.
+func TestSameHTU_PercentEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		name, htu, endpoint string
+		want                bool
+	}{
+		{
+			name: "an escaped unreserved character is the character",
+			htu:  "https://issuer.example.com/%74oken", endpoint: "https://issuer.example.com/token", want: true,
+		},
+		{
+			name: "lower-case hex in an escape",
+			htu:  "https://issuer.example.com/a%2fb", endpoint: "https://issuer.example.com/a%2Fb", want: true,
+		},
+		{
+			name: "every unreserved class: letters, digits, - . _ ~",
+			htu:  "https://issuer.example.com/%61%31%2D%2E%5F%7E", endpoint: "https://issuer.example.com/a1-._~", want: true,
+		},
+		{
+			name: "both sides escaped differently",
+			htu:  "https://issuer.example.com/%74%6Fken", endpoint: "https://issuer.example.com/to%6ben", want: true,
+		},
+
+		{
+			name: "a reserved escape is NOT a separator",
+			htu:  "https://issuer.example.com/a%2Fb", endpoint: "https://issuer.example.com/a/b", want: false,
+		},
+		{
+			name: "an escaped space is not nothing",
+			htu:  "https://issuer.example.com/to%20ken", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "case still matters once decoded",
+			htu:  "https://issuer.example.com/%54oken", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "dot segments are not removed",
+			htu:  "https://issuer.example.com/a/%2E%2E/token", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "a trailing stray percent is left as written",
+			htu:  "https://issuer.example.com/token%", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "a non-hex escape is left as written",
+			htu:  "https://issuer.example.com/to%zzken", endpoint: "https://issuer.example.com/token", want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SameHTU(tc.htu, tc.endpoint); got != tc.want {
+				t.Fatalf("SameHTU(%q, %q) = %v, want %v", tc.htu, tc.endpoint, got, tc.want)
+			}
+			// The comparison has to be symmetric: which side a deployment
+			// writes and which a wallet sends is not fixed.
+			if got := SameHTU(tc.endpoint, tc.htu); got != tc.want {
+				t.Fatalf("reversed: SameHTU(%q, %q) = %v, want %v", tc.endpoint, tc.htu, got, tc.want)
+			}
+		})
+	}
+}
+
+// IDNA does the case mapping itself, and Go's ToLower disagrees with it.
+//
+// Folding before the mapping turned "İ.example" (U+0130) into
+// "i.example", while UTS #46 maps the original to "xn--i-9bb.example" -
+// so a wallet's correctly canonicalised proof was REFUSED and one naming
+// the distinct authority "i.example" was ACCEPTED. Both directions are
+// asserted, because the accepting one is the security half.
+func TestSameHTU_UnicodeCaseIsIDNAsToDo(t *testing.T) {
+	const dotted = "https://İ.example/token"         // İ.example
+	const aLabel = "https://xn--i-9bb.example/token" // what UTS #46 maps it to
+	const plainI = "https://i.example/token"         // what ToLower makes of it
+
+	if !SameHTU(dotted, aLabel) {
+		t.Fatalf("%q is the A-label of %q; a proof naming either must satisfy the other", aLabel, dotted)
+	}
+	if SameHTU(dotted, plainI) {
+		t.Fatalf("%q and %q are different authorities", dotted, plainI)
+	}
+	if SameHTU(aLabel, plainI) {
+		t.Fatalf("%q and %q are different authorities", aLabel, plainI)
+	}
+
+	// The ordinary foldings still fold - the fix is about which component
+	// does the folding, not about giving it up.
+	for _, pair := range [][2]string{
+		{"https://MÜNCHEN.example/token", "https://xn--mnchen-3ya.example/token"},
+		{"https://München.example/token", "https://münchen.example/token"},
+		{"https://EXAMPLE.COM/token", "https://example.com/token"},
+		{"https://ẞ.example/token", "https://ß.example/token"}, // ẞ and ß
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same host", pair[0], pair[1])
+		}
+	}
+}
+
+// A wallet's browser-normalised hostname has to match the endpoint a
+// deployment configured, underscores and all.
+//
+// idna.Lookup turns on StrictDomainName, which rejects an underscore
+// anywhere in the name - so "İ.my_host.example" did not map, fell through
+// to the ASCII fold, and a wallet sending the correct A-label
+// "xn--i-9bb.my_host.example" was answered with invalid_dpop_proof. The
+// comparison now uses the same browser profile CanonicalOrigin does.
+//
+// The negatives are the other half: mapping these hosts rather than
+// refusing them is what keeps "İ…" and "i…" distinct, instead of leaving
+// them to a Unicode fold that merges them.
+func TestSameHTU_UnderscoreHostsMapLikeABrowser(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"https://\u0130.my_host.example/token", "https://xn--i-9bb.my_host.example/token"},
+		{"https://\u0130_host.example/token", "https://xn--i_host-pyd.example/token"},
+		{"https://M\u00dcNCHEN.my_host.example/token", "https://xn--mnchen-3ya.my_host.example/token"},
+		{"https://MY_HOST.EXAMPLE/token", "https://my_host.example/token"},
+		{"https://My_Host.Example/token", "https://my_host.example/token"},
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same authority", pair[0], pair[1])
+		}
+	}
+
+	// Still distinct, which is what the mapping buys: "İ" is not "i".
+	for _, pair := range [][2]string{
+		{"https://\u0130.my_host.example/token", "https://i.my_host.example/token"},
+		{"https://\u0130_host.example/token", "https://i_host.example/token"},
+		{"https://xn--i-9bb.my_host.example/token", "https://i.my_host.example/token"},
+	} {
+		if SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are different authorities", pair[0], pair[1])
+		}
+	}
+}
+
+// The fold that remains is a last resort, and it is ASCII-only so that it
+// cannot merge "İ…" with "i…" the way strings.ToLower would. The browser
+// profile above maps both of those now, so nothing ordinary reaches here -
+// which is exactly why the property is worth pinning rather than assuming.
+func TestAsciiLowerFoldsOnlyASCII(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"MY_HOST.EXAMPLE", "my_host.example"},
+		{"\u0130.Example", "\u0130.example"},
+		{"\u00dcBER.example", "\u00dcber.example"},
+		{"already.lower", "already.lower"},
+		{"", ""},
+	} {
+		if got := asciiLower(tc.in); got != tc.want {
+			t.Fatalf("asciiLower(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	if asciiLower("\u0130") == "i" {
+		t.Fatal("asciiLower must not fold U+0130 to i; that is the merge this helper exists to avoid")
+	}
+}

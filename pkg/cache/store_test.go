@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -227,4 +229,172 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		_, err := store.GetByAccessToken(ctx, "")
 		assert.Error(t, err)
 	})
+
+	// The one-shot guarantee the Authorization Challenge Endpoint runs on,
+	// asserted against every backend rather than only the one the handler
+	// tests happen to use.
+	//
+	// It is implemented differently in each - a locked read-modify-write in
+	// memory, a single FindOneAndUpdate in MongoDB - and MongoDB is the
+	// deployment where it matters, because that is where two APIGW
+	// instances can be answering the same wallet's retry at once. A
+	// contract that is only exercised in memory says nothing about the
+	// implementation that carries the risk.
+	t.Run("ClaimAuthSession", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:                 "contract-claim-1",
+			Code:                      "contract-claim-code-1",
+			AuthSession:               "contract-handle-1",
+			AuthSessionDPoPThumbprint: "contract-thumbprint-1",
+		}))
+
+		claimed, err := store.ClaimAuthSession(ctx, "contract-handle-1")
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+
+		// The claimant is handed the exchange as it was, because the DPoP
+		// binding is what the authorization code inherits...
+		assert.Equal(t, "contract-thumbprint-1", claimed.AuthSessionDPoPThumbprint)
+		// ...but not the handle. Anything downstream that persists this
+		// document would otherwise write it straight back.
+		assert.Empty(t, claimed.AuthSession)
+
+		// Exactly one claimant: the second request finds nothing, whether
+		// it is a retry or the other half of a race.
+		second, err := store.ClaimAuthSession(ctx, "contract-handle-1")
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
+
+		// And the handle stops resolving, while the context it named
+		// stays reachable by the code it produced.
+		_, err = store.Get(ctx, &AuthorizationContext{AuthSession: "contract-handle-1"})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+
+		stored, err := store.GetByID(ctx, "contract-claim-1")
+		require.NoError(t, err)
+		assert.Empty(t, stored.AuthSession)
+		assert.Equal(t, "contract-thumbprint-1", stored.AuthSessionDPoPThumbprint)
+	})
+
+	// Sequentially, the second claim arrives after the first has finished.
+	// The case the implementation actually has to survive is the one where
+	// it does not - two APIGW instances answering the same wallet's retry
+	// at the same moment - and that is a property of the STORE, which is
+	// why it is asserted here against each of them.
+	t.Run("ClaimAuthSession_Concurrent", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:                 "contract-claim-race",
+			Code:                      "contract-claim-race-code",
+			AuthSession:               "contract-handle-race",
+			AuthSessionDPoPThumbprint: "contract-thumbprint-race",
+		}))
+
+		const contenders = 8
+		var (
+			start     sync.WaitGroup
+			finished  sync.WaitGroup
+			succeeded atomic.Int32
+		)
+		start.Add(1)
+		finished.Add(contenders)
+
+		for range contenders {
+			go func() {
+				defer finished.Done()
+				start.Wait()
+				claimed, err := store.ClaimAuthSession(ctx, "contract-handle-race")
+				if err == nil && claimed != nil {
+					succeeded.Add(1)
+				}
+			}()
+		}
+		start.Done()
+		finished.Wait()
+
+		assert.Equal(t, int32(1), succeeded.Load(),
+			"exactly one of %d concurrent claimants may take the handle", contenders)
+	})
+
+	t.Run("ClaimAuthSession_Unknown", func(t *testing.T) {
+		claimed, err := store.ClaimAuthSession(ctx, "contract-handle-never-issued")
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, claimed)
+	})
+
+	t.Run("ClaimAuthSession_Empty", func(t *testing.T) {
+		_, err := store.ClaimAuthSession(ctx, "")
+		assert.Error(t, err)
+	})
+}
+
+// Get returns the cached pointer and then releases the lock, so a caller
+// that fetched a context is still reading the struct the store holds.
+// Claiming the handle used to WRITE into that struct, which `go test
+// -race` reports as a data race against any such reader - and a race on a
+// field that decides whether an exchange is still claimable is not a
+// theoretical one.
+//
+// The claim now replaces the stored document instead. The reader keeps a
+// consistent pre-claim snapshot; the post-claim state is reachable through
+// the cache, which is where it belongs.
+//
+// This test only means anything under -race, which is how CI runs it.
+func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:   "claim-reader-race",
+		AuthSession: "claim-reader-handle",
+		Code:        "claim-reader-code",
+	}))
+
+	// A caller that fetched the context before the claim, as every
+	// handler does.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	require.Equal(t, "claim-reader-handle", held.AuthSession)
+
+	// The read is ASSERTED, not discarded. `_ = held.AuthSession` is a
+	// read the compiler may remove, and a removed read races with
+	// nothing: the test would pass even if the claim mutated the context
+	// the store had handed out, which is the whole thing it exists to
+	// catch. Collecting the values and checking them afterwards makes the
+	// read observable, and also pins the snapshot - a caller holding this
+	// pointer must keep seeing the handle it fetched.
+	var wg sync.WaitGroup
+	seen := make([]string, 0, 2000)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			seen = append(seen, held.AuthSession)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		claimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+		assert.NoError(t, err)
+		if claimed != nil {
+			assert.Empty(t, claimed.AuthSession, "the returned copy must not carry the handle")
+		}
+	}()
+	wg.Wait()
+
+	require.Len(t, seen, 2000, "the reads must actually have happened")
+	for _, got := range seen {
+		require.Equal(t, "claim-reader-handle", got,
+			"a caller holding the context it fetched must keep seeing the handle it fetched")
+	}
+
+	// And the claim did take effect in the store, so the absence of a
+	// race is not the absence of the write.
+	reclaimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+	require.ErrorIs(t, err, ErrNoDocuments, "the handle must stop resolving once claimed")
+	require.Nil(t, reclaimed)
+
+	stored, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	assert.Empty(t, stored.AuthSession, "the stored document must have had its handle cleared")
+	assert.Equal(t, "claim-reader-code", stored.Code, "and nothing else")
 }
