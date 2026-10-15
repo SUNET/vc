@@ -679,6 +679,24 @@ func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 // invalid, and sending it to Raw would launder a decode error into a
 // query that validates: ClaimQuery.UnmarshalJSON refuses an empty path,
 // and such a query used to be refused outright.
+// openItemMembers are members whose ITEMS are deliberately open, so an
+// array this model cannot hold is an unmodelled shape rather than an
+// ordinary invalid query.
+//
+// Only req. A circuit_zk request carries its arguments there, the
+// rulebook is moving, and the vendored conformance set includes negative
+// vectors - a numeric item id, array-valued params - that exist to be
+// SENT. Without this they were accepted by NewRawCredentialQuery and
+// then refused on the way back in: a request object is JSON-encoded into
+// the HA cache and read by another node, so such a request could be
+// published and then not reload anywhere but the node that built it.
+//
+// The other members keep the strict rule. claims, meta and format are
+// what the SD-JWT and mdoc validation reads, and laundering a decode
+// error there into Raw would turn an unreadable constraint into a query
+// that validates because there is nothing left to judge.
+var openItemMembers = map[string]bool{"req": true}
+
 func (q *CredentialQuery) adoptRawShadowReporting() (unreadable, invalid []string) {
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(q.Raw, &members); err != nil {
@@ -701,7 +719,7 @@ func (q *CredentialQuery) adoptRawShadowReporting() (unreadable, invalid []strin
 		field := reflect.New(structure.Field(i).Type)
 		if err := json.Unmarshal(encoded, field.Interface()); err != nil {
 			unreadable = append(unreadable, name)
-			if jsonKindMatches(structure.Field(i).Type, encoded) {
+			if jsonKindMatches(structure.Field(i).Type, encoded) && !openItemMembers[name] {
 				invalid = append(invalid, name)
 			}
 			continue

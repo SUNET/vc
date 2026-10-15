@@ -104,12 +104,26 @@ func (r *ReqItem) UnmarshalJSON(data []byte) error {
 // both - so an operator talking to a wallet generation that wants the
 // envelope has to be able to send it without waiting for a release here.
 type CircuitZkFormat struct {
+	// omitzero, not omitempty, on both arrays below.
+	//
+	// The matcher's contract distinguishes an EMPTY list - a filter that
+	// nothing matches - from an ABSENT one, which is no filter at all.
+	// omitempty cannot tell them apart, so an explicit
+	// {"circuit_id_values": []} was serialised as {} and the constraint
+	// silently disappeared: the wallet saw an unfiltered request where
+	// the operator had asked for one that matches nothing.
+	//
+	// omitzero omits only the zero value, which for a slice is nil, so
+	// absent stays absent and empty survives. MarshalYAML below already
+	// made this distinction by hand (it tests != nil), so only the JSON
+	// path was losing it.
+
 	// CircuitProofSystemValues lists acceptable proof systems.
-	CircuitProofSystemValues []string `json:"circuit_proof_system_values,omitempty" yaml:"circuit_proof_system_values,omitempty" doc_example:"[\"longfellow-libzk-v1\"]"`
+	CircuitProofSystemValues []string `json:"circuit_proof_system_values,omitzero" yaml:"circuit_proof_system_values,omitempty" doc_example:"[\"longfellow-libzk-v1\"]"`
 
 	// CircuitIDValues lists acceptable circuit identifiers, from the
 	// circuit catalog.
-	CircuitIDValues []string `json:"circuit_id_values,omitempty" yaml:"circuit_id_values,omitempty" doc_example:"[\"urn:circuits:longfellow:nym_auth:v1\"]"`
+	CircuitIDValues []string `json:"circuit_id_values,omitzero" yaml:"circuit_id_values,omitempty" doc_example:"[\"urn:circuits:longfellow:nym_auth:v1\"]"`
 
 	// Extra carries any other member, flattened alongside the two above -
 	// including the envelope form's fn_id and input.

@@ -892,3 +892,73 @@ func TestYAMLRefusesARawQueryWithDuplicateMembers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, in, string(encoded))
 }
+
+// An EMPTY constraint list is a filter that nothing matches; an ABSENT
+// one is no filter at all. The matcher's contract distinguishes them, so
+// this serialisation has to.
+//
+// omitempty could not: an explicit {"circuit_id_values": []} became {},
+// and the wallet saw an unfiltered request where the operator had asked
+// for one that matches nothing. omitzero omits only nil.
+//
+// Both encodings, because they reach the distinction by different means -
+// JSON through the struct tag, YAML through MarshalYAML's own != nil
+// test - and a fix to one would not have fixed the other.
+func TestCircuitZkFormatKeepsEmptyApartFromAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		format   CircuitZkFormat
+		wantJSON string
+		wantYAML string
+	}{
+		{
+			name:     "absent",
+			format:   CircuitZkFormat{},
+			wantJSON: `{}`,
+			wantYAML: "{}\n",
+		},
+		{
+			name:     "empty, which matches nothing",
+			format:   CircuitZkFormat{CircuitIDValues: []string{}, CircuitProofSystemValues: []string{}},
+			wantJSON: `{"circuit_proof_system_values":[],"circuit_id_values":[]}`,
+			wantYAML: "circuit_id_values: []\ncircuit_proof_system_values: []\n",
+		},
+		{
+			name:     "one empty and one absent",
+			format:   CircuitZkFormat{CircuitIDValues: []string{}},
+			wantJSON: `{"circuit_id_values":[]}`,
+			wantYAML: "circuit_id_values: []\n",
+		},
+		{
+			name:     "populated",
+			format:   CircuitZkFormat{CircuitIDValues: []string{"urn:x"}},
+			wantJSON: `{"circuit_id_values":["urn:x"]}`,
+			wantYAML: "circuit_id_values:\n- urn:x\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, err := json.Marshal(tc.format)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantJSON, string(encoded))
+
+			asYAML, err := yamlv2.Marshal(tc.format)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantYAML, string(asYAML))
+
+			// And back: the distinction has to survive a round trip, not
+			// just the encode. A decode that turned [] into nil would
+			// lose the constraint one step later.
+			var backJSON CircuitZkFormat
+			require.NoError(t, json.Unmarshal(encoded, &backJSON))
+			assert.Equal(t, tc.format.CircuitIDValues == nil, backJSON.CircuitIDValues == nil,
+				"nil-ness of circuit_id_values must survive JSON")
+			assert.Equal(t, len(tc.format.CircuitIDValues), len(backJSON.CircuitIDValues))
+
+			var backYAML CircuitZkFormat
+			require.NoError(t, yamlv2.Unmarshal(asYAML, &backYAML))
+			assert.Equal(t, tc.format.CircuitIDValues == nil, backYAML.CircuitIDValues == nil,
+				"nil-ness of circuit_id_values must survive YAML")
+			assert.Equal(t, len(tc.format.CircuitIDValues), len(backYAML.CircuitIDValues))
+		})
+	}
+}
