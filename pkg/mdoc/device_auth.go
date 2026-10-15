@@ -2,6 +2,7 @@
 package mdoc
 
 import (
+	"bytes"
 	"crypto"
 	"errors"
 	"fmt"
@@ -310,26 +311,52 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKe
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}
 
-	// Verify the MAC over the detached DeviceAuthenticationBytes, falling
-	// back to the pre-conformance shape for a presentation built by an
-	// older build of this code.
-	if err := VerifyCOSEMac0(&mac0, sessionKey, deviceAuthBytes, nil); err != nil {
-		legacy, lerr := buildLegacyDeviceAuthenticationBytes(v.sessionTranscript, v.docType, nameSpacesBytes)
-		if lerr != nil || VerifyCOSEMac0(&mac0, sessionKey, legacy, nil) != nil {
+	// Both encodings this verifier will accept: the conformant one, and
+	// the shape a pre-fix build of this code produced.
+	accepted := [][]byte{deviceAuthBytes}
+	if legacy, lerr := buildLegacyDeviceAuthenticationBytes(v.sessionTranscript, v.docType, nameSpacesBytes); lerr == nil {
+		accepted = append(accepted, legacy)
+	}
+
+	// An ATTACHED payload has to be one of them before its MAC is worth
+	// checking. A pre-fix DeviceMac carries the legacy bytes inline, so
+	// the MAC over them verifies happily - and comparing only against the
+	// conformant encoding afterwards rejected exactly the presentations
+	// the compatibility path exists for.
+	//
+	// nil, not len() == 0: an empty byte string is valid COSE content and
+	// a different thing from an absent payload, so treating the two alike
+	// would both reject a legitimately empty one and let it be silently
+	// replaced by detached content.
+	if mac0.Payload != nil {
+		if !containsBytes(accepted, mac0.Payload) {
+			return errors.New("device auth payload mismatch")
+		}
+		if err := VerifyCOSEMac0(&mac0, sessionKey, nil, nil); err != nil {
 			return fmt.Errorf("device MAC verification failed: %w", err)
 		}
 		return nil
 	}
 
-	// Also verify the payload matches
-	if len(mac0.Payload) > 0 {
-		// If payload is included, verify it matches expected
-		if string(mac0.Payload) != string(deviceAuthBytes) {
-			return errors.New("device auth payload mismatch")
+	// Detached: the MAC is over bytes the verifier reconstructs, so each
+	// candidate encoding is tried.
+	var macErr error
+	for _, candidate := range accepted {
+		if macErr = VerifyCOSEMac0(&mac0, sessionKey, candidate, nil); macErr == nil {
+			return nil
 		}
 	}
+	return fmt.Errorf("device MAC verification failed: %w", macErr)
+}
 
-	return nil
+// containsBytes reports whether want equals any of the candidates.
+func containsBytes(candidates [][]byte, want []byte) bool {
+	for _, candidate := range candidates {
+		if bytes.Equal(candidate, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildDeviceAuthBytes reconstructs the DeviceAuthentication bytes for verification.

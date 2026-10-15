@@ -701,11 +701,16 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, detachedPayload []byte, external
 		return fmt.Errorf("invalid algorithm type: %T", algRaw)
 	}
 
+	// nil, not len() == 0. An empty byte string is valid COSE content and
+	// a different thing from an absent payload: treating them alike would
+	// reject a MAC legitimately computed over h'', and would silently
+	// substitute detached content for an attached empty payload - a
+	// different message with a different tag.
 	payload := mac0.Payload
-	if len(payload) == 0 {
+	if payload == nil {
 		payload = detachedPayload
 	}
-	if len(payload) == 0 {
+	if payload == nil {
 		return errors.New("COSE_Mac0 has neither an attached nor a detached payload, so there is nothing it authenticates")
 	}
 

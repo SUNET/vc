@@ -155,3 +155,81 @@ func TestLegacyPresentationsStillVerify(t *testing.T) {
 			"legacy acceptance must still bind to the session")
 	})
 }
+
+// A pre-fix DeviceMac carries the legacy DeviceAuthenticationBytes INLINE.
+// Its MAC therefore verifies over the attached payload without the detached
+// fallback ever running - so comparing the payload only against the
+// conformant encoding rejected exactly the presentations the compatibility
+// path exists for.
+func TestLegacyAttachedMACStillVerifies(t *testing.T) {
+	sessionKey := make([]byte, 32)
+	_, err := rand.Read(sessionKey)
+	require.NoError(t, err)
+
+	transcript := testSessionTranscript()
+	encoder, err := NewCBOREncoder()
+	require.NoError(t, err)
+	namespaces, err := encoder.Marshal(map[string]any{})
+	require.NoError(t, err)
+
+	legacyBytes, err := buildLegacyDeviceAuthenticationBytes(transcript, DocType, namespaces)
+	require.NoError(t, err)
+	mac0, err := Mac0(legacyBytes, sessionKey, AlgorithmHMAC256, nil)
+	require.NoError(t, err)
+
+	build := func(payload any) *DeviceSignedMdoc {
+		d := &DeviceSignedMdoc{NameSpaces: cbor.Tag{Number: 24, Content: namespaces}}
+		d.DeviceAuth.DeviceMac = []any{mac0.Protected, mac0.Unprotected, payload, mac0.Tag}
+		return d
+	}
+
+	verifier := NewDeviceAuthVerifier(transcript, DocType)
+	assert.NoError(t, verifier.VerifyMAC(build(legacyBytes), sessionKey),
+		"the old attached-MAC layout is exactly what a pre-fix build produced")
+
+	t.Run("a wrong session key is still refused", func(t *testing.T) {
+		other := make([]byte, 32)
+		_, err := rand.Read(other)
+		require.NoError(t, err)
+		assert.Error(t, verifier.VerifyMAC(build(legacyBytes), other))
+	})
+
+	t.Run("a wrong transcript is still refused", func(t *testing.T) {
+		elsewhere, err := encoder.Marshal([]any{nil, nil, "a-different-handover"})
+		require.NoError(t, err)
+		assert.Error(t, NewDeviceAuthVerifier(elsewhere, DocType).VerifyMAC(build(legacyBytes), sessionKey),
+			"compatibility must not cost the session binding")
+	})
+
+	t.Run("an attached payload that is neither encoding is refused", func(t *testing.T) {
+		assert.Error(t, verifier.VerifyMAC(build([]byte("something else entirely")), sessionKey))
+	})
+}
+
+// An empty byte string is valid COSE content and a DIFFERENT thing from an
+// absent payload. Conflating them would reject a MAC legitimately computed
+// over h”, and would let detached content silently stand in for an
+// attached empty payload - a different message with a different tag.
+func TestEmptyPayloadIsNotAnAbsentPayload(t *testing.T) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+
+	mac0, err := Mac0([]byte{}, key, AlgorithmHMAC256, nil)
+	require.NoError(t, err)
+	require.NotNil(t, mac0.Payload)
+	require.Empty(t, mac0.Payload)
+
+	assert.NoError(t, VerifyCOSEMac0(mac0, key, nil, nil),
+		"a MAC over an empty payload verifies on its own terms")
+
+	assert.NoError(t, VerifyCOSEMac0(mac0, key, []byte("detached"), nil),
+		"and the attached empty payload wins over detached content rather than being replaced by it")
+
+	t.Run("neither attached nor detached is refused", func(t *testing.T) {
+		absent := &COSEMac0{Protected: mac0.Protected, Unprotected: mac0.Unprotected, Payload: nil, Tag: mac0.Tag}
+		err := VerifyCOSEMac0(absent, key, nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nothing it authenticates")
+	})
+}
