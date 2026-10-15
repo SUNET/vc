@@ -1,5 +1,5 @@
 {
-  "description": "config, verifier_id_type and verifier_context are opaque: unknown, empty and over-long values pass through unchanged.",
+  "description": "config and verifier_context are opaque: unknown and over-long values pass through unchanged.",
   "query": {
     "id": "nym_attestation",
     "format": "circuit_zk",
@@ -12,7 +12,6 @@
         "return": "h",
         "params": {
           "config": "no-such-config",
-          "verifier_id_type": "",
           "verifier_context": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
         }
       }
@@ -26,7 +25,6 @@
           "handle": "h",
           "params": {
             "config": "no-such-config",
-            "verifier_id_type": "",
             "verifier_context": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
           }
         }
