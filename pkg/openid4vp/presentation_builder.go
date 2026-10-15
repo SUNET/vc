@@ -216,7 +216,52 @@ func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []str
 // normalised rather than aliased, and the walk does not have to be taught
 // every type a Verifier might configure.
 func copyAnyMap(src map[string]any) map[string]any {
-	return copyAnyMapAt(src, 0)
+	return copyAnyMapAt(src, &copyPath{})
+}
+
+// copyPath is the walk's position: how deep it is, and which containers
+// are on the route it took to get there.
+//
+// On the PATH, not merely visited. The same container reached twice by
+// different routes is a DAG, which is legitimate and has to be copied
+// both times; only a container reachable from itself is a cycle.
+//
+// Depth alone was not enough. It bounds stack usage, not total work, so
+// a map holding ITSELF TWICE - m["a"] = m, m["b"] = m - still expanded
+// into a binary tree and burned 2^65 steps before the bound could stop
+// it. Identity stops it at the first repeat.
+type copyPath struct {
+	depth int
+	seen  map[[2]uintptr]bool
+}
+
+// containerKey identifies a container on the path.
+//
+// The length is part of it because two sub-slices of one array share a
+// data pointer: keying on the pointer alone would call a legitimate
+// nested slice a cycle and alias it instead of copying it. A map or a
+// pointer has no length and uses zero.
+func containerKey(pointer uintptr, length int) [2]uintptr {
+	return [2]uintptr{pointer, uintptr(length)}
+}
+
+// enter records a container as being on the active path, reporting false
+// if it already is - which means the walk has come back to it.
+func (p *copyPath) enter(key [2]uintptr) bool {
+	if p.seen[key] {
+		return false
+	}
+	if p.seen == nil {
+		p.seen = make(map[[2]uintptr]bool, 4)
+	}
+	p.seen[key] = true
+	p.depth++
+	return true
+}
+
+func (p *copyPath) leave(key [2]uintptr) {
+	delete(p.seen, key)
+	p.depth--
 }
 
 // maxCopyDepth bounds the walk below.
@@ -231,24 +276,33 @@ func copyAnyMap(src map[string]any) map[string]any {
 // byte-exact.
 const maxCopyDepth = 64
 
-func copyAnyMapAt(src map[string]any, depth int) map[string]any {
+func copyAnyMapAt(src map[string]any, path *copyPath) map[string]any {
 	if src == nil {
 		return nil
 	}
+	key := containerKey(reflect.ValueOf(src).Pointer(), 0)
+	if !path.enter(key) {
+		// Already on the path: this map contains itself. Nothing can be
+		// copied faithfully from here, and Marshal refuses such a value
+		// anyway, so the original is left in place.
+		return src
+	}
+	defer path.leave(key)
+
 	dst := make(map[string]any, len(src))
 	for key, value := range src {
-		dst[key] = copyAnyValueAt(value, depth+1)
+		dst[key] = copyAnyValueAt(value, path)
 	}
 	return dst
 }
 
 // copyAnyValue deep-copies one node of an opaque JSON tree.
 func copyAnyValue(src any) any {
-	return copyAnyValueAt(src, 0)
+	return copyAnyValueAt(src, &copyPath{})
 }
 
-func copyAnyValueAt(src any, depth int) any {
-	if depth > maxCopyDepth {
+func copyAnyValueAt(src any, path *copyPath) any {
+	if path.depth > maxCopyDepth {
 		return encodeCopy(src)
 	}
 	switch typed := src.(type) {
@@ -274,7 +328,7 @@ func copyAnyValueAt(src any, depth int) any {
 		return append(make(json.RawMessage, 0, len(typed)), typed...)
 
 	case map[string]any:
-		return copyAnyMapAt(typed, depth)
+		return copyAnyMapAt(typed, path)
 
 	case []any:
 		if typed == nil {
@@ -284,12 +338,12 @@ func copyAnyValueAt(src any, depth int) any {
 		}
 		dst := make([]any, len(typed))
 		for i, value := range typed {
-			dst[i] = copyAnyValueAt(value, depth+1)
+			dst[i] = copyAnyValueAt(value, path)
 		}
 		return dst
 
 	default:
-		return copyTypedContainerAt(src, depth)
+		return copyTypedContainerAt(src, path)
 	}
 }
 
@@ -306,7 +360,7 @@ func copyAnyValueAt(src any, depth int) any {
 // Anything that is not a map or a slice, or whose elements will not fit
 // back into it, still goes through the encoding: a shape this build does
 // not model is normalised rather than aliased.
-func copyTypedContainerAt(src any, depth int) any {
+func copyTypedContainerAt(src any, path *copyPath) any {
 	value := reflect.ValueOf(src)
 	kind := value.Kind()
 
@@ -328,6 +382,17 @@ func copyTypedContainerAt(src any, depth int) any {
 		return src
 	}
 
+	// A value with its OWN MarshalJSON is snapshotted whole. A
+	// structural copy keeps the container's named type, and so keeps that
+	// method, while the elements inside it can come back as different
+	// types - a named map[string]any whose marshaller expects a
+	// time.Time element would find a json.RawMessage there, and
+	// marshalling the copied request would fail. encodeCopy keeps the
+	// bytes the marshaller produced, which is what the request is.
+	if implementsJSONMarshaler(value.Type()) {
+		return encodeCopy(src)
+	}
+
 	// A POINTER to a raw leaf is a raw leaf. *json.RawMessage went
 	// straight to the encoding, where re-parsing collapsed a duplicate
 	// member exactly as it did for the value form - so a template
@@ -337,7 +402,13 @@ func copyTypedContainerAt(src any, depth int) any {
 		if value.IsNil() {
 			return src
 		}
-		copied, ok := copyReflectedAt(value.Elem().Interface(), value.Type().Elem(), depth)
+		key := containerKey(value.Pointer(), 0)
+		if !path.enter(key) {
+			return src // already on the path: a cycle through this pointer
+		}
+		defer path.leave(key)
+
+		copied, ok := copyReflectedAt(value.Elem().Interface(), value.Type().Elem(), path)
 		if !ok {
 			return encodeCopy(src)
 		}
@@ -353,7 +424,7 @@ func copyTypedContainerAt(src any, depth int) any {
 	if kind == reflect.Array {
 		dst := reflect.New(value.Type()).Elem()
 		for i := range value.Len() {
-			copied, ok := copyReflectedAt(value.Index(i).Interface(), value.Type().Elem(), depth)
+			copied, ok := copyReflectedAt(value.Index(i).Interface(), value.Type().Elem(), path)
 			if !ok {
 				return encodeCopy(src)
 			}
@@ -369,11 +440,21 @@ func copyTypedContainerAt(src any, depth int) any {
 		return src
 	}
 
+	length := 0
+	if kind == reflect.Slice {
+		length = value.Len()
+	}
+	key := containerKey(value.Pointer(), length)
+	if !path.enter(key) {
+		return src // already on the path: a cycle through this container
+	}
+	defer path.leave(key)
+
 	element := value.Type().Elem()
 	if kind == reflect.Map {
 		dst := reflect.MakeMapWithSize(value.Type(), value.Len())
 		for iter := value.MapRange(); iter.Next(); {
-			copied, ok := copyReflectedAt(iter.Value().Interface(), element, depth)
+			copied, ok := copyReflectedAt(iter.Value().Interface(), element, path)
 			if !ok {
 				return encodeCopy(src)
 			}
@@ -384,7 +465,7 @@ func copyTypedContainerAt(src any, depth int) any {
 
 	dst := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
 	for i := range value.Len() {
-		copied, ok := copyReflectedAt(value.Index(i).Interface(), element, depth)
+		copied, ok := copyReflectedAt(value.Index(i).Interface(), element, path)
 		if !ok {
 			return encodeCopy(src)
 		}
@@ -402,8 +483,8 @@ func copyTypedContainerAt(src any, depth int) any {
 // encoding - re-parsing every raw leaf sitting beside the nil and
 // collapsing any duplicate member inside them. A named container, say
 // type Object map[string]any, reaches here holding exactly that mix.
-func copyReflectedAt(src any, element reflect.Type, depth int) (reflect.Value, bool) {
-	copied := reflect.ValueOf(copyAnyValueAt(src, depth+1))
+func copyReflectedAt(src any, element reflect.Type, path *copyPath) (reflect.Value, bool) {
+	copied := reflect.ValueOf(copyAnyValueAt(src, path))
 	if !copied.IsValid() {
 		// Nil, which every element type that can hold it has a zero for.
 		if element.Kind() == reflect.Interface {
@@ -415,6 +496,12 @@ func copyReflectedAt(src any, element reflect.Type, depth int) (reflect.Value, b
 		return reflect.Value{}, false
 	}
 	return copied, true
+}
+
+var jsonMarshalerType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
+
+func implementsJSONMarshaler(t reflect.Type) bool {
+	return t.Implements(jsonMarshalerType) || reflect.PointerTo(t).Implements(jsonMarshalerType)
 }
 
 // encodeCopy copies through the encoding, normalising a shape this build
