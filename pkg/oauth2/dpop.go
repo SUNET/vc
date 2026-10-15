@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -253,11 +254,19 @@ func (c *DPoP) IsAccessTokenDPoP(token string) bool {
 // comparison refuses those proofs, and the refusal is unfixable from the
 // wallet's side - it is a correct proof for the URL it was sent to.
 //
-// What normalization deliberately does NOT touch is the path. Two
-// endpoints on one host differ only there, so a proof for /token must
-// never satisfy a request to the Authorization Challenge Endpoint; case,
-// percent-encoding and empty-versus-root are left exactly as written,
-// except that "" and "/" are the same path under RFC 3986 §6.2.3.
+// The path is normalized only where RFC 3986 says two spellings are the
+// same path, and not one step further. Two endpoints on one host differ
+// only there, so a proof for /token must never satisfy a request to the
+// Authorization Challenge Endpoint. Case is therefore significant, and so
+// is every reserved escape - %2F is not a separator. What IS normalized
+// is "" versus "/" (§6.2.3), the hex case of an escape (§6.2.2.1), and an
+// escape of an unreserved character (§6.2.2.2), which is how /%74oken and
+// /token come to be one path.
+//
+// Dot segments are deliberately NOT removed (§6.2.2.4 is not applied), so
+// /a/../token and /token stay different. That keeps this comparison
+// strict: the only spellings it merges are ones the RFC defines as the
+// same path.
 func SameHTU(htu, endpoint string) bool {
 	normalizedHTU, okHTU := normalizeURIForComparison(htu)
 	normalizedEndpoint, okEndpoint := normalizeURIForComparison(endpoint)
@@ -281,10 +290,23 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	scheme := strings.ToLower(u.Scheme)
 
 	host := strings.ToLower(u.Hostname())
-	// A Unicode host and its A-label are the same host. ToASCII only ever
-	// narrows the spelling, so a failure leaves the lowercased form rather
-	// than rejecting a proof over it.
-	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+	// An address is normalized as an address, not as a name. IPv6 has many
+	// spellings of one address - 2001:0db8:0:0:0:0:0:1 and 2001:db8::1 are
+	// the same endpoint - and lowercasing alone leaves them different, so a
+	// wallet that compressed the URL it was given got invalid_dpop_proof
+	// for a proof that named this very endpoint. net.IP.String is the
+	// canonical form from RFC 5952, which also renders an IPv4-mapped
+	// address as its dotted quad, so [::ffff:127.0.0.1] and 127.0.0.1
+	// agree - as they must, being one address.
+	//
+	// Before the IDNA mapping, not after: an address is not a domain name
+	// and has no business being mapped as one.
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		// A Unicode host and its A-label are the same host. ToASCII only
+		// ever narrows the spelling, so a failure leaves the lowercased
+		// form rather than rejecting a proof over it.
 		host = ascii
 	}
 	if strings.Contains(host, ":") {
@@ -302,12 +324,85 @@ func normalizeURIForComparison(raw string) (string, bool) {
 		host += ":" + port
 	}
 
-	path := u.EscapedPath()
+	path := normalizePercentEncoding(u.EscapedPath())
 	if path == "" {
 		path = "/"
 	}
 
 	return scheme + "://" + host + path, true
+}
+
+// normalizePercentEncoding applies the two percent-encoding rules of RFC
+// 3986 §6.2.2 to an already-escaped path: an escape is written in upper
+// case (§6.2.2.1), and an escape of an unreserved character is decoded
+// (§6.2.2.2).
+//
+// url.URL.EscapedPath preserves whatever the sender wrote, which is right
+// for a path and wrong for a comparison: /%74oken and /token are the same
+// path under the RFC, and a wallet that normalized the endpoint URL it was
+// configured with was refused for naming it that way.
+//
+// Only unreserved characters are decoded. A reserved escape stands,
+// because decoding it would change the path - %2F is not a separator, and
+// a proof for /a%2Fb must not satisfy a request to /a/b.
+//
+// A malformed escape - a stray % or a non-hex digit - is left exactly as
+// written and no attempt is made to repair it. It is not a valid path, and
+// a comparison is not the place to decide what the sender meant.
+func normalizePercentEncoding(path string) string {
+	if !strings.Contains(path, "%") {
+		return path
+	}
+	var out strings.Builder
+	out.Grow(len(path))
+	for i := 0; i < len(path); {
+		if path[i] != '%' || i+2 >= len(path) {
+			out.WriteByte(path[i])
+			i++
+			continue
+		}
+		high, highOK := unhexDigit(path[i+1])
+		low, lowOK := unhexDigit(path[i+2])
+		if !highOK || !lowOK {
+			out.WriteByte(path[i])
+			i++
+			continue
+		}
+		if octet := high<<4 | low; isUnreservedByte(octet) {
+			out.WriteByte(octet)
+		} else {
+			out.WriteByte('%')
+			out.WriteString(strings.ToUpper(path[i+1 : i+3]))
+		}
+		i += 3
+	}
+	return out.String()
+}
+
+func unhexDigit(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+// isUnreservedByte reports whether an octet is one of RFC 3986 §2.3's
+// unreserved characters, whose escape carries no meaning.
+func isUnreservedByte(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	case c == '-' || c == '.' || c == '_' || c == '~':
+		return true
+	default:
+		return false
+	}
 }
 
 // defaultPortFor returns the port that is implied by a scheme and so
