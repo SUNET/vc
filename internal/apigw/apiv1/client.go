@@ -86,10 +86,49 @@ type Client struct {
 	// status is the shared readiness aggregator: local probes + downstream
 	// Status RPCs, cached + single-flighted. Configured in New.
 	statusAggregator *status.Aggregator
+
+	// authProviderSelector answers which auth provider a scope will
+	// actually be served by in this deployment. The browser flow consults
+	// it at /authorize; the Authorization Challenge Endpoint consults the
+	// same one so the two cannot disagree about whether a scope needs a
+	// presentation or a browser.
+	authProviderSelector AuthProviderSelector
+
+	// issuanceAuth overrides the issuance-auth pipeline the Authorization
+	// Challenge Endpoint feeds. nil everywhere but in tests, where it is
+	// the only way to reach the endpoint's own code on a presentation that
+	// VERIFIES: everything past decryption - SD-JWT or mdoc verification,
+	// issuer trust via the PDP, identity resolution, the datastore lookup -
+	// needs a signing authority, a trust deployment and documents, none of
+	// which say anything about the wiring between this endpoint and the
+	// pipeline.
+	//
+	// That wiring is what breaks silently: the audience a presentation is
+	// bound to, the state it must echo, the mdoc session transcript it was
+	// signed over, and whether an authorization code comes back at all.
+	// Only the challenge endpoint has one, because only it builds a binding
+	// that has no other test - the browser flow's is exercised end to end
+	// through /verification/direct_post.
+	//
+	// See issuanceAuthPipeline.
+	issuanceAuth issuanceAuthConsumer
+}
+
+// AuthProviderSelector names the auth provider, and the credential source,
+// that will serve a scope in this deployment.
+//
+// A narrow local interface rather than the concrete type: the answer
+// depends on which provider services actually started, which is knowledge
+// the wiring layer has and this package does not, and declaring only what
+// is used keeps it substitutable in tests.
+//
+// Implemented by *authproviders.Selector.
+type AuthProviderSelector interface {
+	Select(scope string, ds *model.DataSources) (string, model.CredentialSource, error)
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authProviderSelector AuthProviderSelector, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
 	vciMetrics, err := metric.NewVCI(meter.Meter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VCI metrics: %w", err)
@@ -106,6 +145,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		vciMetrics:                    vciMetrics,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
 		cacheService:                  cacheService,
+		authProviderSelector:          authProviderSelector,
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
@@ -117,7 +157,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	// Advertise attest_jwt_client_auth only when the evaluator will actually be wired below (needs Enabled + PDPURL).
 	walletAttestationAdvertised := cfg.APIGW.Trust.WalletAttestation.Enabled && cfg.APIGW.Trust.PDPURL != ""
-	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL, walletAttestationAdvertised, cfg.APIGW.Trust.AllowedSignatureAlgorithms)
+	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL, walletAttestationAdvertised, cfg.APIGW.Trust.AllowedSignatureAlgorithms, &c.cfg.APIGW.Delivery.InteractiveAuthorization)
 
 	// Load PKI signing key and chain for metadata signing
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
@@ -219,32 +259,27 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 }
 
 // EphemeralEncryptionKey returns the ephemeral encryption key pair for the
-// given kid.  If a private key already exists in the cache (i.e. the request-
-// object endpoint was already called for this session) the cached key is
-// reused so that the wallet's encrypted response can still be decrypted.
-// Otherwise a fresh P-256 key pair is generated, the private key is cached,
-// and both private and public JWKs are returned.
+// given kid, generating and storing one if this is the first caller to ask.
+//
+// Exactly one key ever exists for a kid, and every caller gets that one.
+// The private half is what decrypts the wallet's response, and the public
+// half goes into a REQUEST THE SERVER SIGNS - so two callers that each
+// generated their own would produce two signed requests, and whichever
+// private key ended up in the cache would be unable to decrypt a response
+// to the other. Nothing downstream could recover from that: the wallet's
+// presentation is correct, the signature verifies, and the ciphertext is
+// simply undecryptable.
+//
+// A plain Get-then-Set could not give that guarantee, and the window is
+// not theoretical: issuer-initiated issuance and the request-object
+// endpoint both reach here for the same kid, and a wallet retrying a
+// request object races itself. SetNX decides the winner atomically, and a
+// loser reads the winner's key back rather than keeping its own.
 func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Key, jwk.Key, error) {
 	// Return the existing key pair when available to avoid overwriting the
 	// private key on repeated request-object fetches (wallet retries, etc.).
 	if existing, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid); ok {
-		publicJWK, err := existing.PublicKey()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to derive public key from cached ephemeral key: %w", err)
-		}
-		if err := publicJWK.Set("use", "enc"); err != nil {
-			return nil, nil, err
-		}
-		// The reference wallet's ClientMetaDataValidator (eudi-lib-jvm-openid4vp-kt)
-		// only treats a jwks entry as a viable encryption-key candidate if it has
-		// both a non-blank "kid" AND a non-blank "alg" -- entries without "alg"
-		// are silently filtered out, so without this the candidate list ends up
-		// empty and the wallet rejects the request with InvalidClientMetaData
-		// ("No encryption JWKs were advertised").
-		if err := publicJWK.Set("alg", "ECDH-ES"); err != nil {
-			return nil, nil, err
-		}
-		return existing, publicJWK, nil
+		return ephemeralKeyPair(existing)
 	}
 
 	privKey, err := ecdh.P256().GenerateKey(rand.Reader)
@@ -260,29 +295,49 @@ func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Ke
 		return nil, nil, err
 	}
 
-	c.cacheService.EphemeralEncryptionKey.Set(ctx, kid, privateJWK)
-
-	pub := privKey.Public()
-
-	publicJWK, err := jwk.Import(pub)
+	stored, err := c.cacheService.EphemeralEncryptionKey.SetNX(ctx, kid, privateJWK)
 	if err != nil {
-		return nil, nil, err
+		// Propagated rather than swallowed. A cache that would not take
+		// the key is a request this server cannot decrypt the answer to,
+		// and signing it anyway produces a flow that fails much later
+		// with nothing to point at.
+		c.log.Error(err, "failed to store the ephemeral encryption key", "kid", kid)
+		return nil, nil, fmt.Errorf("storing the ephemeral encryption key for %q: %w", kid, err)
+	}
+	if !stored {
+		// Another caller got there first. Its key is the one the cache
+		// holds and therefore the only one that can decrypt anything, so
+		// this caller signs with that rather than with the key it just
+		// generated and is about to throw away.
+		winner, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
+		if !ok {
+			return nil, nil, fmt.Errorf("the ephemeral encryption key for %q was taken by another caller and is already gone", kid)
+		}
+		return ephemeralKeyPair(winner)
 	}
 
+	return ephemeralKeyPair(privateJWK)
+}
+
+// ephemeralKeyPair returns the private key as stored and the public half a
+// wallet will accept.
+func ephemeralKeyPair(privateJWK jwk.Key) (jwk.Key, jwk.Key, error) {
+	publicJWK, err := privateJWK.PublicKey()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to derive public key from ephemeral key: %w", err)
+	}
 	if err := publicJWK.Set("use", "enc"); err != nil {
 		return nil, nil, err
 	}
-
-	if err := publicJWK.Set("kid", kid); err != nil {
-		return nil, nil, err
-	}
-
-	// See the comment on the cache-hit branch above: the wallet requires "alg"
-	// on the JWK itself, not just at the top-level authorization_encrypted_response_alg.
+	// The reference wallet's ClientMetaDataValidator (eudi-lib-jvm-openid4vp-kt)
+	// only treats a jwks entry as a viable encryption-key candidate if it has
+	// both a non-blank "kid" AND a non-blank "alg" -- entries without "alg"
+	// are silently filtered out, so without this the candidate list ends up
+	// empty and the wallet rejects the request with InvalidClientMetaData
+	// ("No encryption JWKs were advertised").
 	if err := publicJWK.Set("alg", "ECDH-ES"); err != nil {
 		return nil, nil, err
 	}
-
 	return privateJWK, publicJWK, nil
 }
 

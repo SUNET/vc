@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -269,6 +270,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	if err := checkIssuancePolicies(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
+	if err := checkInteractiveAuthorization(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
@@ -991,4 +996,96 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	}
 
 	return secrets, nil
+}
+
+// checkInteractiveAuthorization refuses a configuration that advertises
+// Interactive Authorization as REQUIRED without offering it.
+//
+// OpenID4VCI 1.1 says require_interactive_authorization MUST NOT be present
+// without authorization_challenge_endpoint, and the reason is practical: a
+// wallet reading that document is told the only accepted path to issuance
+// is a mechanism this server does not expose, which leaves it nothing to
+// do. The metadata itself refuses the pair too - the field carries
+// excluded_without - but that refusal arrives at serving time with no
+// operator watching. This one arrives at startup, with a message.
+func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+	ia := cfg.APIGW.Delivery.InteractiveAuthorization
+	if model.BoolVal(ia.RequireInteractiveAuthorization, false) && !model.BoolVal(ia.Enable, false) {
+		return errors.New(
+			"apigw.delivery.interactive_authorization.require_interactive_authorization is true " +
+				"but enable is false: a server cannot require a mechanism it does not offer " +
+				"(OpenID4VCI 1.1, Authorization Server Metadata)")
+	}
+
+	// The two configured metadata member names are free text, and they are
+	// written straight into the published document. A name that collides
+	// with a member the document already has - "issuer" being the way to do
+	// real damage - would replace it; two names configured the same would
+	// leave map iteration deciding which of the two survives, so the served
+	// document could differ between restarts and stop matching its own
+	// signature.
+	//
+	// The marshaller refuses both, but that refusal arrives when a wallet
+	// asks for the document, with nobody watching. This one arrives at
+	// startup.
+	if err := oauth2.ValidateMetadataNames(ia.MetadataNames()); err != nil {
+		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
+	}
+
+	// Enabling the mechanism exposes POST /api/v1/issuance/prepare, which
+	// prepares an issuance bound to a Holder the CALLER names. On a
+	// deployment with no API authentication configured that is an open
+	// endpoint for minting credential offers against any identity rule the
+	// caller likes - precisely the trusted-portal step the mechanism
+	// exists to represent, available to anyone who can reach the port.
+	//
+	// Refused here rather than guarded in the handler, because the handler
+	// has no better answer available: with neither JWKS nor OIDC
+	// configured the API-auth middleware is a pass-through, and the admin
+	// session it would otherwise look for is granted anonymously when OIDC
+	// is absent. There is no authenticated principal to require, so the
+	// only honest check is on the configuration that left none.
+	if model.BoolVal(ia.Enable, false) {
+		if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+			return errors.New(
+				"apigw.delivery.interactive_authorization.enable is true but apigw.api_server.api_auth " +
+					"configures neither jwks nor oidc: enabling it exposes /api/v1/issuance/prepare, " +
+					"which prepares an issuance for a Holder the caller names, and without API " +
+					"authentication anyone who can reach the port may call it")
+		}
+
+		// Having a Bearer mode configured is not enough on its own,
+		// because the admin session is an alternative to it rather than a
+		// second check on top of it.
+		//
+		// With the admin UI on and no OIDC, /ui/login grants a session
+		// with admin_subject "anonymous" to anybody who asks, and
+		// SessionOrAPIAuth accepts a session INSTEAD of falling through
+		// to the Bearer middleware. So a deployment with jwks enabled and
+		// the admin UI on still exposes preparation to an anonymous
+		// caller, and the JWKS configuration says nothing about it.
+		if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+			return errors.New(
+				"apigw.delivery.interactive_authorization.enable is true with apigw.admin_ui_enable " +
+					"true and apigw.api_server.api_auth.oidc disabled: the admin UI grants an " +
+					"anonymous session when OIDC is absent, and that session is accepted in place " +
+					"of a bearer token - so /api/v1/issuance/prepare would be reachable without " +
+					"authenticating anybody. Configure oidc, or turn the admin UI off")
+		}
+	}
+
+	return nil
+}
+
+// apiAuthenticationConfigured reports whether a caller reaching the admin
+// API has to be anybody in particular.
+//
+// Only the two Bearer modes count. An admin session does not: it is
+// granted anonymously when OIDC is absent, so requiring one would be a
+// check that passes for everyone.
+func apiAuthenticationConfigured(apiAuth model.APIAuth) bool {
+	return apiAuth.JWKS.Enable || apiAuth.OIDC.Enable
 }

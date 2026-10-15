@@ -121,6 +121,12 @@ type AuthorizationServerMetadata struct {
 	RequireInteractiveAuthorization bool `json:"require_interactive_authorization,omitempty" validate:"excluded_without=AuthorizationChallengeEndpoint"`
 
 	// More attributes MAY be present, such as https://openid.net/specs/openid-connect-discovery-1_0.html
+
+	// iaNames renames the two Interactive Authorization members on the way
+	// out. Unexported and untagged, so it is neither serialised nor
+	// settable from a configured document - see
+	// WithInteractiveAuthorizationNames for why it lives on the struct.
+	iaNames MetadataNames
 }
 
 // MetadataIssuer returns the issuer identifier embedded in the metadata,

@@ -23,6 +23,14 @@ import (
 // VCICredential presentation branch). A preview document is cached so the
 // consent/preview UI (which calls UserLookup unconditionally) can render
 // the credential-to-be-issued before final consent.
+// Errors from here are classified the same way the rest of the
+// issuance-auth pipeline classifies them: a credential that does not carry
+// what was asked for is the wallet's, while a store that would not write
+// or a deployment whose derivations do not resolve is ours and carries
+// ErrIssuanceAuthServerFault. The Authorization Challenge Endpoint turns
+// the two into different HTTP answers, and telling a wallet its
+// presentation was rejected when the datastore was down invites a retry
+// that cannot succeed.
 func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *cache.AuthorizationContext, pScope model.PresentationScope, presented map[string]any) error {
 	// VPTokenValidator.validateAgainstDCQL is currently a no-op, so a
 	// wallet could return a credential of the wrong type that happens to
@@ -62,7 +70,7 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	}
 	authCtx.VerifiedClaims = verified
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
-		return fmt.Errorf("failed to persist verified claims: %w", err)
+		return serverFault(fmt.Errorf("failed to persist verified claims: %w", err))
 	}
 
 	// Cache a preview document keyed by session so UserLookup (called by the
@@ -83,15 +91,15 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	now := time.Now()
 	derived, err := credential.ApplyDerivations(pScope.Derivations, verified, now)
 	if err != nil {
-		return fmt.Errorf("failed to apply derivations for preview: %w", err)
+		return serverFault(fmt.Errorf("failed to apply derivations for preview: %w", err))
 	}
 	credential.MergeNestedClaims(previewData, derived)
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {
-		return fmt.Errorf("failed to resolve defaults for preview: %w", err)
+		return serverFault(fmt.Errorf("failed to resolve defaults for preview: %w", err))
 	}
 	if err := credential.MergeDefaults(previewData, defaults); err != nil {
-		return fmt.Errorf("failed to merge defaults for preview: %w", err)
+		return serverFault(fmt.Errorf("failed to merge defaults for preview: %w", err))
 	}
 
 	previewDoc := &model.CompleteDocument{
