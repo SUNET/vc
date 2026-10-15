@@ -1,0 +1,192 @@
+package apiv1
+
+import (
+	"os"
+	"testing"
+	"time"
+
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
+
+	"github.com/fxamacker/cbor/v2"
+	"github.com/stretchr/testify/require"
+)
+
+// decodedMdocValue round-trips v through the same CBOR path a verified mdoc
+// presentation takes (IssuerSignedItem.ElementValue decoded into `any`), so
+// the tests see what VerificationDirectPost really sees - e.g. a full-date
+// as cbor.Tag{1004, "..."}, not a string.
+func decodedMdocValue(t *testing.T, v any) any {
+	t.Helper()
+	enc, err := mdoc.NewCBOREncoder()
+	require.NoError(t, err)
+	b, err := enc.Marshal(mdoc.IssuerSignedItem{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "x", ElementValue: v})
+	require.NoError(t, err)
+	var back mdoc.IssuerSignedItem
+	require.NoError(t, cbor.Unmarshal(b, &back))
+	return back.ElementValue
+}
+
+func mdocPresented(t *testing.T, docType string, ns map[string]map[string]any) map[string]any {
+	t.Helper()
+	decoded := make(map[string]map[string]any, len(ns))
+	for n, items := range ns {
+		decoded[n] = map[string]any{}
+		for k, v := range items {
+			decoded[n][k] = decodedMdocValue(t, v)
+		}
+	}
+	claims, err := mdocClaimsFromResult(&mdoc.MDocVerificationResult{Valid: true, Documents: map[string]*mdoc.MDocDocumentClaims{
+		docType: {DocType: docType, Namespaces: decoded},
+	}})
+	require.NoError(t, err)
+	return claims
+}
+
+func nymAuthTarget(t *testing.T) *model.CredentialMetadata {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/nym_auth.mdoc.json")
+	require.NoError(t, err)
+	schema, err := mdoc.LoadMDDLSchema(raw)
+	require.NoError(t, err)
+	return &model.CredentialMetadata{Format: "mso_mdoc", MDDL: schema}
+}
+
+// The five nym_auth authentication credentials, each in the shape its
+// verified claims really have, with the auth_scopes entry sirosid-dev's
+// values-base.yaml renders for it.
+func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
+	sdjwtPID := func(vct string) map[string]any {
+		return map[string]any{"vct": vct, "given_name": "Alice", "family_name": "Wonderland", "birthdate": "1990-01-15"}
+	}
+	sdjwtEntry := model.AuthScopeEntry{
+		AuthClaims:         []string{"given_name", "family_name", "birthdate"},
+		IdentityAttributes: map[string]string{"birthdate": "birth_date"},
+		DocumentClaims:     map[string]string{"birthdate": "birth_date"},
+	}
+	cases := map[string]struct {
+		format    string
+		presented map[string]any
+		entry     model.AuthScopeEntry
+	}{
+		"pid_1_8": {"dc+sd-jwt", sdjwtPID("urn:eudi:pid:arf-1.8:1"), sdjwtEntry},
+		"pid_1_5": {"dc+sd-jwt", sdjwtPID("urn:eudi:pid:arf-1.5:1"), sdjwtEntry},
+		"pid_mdoc": {"mso_mdoc", mdocPresented(t, "eu.europa.ec.eudi.pid.1", map[string]map[string]any{
+			"eu.europa.ec.eudi.pid.1": {"given_name": "Alice", "family_name": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
+		}), model.AuthScopeEntry{
+			AuthClaims: []string{"eu.europa.ec.eudi.pid.1.given_name", "eu.europa.ec.eudi.pid.1.family_name"},
+			IdentityAttributes: map[string]string{
+				"eu.europa.ec.eudi.pid.1.given_name":  "given_name",
+				"eu.europa.ec.eudi.pid.1.family_name": "family_name",
+			},
+			DocumentClaims: map[string]string{"eu.europa.ec.eudi.pid.1.birth_date": "birth_date"},
+		}},
+		"mdl": {"mso_mdoc", mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+			"org.iso.18013.5.1": {"given_name": "Alice", "family_name": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
+		}), model.AuthScopeEntry{
+			AuthClaims:     []string{"given_name", "family_name"},
+			DocumentClaims: map[string]string{"birth_date": "birth_date"},
+		}},
+		"photoid": {"mso_mdoc", mdocPresented(t, "eu.europa.ec.eudi.photoid.1", map[string]map[string]any{
+			"org.iso.23220.1": {"given_name_unicode": "Alice", "family_name_unicode": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
+		}), model.AuthScopeEntry{
+			AuthClaims: []string{"org.iso.23220.1.given_name_unicode", "org.iso.23220.1.family_name_unicode"},
+			IdentityAttributes: map[string]string{
+				"org.iso.23220.1.given_name_unicode":  "given_name",
+				"org.iso.23220.1.family_name_unicode": "family_name",
+			},
+			DocumentClaims: map[string]string{"org.iso.23220.1.birth_date": "birth_date"},
+		}},
+	}
+	target := nymAuthTarget(t)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// What vc main does today: refuses every mdoc birth date (a
+			// cbor.Tag, not a string) and finds no unqualified name for
+			// pid_mdoc/photoid.
+			if tc.format == "mso_mdoc" {
+				_, isTag := tc.presented[firstKey(tc.entry.DocumentClaims)].(cbor.Tag)
+				require.True(t, isTag, "an mdoc full-date must reach the handler as cbor.Tag 1004")
+			}
+
+			ids, err := extractAuthScopeIdentity(tc.format, tc.presented, tc.entry)
+			require.NoError(t, err)
+			require.Equal(t, "Alice", ids["given_name"])
+			require.Equal(t, "Wonderland", ids["family_name"])
+			if tc.format == "dc+sd-jwt" {
+				require.Equal(t, "1990-01-15", ids["birth_date"], "the SD-JWT birthdate is matched as the mapping's birth_date")
+			}
+
+			copied, err := presentedDocumentClaims(tc.format, tc.presented, tc.entry, target)
+			require.NoError(t, err)
+			require.Equal(t, map[string]any{"birth_date": "1990-01-15"}, copied)
+
+			docs := applyPresentedDocumentClaims(map[string]*model.CompleteDocument{
+				"d": {DocumentData: map[string]any{"birth_date": "1900-01-01", "ssc": "AAAA"}},
+			}, copied)
+			require.Equal(t, "1990-01-15", docs["d"].DocumentData["birth_date"])
+			require.Equal(t, "AAAA", docs["d"].DocumentData["ssc"])
+		})
+	}
+}
+
+func firstKey(m map[string]string) string {
+	for k := range m {
+		return k
+	}
+	return ""
+}
+
+func TestPresentedDocumentClaimsFailsClosed(t *testing.T) {
+	target := nymAuthTarget(t)
+	entry := model.AuthScopeEntry{AuthClaims: []string{"given_name"}, DocumentClaims: map[string]string{"birth_date": "birth_date"}}
+	// pid_mdoc as sirosid-dev vendors it today: no birth_date at all.
+	presented := mdocPresented(t, "eu.europa.ec.eudi.pid.1", map[string]map[string]any{
+		"eu.europa.ec.eudi.pid.1": {"given_name": "Alice"},
+	})
+	_, err := presentedDocumentClaims("mso_mdoc", presented, entry, target)
+	require.Error(t, err)
+
+	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"birth_date": "15/01/1990"}, entry, target)
+	require.Error(t, err, "a date in no RFC 3339 shape is refused, not issued")
+	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"birth_date": "1990-02-30"}, entry, target)
+	require.Error(t, err, "an impossible date is refused")
+}
+
+func TestNormaliseFullDateShapes(t *testing.T) {
+	for in, want := range map[string]any{
+		"plain string":       "1990-01-15",
+		"date-time string":   "1990-01-15T00:00:00Z",
+		"tag 1004":           cbor.Tag{Number: 1004, Content: "1990-01-15"},
+		"tag 0":              cbor.Tag{Number: 0, Content: "1990-01-15T10:00:00Z"},
+		"tag 1 epoch":        cbor.Tag{Number: 1, Content: uint64(632361600)},
+		"time.Time":          time.Date(1990, 1, 15, 12, 0, 0, 0, time.UTC),
+		"mdoc.FullDate":      mdoc.FullDate("1990-01-15"),
+		"decoded mdoc value": decodedMdocValue(t, mdoc.FullDate("1990-01-15")),
+	} {
+		got, err := normaliseFullDate(want)
+		require.NoError(t, err, in)
+		require.Equal(t, "1990-01-15", got, in)
+	}
+}
+
+func TestIssuanceAuthDCQLRequestsTheCopiedClaims(t *testing.T) {
+	cfg := &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+		"mdl": {Format: "mso_mdoc", Doctype: "org.iso.18013.5.1.mDL", MDDL: &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"}},
+	}}}
+	dcql, err := buildIssuanceAuthDCQL(&model.OpenID4VPCredentialAuth{AuthScopes: map[string]model.AuthScopeEntry{
+		"mdl": {AuthClaims: []string{"given_name", "family_name"}, DocumentClaims: map[string]string{"birth_date": "birth_date"}},
+	}}, cfg)
+	require.NoError(t, err)
+	var paths [][]string
+	for _, c := range dcql.Credentials[0].Claims {
+		var p []string
+		for _, s := range c.Path {
+			p = append(p, *s)
+		}
+		paths = append(paths, p)
+	}
+	require.Contains(t, paths, []string{"org.iso.18013.5.1", "birth_date"})
+	require.Equal(t, openid4vp.FormatMsoMdoc, dcql.Credentials[0].Format)
+}
