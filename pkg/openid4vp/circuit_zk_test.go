@@ -876,3 +876,56 @@ func TestCopyDCQLPreservesPointerRawLeaves(t *testing.T) {
 	payload = json.RawMessage(`{"other":true}`)
 	assert.Equal(t, `{"changed":true}`, string(*copiedPointer), "writing to the original must not reach the copy")
 }
+
+// rawHolder and privateHolder are the struct shapes the copy had to
+// learn: one it can copy field by field, one it must refuse to.
+type (
+	rawHolder struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	privateHolder struct {
+		Payload json.RawMessage `json:"payload"`
+		hidden  string
+	}
+)
+
+// Arrays and structs hold raw leaves too.
+//
+// Only map, slice and pointer were copied structurally, so an array or a
+// struct went to the encoding and had its duplicate members collapsed -
+// the same defect as the slice and pointer cases, in the two shapes left
+// over. Found by enumerating what can still reach the encoding fallback
+// while holding a raw leaf, rather than waiting for the next review.
+func TestCopyPreservesRawLeavesInArraysAndStructs(t *testing.T) {
+	t.Run("array", func(t *testing.T) {
+		const duplicate = `{"x":1,"x":2}`
+		src := map[string]any{"arr": [2]json.RawMessage{json.RawMessage(duplicate), json.RawMessage(`{"y":1}`)}}
+		out, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Contains(t, string(out), duplicate, "a raw leaf in an array must survive as bytes")
+	})
+
+	t.Run("struct", func(t *testing.T) {
+		const duplicate = `{"z":1,"z":2}`
+		src := map[string]any{"s": rawHolder{Payload: json.RawMessage(duplicate)}}
+		out, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Contains(t, string(out), duplicate, "a raw leaf in a struct field must survive as bytes")
+
+		// And it is a copy, not the original.
+		copied, ok := copyAnyMap(src)["s"].(rawHolder)
+		require.True(t, ok, "the copy keeps the struct shape")
+		copied.Payload[1] = 'Z'
+		assert.Equal(t, duplicate, string(src["s"].(rawHolder).Payload),
+			"writing to the copied struct must not reach the original")
+	})
+
+	t.Run("a struct with an unexported field is normalised, not silently truncated", func(t *testing.T) {
+		src := map[string]any{"s": privateHolder{Payload: json.RawMessage(`{"z":1}`), hidden: "x"}}
+		out, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		// Reflection can neither read nor set the unexported field, so
+		// this falls back to the encoding rather than dropping it.
+		assert.Contains(t, string(out), `"payload"`)
+	})
+}
