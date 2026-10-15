@@ -233,3 +233,39 @@ func TestEmptyPayloadIsNotAnAbsentPayload(t *testing.T) {
 		assert.Contains(t, err.Error(), "nothing it authenticates")
 	})
 }
+
+// The built DeviceMac's payload must encode as CBOR null (0xf6).
+//
+// Asserted on the ENCODED byte because nothing else can see it. ISO 18013-5
+// 9.1.3.4 requires a null payload with the content detached; the existing
+// builder tests check only that a MAC is present, and verification
+// deliberately accepts an attached payload for compatibility - so restoring
+// the inline payload would satisfy every other test here while putting a
+// non-conformant message on the wire.
+//
+// That is the same shape as the defect this whole change fixes: a check
+// that cannot observe the thing it is meant to protect.
+func TestBuiltDeviceMACPayloadIsCBORNull(t *testing.T) {
+	sessionKey := make([]byte, 32)
+	_, err := rand.Read(sessionKey)
+	require.NoError(t, err)
+
+	deviceSigned, err := NewDeviceAuthBuilder(DocType).
+		WithSessionTranscript(testSessionTranscript()).
+		WithSessionKey(sessionKey).
+		Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, deviceSigned.DeviceAuth.DeviceMac)
+
+	encoder, err := NewCBOREncoder()
+	require.NoError(t, err)
+	encoded, err := encoder.Marshal(deviceSigned.DeviceAuth.DeviceMac)
+	require.NoError(t, err)
+
+	var elements []cbor.RawMessage
+	require.NoError(t, cbor.Unmarshal(encoded, &elements))
+	require.Len(t, elements, 4, "COSE_Mac0 = [protected, unprotected, payload, tag]")
+
+	assert.Equal(t, []byte{0xf6}, []byte(elements[2]),
+		"the payload must be CBOR null; the detached content is DeviceAuthenticationBytes")
+}
