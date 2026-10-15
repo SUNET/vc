@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/google/uuid"
@@ -30,7 +31,10 @@ type UIPaymentRequest struct {
 }
 
 func invalidPayment(format string, args ...any) error {
-	return &OAuthError{
+	// The shared type: RegEndpoint renders pkg/oauth2.OAuthError (status and
+	// description); the verifier-local OAuthError would fall through to the
+	// generic handler and lose both.
+	return &oauth2.OAuthError{
 		ErrorCode:        ErrCodeInvalidRequest,
 		ErrorDescription: "payment: " + fmt.Sprintf(format, args...),
 		HTTPStatus:       http.StatusBadRequest,
