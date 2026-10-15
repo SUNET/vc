@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1032,7 +1033,11 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 	if err != nil {
 		return nil, err
 	}
-	if c.cfg.Verifier.DigitalCredentials.Enable {
+	// A payment session records the response modes it was issued with and the
+	// response is checked against them, so a resume must not issue a variant
+	// that was not among them (the DC API switched on since).
+	dcAPIAllowed := len(authCtx.TransactionData) == 0 || slices.Contains(authCtx.TransactionDataResponseModes, openid4vp.ResponseModeDCAPIJWT)
+	if c.cfg.Verifier.DigitalCredentials.Enable && dcAPIAllowed {
 		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
