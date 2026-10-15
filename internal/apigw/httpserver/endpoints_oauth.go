@@ -88,6 +88,65 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 	return reply, nil
 }
 
+// endpointOAuthAuthorizationChallenge is the Authorization Challenge
+// Endpoint (OpenID4VCI 1.1 Interactive Authorization).
+//
+// It renders *apiv1.AuthorizationChallengeError itself rather than handing
+// it to the shared error renderer: the Interaction Required Response is a
+// 403 whose body carries the whole next step of the flow -
+// interaction_type_required, auth_session and the OpenID4VP request - and a
+// renderer that only knows error/error_description would drop all three.
+func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOAuthAuthorizationChallenge")
+	defer span.End()
+
+	request := &apiv1.AuthorizationChallengeRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "binding error")
+		// A body this endpoint cannot read is a malformed REQUEST, and a
+		// wallet is entitled to be told so in the protocol's own terms.
+		// Returned bare, the binding failure went to the generic renderer
+		// and came back as {"error":{"title":"internal_server_error"}} -
+		// a 400 whose body blames the server, in a shape no OAuth client
+		// parses (RFC 6749 §5.2).
+		//
+		// The description is the fixed one. A binding error quotes the
+		// input it could not read, and echoing that into the response
+		// would reflect attacker-controlled bytes back; the cause is
+		// carried for the log instead.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+			"the request body could not be read as an authorization challenge request",
+			http.StatusBadRequest, err)
+	}
+
+	// draft-ietf-oauth-attestation-based-client-auth §3.1, and RFC 9449 §4
+	// for the DPoP proof that binds the auth_session.
+	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
+	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+	request.DPOP = c.GetHeader("DPoP")
+
+	// Every response from this endpoint carries an authorization code or
+	// the material for one - draft-ietf-oauth-first-party-apps §5.2 says
+	// no-store, and so does every example in OpenID4VCI 1.1.
+	c.Header("Cache-Control", "no-store")
+
+	reply, err := s.apiv1.OAuthAuthorizationChallenge(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		var challengeErr *apiv1.AuthorizationChallengeError
+		if errors.As(err, &challengeErr) {
+			c.AbortWithStatusJSON(challengeErr.HTTPStatus, challengeErr)
+			return nil, nil
+		}
+		s.log.Error(err, "authorization challenge error")
+		return nil, err
+	}
+
+	c.JSON(http.StatusOK, reply)
+	return nil, nil
+}
+
 func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointAuthorize")
 	defer span.End()

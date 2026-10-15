@@ -80,6 +80,30 @@ type AuthorizationContext struct {
 	CodeChallenge       string   `json:"code_challenge,omitempty" bson:"code_challenge,omitempty" validate:"omitempty,max=128,printascii"`
 	CodeChallengeMethod string   `json:"code_challenge_method,omitempty" bson:"code_challenge_method,omitempty" validate:"omitempty,max=16,printascii"`
 
+	// AuthSession is the opaque handle that carries one Interactive
+	// Authorization exchange across its several requests (OpenID4VCI 1.1,
+	// profiling draft-ietf-oauth-first-party-apps §5.3.1).
+	//
+	// Opaque to the wallet, and REGENERATED on every challenge response -
+	// the specification requires each response to carry a distinct value,
+	// so this is rotated rather than reused. The wallet echoes the most
+	// recent one.
+	//
+	// Looking the context up by this value, rather than by anything the
+	// presentation itself carries, is what defends against session
+	// fixation: a presentation answering some other exchange's nonce
+	// cannot resolve to this context at all.
+	AuthSession string `json:"auth_session,omitempty" bson:"auth_session,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// AuthSessionDPoPThumbprint binds the Interactive Authorization
+	// exchange to the DPoP key that began it, when DPoP is in use.
+	//
+	// Distinct from Token.DPoPThumbprint, which is set when an access
+	// token is issued and so does not exist yet during this exchange.
+	// OpenID4VCI 1.1 requires every request carrying an auth_session to
+	// present the same key, so it has to be recorded at the start.
+	AuthSessionDPoPThumbprint string `json:"auth_session_dpop_thumbprint,omitempty" bson:"auth_session_dpop_thumbprint,omitempty" validate:"omitempty,max=128,printascii"`
+
 	// Authorization code fields
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`

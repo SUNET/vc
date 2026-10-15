@@ -87,6 +87,15 @@ type Service struct {
 	OIDCRPRenewalLock pkgcache.Locker
 }
 
+// AuthContextTTL is how long an authorization context - and the ephemeral
+// key that belongs to it - survives.
+//
+// Named because it is also the ceiling on an Interactive Authorization
+// exchange: that exchange is nothing but an authorization context with a
+// handle on it, so it cannot be configured to outlive this. See
+// model.MaxAuthSessionTTLSeconds, which must not exceed it.
+const AuthContextTTL = 10 * time.Minute
+
 // New creates the apigw cache service and initialises all caches.
 func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
 	s := &Service{
@@ -97,11 +106,11 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 	cs := pkgcache.New(s.cfg.Common.HA.Enable, s.cfg.Common.HA.CacheDatabaseName, dbService.MongoClient, s.log)
 	var err error
 
-	if s.AuthContext, err = cs.NewAuthContextCache(ctx, "apigw_auth_context", 10*time.Minute); err != nil {
+	if s.AuthContext, err = cs.NewAuthContextCache(ctx, "apigw_auth_context", AuthContextTTL); err != nil {
 		return nil, fmt.Errorf("cache: auth_context: %w", err)
 	}
 
-	if s.EphemeralEncryptionKey, err = pkgcache.NewGenericCache[jwk.Key](cs, ctx, "apigw_ephemeral_keys", 10*time.Minute, pkgcache.WithDecoder(jwkKeyDecoder)); err != nil {
+	if s.EphemeralEncryptionKey, err = pkgcache.NewGenericCache[jwk.Key](cs, ctx, "apigw_ephemeral_keys", AuthContextTTL, pkgcache.WithDecoder(jwkKeyDecoder)); err != nil {
 		return nil, fmt.Errorf("cache: ephemeral_keys: %w", err)
 	}
 
