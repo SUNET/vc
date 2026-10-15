@@ -6,9 +6,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/pkg/jose"
 
@@ -25,7 +28,30 @@ type KeyBindingExpectations struct {
 
 	// Audience is what the presentation is addressed to. Same rule.
 	Audience string
+
+	// MaxAge is how long after it was signed a proof is still accepted,
+	// and ClockSkew is the tolerance applied at both ends of that window.
+	// Zero means the package defaults below.
+	//
+	// There is no spec value to adopt: SD-JWT VC requires iat and leaves
+	// the window to the Verifier. The defaults suit how the claim is
+	// actually produced - a Holder signs the proof immediately before
+	// sending it, so the gap between iat and arrival is a round trip, not
+	// a user's deliberation.
+	MaxAge    time.Duration
+	ClockSkew time.Duration
+
+	// Now is the moment the window is measured against. Zero means
+	// time.Now, which is what every caller outside a test wants.
+	Now time.Time
 }
+
+// The default freshness window for a Key Binding JWT. See
+// KeyBindingExpectations.MaxAge.
+const (
+	DefaultKeyBindingMaxAge    = 5 * time.Minute
+	DefaultKeyBindingClockSkew = time.Minute
+)
 
 // VerifyKeyBinding checks that an SD-JWT VC presentation was made by the
 // Holder the Credential was issued to, and made for THIS request.
@@ -48,6 +74,13 @@ type KeyBindingExpectations struct {
 //     signed by the same key cannot be replayed as a presentation.
 //   - nonce and aud, which make it this request's presentation rather
 //     than one captured from another.
+//   - iat, which SD-JWT VC requires and which nothing else here was
+//     reading. The parser does not check it by default, and enabling its
+//     check would not be enough either: that only rejects a FUTURE iat,
+//     and treats a missing one - and, through a quirk of NumericDate
+//     parsing, an iat of exactly 0 - as absent and therefore fine. So a
+//     correctly signed proof stamped a decade ago, or carrying no stamp
+//     at all, passed every other check here.
 //   - sd_hash, which binds the proof to the exact SD-JWT and the exact
 //     set of disclosures sent with it - without it, a valid proof could
 //     be re-attached to the same Credential with different claims
@@ -97,6 +130,10 @@ func VerifyKeyBinding(vpToken string, issuerClaims map[string]any, expected KeyB
 	}
 	if aud, _ := claims["aud"].(string); aud != expected.Audience {
 		return errors.New("key binding: the proof is addressed elsewhere")
+	}
+
+	if err := checkIssuedAt(claims, expected); err != nil {
+		return err
 	}
 
 	// sd_hash is over the US-ASCII bytes of everything before the proof,
@@ -215,5 +252,82 @@ func validMethodsFor(key crypto.PublicKey) []string {
 		// which refuses the presentation rather than letting the parser
 		// decide.
 		return nil
+	}
+}
+
+// checkIssuedAt requires iat and places it inside the freshness window.
+//
+// Read out of the claim map rather than through MapClaims.GetIssuedAt,
+// which cannot express what is needed here: it reports a missing claim and
+// an iat of exactly 0 identically, as "no error and no date", so a proof
+// that omits the claim and one that stamps the Unix epoch both look like a
+// proof that simply has nothing to check.
+//
+// Both ends of the window matter, for different reasons. A future stamp
+// means the proof was not made when it says, which is either a broken
+// clock or an attempt to extend a proof's usable life past this check. A
+// stale one means a proof made for an earlier moment is being presented
+// now - the nonce already makes that hard, and this makes it an explicit
+// refusal rather than something the nonce happens to cover.
+func checkIssuedAt(claims jwt.MapClaims, expected KeyBindingExpectations) error {
+	raw, present := claims["iat"]
+	if !present {
+		return errors.New("key binding: the proof carries no iat, which a key binding proof requires")
+	}
+	seconds, ok := numericDateSeconds(raw)
+	if !ok {
+		return fmt.Errorf("key binding: iat is %v, which is not a NumericDate", raw)
+	}
+	issuedAt := time.Unix(seconds, 0)
+
+	now := expected.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	maxAge := expected.MaxAge
+	if maxAge == 0 {
+		maxAge = DefaultKeyBindingMaxAge
+	}
+	skew := expected.ClockSkew
+	if skew == 0 {
+		skew = DefaultKeyBindingClockSkew
+	}
+
+	if issuedAt.After(now.Add(skew)) {
+		return fmt.Errorf("key binding: the proof is stamped %s in the future", issuedAt.Sub(now).Round(time.Second))
+	}
+	if issuedAt.Before(now.Add(-maxAge - skew)) {
+		return fmt.Errorf("key binding: the proof was made %s ago, and this one accepts %s", now.Sub(issuedAt).Round(time.Second), maxAge)
+	}
+	return nil
+}
+
+// numericDateSeconds reads a JWT NumericDate from whatever the JSON decode
+// produced for it. encoding/json gives float64; a decoder set to UseNumber
+// gives json.Number, which is why both are read here rather than only the
+// one this package happens to produce today.
+//
+// A fractional value is truncated rather than refused - RFC 7519 allows a
+// non-integer NumericDate - but a value that is not a number at all is
+// not a date, and a string spelling of one is not either: accepting "17..."
+// would let a proof choose a type the rest of this build does not expect.
+func numericDateSeconds(raw any) (int64, bool) {
+	switch value := raw.(type) {
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return 0, false
+		}
+		return int64(value), true
+	case json.Number:
+		if seconds, err := value.Int64(); err == nil {
+			return seconds, true
+		}
+		asFloat, err := value.Float64()
+		if err != nil || math.IsNaN(asFloat) || math.IsInf(asFloat, 0) {
+			return 0, false
+		}
+		return int64(asFloat), true
+	default:
+		return 0, false
 	}
 }

@@ -465,3 +465,115 @@ func TestSameHTU(t *testing.T) {
 		assert.True(t, SameHTU("not a uri", "not a uri"))
 	})
 }
+
+// IPv6 has many spellings of one address, and the htu comparison has to
+// see through them: a wallet that compressed the endpoint URL it was given
+// was answered with invalid_dpop_proof for a proof naming this very
+// endpoint, and nothing on its side could fix that.
+//
+// The negative cases are the point of the positive ones - a canonicaliser
+// that collapsed everything would pass the first half alone.
+func TestSameHTU_IPv6(t *testing.T) {
+	const endpoint = "https://[2001:db8::1]/token"
+
+	for _, tc := range []struct {
+		name string
+		htu  string
+		want bool
+	}{
+		{name: "identical", htu: "https://[2001:db8::1]/token", want: true},
+		{name: "fully expanded", htu: "https://[2001:0db8:0:0:0:0:0:1]/token", want: true},
+		{name: "expanded with every group padded", htu: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]/token", want: true},
+		{name: "upper case hextets", htu: "https://[2001:DB8::1]/token", want: true},
+		{name: "a partially compressed form", htu: "https://[2001:db8:0:0::1]/token", want: true},
+		{name: "with the default port written out", htu: "https://[2001:db8::1]:443/token", want: true},
+
+		{name: "a different address", htu: "https://[2001:db8::2]/token", want: false},
+		{name: "an address that merely looks similar", htu: "https://[2001:db80::1]/token", want: false},
+		{name: "a different path on the same address", htu: "https://[2001:db8::1]/authorize-challenge", want: false},
+		{name: "a non-default port", htu: "https://[2001:db8::1]:8443/token", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SameHTU(tc.htu, endpoint); got != tc.want {
+				t.Fatalf("SameHTU(%q, %q) = %v, want %v", tc.htu, endpoint, got, tc.want)
+			}
+		})
+	}
+
+	// An IPv4-mapped address and its dotted quad are one address, so they
+	// name one endpoint. RFC 5952 renders the mapped form as the quad,
+	// which is what makes the two agree.
+	if !SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.1/token") {
+		t.Fatal("an IPv4-mapped IPv6 literal names the same endpoint as its dotted quad")
+	}
+	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.2/token") {
+		t.Fatal("different addresses must stay different however they are spelled")
+	}
+}
+
+// RFC 3986 §6.2.2 makes /%74oken and /token one path, and the hex case of
+// an escape insignificant. A wallet that normalized the endpoint URL it
+// was configured with was refused for naming it that way.
+//
+// The refusals matter more than the acceptances here: this is the
+// comparison that keeps a proof for /token from satisfying a request to
+// another endpoint, so only the spellings the RFC calls equal may merge.
+func TestSameHTU_PercentEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		name, htu, endpoint string
+		want                bool
+	}{
+		{
+			name: "an escaped unreserved character is the character",
+			htu:  "https://issuer.example.com/%74oken", endpoint: "https://issuer.example.com/token", want: true,
+		},
+		{
+			name: "lower-case hex in an escape",
+			htu:  "https://issuer.example.com/a%2fb", endpoint: "https://issuer.example.com/a%2Fb", want: true,
+		},
+		{
+			name: "every unreserved class: letters, digits, - . _ ~",
+			htu:  "https://issuer.example.com/%61%31%2D%2E%5F%7E", endpoint: "https://issuer.example.com/a1-._~", want: true,
+		},
+		{
+			name: "both sides escaped differently",
+			htu:  "https://issuer.example.com/%74%6Fken", endpoint: "https://issuer.example.com/to%6ben", want: true,
+		},
+
+		{
+			name: "a reserved escape is NOT a separator",
+			htu:  "https://issuer.example.com/a%2Fb", endpoint: "https://issuer.example.com/a/b", want: false,
+		},
+		{
+			name: "an escaped space is not nothing",
+			htu:  "https://issuer.example.com/to%20ken", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "case still matters once decoded",
+			htu:  "https://issuer.example.com/%54oken", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "dot segments are not removed",
+			htu:  "https://issuer.example.com/a/%2E%2E/token", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "a trailing stray percent is left as written",
+			htu:  "https://issuer.example.com/token%", endpoint: "https://issuer.example.com/token", want: false,
+		},
+		{
+			name: "a non-hex escape is left as written",
+			htu:  "https://issuer.example.com/to%zzken", endpoint: "https://issuer.example.com/token", want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SameHTU(tc.htu, tc.endpoint); got != tc.want {
+				t.Fatalf("SameHTU(%q, %q) = %v, want %v", tc.htu, tc.endpoint, got, tc.want)
+			}
+			// The comparison has to be symmetric: which side a deployment
+			// writes and which a wallet sends is not fixed.
+			if got := SameHTU(tc.endpoint, tc.htu); got != tc.want {
+				t.Fatalf("reversed: SameHTU(%q, %q) = %v, want %v", tc.endpoint, tc.htu, got, tc.want)
+			}
+		})
+	}
+}

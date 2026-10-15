@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -68,8 +69,12 @@ func presentationSigned(t *testing.T, disclosures []string, sdAlg string, method
 	claims := jwt.MapClaims{
 		"nonce":   kbTestNonce,
 		"aud":     kbTestAudience,
+		"iat":     time.Now().Unix(),
 		"sd_hash": base64.RawURLEncoding.EncodeToString(hasher.Sum(nil)),
 	}
+	// Before mutate, so a test can replace or remove it. A fixture that
+	// omitted iat is what let the missing check go unnoticed: every
+	// successful case here was a proof with no issuance time at all.
 	if mutate != nil {
 		mutate(claims)
 	}
@@ -152,6 +157,7 @@ func TestVerifyKeyBindingRefusesAForgedHolderProof(t *testing.T) {
 		other := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 			"nonce":   kbTestNonce,
 			"aud":     kbTestAudience,
+			"iat":     time.Now().Unix(),
 			"sd_hash": base64.RawURLEncoding.EncodeToString(hasher.Sum(nil)),
 		})
 		other.Header["typ"] = "JWT"
@@ -323,4 +329,92 @@ func TestVerifyKeyBindingAcceptsEveryAdvertisedKeyFamily(t *testing.T) {
 		vpToken := presentationSigned(t, disclosures, "sha-256", jwt.SigningMethodES256, holder, nil)
 		assert.Error(t, VerifyKeyBinding(vpToken, issuerClaims, expected))
 	})
+}
+
+// iat is REQUIRED of a key binding proof, and nothing here was reading it.
+//
+// The parser does not check iat by default; enabling its check would not
+// have been enough either, because that only rejects a FUTURE stamp and
+// treats a missing claim as fine. It also cannot see an iat of exactly 0:
+// MapClaims.GetIssuedAt reports the Unix epoch and an absent claim
+// identically, as "no error and no date", which is why this check reads
+// the claim itself.
+func TestVerifyKeyBindingRequiresAFreshIssuedAt(t *testing.T) {
+	holder, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	issuerClaims := issuerClaimsBinding(t, holder)
+	disclosures := []string{"WyJzYWx0IiwiZ2l2ZW5fbmFtZSIsIkFsaWNlIl0"}
+	now := time.Now()
+	expected := KeyBindingExpectations{Nonce: kbTestNonce, Audience: kbTestAudience, Now: now}
+
+	for _, tc := range []struct {
+		name     string
+		iat      any
+		remove   bool
+		contains string // empty means the proof must be accepted
+	}{
+		{name: "signed just now", iat: now.Unix()},
+		{name: "a fractional NumericDate, which RFC 7519 allows", iat: float64(now.Unix()) + 0.5},
+		{name: "inside the window", iat: now.Add(-4 * time.Minute).Unix()},
+		{name: "a little ahead, within the clock skew", iat: now.Add(30 * time.Second).Unix()},
+
+		{name: "absent", remove: true, contains: "carries no iat"},
+		{name: "the Unix epoch, which the parser cannot tell from absent", iat: 0, contains: "was made"},
+		{name: "older than the window", iat: now.Add(-10 * time.Minute).Unix(), contains: "was made"},
+		{name: "a decade old", iat: now.AddDate(-10, 0, 0).Unix(), contains: "was made"},
+		{name: "stamped in the future", iat: now.Add(2 * time.Hour).Unix(), contains: "in the future"},
+		{name: "a string spelling of a date", iat: "1700000000", contains: "not a NumericDate"},
+		{name: "an object", iat: map[string]any{"seconds": 1}, contains: "not a NumericDate"},
+		{name: "a boolean", iat: true, contains: "not a NumericDate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vpToken := presentation(t, disclosures, holder, func(claims jwt.MapClaims) {
+				if tc.remove {
+					delete(claims, "iat")
+					return
+				}
+				claims["iat"] = tc.iat
+			})
+
+			err := VerifyKeyBinding(vpToken, issuerClaims, expected)
+			if tc.contains == "" {
+				assert.NoError(t, err, "a proof inside the freshness window must be accepted")
+				return
+			}
+			assert.ErrorContains(t, err, tc.contains)
+		})
+	}
+}
+
+// The window is the caller's to set, and zero means the package default
+// rather than "no window at all" - a zero-value Expectations must not
+// accept a proof from any moment in history.
+func TestVerifyKeyBindingFreshnessWindowIsConfigurable(t *testing.T) {
+	holder, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	issuerClaims := issuerClaimsBinding(t, holder)
+	disclosures := []string{"WyJzYWx0IiwiZ2l2ZW5fbmFtZSIsIkFsaWNlIl0"}
+	now := time.Now()
+
+	anHourOld := presentation(t, disclosures, holder, func(claims jwt.MapClaims) {
+		claims["iat"] = now.Add(-time.Hour).Unix()
+	})
+
+	assert.ErrorContains(t,
+		VerifyKeyBinding(anHourOld, issuerClaims, KeyBindingExpectations{
+			Nonce: kbTestNonce, Audience: kbTestAudience, Now: now,
+		}), "was made", "the default window is %s, not unbounded", DefaultKeyBindingMaxAge)
+
+	assert.NoError(t,
+		VerifyKeyBinding(anHourOld, issuerClaims, KeyBindingExpectations{
+			Nonce: kbTestNonce, Audience: kbTestAudience, Now: now,
+			MaxAge: 2 * time.Hour,
+		}), "a caller that widened the window must get the wider window")
+
+	// And a caller that leaves Now zero measures against the real clock,
+	// which is what every caller outside a test does.
+	fresh := presentation(t, disclosures, holder, nil)
+	assert.NoError(t, VerifyKeyBinding(fresh, issuerClaims, KeyBindingExpectations{
+		Nonce: kbTestNonce, Audience: kbTestAudience,
+	}))
 }

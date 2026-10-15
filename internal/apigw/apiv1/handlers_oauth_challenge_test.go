@@ -275,6 +275,48 @@ func TestAuthorizationChallenge_PresentationRequestIsSignedAndBoundToTheEndpoint
 	require.NotNil(t, claims["dcql_query"])
 }
 
+// The request the wallet actually receives says that holder binding is
+// required, because this endpoint verifies it.
+//
+// buildIssuanceAuthDCQL sets require_cryptographic_holder_binding to false
+// - that is the browser-mediated flow's behaviour, which does not verify
+// the binding - and the Interactive Authorization request is built from
+// the same query. Without the narrowing in WithInteractiveAuthorization a
+// wallet is invited to select an unbound credential and refused for
+// missing cnf or KB-JWT once it has, after the user has consented.
+//
+// Asserted on the SERVED request object rather than on the helper, so the
+// wiring is covered too: the helper could be correct and this handler
+// still hand out the unnarrowed query.
+func TestAuthorizationChallenge_PresentationRequestRequiresHolderBinding(t *testing.T) {
+	client := newChallengeClient(t)
+
+	challengeErr := challengeErr(t, client, initialChallenge(t))
+
+	var envelope struct {
+		Request string `json:"request"`
+	}
+	require.NoError(t, json.Unmarshal(challengeErr.OpenID4VPRequest, &envelope))
+	require.NotEmpty(t, envelope.Request)
+
+	claims := unsafeJWTClaims(t, envelope.Request)
+	query, ok := claims["dcql_query"].(map[string]any)
+	require.True(t, ok, "the request must carry a dcql_query object")
+	credentials, ok := query["credentials"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, credentials, "a query with no credentials would make this test vacuous")
+
+	for _, entry := range credentials {
+		credential, ok := entry.(map[string]any)
+		require.True(t, ok)
+		id := credential["id"]
+		require.Contains(t, credential, "require_cryptographic_holder_binding",
+			"query %v: the requirement must be stated, not left to a default", id)
+		assert.Equal(t, true, credential["require_cryptographic_holder_binding"],
+			"query %v: this endpoint rejects an unbound credential, so the request must not permit one", id)
+	}
+}
+
 // A wallet that cannot do the interaction this scope needs is told which
 // type is missing, not refused with a generic error.
 func TestAuthorizationChallenge_WalletWithoutThePresentationInteraction(t *testing.T) {

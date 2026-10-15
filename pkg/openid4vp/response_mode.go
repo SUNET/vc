@@ -135,6 +135,11 @@ func (r *RequestObject) WithDCAPIRequest(expectedOrigin string) *RequestObject {
 // the same object - the two channels have to stay the same request seen
 // through different delivery paths.
 //
+// Two differences are this build's rather than the draft's, and both
+// narrow the request to what this endpoint will actually accept: one
+// encryption algorithm rather than two, and a query that requires
+// cryptographic holder binding. See the notes at those lines.
+//
 // responseMode is passed in rather than taken from the constants here
 // because its spelling is configurable (CS01_07); it is expected to be one
 // of ResponseModeIAPost or ResponseModeIAPostJWT, or whatever a deployment
@@ -148,6 +153,11 @@ func (r *RequestObject) WithInteractiveAuthorization(responseMode, expectedOrigi
 		return nil
 	}
 	variant.ResponseMode = responseMode
+
+	// Two differences from the browser's request that are not about
+	// delivery. Both NARROW it, and both exist because this endpoint will
+	// refuse what the browser channel would have accepted - a request
+	// that does not say so is a request that lies to the wallet.
 
 	// Advertise only what this channel will actually accept.
 	//
@@ -170,6 +180,24 @@ func (r *RequestObject) WithInteractiveAuthorization(responseMode, expectedOrigi
 		}
 		variant.ClientMetadata = &metadata
 	}
+
+	// And the query is narrowed the same way, for the same reason.
+	//
+	// The Authorization Challenge Endpoint verifies holder binding: the
+	// whole point of the exchange is to establish WHO is asking for an
+	// issuance, so an unbound credential cannot satisfy it. The query
+	// these requests are built from is shared with the browser channel,
+	// which sets require_cryptographic_holder_binding to false - so
+	// without this the request tells the wallet the binding is optional
+	// and the endpoint then refuses what the wallet was invited to send,
+	// after the user has already consented.
+	//
+	// Narrowing a request rather than widening it: a credential that
+	// satisfies this also satisfies the browser channel's query. The
+	// browser object is not touched, and the two channels still ask for
+	// the same credential - this one says out loud what answering it
+	// requires.
+	variant.DCQLQuery = variant.DCQLQuery.withCryptographicHolderBinding()
 
 	return variant
 }
