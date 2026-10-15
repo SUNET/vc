@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -64,6 +65,23 @@ type VPTokenValidator struct {
 
 	// TransactionData from the Authorization Request (raw base64url strings). When non-empty, the validator checks that the KB-JWT contains matching transaction_data_hashes.
 	TransactionData []string
+
+	// CredentialQueryID is the DCQL credential query id this presentation
+	// answers. When set, only the TransactionData entries whose credential_ids
+	// reference it are checked against this presentation's KB-JWT (see
+	// TransactionDataForCredential for why). Empty means every entry.
+	CredentialQueryID string
+
+	// ResponseModes are the response_mode values the request was issued with.
+	// An EC TS12 KB-JWT must echo one of them; empty means the claim cannot
+	// be checked, which refuses an SCA presentation.
+	ResponseModes []string
+
+	// PresentedJTI is an output: after a successful Validate of an EC TS12
+	// SCA presentation it holds the KB-JWT jti. It is empty when no SCA entry
+	// applied. The caller must claim it in a JTIStore after issuer
+	// authentication and treat a non-empty value it cannot claim as a refusal.
+	PresentedJTI string
 
 	// MaxKeyBindingAge bounds how old a Key Binding JWT's iat may be.
 	// Zero means defaultMaxKeyBindingAge.
@@ -384,10 +402,31 @@ func (v *VPTokenValidator) validateAudience(parsed *sdjwtvc.ParsedCredential) er
 }
 
 // validateTransactionData verifies that the KB-JWT contains transaction_data_hashes
-// that match the TransactionData from the authorization request per OpenID4VP §8.4.
+// that match the TransactionData from the authorization request per OpenID4VP
+// Appendix B.3.3.1 and, when an entry is an EC TS12 SCA type, the TS12 v1.0.1
+// section 3.6 claims. Every failure is invalid_transaction_data: a response
+// this cannot positively match to what was sent is refused.
 func (v *VPTokenValidator) validateTransactionData(parsed *sdjwtvc.ParsedCredential) error {
 	if len(parsed.KeyBinding) == 0 {
 		return fmt.Errorf("no key binding found for transaction data validation")
+	}
+
+	entries, err := decodeTransactionData(v.TransactionData)
+	if err != nil {
+		return txError("%v", err)
+	}
+	if v.CredentialQueryID != "" {
+		scoped := entries[:0:0]
+		for _, e := range entries {
+			if slices.Contains(e.CredentialIDs, v.CredentialQueryID) {
+				scoped = append(scoped, e)
+			}
+		}
+		entries = scoped
+	}
+	if len(entries) == 0 {
+		// Nothing in the request is bound to this credential.
+		return nil
 	}
 
 	kbJWT := strings.Join(parsed.KeyBinding, ".")
@@ -396,58 +435,53 @@ func (v *VPTokenValidator) validateTransactionData(parsed *sdjwtvc.ParsedCredent
 		return fmt.Errorf("failed to parse key binding JWT: %w", err)
 	}
 
-	// Extract transaction_data_hashes_alg
-	hashAlg, ok := kbClaims["transaction_data_hashes_alg"].(string)
-	if !ok || hashAlg == "" {
-		return &ErrorResponse{
-			ErrorCode:        ErrorInvalidTransactionData,
-			ErrorDescription: "transaction_data_hashes_alg missing from KB-JWT",
+	// transaction_data_hashes_alg: a STRING in the KB-JWT. REQUIRED when the
+	// request carried a list; the sha-256 default applies when it did not.
+	allowed := allowedHashAlgs(entries)
+	hashAlg := TransactionDataHashAlgDefault
+	if claim, present := kbClaims["transaction_data_hashes_alg"]; present {
+		s, ok := claim.(string)
+		if !ok || s == "" {
+			return txError("transaction_data_hashes_alg in KB-JWT must be a string")
 		}
+		hashAlg = s
+	} else if slices.ContainsFunc(entries, func(e decodedTransactionData) bool { return e.HasAlgList }) {
+		return txError("transaction_data_hashes_alg missing from KB-JWT")
+	}
+	if !slices.Contains(allowed, hashAlg) {
+		return txError("transaction_data_hashes_alg %q is not one the request allowed", hashAlg)
 	}
 
-	// Extract transaction_data_hashes array
 	hashesRaw, ok := kbClaims["transaction_data_hashes"].([]any)
 	if !ok || len(hashesRaw) == 0 {
-		return &ErrorResponse{
-			ErrorCode:        ErrorInvalidTransactionData,
-			ErrorDescription: "transaction_data_hashes missing from KB-JWT",
-		}
+		return txError("transaction_data_hashes missing from KB-JWT")
+	}
+	if len(hashesRaw) != len(entries) {
+		return txError("transaction_data_hashes count mismatch: expected %d, got %d", len(entries), len(hashesRaw))
 	}
 
-	expectedCount := len(v.TransactionData)
-
-	if len(hashesRaw) != expectedCount {
-		return &ErrorResponse{
-			ErrorCode:        ErrorInvalidTransactionData,
-			ErrorDescription: fmt.Sprintf("transaction_data_hashes count mismatch: expected %d, got %d", expectedCount, len(hashesRaw)),
-		}
+	raws := make([]string, len(entries))
+	for i, e := range entries {
+		raws[i] = e.Raw
 	}
-
-	// Re-compute expected hashes from the original transaction data
-	expectedHashes, err := HashTransactionData(v.TransactionData, hashAlg)
+	// Over the strings as sent, never a re-encoding of a decoded object.
+	expectedHashes, err := HashTransactionData(raws, hashAlg)
 	if err != nil {
-		return &ErrorResponse{
-			ErrorCode:        ErrorInvalidTransactionData,
-			ErrorDescription: fmt.Sprintf("unsupported transaction_data_hashes_alg %q: %v", hashAlg, err),
-		}
+		return txError("unsupported transaction_data_hashes_alg %q: %v", hashAlg, err)
 	}
-
 	for i, raw := range hashesRaw {
 		got, ok := raw.(string)
 		if !ok {
-			return &ErrorResponse{
-				ErrorCode:        ErrorInvalidTransactionData,
-				ErrorDescription: fmt.Sprintf("transaction_data_hashes[%d] is not a string", i),
-			}
+			return txError("transaction_data_hashes[%d] is not a string", i)
 		}
 		if got != expectedHashes[i] {
-			return &ErrorResponse{
-				ErrorCode:        ErrorInvalidTransactionData,
-				ErrorDescription: fmt.Sprintf("transaction_data_hashes[%d] mismatch", i),
-			}
+			return txError("transaction_data_hashes[%d] mismatch", i)
 		}
 	}
 
+	if slices.ContainsFunc(entries, func(e decodedTransactionData) bool { return strings.HasPrefix(e.Type, TS12TypePrefix) }) {
+		return v.validateTS12Claims(kbClaims)
+	}
 	return nil
 }
 
