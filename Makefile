@@ -575,6 +575,38 @@ build-wallet: bbs-native-lib-ensure ## Build wallet test tool
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
 
+# The circuit_zk planner vectors are the shared conformance set, vendored
+# from siros-dc-matcher so the suite does not depend on the network. A
+# vendored snapshot goes stale silently - if the request shape moves, the
+# tests keep passing against the old one - so refreshing is a command
+# rather than a note in a file somebody has to find.
+#
+# MATCHER=/path/to/siros-dc-matcher to point at a different checkout.
+MATCHER ?= ../siros-dc-matcher
+vendor-circuit-zk-vectors: ## Refresh the vendored circuit_zk conformance vectors
+	$(info Refreshing circuit_zk vectors from $(MATCHER))
+	@test -d "$(MATCHER)/crates/siros-dc-matcher-core/tests/vectors/circuit_zk" || \
+		{ echo "no matcher checkout at $(MATCHER); set MATCHER=<path>"; exit 1; }
+# The SOURCE file names a commit as the provenance of these vectors, so the
+# files copied have to BE that commit. Copying from a dirty or
+# partially-untracked working tree records a commit that cannot reproduce
+# them, which is a provenance claim that is simply false - and the vectors
+# are the authority this package settles wire-shape questions against.
+	@cd "$(MATCHER)" && git diff --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has uncommitted changes under tests/vectors/circuit_zk; commit or stash them first"; exit 1; }
+	@cd "$(MATCHER)" && git diff --cached --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has staged changes under tests/vectors/circuit_zk; commit them first"; exit 1; }
+	@cd "$(MATCHER)" && test -z "$$(git ls-files --others --exclude-standard -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk)" || \
+		{ echo "$(MATCHER) has untracked files under tests/vectors/circuit_zk; commit or remove them first"; exit 1; }
+	@rm -f pkg/openid4vp/testdata/circuit_zk/*.json
+	@cp "$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/*.json \
+		"$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/README.md \
+		pkg/openid4vp/testdata/circuit_zk/
+	@cd "$(MATCHER)" && git rev-parse HEAD > /dev/null
+	@sed -i.bak "s|^commit .*|commit $$(cd "$(MATCHER)" && git rev-parse HEAD) ($$(cd "$(MATCHER)" && git describe --tags --always))|" \
+		pkg/openid4vp/testdata/circuit_zk/SOURCE && rm -f pkg/openid4vp/testdata/circuit_zk/SOURCE.bak
+	@echo "Vendored $$(ls pkg/openid4vp/testdata/circuit_zk/*.json | wc -l) vectors; review the diff before committing"
+
 build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 	$(info Building check_issuer_jwks)
 	$(eval CHECK_ISSUER_JWKS_VERSION := $(or $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//'),dev))

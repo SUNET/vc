@@ -1,0 +1,14 @@
+{
+  "description": "req is an empty array.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": []
+  },
+  "expect": {
+    "error": "req_missing_or_empty"
+  }
+}

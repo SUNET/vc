@@ -1,0 +1,22 @@
+{
+  "description": "2023-02-29 does not exist (not a leap year).",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "h",
+        "params": {
+          "le": "2023-02-29"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "param_invalid_full_date"
+  }
+}

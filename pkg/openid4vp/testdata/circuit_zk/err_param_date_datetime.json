@@ -1,0 +1,22 @@
+{
+  "description": "A date-time is not a full-date.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "h",
+        "params": {
+          "le": "2026-01-01T00:00:00Z"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "param_invalid_full_date"
+  }
+}

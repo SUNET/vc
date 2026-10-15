@@ -1,0 +1,22 @@
+{
+  "description": "ge is not YYYY-MM-DD.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "h",
+        "params": {
+          "ge": "10/10/2008"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "param_invalid_full_date"
+  }
+}
