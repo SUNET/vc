@@ -10,9 +10,13 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// browserHost serialises a hostname the way a URL parser in a browser
+// BrowserHost serialises a hostname the way a URL parser in a browser
 // does: UTS #46 ToASCII with the flags the WHATWG URL Standard specifies
 // for a non-strict parse.
+//
+// Exported because pkg/oauth2 compares DPoP htu values against configured
+// endpoints and has to reach the same spelling a browser would. Two
+// profiles for one question are two answers waiting to disagree.
 //
 // MapForLookup turns on StrictDomainName and ValidateLabels (and with them
 // CheckHyphens), which is right for a resolver and wrong here - a browser
@@ -21,7 +25,7 @@ import (
 // no comparison could ever match. So those three are turned back off
 // after it, and the bidi and joiner checks, which a browser does apply,
 // are kept.
-var browserHost = idna.New(
+var BrowserHost = idna.New(
 	idna.MapForLookup(),
 	idna.BidiRule(),
 	idna.StrictDomainName(false),
@@ -99,7 +103,7 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		// "１２７.0.0.1" was refused while "１２７.0.0.１" and "１２７.０.０.１"
 		// were accepted as "https://127.0.0.1". Those are one host, and a
 		// browser reports the same origin for all three.
-		host, err = browserHost.ToASCII(host)
+		host, err = BrowserHost.ToASCII(host)
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}

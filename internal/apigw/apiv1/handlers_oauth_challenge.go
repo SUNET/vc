@@ -217,6 +217,7 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	oauthClient, err := c.authenticateOAuthClient(ctx, &walletClientAuth{
 		ClientID:             req.ClientID,
 		RedirectURI:          req.RedirectURI,
+		RedirectOptional:     true,
 		Scope:                req.Scope,
 		ClientAttestation:    req.ClientAttestation,
 		ClientAttestationPoP: req.ClientAttestationPoP,
