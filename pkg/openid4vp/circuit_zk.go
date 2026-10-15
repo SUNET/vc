@@ -552,13 +552,23 @@ func yamlExtra(unmarshal func(any) error, what string, known ...string) (map[str
 	// params and rounding these would be a distinction with no basis.
 	var tree yamlValue
 	if err := unmarshal(&tree); err != nil {
-		// Either not a mapping at all - the typed decode above has
-		// already reported whatever is wrong with it - or one of
-		// yamlValue's own refusals, which is worth reporting.
-		if isUnrepresentableScalar(err) {
-			return nil, err
-		}
-		return nil, nil
+		// EVERY error, not just yamlValue's own refusals.
+		//
+		// This used to swallow anything else on the reasoning that the
+		// typed decode above had already reported it. That is true of a
+		// node which is not a mapping - and nothing else. A structural
+		// fault the typed decode simply IGNORES, such as a sequence used
+		// as a map key under an unknown member, reaches here as a real
+		// error, and discarding it discarded the whole extension bag
+		// with it: a metadata block carrying fn_id, input and one
+		// malformed sibling loaded with NO extensions at all, silently,
+		// and the verifier sent different metadata than was configured.
+		//
+		// The not-a-mapping case needs no special handling here: it is
+		// refused by the typed decode before this function is called,
+		// and if it ever did arrive the type assertion below returns it
+		// as "no extensions" without an error.
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	all, ok := tree.value.(map[any]any)
 	if !ok {

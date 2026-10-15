@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
@@ -169,6 +170,12 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 		if rawErr != nil {
 			return fmt.Errorf("credential query: %w", err)
 		}
+		// On the NORMALISED bytes, which is what will be emitted and
+		// what a wallet will read. A template is as capable of naming a
+		// constraint twice, or in the wrong case, as a JSON request is.
+		if checkErr := checkRawConstraints(raw); checkErr != nil {
+			return checkErr
+		}
 		fallback := CredentialQuery{Raw: raw}
 		if _, invalid := fallback.adoptRawShadowReporting(); len(invalid) > 0 {
 			// A member of the right JSON kind that the model still
@@ -212,6 +219,13 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 		return encErr
 	}
 	if !jsonShapeEquivalent(original, reencoded) {
+		// The second YAML route to Raw, and the same guard. Missing it
+		// here was the whole of the first fix's incompleteness: a
+		// template with a case-aliased constraint takes THIS path, not
+		// the decode-failure one above.
+		if err := checkRawConstraints(original); err != nil {
+			return err
+		}
 		fallback := CredentialQuery{Raw: original}
 		fallback.adoptRawShadow()
 		*q = fallback
@@ -1248,7 +1262,7 @@ func validateClaimValues(values []any, present bool) error {
 			// imposing one here would be this validator inventing a rule
 			// the specification does not have - and rejecting the very
 			// values the exact-JSON copy exists to preserve.
-			if !isIntegerLiteral(t.String()) {
+			if !isIntegralNumber(t.String()) {
 				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 			}
 		case float32:
@@ -1266,15 +1280,34 @@ func validateClaimValues(values []any, present bool) error {
 	return nil
 }
 
-// isIntegerLiteral reports whether a JSON number literal spells an
-// integer: an optional minus and then digits, with no fraction and no
-// exponent.
+// isIntegralNumber reports whether a JSON number literal denotes an
+// integer - its VALUE, not its spelling.
 //
-// Read as text on purpose. Parsing it to decide would reintroduce the
-// very limit this exists to avoid; the point is that the literal is kept
-// whole, however long it is.
-func isIntegerLiteral(literal string) bool {
-	digits := strings.TrimPrefix(literal, "-")
+// 10, 10.0 and 1e1 are all the integer ten, and a validator that accepts
+// only the first changes what an ordinary SD-JWT or mdoc query may say.
+// An earlier version of this tested the spelling and did exactly that.
+//
+// Decided on the digits rather than by parsing to a number, because
+// parsing is what this exists to avoid: a float64 cannot hold
+// 9007199254740993, and that value is the reason the exact copy exists.
+//
+// A literal is digits x 10^(exp - len(frac)). Shift the point right by
+// that exponent: if it lands at or past the end of the digits the value
+// is an integer, and if it lands inside them the digits it would cut
+// have to be zeros.
+func isIntegralNumber(literal string) bool {
+	mantissa, exponent := literal, 0
+	if i := strings.IndexAny(literal, "eE"); i >= 0 {
+		parsed, err := strconv.Atoi(literal[i+1:])
+		if err != nil {
+			return false
+		}
+		mantissa, exponent = literal[:i], parsed
+	}
+	mantissa = strings.TrimPrefix(strings.TrimPrefix(mantissa, "-"), "+")
+
+	whole, fraction, _ := strings.Cut(mantissa, ".")
+	digits := whole + fraction
 	if digits == "" {
 		return false
 	}
@@ -1283,7 +1316,26 @@ func isIntegerLiteral(literal string) bool {
 			return false
 		}
 	}
-	return true
+	// Zero is an integer however it is spelled, including 0e-5.
+	if strings.Trim(digits, "0") == "" {
+		return true
+	}
+
+	// A nonzero value whose every significant digit falls to the right of
+	// the point is not an integer. Deciding that on the exponent alone
+	// keeps the arithmetic below away from the ends of the int range: a
+	// literal may carry an exponent as extreme as math.MinInt64, where
+	// negating the shift wraps round to a negative cut that panics the
+	// slice, and subtracting the fraction length wraps the other way and
+	// reports a fraction as integral.
+	if exponent <= len(fraction)-len(digits) {
+		return false
+	}
+	shift := exponent - len(fraction)
+	if shift >= 0 {
+		return true
+	}
+	return strings.Trim(digits[len(digits)+shift:], "0") == ""
 }
 
 func checkIntegralFloat(f float64, i int) error {

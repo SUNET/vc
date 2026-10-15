@@ -282,3 +282,68 @@ func TestRawPathStillCarriesUnmodelledMembers(t *testing.T) {
 		})
 	}
 }
+
+// A claim value is judged on what the number IS, not how it is spelled.
+//
+// 10, 10.0 and 1e1 are the same integer, and ordinary SD-JWT and mdoc
+// queries use all three. An earlier version of this check tested the
+// spelling and rejected the last two - a regression for every query that
+// did not happen to write its integers the shortest way.
+//
+// Decided on the digits rather than by parsing, because parsing is what
+// the exact-copy work exists to avoid: a float64 cannot hold
+// 9007199254740993.
+func TestClaimValuesAreJudgedByValueNotSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		literal string
+		ok      bool
+	}{
+		{"10", true},
+		{"10.0", true},
+		{"10.000", true},
+		{"1e1", true},
+		{"1E1", true},
+		{"1.5e1", true},  // 15
+		{"-1.5e1", true}, // -15
+		{"1e+2", true},   // 100
+		{"0", true},
+		{"0.0", true},
+		{"0e-5", true}, // zero is an integer however it is spelled
+		{"9007199254740993", true},
+		{"123456789012345678901234567890", true},
+		{"-9007199254740993", true},
+
+		{"1.5", false},
+		{"1e-1", false},   // 0.1
+		{"1.55e1", false}, // 15.5
+		{"0.001", false},
+		{"1e-20", false},
+
+		// An exponent may sit at the very end of the int range. Both of
+		// these are nonzero magnitudes far below one, so neither is an
+		// integer - but reaching that answer by negating the shift wraps
+		// to a negative cut and panics the slice, and reaching it by
+		// subtracting the fraction length wraps the other way and calls a
+		// fraction integral.
+		{"1e-9223372036854775808", false},
+		{"1.0e-9223372036854775808", false},
+	} {
+		t.Run(tc.literal, func(t *testing.T) {
+			body := `{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},` +
+				`"claims":[{"path":["a"],"values":[` + tc.literal + `]}]}`
+			var q CredentialQuery
+			err := json.Unmarshal([]byte(body), &q)
+			if tc.ok {
+				require.NoError(t, err, "%s is an integer", tc.literal)
+
+				// And it goes out as it came in: judging the literal must
+				// not mean rewriting it.
+				encoded, mErr := json.Marshal(q)
+				require.NoError(t, mErr)
+				assert.Contains(t, string(encoded), tc.literal)
+				return
+			}
+			require.Error(t, err, "%s is not an integer", tc.literal)
+		})
+	}
+}
