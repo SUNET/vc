@@ -269,3 +269,67 @@ func TestBuiltDeviceMACPayloadIsCBORNull(t *testing.T) {
 	assert.Equal(t, []byte{0xf6}, []byte(elements[2]),
 		"the payload must be CBOR null; the detached content is DeviceAuthenticationBytes")
 }
+
+// Normalising on the VERIFICATION path is a bypass: the verifier must
+// reconstruct from exactly what the presentation carries, never from a
+// tidied-up version of it.
+//
+// Both encoding helpers replaced a non-nil empty namespace content (h”)
+// with the encoded empty map (h'a0'). extractDeviceNameSpacesBytes passes
+// the tag content through unchanged, so an attacker could rewrite a
+// presentation's namespaces from h'a0' to h” and the verifier would
+// rebuild the ORIGINAL authenticated bytes and report success on a message
+// that had been modified.
+func TestMutatedEmptyNamespacesAreRefused(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	sessionKey := make([]byte, 32)
+	_, err = rand.Read(sessionKey)
+	require.NoError(t, err)
+
+	transcript := testSessionTranscript()
+	encoder, err := NewCBOREncoder()
+	require.NoError(t, err)
+	namespaces, err := encoder.Marshal(map[string]any{})
+	require.NoError(t, err)
+	verifier := NewDeviceAuthVerifier(transcript, DocType)
+
+	for _, tc := range []struct {
+		name  string
+		build func() ([]byte, error)
+	}{
+		{"conformant", func() ([]byte, error) {
+			return buildDeviceAuthenticationBytes(transcript, DocType, namespaces)
+		}},
+		{"legacy", func() ([]byte, error) {
+			return buildLegacyDeviceAuthenticationBytes(transcript, DocType, namespaces)
+		}},
+	} {
+		t.Run(tc.name+" signature", func(t *testing.T) {
+			authBytes, err := tc.build()
+			require.NoError(t, err)
+			sign1, err := Sign1Detached(authBytes, key, AlgorithmES256, nil, nil)
+			require.NoError(t, err)
+
+			// The mutation: h'a0' becomes h''.
+			mutated := &DeviceSignedMdoc{NameSpaces: cbor.Tag{Number: 24, Content: []byte{}}}
+			mutated.DeviceAuth.DeviceSignature = []any{sign1.Protected, sign1.Unprotected, nil, sign1.Signature}
+
+			assert.Error(t, verifier.VerifySignature(mutated, &key.PublicKey),
+				"a presentation whose authenticated namespaces were rewritten must not verify")
+		})
+
+		t.Run(tc.name+" MAC", func(t *testing.T) {
+			authBytes, err := tc.build()
+			require.NoError(t, err)
+			mac0, err := Mac0(authBytes, sessionKey, AlgorithmHMAC256, nil)
+			require.NoError(t, err)
+
+			mutated := &DeviceSignedMdoc{NameSpaces: cbor.Tag{Number: 24, Content: []byte{}}}
+			mutated.DeviceAuth.DeviceMac = []any{mac0.Protected, mac0.Unprotected, nil, mac0.Tag}
+
+			assert.Error(t, verifier.VerifyMAC(mutated, sessionKey),
+				"same mutation, same refusal, on the MAC path")
+		})
+	}
+}

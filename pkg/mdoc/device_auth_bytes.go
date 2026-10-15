@@ -40,10 +40,9 @@ func buildDeviceAuthenticationBytes(sessionTranscript []byte, docType string, de
 	if err != nil {
 		return nil, err
 	}
-	if len(deviceNameSpaces) == 0 {
-		if deviceNameSpaces, err = encoder.Marshal(map[string]any{}); err != nil {
-			return nil, fmt.Errorf("encoding empty device namespaces: %w", err)
-		}
+	deviceNameSpaces, err = normaliseDeviceNameSpaces(encoder, deviceNameSpaces)
+	if err != nil {
+		return nil, err
 	}
 	if len(sessionTranscript) == 0 {
 		return nil, fmt.Errorf("device authentication needs a session transcript")
@@ -92,10 +91,9 @@ func buildLegacyDeviceAuthenticationBytes(sessionTranscript []byte, docType stri
 	if err != nil {
 		return nil, err
 	}
-	if len(deviceNameSpaces) == 0 {
-		if deviceNameSpaces, err = encoder.Marshal(map[string]any{}); err != nil {
-			return nil, err
-		}
+	deviceNameSpaces, err = normaliseDeviceNameSpaces(encoder, deviceNameSpaces)
+	if err != nil {
+		return nil, err
 	}
 	return encoder.Marshal([]any{
 		"DeviceAuthentication",
@@ -103,4 +101,34 @@ func buildLegacyDeviceAuthenticationBytes(sessionTranscript []byte, docType stri
 		docType,
 		deviceNameSpaces,
 	})
+}
+
+// normaliseDeviceNameSpaces supplies the encoded empty map when a caller
+// has no namespaces, and refuses a present-but-empty one.
+//
+// nil and h” are different things here, and the difference is a bypass.
+// nil is a BUILDER saying it has no namespaces to disclose. h” comes from
+// a PRESENTATION, via extractDeviceNameSpacesBytes, which passes the tag
+// content through unchanged - and substituting the encoded empty map for
+// it would reconstruct bytes the presentation does not carry. An attacker
+// rewriting a presentation's namespaces from h'a0' to h” would then have
+// the verifier rebuild the ORIGINAL authenticated bytes and report
+// success on a message that had been modified.
+//
+// So the empty map is supplied only for an absent value, and a present
+// empty one is refused: h” is not a DeviceNameSpaces encoding under any
+// reading.
+func normaliseDeviceNameSpaces(encoder *CBOREncoder, deviceNameSpaces []byte) ([]byte, error) {
+	if deviceNameSpaces == nil {
+		encoded, err := encoder.Marshal(map[string]any{})
+		if err != nil {
+			return nil, fmt.Errorf("encoding empty device namespaces: %w", err)
+		}
+		return encoded, nil
+	}
+	if len(deviceNameSpaces) == 0 {
+		return nil, fmt.Errorf("device namespaces are present but empty, which is not a DeviceNameSpaces encoding; " +
+			"reconstructing from a substituted value would authenticate bytes the presentation does not carry")
+	}
+	return deviceNameSpaces, nil
 }
