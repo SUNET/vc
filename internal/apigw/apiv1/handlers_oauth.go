@@ -684,8 +684,16 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			AuthProvider:         authorizationContext.AuthProvider,
 			Identifier:           authorizationContext.Identifier,
 			DataSource:           authorizationContext.DataSource,
-			Token:                tokenDoc,
-			RefreshToken:         refreshToken,
+			// Carried for the same reason Identifier and DataSource are:
+			// issuance reads it from the context it is handed. The
+			// DOCUMENT is fetched through docLookupSessionID, which
+			// follows SourceSessionID back to the parent - so without
+			// this the child gets the parent's document and none of the
+			// provenance describing it, and a derivation is free to
+			// overwrite a claim the holder actually proved.
+			PresentedClaims: authorizationContext.PresentedClaims,
+			Token:           tokenDoc,
+			RefreshToken:    refreshToken,
 		}
 		if refreshToken != "" {
 			childSession.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()

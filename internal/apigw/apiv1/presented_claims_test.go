@@ -2,6 +2,9 @@ package apiv1
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"testing"
 	"time"
@@ -389,4 +392,68 @@ func TestPresentedClaimsPersistenceCarriesTheIdentifier(t *testing.T) {
 		require.Equal(t, "mapping-1", back.Identifier,
 			"and the identity just resolved must survive the replace")
 	})
+}
+
+// A pre-authorized child session must carry the provenance.
+//
+// The child is built FIELD BY FIELD, and the document it issues from is
+// fetched through docLookupSessionID, which follows SourceSessionID back
+// to the parent. A child missing PresentedClaims therefore gets the
+// parent's document and none of the provenance describing it: issuance
+// reads an empty list and a derivation is free to overwrite a claim the
+// holder proved, in exactly the flow that issues to several clients.
+//
+// Checked against the SOURCE rather than a hand-built child. A test that
+// assembles the struct itself passes whatever production does, which is
+// the one thing worth knowing here - the risk is a field-by-field copy
+// quietly omitting a field, and only the real literal can show that.
+func TestChildSessionLiteralCarriesPresentedClaims(t *testing.T) {
+	const source = "handlers_oauth.go"
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, source, nil, parser.SkipObjectResolution)
+	require.NoError(t, err)
+
+	var found, carries bool
+	ast.Inspect(file, func(n ast.Node) bool {
+		composite, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		selector, ok := composite.Type.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "AuthorizationContext" {
+			return true
+		}
+		// The child is the one that points back at a parent.
+		var isChild bool
+		for _, element := range composite.Elts {
+			kv, ok := element.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "SourceSessionID" {
+				isChild = true
+			}
+		}
+		if !isChild {
+			return true
+		}
+		found = true
+		for _, element := range composite.Elts {
+			kv, ok := element.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "PresentedClaims" {
+				carries = true
+			}
+		}
+		return true
+	})
+
+	// Fail closed: a guard that found nothing to check proves nothing.
+	require.True(t, found, "no child AuthorizationContext literal found in %s; this guard is not looking at anything", source)
+	require.True(t, carries,
+		"the child session literal in %s must set PresentedClaims, or issuance from a pre-authorized child reads an empty provenance and derivations overwrite verified claims",
+		source)
 }
