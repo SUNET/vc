@@ -9,6 +9,7 @@ import {
 import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
+import { reqSchema } from "./req-schema.js";
 import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
@@ -144,14 +145,10 @@ const metadataResponseSchema = v.object({
             // query in that format discloses nothing - every value comes
             // from a function named here - so a stripped req asks the
             // wallet for nothing and gets nothing back, which reads as a
-            // wallet fault. params is an open map (looseObject below keeps
-            // the item's own extras too): its contents are inputs to a
-            // proof and are passed through exactly as configured.
-            req: v.optional(v.array(v.looseObject({
-                id: v.string(),
-                return: v.string(),
-                params: v.optional(v.record(v.string(), v.any())),
-            }))),
+            // wallet fault. Its params are inputs to a proof and are
+            // passed through exactly as configured; see req-schema.js for
+            // why this validates without rebuilding them.
+            req: v.optional(reqSchema),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
                 path: v.array(v.string()),
@@ -185,11 +182,10 @@ const dcqlQueryCredentialSchema = v.object({
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
-    req: v.optional(v.array(v.looseObject({
-        id: v.string(),
-        return: v.string(),
-        params: v.optional(v.record(v.string(), v.any())),
-    }))),
+    // The same schema as the metadata one above, and the same reason:
+    // this is the query that is actually posted, so a parameter dropped
+    // here never reaches the wallet at all.
+    req: v.optional(reqSchema),
 });
 
 const credentialSetQuerySchema = v.object({
