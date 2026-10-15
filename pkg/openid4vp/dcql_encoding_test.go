@@ -198,3 +198,87 @@ func TestMultipleRoundTripsAbsentFalseAndTrue(t *testing.T) {
 		})
 	}
 }
+
+// A constraint this verifier reads one way and a wallet reads another is
+// not a request to sign, and reaching the Raw path must not be a way past
+// that rule.
+//
+// The duplicate check ran only after a SUCCESSFUL typed decode. An
+// unmodelled member - `"req": {}` - made the decode fail, the query went
+// raw, and the check never ran: the shadow still reported the last meta's
+// constraint, so validation passed, while the request was emitted with
+// BOTH metas. A first-wins wallet reads the empty one and is handed an
+// unconstrained SD-JWT request.
+//
+// Case is the same hole by another route. encoding/json matches field
+// names case-insensitively, so "VCT_VALUES" populates MetaQuery.VCTValues
+// and the shadow reports a constraint - while the signed bytes carry a
+// member name no conformant wallet reads.
+func TestRawPathIsNotAWayPastTheConstraintChecks(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{
+			name: "duplicate meta, reached through an unmodelled member",
+			body: `{"id":"q","format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]},"req":{}}`,
+			want: "named more than once",
+		},
+		{
+			name: "duplicate meta, reached through object-valued claims",
+			body: `{"id":"q","format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]},"claims":{}}`,
+			want: "named more than once",
+		},
+		{
+			name: "duplicate format, same route",
+			body: `{"id":"q","format":"dc+sd-jwt","format":"mso_mdoc","meta":{},"req":{}}`,
+			want: "named more than once",
+		},
+		{
+			name: "a case-aliased constraint inside meta",
+			body: `{"id":"q","format":"dc+sd-jwt","meta":{"VCT_VALUES":["urn:x"]}}`,
+			want: "differs only in case",
+		},
+		{
+			name: "a case-aliased meta itself",
+			body: `{"id":"q","format":"dc+sd-jwt","META":{"vct_values":["urn:x"]}}`,
+			want: "differs only in case",
+		},
+		{
+			name: "a case-aliased doctype_value",
+			body: `{"id":"q","format":"mso_mdoc","meta":{"DocType_Value":"org.iso.18013.5.1.mDL"}}`,
+			want: "differs only in case",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var q CredentialQuery
+			err := json.Unmarshal([]byte(tc.body), &q)
+			require.Error(t, err, "this request must not be readable; it decoded to %#v", q)
+			assert.Contains(t, err.Error(), tc.want)
+
+			// And the explicit constructor refuses it too, so neither
+			// entrance can produce one.
+			_, cerr := NewRawCredentialQuery(json.RawMessage(tc.body))
+			require.Error(t, cerr)
+			assert.Contains(t, cerr.Error(), tc.want)
+		})
+	}
+}
+
+// And the rule is narrow: an unmodelled member on its own is exactly what
+// the raw path is for, and an exactly-spelled constraint beside it is
+// still read and still emitted as it arrived.
+func TestRawPathStillCarriesUnmodelledMembers(t *testing.T) {
+	for _, body := range []string{
+		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"req":{}}`,
+		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"claims":{}}`,
+		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"],"future_member":1}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			var q CredentialQuery
+			require.NoError(t, json.Unmarshal([]byte(body), &q),
+				"an unmodelled member is the point of the raw path")
+
+			encoded, err := json.Marshal(q)
+			require.NoError(t, err)
+			assert.JSONEq(t, body, string(encoded), "and it goes out as it came in")
+		})
+	}
+}
