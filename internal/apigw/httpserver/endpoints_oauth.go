@@ -88,6 +88,87 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 	return reply, nil
 }
 
+// endpointOAuthAuthorizationChallenge is the Authorization Challenge
+// Endpoint (OpenID4VCI 1.1 Interactive Authorization).
+//
+// It renders *apiv1.AuthorizationChallengeError itself rather than handing
+// it to the shared error renderer: the Interaction Required Response is a
+// 403 whose body carries the whole next step of the flow -
+// interaction_type_required, auth_session and the OpenID4VP request - and a
+// renderer that only knows error/error_description would drop all three.
+func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOAuthAuthorizationChallenge")
+	defer span.End()
+
+	request := &apiv1.AuthorizationChallengeRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "binding error")
+		// A body this endpoint cannot read is a malformed REQUEST, and a
+		// wallet is entitled to be told so in the protocol's own terms.
+		// Returned bare, the binding failure went to the generic renderer
+		// and came back as {"error":{"title":"internal_server_error"}} -
+		// a 400 whose body blames the server, in a shape no OAuth client
+		// parses (RFC 6749 §5.2).
+		//
+		// The description is the fixed one. A binding error quotes the
+		// input it could not read, and echoing that into the response
+		// would reflect attacker-controlled bytes back; the cause is
+		// carried for the log instead.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+			"the request body could not be read as an authorization challenge request",
+			http.StatusBadRequest, err)
+	}
+
+	// draft-ietf-oauth-attestation-based-client-auth §3.1, and RFC 9449 §4
+	// for the DPoP proof that binds the auth_session.
+	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
+	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+	request.DPOP = c.GetHeader("DPoP")
+
+	// Every response from this endpoint carries an authorization code or
+	// the material for one - draft-ietf-oauth-first-party-apps §5.2 says
+	// no-store, and so does every example in OpenID4VCI 1.1.
+	c.Header("Cache-Control", "no-store")
+
+	reply, err := s.apiv1.OAuthAuthorizationChallenge(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		var challengeErr *apiv1.AuthorizationChallengeError
+		if errors.As(err, &challengeErr) {
+			c.AbortWithStatusJSON(challengeErr.HTTPStatus, challengeErr)
+			return nil, nil
+		}
+		s.log.Error(err, "authorization challenge error")
+
+		// Anything not already typed as a protocol error reaches the
+		// generic renderer and comes back as
+		// {"error":{"title":"internal_server_error","details":{}}} - a
+		// shape no OAuth client parses. A failure to save the context is
+		// the ordinary way that happens, and from a wallet's side it is
+		// indistinguishable from the endpoint being broken, which is
+		// exactly what server_error is for (RFC 6749 §5.2).
+		//
+		// Existing OAuth and OpenID4VCI errors are passed through
+		// untouched: pkg/httphelpers/server.go renders both, and wrapping
+		// one here would replace a precise refusal with a generic one.
+		var oauthErr *oauth2.OAuthError
+		var vciErr *openid4vci.Error
+		if errors.As(err, &oauthErr) || errors.As(err, &vciErr) {
+			return nil, err
+		}
+
+		// Fixed description. The cause is carried for the log, not for
+		// the wallet - it names internal state, and a failing store is
+		// not something a wallet can act on beyond retrying.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"the authorization challenge could not be completed",
+			http.StatusInternalServerError, err)
+	}
+
+	return reply, nil
+}
+
 func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointAuthorize")
 	defer span.End()
@@ -116,16 +197,20 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 
 	// Persist the auth provider into the authorization context so the
 	// credential endpoint (which has no gin session) can read it back.
-	authCtx, err := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: reply.SessionID})
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("failed to get auth context for session %s: %w", reply.SessionID, err)
-	}
-	authCtx.AuthProvider = authProvider
-	authCtx.DataSource = string(credSource.DataSource)
-	authCtx.RemoteName = credSource.RemoteName
-	authCtx.AuthenticSource = credSource.AuthenticSource
-	if err := s.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+	//
+	// A targeted write of exactly these four fields, not a read-modify-
+	// Update of the whole document. OAuthAuthorize has just extended this
+	// context's deadline through ExtendExpiry, which never shortens - and
+	// a whole-document replace built from a copy read afterwards would
+	// carry whatever expires_at that copy happened to see, so two requests
+	// entering /authorize at once could have the slower one write back the
+	// earlier deadline and cut the code's life short.
+	if err := s.cacheService.AuthContext.SetAuthProvider(ctx, reply.SessionID, cache.AuthProviderFields{
+		AuthProvider:    authProvider,
+		DataSource:      string(credSource.DataSource),
+		RemoteName:      credSource.RemoteName,
+		AuthenticSource: credSource.AuthenticSource,
+	}); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("failed to update auth provider on session %s: %w", reply.SessionID, err)
 	}

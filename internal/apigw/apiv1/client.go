@@ -86,10 +86,49 @@ type Client struct {
 	// status is the shared readiness aggregator: local probes + downstream
 	// Status RPCs, cached + single-flighted. Configured in New.
 	statusAggregator *status.Aggregator
+
+	// authProviderSelector answers which auth provider a scope will
+	// actually be served by in this deployment. The browser flow consults
+	// it at /authorize; the Authorization Challenge Endpoint consults the
+	// same one so the two cannot disagree about whether a scope needs a
+	// presentation or a browser.
+	authProviderSelector AuthProviderSelector
+
+	// issuanceAuth overrides the issuance-auth pipeline the Authorization
+	// Challenge Endpoint feeds. nil everywhere but in tests, where it is
+	// the only way to reach the endpoint's own code on a presentation that
+	// VERIFIES: everything past decryption - SD-JWT or mdoc verification,
+	// issuer trust via the PDP, identity resolution, the datastore lookup -
+	// needs a signing authority, a trust deployment and documents, none of
+	// which say anything about the wiring between this endpoint and the
+	// pipeline.
+	//
+	// That wiring is what breaks silently: the audience a presentation is
+	// bound to, the state it must echo, the mdoc session transcript it was
+	// signed over, and whether an authorization code comes back at all.
+	// Only the challenge endpoint has one, because only it builds a binding
+	// that has no other test - the browser flow's is exercised end to end
+	// through /verification/direct_post.
+	//
+	// See issuanceAuthPipeline.
+	issuanceAuth issuanceAuthConsumer
+}
+
+// AuthProviderSelector names the auth provider, and the credential source,
+// that will serve a scope in this deployment.
+//
+// A narrow local interface rather than the concrete type: the answer
+// depends on which provider services actually started, which is knowledge
+// the wiring layer has and this package does not, and declaring only what
+// is used keeps it substitutable in tests.
+//
+// Implemented by *authproviders.Selector.
+type AuthProviderSelector interface {
+	Select(scope string, ds *model.DataSources) (string, model.CredentialSource, error)
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authProviderSelector AuthProviderSelector, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
 	vciMetrics, err := metric.NewVCI(meter.Meter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VCI metrics: %w", err)
@@ -106,6 +145,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		vciMetrics:                    vciMetrics,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
 		cacheService:                  cacheService,
+		authProviderSelector:          authProviderSelector,
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
@@ -117,7 +157,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	// Advertise attest_jwt_client_auth only when the evaluator will actually be wired below (needs Enabled + PDPURL).
 	walletAttestationAdvertised := cfg.APIGW.Trust.WalletAttestation.Enabled && cfg.APIGW.Trust.PDPURL != ""
-	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL, walletAttestationAdvertised, cfg.APIGW.Trust.AllowedSignatureAlgorithms)
+	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL, walletAttestationAdvertised, cfg.APIGW.Trust.AllowedSignatureAlgorithms, &c.cfg.APIGW.Delivery.InteractiveAuthorization)
 
 	// Load PKI signing key and chain for metadata signing
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
