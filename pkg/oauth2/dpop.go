@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -55,9 +55,28 @@ type DPoP struct {
 	// ATH Hash of the access token. The value MUST be the result of a base64url encoding (as defined in Section 2 of [RFC7515]) the SHA-256 [SHS] hash of the ASCII encoding of the associated access token's value.¶
 	ATH string `json:"ath"`
 
-	Thumbprint string `json:"thumbprint,omitempty"` // Optional, used for JWK thumbprint
+	// Thumbprint is the RFC 7638 thumbprint of the key in the proof's own
+	// jwk HEADER, which is the key the signature was verified against. It
+	// is what every DPoP key-binding decision in this build compares, so
+	// it is the one field a proof must never be able to state about
+	// itself.
+	//
+	// json:"-" is load-bearing, not tidiness. ValidateAndParseDPoPJWT
+	// decodes the payload into this struct, and with a json name this
+	// field was settable from the payload: a proof signed by key B
+	// carrying {"thumbprint":"<A>"} came back claiming A's thumbprint and
+	// passed the comparison against an exchange bound to A, without the
+	// sender possessing A at all. encoding/json matches field names
+	// case-insensitively, so "Thumbprint" and "THUMBPRINT" worked too.
+	//
+	// The derived value is also assigned AFTER the decode rather than
+	// before. Either measure alone closes this; both are here because the
+	// cost is nothing and the failure is silent.
+	Thumbprint string `json:"-"`
 
-	JWK *jose.JWKWithMetadata `json:"jwk,omitempty"` // JWK claim, optional
+	// JWK is the parsed header key, assigned after the decode for the
+	// same reason and excluded from it for the same reason.
+	JWK *jose.JWKWithMetadata `json:"-"`
 }
 
 func (d *DPoP) Unmarshal(claims jwt.MapClaims) error {
@@ -206,14 +225,18 @@ func ValidateAndParseDPoPJWT(dPopJWT string) (*DPoP, error) {
 		return nil, ErrInvalidTokenType
 	}
 
-	// Unmarshal claims into DPoP struct
-	dpopClaims := &DPoP{
-		Thumbprint: thumbprint,
-	}
+	// Unmarshal claims into DPoP struct.
+	//
+	// The thumbprint is assigned AFTER this, never before: the decode
+	// writes into the same struct, so a value set first is a value the
+	// signed payload can replace. See the field's own comment for what
+	// that cost.
+	dpopClaims := &DPoP{}
 
 	if err := dpopClaims.Unmarshal(claims); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal claims into DPoP struct: %w", err)
 	}
+	dpopClaims.Thumbprint = thumbprint
 
 	// Validate DPoP claims
 	if err := dpopClaims.Validate(); err != nil {
@@ -289,25 +312,42 @@ func normalizeURIForComparison(raw string) (string, bool) {
 
 	scheme := strings.ToLower(u.Scheme)
 
-	host := strings.ToLower(u.Hostname())
+	// NOT lowercased first. IDNA does the case mapping itself, as part of
+	// the UTS #46 mapping, and Go's ToLower disagrees with it: ToLower
+	// turns "İ.example" (U+0130) into "i.example", while UTS #46 maps the
+	// original to "xn--i-9bb.example". Folding first therefore REJECTED a
+	// wallet's correctly canonicalised proof and ACCEPTED one naming the
+	// distinct authority "i.example". pkg/openid4vp's CanonicalOrigin has
+	// said this in its own comment all along; this is the same rule.
+	host := u.Hostname()
 	// An address is normalized as an address, not as a name. IPv6 has many
 	// spellings of one address - 2001:0db8:0:0:0:0:0:1 and 2001:db8::1 are
 	// the same endpoint - and lowercasing alone leaves them different, so a
 	// wallet that compressed the URL it was given got invalid_dpop_proof
-	// for a proof that named this very endpoint. net.IP.String is the
-	// canonical form from RFC 5952, which also renders an IPv4-mapped
-	// address as its dotted quad, so [::ffff:127.0.0.1] and 127.0.0.1
-	// agree - as they must, being one address.
+	// for a proof that named this very endpoint. netip.Addr.String is the
+	// canonical form from RFC 5952.
+	//
+	// netip rather than net.IP, and this is the whole reason: net.IP.String
+	// UNMAPS, rendering ::ffff:127.0.0.1 as 127.0.0.1. That makes
+	// https://[::ffff:127.0.0.1]/token and https://127.0.0.1/token compare
+	// equal, and they are not the same thing. htu binds the target URI, not
+	// the target address: the two reach a server with different Host
+	// headers and can select different virtual hosts, so merging them
+	// weakens exactly the binding this comparison exists to make. One
+	// address, two authorities. netip preserves the family.
 	//
 	// Before the IDNA mapping, not after: an address is not a domain name
 	// and has no business being mapped as one.
-	if ip := net.ParseIP(host); ip != nil {
-		host = ip.String()
+	if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
+		host = addr.String()
 	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
-		// A Unicode host and its A-label are the same host. ToASCII only
-		// ever narrows the spelling, so a failure leaves the lowercased
-		// form rather than rejecting a proof over it.
+		// A Unicode host and its A-label are the same host.
 		host = ascii
+	} else {
+		// ToASCII only ever narrows the spelling, so a failure leaves a
+		// lowercased form rather than rejecting a proof over it - the
+		// case of a host is insignificant either way (RFC 3986 §6.2.2.1).
+		host = strings.ToLower(host)
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"

@@ -104,6 +104,32 @@ type AuthorizationContext struct {
 	// present the same key, so it has to be recorded at the start.
 	AuthSessionDPoPThumbprint string `json:"auth_session_dpop_thumbprint,omitempty" bson:"auth_session_dpop_thumbprint,omitempty" validate:"omitempty,max=128,printascii"`
 
+	// InteractiveAuthorization marks a context opened by the
+	// Authorization Challenge Endpoint, so that it can only be answered
+	// there.
+	//
+	// The channel is part of what the request said. An Interactive
+	// Authorization request names ia_post.jwt and carries the challenge
+	// endpoint's origin in expected_origins, and the endpoint verifies
+	// holder binding before it will accept the presentation. The
+	// browser-mediated /verification/direct_post endpoint resolves a
+	// context by EphemeralEncryptionKeyID - which this context also has,
+	// and whose kid the wallet was given in the request's client_metadata
+	// - and runs the same pipeline WITHOUT that verification.
+	//
+	// So without this marker the two channels were interchangeable in one
+	// direction: a wallet could complete its own challenge honestly, then
+	// post a copied credential with a self-signed key binding proof to the
+	// other endpoint, overwrite VerifiedClaims on the context its own
+	// authorization code belongs to, and redeem that code for a credential
+	// built from someone else's claims. Clearing the auth_session does not
+	// stop it, because that only removes the auth_session index.
+	//
+	// A bool rather than a cleared field, for the same reason
+	// AuthSessionDPoPThumbprint is: it has to survive the handle being
+	// consumed, which is exactly when the attack is available.
+	InteractiveAuthorization bool `json:"interactive_authorization,omitempty" bson:"interactive_authorization,omitempty"`
+
 	// Authorization code fields
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
