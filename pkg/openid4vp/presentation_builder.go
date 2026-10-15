@@ -216,18 +216,41 @@ func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []str
 // normalised rather than aliased, and the walk does not have to be taught
 // every type a Verifier might configure.
 func copyAnyMap(src map[string]any) map[string]any {
+	return copyAnyMapAt(src, 0)
+}
+
+// maxCopyDepth bounds the walk below.
+//
+// A tree that came off the wire is shallow; a programmatically built one
+// can contain a CYCLE, and the walk followed it until the stack died -
+// a self-referencing field tagged json:"-" is invisible to Marshal, so
+// the value serialises fine and only copying it crashes. Past this depth
+// the value goes to encodeCopy, which keeps it as the bytes it marshals
+// to, and reports the cycle as an error that leaves the original in
+// place. The bound costs nothing in fidelity now that the fallback is
+// byte-exact.
+const maxCopyDepth = 64
+
+func copyAnyMapAt(src map[string]any, depth int) map[string]any {
 	if src == nil {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
 	for key, value := range src {
-		dst[key] = copyAnyValue(value)
+		dst[key] = copyAnyValueAt(value, depth+1)
 	}
 	return dst
 }
 
 // copyAnyValue deep-copies one node of an opaque JSON tree.
 func copyAnyValue(src any) any {
+	return copyAnyValueAt(src, 0)
+}
+
+func copyAnyValueAt(src any, depth int) any {
+	if depth > maxCopyDepth {
+		return encodeCopy(src)
+	}
 	switch typed := src.(type) {
 	case nil, bool, string, float64, json.Number:
 		// Immutable, so sharing one is not aliasing.
@@ -251,7 +274,7 @@ func copyAnyValue(src any) any {
 		return append(make(json.RawMessage, 0, len(typed)), typed...)
 
 	case map[string]any:
-		return copyAnyMap(typed)
+		return copyAnyMapAt(typed, depth)
 
 	case []any:
 		if typed == nil {
@@ -261,12 +284,12 @@ func copyAnyValue(src any) any {
 		}
 		dst := make([]any, len(typed))
 		for i, value := range typed {
-			dst[i] = copyAnyValue(value)
+			dst[i] = copyAnyValueAt(value, depth+1)
 		}
 		return dst
 
 	default:
-		return copyTypedContainer(src)
+		return copyTypedContainerAt(src, depth)
 	}
 }
 
@@ -283,7 +306,7 @@ func copyAnyValue(src any) any {
 // Anything that is not a map or a slice, or whose elements will not fit
 // back into it, still goes through the encoding: a shape this build does
 // not model is normalised rather than aliased.
-func copyTypedContainer(src any) any {
+func copyTypedContainerAt(src any, depth int) any {
 	value := reflect.ValueOf(src)
 	kind := value.Kind()
 
@@ -314,7 +337,7 @@ func copyTypedContainer(src any) any {
 		if value.IsNil() {
 			return src
 		}
-		copied, ok := copyReflected(value.Elem().Interface(), value.Type().Elem())
+		copied, ok := copyReflectedAt(value.Elem().Interface(), value.Type().Elem(), depth)
 		if !ok {
 			return encodeCopy(src)
 		}
@@ -330,41 +353,11 @@ func copyTypedContainer(src any) any {
 	if kind == reflect.Array {
 		dst := reflect.New(value.Type()).Elem()
 		for i := range value.Len() {
-			copied, ok := copyReflected(value.Index(i).Interface(), value.Type().Elem())
+			copied, ok := copyReflectedAt(value.Index(i).Interface(), value.Type().Elem(), depth)
 			if !ok {
 				return encodeCopy(src)
 			}
 			dst.Index(i).Set(copied)
-		}
-		return dst.Interface()
-	}
-
-	// A STRUCT holding a raw leaf has the same problem, and the encoding
-	// fallback was collapsing it. Copied field by field so the leaf stays
-	// bytes.
-	//
-	// A single unexported field sends the whole struct back to the
-	// encoding: reflection can neither read nor set one, so copying field
-	// by field would silently drop it, and losing a field outright is
-	// worse than normalising the raw leaves inside it.
-	if kind == reflect.Struct {
-		structType := value.Type()
-		dst := reflect.New(structType).Elem()
-		for i := range structType.NumField() {
-			field := structType.Field(i)
-			if !field.IsExported() {
-				// Reflection can neither read nor set one, so the whole
-				// struct goes to encodeCopy - which now keeps it as the
-				// bytes it marshals to, so the raw leaves inside survive
-				// anyway. A custom marshaller reading unexported state
-				// takes the same route and keeps its derived output.
-				return encodeCopy(src)
-			}
-			copied, ok := copyReflected(value.Field(i).Interface(), field.Type)
-			if !ok {
-				return encodeCopy(src)
-			}
-			dst.Field(i).Set(copied)
 		}
 		return dst.Interface()
 	}
@@ -380,7 +373,7 @@ func copyTypedContainer(src any) any {
 	if kind == reflect.Map {
 		dst := reflect.MakeMapWithSize(value.Type(), value.Len())
 		for iter := value.MapRange(); iter.Next(); {
-			copied, ok := copyReflected(iter.Value().Interface(), element)
+			copied, ok := copyReflectedAt(iter.Value().Interface(), element, depth)
 			if !ok {
 				return encodeCopy(src)
 			}
@@ -391,7 +384,7 @@ func copyTypedContainer(src any) any {
 
 	dst := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
 	for i := range value.Len() {
-		copied, ok := copyReflected(value.Index(i).Interface(), element)
+		copied, ok := copyReflectedAt(value.Index(i).Interface(), element, depth)
 		if !ok {
 			return encodeCopy(src)
 		}
@@ -409,8 +402,8 @@ func copyTypedContainer(src any) any {
 // encoding - re-parsing every raw leaf sitting beside the nil and
 // collapsing any duplicate member inside them. A named container, say
 // type Object map[string]any, reaches here holding exactly that mix.
-func copyReflected(src any, element reflect.Type) (reflect.Value, bool) {
-	copied := reflect.ValueOf(copyAnyValue(src))
+func copyReflectedAt(src any, element reflect.Type, depth int) (reflect.Value, bool) {
+	copied := reflect.ValueOf(copyAnyValueAt(src, depth+1))
 	if !copied.IsValid() {
 		// Nil, which every element type that can hold it has a zero for.
 		if element.Kind() == reflect.Interface {

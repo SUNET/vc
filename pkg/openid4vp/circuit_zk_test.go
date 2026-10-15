@@ -910,16 +910,18 @@ func TestCopyPreservesRawLeavesInArraysAndStructs(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		const duplicate = `{"z":1,"z":2}`
 		src := map[string]any{"s": rawHolder{Payload: json.RawMessage(duplicate)}}
-		out, err := json.Marshal(copyAnyMap(src))
-		require.NoError(t, err)
-		assert.Contains(t, string(out), duplicate, "a raw leaf in a struct field must survive as bytes")
 
-		// And it is a copy, not the original.
-		copied, ok := copyAnyMap(src)["s"].(rawHolder)
-		require.True(t, ok, "the copy keeps the struct shape")
-		copied.Payload[1] = 'Z'
-		assert.Equal(t, duplicate, string(src["s"].(rawHolder).Payload),
-			"writing to the copied struct must not reach the original")
+		// A struct is kept as the bytes it marshals to rather than walked
+		// field by field: walking it followed self-referencing fields
+		// that Marshal ignores, until the stack died. What the copy owes
+		// is that it serialises identically, not that it keeps the Go
+		// type.
+		before, err := json.Marshal(src)
+		require.NoError(t, err)
+		after, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after))
+		assert.Contains(t, string(after), duplicate, "a raw leaf in a struct field must survive as bytes")
 	})
 
 	t.Run("an unexported field must not cost the raw leaf beside it", func(t *testing.T) {
@@ -1021,14 +1023,12 @@ func TestCopyPreservesRawLeavesBesideScalars(t *testing.T) {
 
 	t.Run("struct", func(t *testing.T) {
 		src := map[string]any{"s": countingHolder{Count: 7, Plain: 9, Payload: json.RawMessage(duplicate)}}
-		out, err := json.Marshal(copyAnyMap(src))
+		before, err := json.Marshal(src)
 		require.NoError(t, err)
-		assert.Contains(t, string(out), duplicate, "a scalar field must not cost the raw leaf beside it")
-
-		copied, ok := copyAnyMap(src)["s"].(countingHolder)
-		require.True(t, ok, "the struct keeps its type through the copy")
-		assert.Equal(t, namedCount(7), copied.Count, "a named scalar survives as itself")
-		assert.Equal(t, 9, copied.Plain)
+		after, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after), "a scalar field must not cost the raw leaf beside it")
+		assert.Contains(t, string(after), duplicate)
 	})
 
 	t.Run("scalars keep their Go type", func(t *testing.T) {
@@ -1127,5 +1127,65 @@ func TestFallbackKeepsBytesRatherThanReparsingThem(t *testing.T) {
 			"neither the derived member nor the duplicate payload may be lost")
 		assert.Contains(t, string(after), `{"y":1,"y":2}`)
 		assert.Contains(t, string(after), "derived-value")
+	})
+}
+
+// node is the shape that killed the stack: a self-reference Marshal never
+// follows, because the field is tagged json:"-".
+type node struct {
+	Value   int             `json:"value"`
+	Payload json.RawMessage `json:"payload"`
+	Parent  *node           `json:"-"`
+}
+
+// Copying must terminate on a value that serialises perfectly well.
+//
+// A struct walked field by field follows EVERY exported field, including
+// ones Marshal is told to skip, so a self-referencing Parent recursed
+// until a fatal stack overflow - not a panic a test can recover, the
+// process dies. The copy no longer walks structs at all, and the walk
+// that remains is depth-bounded, so a cycle reached any other way ends in
+// encodeCopy rather than in the runtime.
+func TestCopyTerminatesOnCyclicValues(t *testing.T) {
+	t.Run("self-referencing struct behind a json:\"-\" tag", func(t *testing.T) {
+		const duplicate = `{"x":1,"x":2}`
+		n := &node{Value: 1, Payload: json.RawMessage(duplicate)}
+		n.Parent = n // the cycle Marshal never sees
+
+		src := map[string]any{"n": n}
+		before, err := json.Marshal(src)
+		require.NoError(t, err, "the value serialises fine; only copying it used to crash")
+
+		after, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after), "the copy must serialise identically")
+		assert.Contains(t, string(after), duplicate, "and still keep the raw leaf intact")
+	})
+
+	t.Run("self-referencing map", func(t *testing.T) {
+		m := map[string]any{"k": "v"}
+		m["self"] = m // Marshal reports this one as a cycle
+
+		// What matters is that copying RETURNS rather than exhausting the
+		// stack; a value Marshal itself refuses cannot be copied
+		// faithfully, so the original is left in place.
+		require.NotPanics(t, func() { _ = copyAnyMap(map[string]any{"m": m}) })
+	})
+
+	t.Run("a legitimately deep tree is still copied exactly", func(t *testing.T) {
+		const duplicate = `{"d":1,"d":2}`
+		leaf := map[string]any{"payload": json.RawMessage(duplicate)}
+		tree := any(leaf)
+		for range 40 {
+			tree = map[string]any{"next": tree}
+		}
+		src := map[string]any{"root": tree}
+
+		before, err := json.Marshal(src)
+		require.NoError(t, err)
+		after, err := json.Marshal(copyAnyMap(src))
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after))
+		assert.Contains(t, string(after), duplicate, "depth must not cost the raw leaf")
 	})
 }
