@@ -715,3 +715,60 @@ func TestCopyDCQLPreservesRawLeavesByteForByte(t *testing.T) {
 	assert.Equal(t, `{"changed":true}`, string(nested["inner"].(json.RawMessage)),
 		"writing to the original must not reach the copy")
 }
+
+// A nil slice is not an empty one.
+//
+// nil encodes as null and an empty slice as [], so allocating during the
+// copy sent [] where the query said null.
+func TestCopyDCQLPreservesNilSlices(t *testing.T) {
+	src := &DCQL{Credentials: []CredentialQuery{{
+		ID: "q", Format: FormatCircuitZk, Meta: MetaQuery{DoctypeValue: "d"},
+		Req: []ReqItem{{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{
+			"absent":  []any(nil),
+			"present": []any{},
+		}}},
+	}}}
+
+	before, err := json.Marshal(src.Credentials[0].Req[0].Params)
+	require.NoError(t, err)
+	after, err := json.Marshal(copyDCQL(src).Credentials[0].Req[0].Params)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "copying must not turn null into []")
+	assert.Contains(t, string(after), `"absent":null`)
+	assert.Contains(t, string(after), `"present":[]`)
+}
+
+// A raw leaf inside a TYPED container is still a raw leaf.
+//
+// map[string]json.RawMessage and []json.RawMessage fell through to the
+// encoding fallback, where re-parsing collapsed a duplicate member - so
+// templating still changed a deliberately malformed payload even after
+// direct raw leaves were preserved.
+//
+// Compared as text, never semantically: a semantic comparison is exactly
+// what hides a dropped duplicate.
+func TestCopyDCQLPreservesRawLeavesInTypedContainers(t *testing.T) {
+	const inMap = `{"x":1,"x":2}`
+	const inSlice = `{"y":1,"y":2}`
+
+	src := &DCQL{Credentials: []CredentialQuery{{
+		ID: "q", Format: FormatCircuitZk, Meta: MetaQuery{DoctypeValue: "d"},
+		Req: []ReqItem{{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{
+			"typed_map":   map[string]json.RawMessage{"a": json.RawMessage(inMap)},
+			"typed_slice": []json.RawMessage{json.RawMessage(inSlice)},
+		}}},
+	}}}
+
+	params := copyDCQL(src).Credentials[0].Req[0].Params
+
+	encoded, err := json.Marshal(params)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), inMap, "a raw leaf in a typed map must survive as bytes")
+	assert.Contains(t, string(encoded), inSlice, "a raw leaf in a typed slice must survive as bytes")
+
+	// And the containers are copies, not the originals.
+	srcParams := src.Credentials[0].Req[0].Params
+	params["typed_map"].(map[string]json.RawMessage)["a"] = json.RawMessage(`{"changed":true}`)
+	assert.Equal(t, inMap, string(srcParams["typed_map"].(map[string]json.RawMessage)["a"]),
+		"writing to the copied typed map must not reach the original")
+}

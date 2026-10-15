@@ -130,10 +130,11 @@ func (q CredentialQuery) MarshalYAML() (any, error) {
 		// decodeExact keeps numbers as their literals; this refuses the
 		// ones yaml.v2 would round on the way out, rather than writing a
 		// different number than the one configured.
-		if err := checkYAMLRendersNumbersExactly(tree, "credential query", nil); err != nil {
+		normalised, err := checkYAMLRendersNumbersExactly(tree, "credential query", nil)
+		if err != nil {
 			return nil, err
 		}
-		return tree, nil
+		return normalised, nil
 	}
 	type plain CredentialQuery
 	encoded, err := json.Marshal(plain(q))

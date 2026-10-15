@@ -1033,3 +1033,32 @@ func TestYAMLExtensionsAreNotDiscardedOnADecodeError(t *testing.T) {
 	assert.Empty(t, broken.Extra,
 		"and nothing half-read is kept; the caller gets the error, not a partial bag")
 }
+
+// The YAML path must emit the tree it CHECKED.
+//
+// checkYAMLRendersNumbersExactly normalised a temporary copy to walk its
+// numbers and then handed yaml.v2 the caller's own containers, where a
+// json.RawMessage is a []byte - written out as a sequence of byte
+// integers rather than the object it encodes.
+func TestYAMLEmitsRawLeavesAsTheObjectsTheyEncode(t *testing.T) {
+	t.Run("a raw leaf is an object, not bytes", func(t *testing.T) {
+		item := ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{
+			"payload": json.RawMessage(`{"x":1}`),
+		}}
+
+		out, err := yamlv2.Marshal(item)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "x: 1", "a raw leaf must render as the object it encodes: %s", out)
+		assert.NotContains(t, string(out), "- 123", "rendered as a byte sequence: %s", out)
+	})
+
+	t.Run("a duplicate member is refused, not dropped", func(t *testing.T) {
+		item := ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{
+			"payload": json.RawMessage(`{"x":1,"x":2}`),
+		}}
+
+		_, err := yamlv2.Marshal(item)
+		require.Error(t, err, "YAML cannot write a duplicate member, so it must refuse rather than drop one")
+		assert.Contains(t, err.Error(), "more than once")
+	})
+}
