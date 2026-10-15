@@ -1297,3 +1297,34 @@ func TestCopyKeepsTextMarshalledContainersIntact(t *testing.T) {
 	assert.Equal(t, string(before), string(after))
 	assert.Contains(t, string(after), "2026-10-15T12:00:00Z")
 }
+
+// appendStamped serialises through encoding.TextAppender only - no
+// MarshalJSON, no MarshalText. encoding/json dispatches to it all the
+// same.
+type appendStamped map[string]any
+
+func (a appendStamped) AppendText(b []byte) ([]byte, error) {
+	when, ok := a["at"].(time.Time)
+	if !ok {
+		return nil, fmt.Errorf("appendStamped: at is %T, not a time.Time", a["at"])
+	}
+	return append(b, when.UTC().Format(time.RFC3339)...), nil
+}
+
+// Every interface encoding/json serialises through has to be recognised.
+//
+// Recognising only some of them is what let a container through twice
+// already: first json.Marshaler alone, then json.Marshaler and
+// encoding.TextMarshaler. encoding.TextAppender reaches the same
+// serialiser and broke the same way - found by finishing the list rather
+// than waiting for the next report.
+func TestCopyKeepsAppendTextContainersIntact(t *testing.T) {
+	src := map[string]any{"a": appendStamped{"at": time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)}}
+
+	before, err := json.Marshal(src)
+	require.NoError(t, err, "the original marshals through AppendText")
+	after, err := json.Marshal(copyAnyMap(src))
+	require.NoError(t, err, "so must the copy")
+	assert.Equal(t, string(before), string(after))
+	assert.Contains(t, string(after), "2026-10-15T12:00:00Z")
+}
