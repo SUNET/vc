@@ -451,6 +451,19 @@ func copyTypedContainerAt(src any, path *copyPath) any {
 		return src
 	}
 
+	// Only a STRING key is safe to carry across. Every other key is
+	// copied BY VALUE into the new map, which for a pointer - or anything
+	// holding one - shares what it points at, and a key is part of the
+	// wire representation: a map[*big.Int]string key marshals through
+	// TextMarshaler, so mutating the original integer after the copy
+	// renamed the COPY's member, {"1":"v"} becoming {"999":"v"}.
+	//
+	// The values were walked carefully and the keys were handed over
+	// untouched; a key is as much of the request as a value is.
+	if kind == reflect.Map && value.Type().Key().Kind() != reflect.String {
+		return encodeCopy(src)
+	}
+
 	length := 0
 	if kind == reflect.Slice {
 		length = value.Len()
