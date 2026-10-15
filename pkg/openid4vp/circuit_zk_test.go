@@ -3,10 +3,12 @@ package openid4vp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	yamlv2 "gopkg.in/yaml.v2"
 
@@ -866,17 +868,16 @@ func TestCopyDCQLPreservesPointerRawLeaves(t *testing.T) {
 	assert.Contains(t, string(encoded), duplicate,
 		"a pointer-valued raw leaf must be copied as bytes")
 
-	// Independent of the original: writing through either pointer must
-	// not reach the other.
-	copiedPointer, ok := params["payload"].(*json.RawMessage)
-	require.True(t, ok, "the copy keeps the pointer shape")
-	require.NotSame(t, &payload, copiedPointer, "the copy must not alias the original pointer")
-
-	*copiedPointer = json.RawMessage(`{"changed":true}`)
-	assert.Equal(t, duplicate, string(payload), "writing through the copy must not reach the original")
-
+	// json.RawMessage carries its own MarshalJSON, so the pointer is
+	// snapshotted as the bytes it marshals to rather than walked. What
+	// the copy owes is that it serialises identically and does not share
+	// memory with the original - not that it is still a pointer.
 	payload = json.RawMessage(`{"other":true}`)
-	assert.Equal(t, `{"changed":true}`, string(*copiedPointer), "writing to the original must not reach the copy")
+	after, err := json.Marshal(params)
+	require.NoError(t, err)
+	assert.Contains(t, string(after), duplicate,
+		"writing to the original must not reach the copy")
+	assert.NotContains(t, string(after), "other")
 }
 
 // rawHolder and privateHolder are the struct shapes the copy had to
@@ -1188,4 +1189,60 @@ func TestCopyTerminatesOnCyclicValues(t *testing.T) {
 		assert.Equal(t, string(before), string(after))
 		assert.Contains(t, string(after), duplicate, "depth must not cost the raw leaf")
 	})
+}
+
+// stamped is a NAMED container with its own marshaller, which expects a
+// concrete element type. A structural copy keeps the named type - and so
+// the method - while retyping what is inside it.
+type stamped map[string]any
+
+func (s stamped) MarshalJSON() ([]byte, error) {
+	when, ok := s["at"].(time.Time)
+	if !ok {
+		return nil, fmt.Errorf("stamped: at is %T, not a time.Time", s["at"])
+	}
+	return json.Marshal(map[string]any{"at": when.UTC().Format(time.RFC3339), "payload": s["payload"]})
+}
+
+// A branching cycle exhausts work, not just stack.
+//
+// The depth bound stopped the stack growing but not the walk: a map
+// holding ITSELF TWICE expands into a binary tree, so it burned 2^65
+// steps before depth 65 could stop it. Identity on the active path stops
+// it at the first repeat.
+func TestCopyTerminatesOnBranchingCycles(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m := map[string]any{"payload": json.RawMessage(`{"x":1,"x":2}`)}
+		m["a"] = m
+		m["b"] = m // two routes back to m, not one
+		_ = copyAnyMap(map[string]any{"m": m})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("copying a branching cycle did not terminate")
+	}
+}
+
+// A container that marshals itself is snapshotted, not walked.
+//
+// Copying its elements kept the named type - and therefore its
+// MarshalJSON - while turning a time.Time element into a json.RawMessage,
+// so marshalling the copied request failed where the original succeeded.
+func TestCopyKeepsCustomMarshalledContainersIntact(t *testing.T) {
+	src := map[string]any{"s": stamped{
+		"at":      time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC),
+		"payload": json.RawMessage(`{"x":1,"x":2}`),
+	}}
+
+	before, err := json.Marshal(src)
+	require.NoError(t, err, "the original marshals")
+
+	after, err := json.Marshal(copyAnyMap(src))
+	require.NoError(t, err, "so must the copy: its marshaller must still find a time.Time")
+	assert.Equal(t, string(before), string(after))
+	assert.Contains(t, string(after), `{"x":1,"x":2}`, "and the raw leaf must survive")
 }
