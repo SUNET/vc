@@ -269,7 +269,12 @@ func TestRevokeCredential_AllEntriesUnauthorizedIsAnError(t *testing.T) {
 		Authorize:  grants(pair{"SUNET", "pid"}),
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not authorized")
+	// The message is the SAME one an identifier with no entries at all
+	// gets. Saying "not authorized" here would tell a caller who may act
+	// on nothing that something is nonetheless there, which is the
+	// disclosure this test exists to prevent.
+	require.Contains(t, err.Error(), "no status list entry is recorded")
+	require.NotContains(t, err.Error(), "not authorized")
 	require.NotContains(t, err.Error(), "OTHER_ORG", "an unauthorized caller must not learn where else the subject holds credentials")
 	require.Empty(t, issuer.calls)
 }
@@ -302,7 +307,8 @@ func TestRevokeCredential_PairsAreAtomic(t *testing.T) {
 		Authorize:  grants(pair{"SUNET", "pid"}, pair{"OTHER", "ehic"}),
 	})
 	require.Error(t, err, "(SUNET, ehic) was never granted, even though both values appear among the grants")
-	require.Contains(t, err.Error(), "not authorized")
+	require.Contains(t, err.Error(), "no status list entry is recorded",
+		"and the refusal reads the same as no-entries, so it discloses nothing")
 	require.Empty(t, issuer.calls)
 }
 
@@ -392,4 +398,66 @@ func TestRevokeCredential_BackendNarrowsTheUnnarrowedCase(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, reply.Revoked, 1)
 	require.Equal(t, "registry", issuer.calls[0].Backend)
+}
+
+// The ambiguity error used to be computed over every matching entry and
+// returned before authorization ran, so a caller who guessed an
+// identifier, URI and index learned that the subject has entries and
+// which backends own them - without being authorized for any of them.
+//
+// That is the same disclosure the per-entry skip exists to prevent; it was
+// simply happening a few lines earlier.
+func TestRevokeCredential_AmbiguityDoesNotDiscloseUnauthorizedBackends(t *testing.T) {
+	issuer := &recordingIssuer{}
+	uri := "https://registry.example.com/statuslists/4"
+	index := int64(4)
+
+	mine := registryEntry()
+	mine.AuthenticSource, mine.Scope, mine.StatusListURI, mine.Index = "SUNET", "pid", uri, index
+	theirs := externalEntry()
+	theirs.AuthenticSource, theirs.Scope, theirs.StatusListURI, theirs.Index = "OTHER_ORG", "ehic", uri, index
+
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{mine, theirs}}, issuer)
+
+	t.Run("a caller authorized for neither learns nothing", func(t *testing.T) {
+		_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+			Identifier:    "person-1",
+			StatusListURI: uri,
+			Index:         &index,
+			Authorize:     grants(pair{"ELSEWHERE", "diploma"}),
+		})
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "more than one backend",
+			"the ambiguity is between entries this caller may not touch, so it is not theirs to hear about")
+		require.NotContains(t, err.Error(), "OTHER_ORG")
+		require.NotContains(t, err.Error(), theirs.Backend)
+		require.Empty(t, issuer.calls)
+	})
+
+	t.Run("a caller authorized for one of them acts on it, without ambiguity", func(t *testing.T) {
+		issuer.calls = nil
+		reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+			Identifier:    "person-1",
+			StatusListURI: uri,
+			Index:         &index,
+			Authorize:     grants(pair{"SUNET", "pid"}),
+		})
+		require.NoError(t, err, "only one entry is theirs, so there is nothing ambiguous about it")
+		require.Len(t, reply.Revoked, 1)
+		require.Len(t, issuer.calls, 1)
+	})
+
+	t.Run("a caller authorized for both still gets the ambiguity error", func(t *testing.T) {
+		issuer.calls = nil
+		_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+			Identifier:    "person-1",
+			StatusListURI: uri,
+			Index:         &index,
+			Authorize:     grants(pair{"SUNET", "pid"}, pair{"OTHER_ORG", "ehic"}),
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "more than one backend",
+			"the message is useful and safe once every named entry is the caller's own")
+		require.Empty(t, issuer.calls, "an ambiguous request must change nothing")
+	})
 }

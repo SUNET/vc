@@ -137,9 +137,32 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 		}
 		selected = append(selected, e)
 	}
-	if req.StatusListURI != "" && req.Backend == "" && len(selected) > 1 {
-		backends := make([]string, 0, len(selected))
-		for _, e := range selected {
+	// Authorization BEFORE anything that describes what was found.
+	//
+	// The rule is the one stated below - telling an unauthorized caller
+	// that a subject holds a credential in some other authentic source is
+	// itself a disclosure - and the ambiguity error used to break it a few
+	// lines above, naming every matching backend before any of this ran.
+	// A caller who guessed an identifier, URI and index learned that the
+	// subject has entries and which backends own them, without being
+	// authorized for any of them.
+	authorized := make([]*db.CredentialStatusEntry, 0, len(selected))
+	var refused int
+	for _, e := range selected {
+		if !c.mayRevoke(req, e) {
+			c.log.Info("refusing to revoke an entry outside the caller's authorization",
+				"identifier", req.Identifier, "authentic_source", e.AuthenticSource, "scope", e.Scope)
+			refused++
+			continue
+		}
+		authorized = append(authorized, e)
+	}
+
+	// Ambiguity is judged over what this caller may actually act on, so
+	// the names in the message are only ever their own.
+	if req.StatusListURI != "" && req.Backend == "" && len(authorized) > 1 {
+		backends := make([]string, 0, len(authorized))
+		for _, e := range authorized {
 			backends = append(backends, e.Backend)
 		}
 		return nil, fmt.Errorf("index %d of %q is recorded under more than one backend (%s); name one in `backend` - acting on all of them would revoke a credential that was not asked about",
@@ -148,19 +171,7 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 
 	reply := &RevokeCredentialReply{Identifier: req.Identifier, Revoked: []*RevokedEntry{}}
 
-	var refused int
-	for _, e := range selected {
-		// An entry the caller is not authorized for is skipped, not
-		// reported: telling an unauthorized caller that a subject holds a
-		// credential in some other authentic source is itself a disclosure.
-		// The count feeds the error below, so the request still fails rather
-		// than silently succeeding with nothing done.
-		if !c.mayRevoke(req, e) {
-			c.log.Info("refusing to revoke an entry outside the caller's authorization",
-				"identifier", req.Identifier, "authentic_source", e.AuthenticSource, "scope", e.Scope)
-			refused++
-			continue
-		}
+	for _, e := range authorized {
 		if _, err := c.issuerClient.SetCredentialStatus(ctx, &apiv1_issuer.SetCredentialStatusRequest{
 			Backend:       e.Backend,
 			StatusListUri: e.StatusListURI,
@@ -185,10 +196,19 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 	// credential's status to change and no status changed, so answering OK
 	// would report a revocation that did not happen.
 	if len(reply.Revoked) == 0 {
+		// One message for both outcomes. Saying "not authorized" where
+		// entries exist and "none recorded" where they do not tells an
+		// unauthorized caller which it is, which is the same disclosure
+		// the skip above exists to prevent - and a caller who may act on
+		// nothing has no business learning that something is there.
+		//
+		// The distinction is kept where it is useful and safe: the refusal
+		// is logged per entry above, with the authentic source and scope.
 		if refused > 0 {
-			return nil, fmt.Errorf("not authorized to revoke any recorded status list entry for identifier %q%s", req.Identifier, narrowedTo(req))
+			c.log.Info("revocation refused: entries exist but none is within the caller's authorization",
+				"identifier", req.Identifier, "refused", refused)
 		}
-		return nil, fmt.Errorf("no status list entry is recorded for identifier %q%s", req.Identifier, narrowedTo(req))
+		return nil, fmt.Errorf("no status list entry is recorded for identifier %q%s that this caller may revoke", req.Identifier, narrowedTo(req))
 	}
 
 	c.log.Info("credential status updated", "identifier", req.Identifier, "entries", len(reply.Revoked), "status", status)
