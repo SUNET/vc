@@ -147,7 +147,7 @@ func TestNewDeviceAuthBuilder(t *testing.T) {
 
 func TestDeviceAuthBuilder_WithSessionTranscript(t *testing.T) {
 	builder := NewDeviceAuthBuilder(DocType)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	result := builder.WithSessionTranscript(transcript)
 
@@ -219,7 +219,7 @@ func TestDeviceAuthBuilder_Build_Signature(t *testing.T) {
 		t.Fatalf("failed to generate key: %v", err)
 	}
 
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceAuthBuilder(DocType).
 		WithSessionTranscript(transcript).
@@ -255,7 +255,7 @@ func TestDeviceAuthBuilder_Build_MAC(t *testing.T) {
 	sessionKey := make([]byte, 32)
 	rand.Read(sessionKey)
 
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceAuthBuilder(DocType).
 		WithSessionTranscript(transcript).
@@ -295,7 +295,7 @@ func TestDeviceAuthBuilder_Build_MissingTranscript(t *testing.T) {
 }
 
 func TestDeviceAuthBuilder_Build_MissingKey(t *testing.T) {
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceAuthBuilder(DocType).
 		WithSessionTranscript(transcript)
@@ -308,7 +308,7 @@ func TestDeviceAuthBuilder_Build_MissingKey(t *testing.T) {
 
 func TestDeviceAuthBuilder_Build_WithNameSpaces(t *testing.T) {
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceAuthBuilder(DocType).
 		WithSessionTranscript(transcript).
@@ -327,7 +327,7 @@ func TestDeviceAuthBuilder_Build_WithNameSpaces(t *testing.T) {
 }
 
 func TestNewDeviceAuthVerifier(t *testing.T) {
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	verifier := NewDeviceAuthVerifier(transcript, DocType)
 
@@ -342,7 +342,7 @@ func TestDeviceAuthVerifier_VerifySignature(t *testing.T) {
 		t.Fatalf("failed to generate key: %v", err)
 	}
 
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	// Build device auth
 	builder := NewDeviceAuthBuilder(DocType).
@@ -366,7 +366,7 @@ func TestDeviceAuthVerifier_VerifySignature_WrongKey(t *testing.T) {
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	wrongKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	// Build device auth
 	builder := NewDeviceAuthBuilder(DocType).
@@ -387,7 +387,7 @@ func TestDeviceAuthVerifier_VerifyMAC(t *testing.T) {
 	sessionKey := make([]byte, 32)
 	rand.Read(sessionKey)
 
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	// Build device auth with MAC
 	builder := NewDeviceAuthBuilder(DocType).
@@ -413,7 +413,7 @@ func TestDeviceAuthVerifier_VerifyMAC_WrongKey(t *testing.T) {
 	wrongKey := make([]byte, 32)
 	rand.Read(wrongKey)
 
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	// Build device auth with MAC
 	builder := NewDeviceAuthBuilder(DocType).
@@ -431,7 +431,7 @@ func TestDeviceAuthVerifier_VerifyMAC_WrongKey(t *testing.T) {
 }
 
 func TestDeviceAuthVerifier_VerifySignature_NoSignature(t *testing.T) {
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	deviceSigned := &DeviceSignedMdoc{
 		NameSpaces: []byte{},
@@ -446,7 +446,7 @@ func TestDeviceAuthVerifier_VerifySignature_NoSignature(t *testing.T) {
 }
 
 func TestDeviceAuthVerifier_VerifyMAC_NoMAC(t *testing.T) {
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	deviceSigned := &DeviceSignedMdoc{
 		NameSpaces: []byte{},
@@ -1014,4 +1014,23 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 	if err == nil {
 		t.Error("VerifyDeviceAuth() should fail with invalid device key")
 	}
+}
+
+// testSessionTranscript returns a structurally valid SessionTranscript.
+//
+// It has to be real CBOR now: DeviceAuthentication embeds the transcript as
+// a CBOR ITEM (ISO 18013-5 9.1.3.4), so a plain string - which these tests
+// used to pass - produces a structure no conformant reader can verify, and
+// is refused rather than wrapped in a byte string as it silently was before.
+func testSessionTranscript() []byte {
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		panic(err)
+	}
+	// SessionTranscript = [DeviceEngagementBytes/null, EReaderKeyBytes/null, Handover]
+	transcript, err := encoder.Marshal([]any{nil, nil, "test-handover"})
+	if err != nil {
+		panic(err)
+	}
+	return transcript
 }

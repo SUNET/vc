@@ -90,7 +90,7 @@ func TestNewReaderAuthBuilder(t *testing.T) {
 
 func TestReaderAuthBuilder_WithSessionTranscript(t *testing.T) {
 	builder := NewReaderAuthBuilder()
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	result := builder.WithSessionTranscript(transcript)
 
@@ -140,7 +140,7 @@ func TestReaderAuthBuilder_WithReaderKey(t *testing.T) {
 
 func TestReaderAuthBuilder_Build(t *testing.T) {
 	readerKey, certChain, _ := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	request := &ItemsRequest{
 		DocType: DocType,
 		NameSpaces: map[string]map[string]bool{
@@ -179,7 +179,7 @@ func TestReaderAuthBuilder_Build_MissingTranscript(t *testing.T) {
 
 func TestReaderAuthBuilder_Build_MissingRequest(t *testing.T) {
 	readerKey, certChain, _ := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewReaderAuthBuilder().
 		WithSessionTranscript(transcript).
@@ -192,7 +192,7 @@ func TestReaderAuthBuilder_Build_MissingRequest(t *testing.T) {
 }
 
 func TestReaderAuthBuilder_Build_MissingKey(t *testing.T) {
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	request := &ItemsRequest{DocType: DocType}
 
 	builder := NewReaderAuthBuilder().
@@ -207,7 +207,7 @@ func TestReaderAuthBuilder_Build_MissingKey(t *testing.T) {
 
 func TestReaderAuthBuilder_BuildDocRequest(t *testing.T) {
 	readerKey, certChain, _ := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	request := &ItemsRequest{
 		DocType: DocType,
 		NameSpaces: map[string]map[string]bool{
@@ -350,7 +350,7 @@ func TestReaderTrustList_IsTrusted_Empty(t *testing.T) {
 }
 
 func TestNewReaderAuthVerifier(t *testing.T) {
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	trustList := NewReaderTrustList()
 
 	verifier := NewReaderAuthVerifier(transcript, trustList)
@@ -362,7 +362,7 @@ func TestNewReaderAuthVerifier(t *testing.T) {
 
 func TestReaderAuthVerifier_VerifyReaderAuth(t *testing.T) {
 	readerKey, certChain, caCert := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	request := &ItemsRequest{
 		DocType: DocType,
 		NameSpaces: map[string]map[string]bool{
@@ -411,7 +411,7 @@ func TestReaderAuthVerifier_VerifyReaderAuth(t *testing.T) {
 
 func TestReaderAuthVerifier_VerifyReaderAuth_Untrusted(t *testing.T) {
 	readerKey, certChain, _ := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	request := &ItemsRequest{DocType: DocType}
 
 	// Build reader auth
@@ -437,7 +437,7 @@ func TestReaderAuthVerifier_VerifyReaderAuth_Untrusted(t *testing.T) {
 
 func TestReaderAuthVerifier_VerifyReaderAuth_WrongTranscript(t *testing.T) {
 	readerKey, certChain, caCert := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	wrongTranscript := []byte("wrong transcript")
 	request := &ItemsRequest{DocType: DocType}
 
@@ -465,7 +465,7 @@ func TestReaderAuthVerifier_VerifyReaderAuth_WrongTranscript(t *testing.T) {
 
 func TestReaderAuthVerifier_FilterRequestByIntent(t *testing.T) {
 	_, certChain, _ := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	request := &ItemsRequest{
 		DocType: DocType,
@@ -541,7 +541,7 @@ func TestHasReaderAuth(t *testing.T) {
 
 func TestExtractReaderCertificate(t *testing.T) {
 	readerKey, certChain, _ := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 	request := &ItemsRequest{DocType: DocType}
 
 	builder := NewReaderAuthBuilder().
@@ -591,7 +591,7 @@ func TestDefaultReaderCertProfile(t *testing.T) {
 func TestReaderAuth_RoundTrip(t *testing.T) {
 	// Complete round-trip test
 	readerKey, certChain, caCert := createTestReaderCertChain(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	// Build request
 	request := &ItemsRequest{

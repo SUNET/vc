@@ -108,6 +108,19 @@ func calculateSDHash(sdJWT string, hashMethod hash.Hash) (string, error) {
 	return digest, nil
 }
 
+// HashFromAlgorithm resolves an SD-JWT hash algorithm name - the value of
+// _sd_alg, and the algorithm sd_hash is therefore taken under - to the
+// hash it names.
+//
+// Exported because a verifier has to recompute sd_hash under the
+// algorithm the ISSUER chose rather than the one it would have picked
+// itself, and the registry of names lives here. Unknown names are an
+// error: a verifier that cannot tell which hash was meant cannot compare
+// the digests, and must refuse rather than guess sha-256.
+func HashFromAlgorithm(algName string) (hash.Hash, error) {
+	return getHashFromAlgorithm(algName)
+}
+
 // getHashFromAlgorithm returns a hash.Hash instance from algorithm name
 func getHashFromAlgorithm(algName string) (hash.Hash, error) {
 	switch algName {

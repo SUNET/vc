@@ -456,7 +456,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 	if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
 		dataSource := model.DataSourceType(session.Get("data_source").(string))
 		if dataSource == model.DataSourceExternalAPI {
-			if s.dataSources.EduAPI() == nil {
+			if !s.dataSources.AnyEnabled() {
 				scope, _ := session.Get("scope").(string)
 				err := fmt.Errorf("external API data source requested for %q but no remote is enabled", scope)
 				span.SetStatus(codes.Error, err.Error())
@@ -476,7 +476,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			}
 
 			scope, _ := session.Get("scope").(string)
-			if err := s.dataSources.EduAPI().FetchAndStoreForVCI(ctx, authCtx.Identifier, scope, sessionID); err != nil {
+			if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, authCtx.Identifier, scope, sessionID); err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
 			}
