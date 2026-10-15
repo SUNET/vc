@@ -623,10 +623,15 @@ func createTestSDJWTWithKBClaims(t *testing.T, key *ecdsa.PrivateKey, claims map
 		"y":   base64.RawURLEncoding.EncodeToString(keyY),
 	}
 
+	// "_vct" is a test-only override of the credential type, not a KB claim.
+	vct := "urn:test:credential"
+	if v, ok := extraKB["_vct"].(string); ok {
+		vct = v
+	}
 	issuerClaims := jwt.MapClaims{
 		"iss": "https://issuer.example.com",
 		"iat": time.Now().Unix(),
-		"vct": "urn:test:credential",
+		"vct": vct,
 		"_sd": sdHashes,
 		// The holder this credential was issued to. These fixtures use
 		// one key for issuer and holder, so naming it here is what makes
@@ -659,7 +664,9 @@ func createTestSDJWTWithKBClaims(t *testing.T, key *ecdsa.PrivateKey, claims map
 		"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:]),
 	}
 	for k, v := range extraKB {
-		kbClaims[k] = v
+		if k != "_vct" {
+			kbClaims[k] = v
+		}
 	}
 	kbToken := jwt.NewWithClaims(jwt.SigningMethodES256, kbClaims)
 	kbToken.Header["typ"] = "kb+jwt"

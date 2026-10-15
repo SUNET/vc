@@ -84,6 +84,11 @@ func (r *ts12Rig) post(kb map[string]any) error {
 	ctx := r.t.Context()
 	authCtx, err := r.client.cacheService.AuthContext.GetByID(ctx, r.sessID)
 	require.NoError(r.t, err)
+	if kb != nil {
+		if _, set := kb["_vct"]; !set {
+			kb["_vct"] = "https://psp.example/sca"
+		}
+	}
 	tok := createTestSDJWTWithKBClaims(r.t, r.key, map[string]any{"given_name": "Ada"}, nil, authCtx.Nonce, authCtx.ClientID, kb)
 	body, err := json.Marshal(openid4vp.VPResponse{VPToken: map[string][]string{"sca": {tok}}, State: authCtx.State})
 	require.NoError(r.t, err)
@@ -126,6 +131,45 @@ func TestVerificationDirectPost_TS12Payment(t *testing.T) {
 			assert.Contains(t, err.Error(), openid4vp.ErrorInvalidTransactionData)
 		})
 	}
+
+	t.Run("refuses a credential of another type", func(t *testing.T) {
+		r := newTS12Rig(t)
+		kb := r.kbClaims("jti-othertype")
+		kb["_vct"] = "urn:eudi:pid:1"
+		err := r.post(kb)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not one the request asked for")
+	})
+	t.Run("refuses a credential with no vct", func(t *testing.T) {
+		r := newTS12Rig(t)
+		kb := r.kbClaims("jti-novct")
+		kb["_vct"] = ""
+		err := r.post(kb)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no vct")
+	})
+
+	// The modes come from what the session was issued with, not from the
+	// configuration of whichever node receives the response.
+	t.Run("response_mode is checked against the issued modes, not the current config", func(t *testing.T) {
+		r := newTS12Rig(t)
+		r.client.cfg.Verifier.DigitalCredentials.Enable = true // enabled after issuance
+		kb := r.kbClaims("jti-mode-1")
+		kb["response_mode"] = "dc_api.jwt"
+		err := r.post(kb)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not one this request was issued with")
+
+		r = newTS12Rig(t)
+		authCtx, err := r.client.cacheService.AuthContext.GetByID(t.Context(), r.sessID)
+		require.NoError(t, err)
+		authCtx.TransactionDataResponseModes = []string{"direct_post.jwt", "dc_api.jwt"} // issued with the DC API on
+		require.NoError(t, r.client.cacheService.AuthContext.Update(t.Context(), authCtx))
+		r.client.cfg.Verifier.DigitalCredentials.Enable = false // disabled since
+		kb = r.kbClaims("jti-mode-2")
+		kb["response_mode"] = "dc_api.jwt"
+		require.NoError(t, r.post(kb))
+	})
 
 	t.Run("a plain presentation of a payment request is refused", func(t *testing.T) {
 		r := newTS12Rig(t)
@@ -170,7 +214,11 @@ func TestVerificationDirectPost_TS12ScopedToTheBoundCredential(t *testing.T) {
 		mk := func(kb map[string]any) string {
 			return createTestSDJWTWithKBClaims(r.t, r.key, map[string]any{"given_name": "Ada"}, nil, authCtx.Nonce, authCtx.ClientID, kb)
 		}
-		body, err := json.Marshal(openid4vp.VPResponse{VPToken: map[string][]string{"sca": {mk(scaKB)}, "age": {mk(nil)}}, State: authCtx.State})
+		sca := map[string]any{"_vct": "https://psp.example/sca"}
+		for k, v := range scaKB {
+			sca[k] = v
+		}
+		body, err := json.Marshal(openid4vp.VPResponse{VPToken: map[string][]string{"sca": {mk(sca)}, "age": {mk(nil)}}, State: authCtx.State})
 		require.NoError(r.t, err)
 		_, pub, err := r.client.ephemeralEncryptionKey(ctx, authCtx.EphemeralEncryptionKeyID)
 		require.NoError(r.t, err)

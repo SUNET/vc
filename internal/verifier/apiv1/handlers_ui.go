@@ -527,8 +527,9 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// request object AND the session: OpenID4VP hashes the string as
 	// received, so what we compare the wallet's hashes against must be the
 	// bytes we sent, not a later re-encoding.
-	var transactionData []string
+	var transactionData, transactionDataModes []string
 	if req.Payment != nil {
+		transactionDataModes = c.issuedResponseModes()
 		var err error
 		transactionData, err = c.buildPaymentTransactionData(req.Payment, req.DCQLQuery)
 		if err != nil {
@@ -559,12 +560,15 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// verification path cannot see what it is checking against.
 		DCQLQuery:       req.DCQLQuery,
 		TransactionData: transactionData,
-		Code:            "",
-		RequestURI:      "",
-		WalletURI:       "",
-		Forfeited:       false,
-		State:           state,
-		ClientID:        uiClientID,
+		// What the request objects below are issued with, kept so the
+		// response is checked against it and not against a later config.
+		TransactionDataResponseModes: transactionDataModes,
+		Code:                         "",
+		RequestURI:                   "",
+		WalletURI:                    "",
+		Forfeited:                    false,
+		State:                        state,
+		ClientID:                     uiClientID,
 		// How long the user has to complete the presentation.
 		//
 		// This was 0, and isSessionActive reads 0 as "never expires" - so

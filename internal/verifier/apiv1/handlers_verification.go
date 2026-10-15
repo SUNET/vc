@@ -327,7 +327,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			if len(authCtx.TransactionData) > 0 {
 				validator.TransactionData = authCtx.TransactionData
 				validator.CredentialQueryID = scopeQueryID
-				validator.ResponseModes = c.issuedResponseModes()
+				validator.ResponseModes = authCtx.TransactionDataResponseModes
 				validator.JTIStore = c.jtiStore(ctx)
 			}
 
@@ -350,6 +350,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			if err != nil {
 				c.log.Error(err, "failed to parse sd-jwt credential", "scope", scope)
 				return nil, err
+			}
+
+			// A credential that answers a transaction_data-bound query must be
+			// of the type that query names: the amr and other TS12 claims are
+			// the wallet's own words, and nothing else ties them to an SCA
+			// attestation. Trust evaluation does not enforce the requested vct.
+			if slices.Contains(answeredTransactionQueries, scopeQueryID) {
+				if err := c.checkBoundCredentialType(authCtx, scopeQueryIDs, scope, parsed.Claims); err != nil {
+					c.log.Error(err, "credential does not match the transaction_data-bound query", "scope", scope)
+					return nil, err
+				}
 			}
 
 			c.log.Debug("Parsed SD-JWT credential",

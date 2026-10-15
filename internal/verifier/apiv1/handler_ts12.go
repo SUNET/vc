@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/google/uuid"
@@ -73,6 +75,12 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 	if target.Format != openid4vp.FormatSDJWTVC {
 		return nil, invalidPayment("credential query %q has format %q; TS12 payment SCA requires %q", target.ID, target.Format, openid4vp.FormatSDJWTVC)
 	}
+	if len(target.Meta.VCTValues) == 0 {
+		// Without a vct constraint any credential the trust policy accepts
+		// could authorize the payment: the response check compares the
+		// presented credential's vct against these values.
+		return nil, invalidPayment("credential query %q must name the SCA attestation with meta.vct_values", target.ID)
+	}
 	if !target.RequiresCryptographicHolderBinding() {
 		return nil, invalidPayment("credential query %q disables cryptographic holder binding, which transaction_data requires", target.ID)
 	}
@@ -101,6 +109,7 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 // requests it issues for /ui/interaction: direct_post.jwt behind the QR code
 // and link, and dc_api.jwt for the Digital Credentials API variant when that
 // is enabled. The response arrives at one endpoint whichever was used, so a
+// TS12 KB-JWT may echo either. Recorded on the session at issuance.
 // TS12 KB-JWT may echo either.
 func (c *Client) issuedResponseModes() []string {
 	modes := []string{openid4vp.ResponseModeDirectPostJWT}
@@ -129,4 +138,29 @@ type jtiClaimer struct {
 func (j jtiClaimer) Claim(jti string) (bool, error) {
 	// Atomic: a concurrent second submission of the same KB-JWT loses SetNX.
 	return j.cache.SetNX(j.ctx, jti, true)
+}
+
+// checkBoundCredentialType refuses a presented credential whose vct is not one
+// the bound credential query asked for. Fails closed: when the query cannot be
+// found for this session (for example the DCQL is not available on this
+// replica) the type cannot be compared and the presentation is refused.
+func (c *Client) checkBoundCredentialType(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string, claims map[string]any) error {
+	refuse := func(format string, args ...any) error {
+		return &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf(format, args...)}
+	}
+	query, ok := c.requestedQueryExact(authCtx, scopeQueryIDs, scope)
+	if !ok {
+		return refuse("cannot compare the credential type: the request's credential query is not available")
+	}
+	if len(query.Meta.VCTValues) == 0 {
+		return refuse("cannot compare the credential type: the request named no vct_values")
+	}
+	vct, _ := claims["vct"].(string)
+	if vct == "" {
+		return refuse("credential has no vct")
+	}
+	if !slices.Contains(query.Meta.VCTValues, vct) {
+		return refuse("credential vct %q is not one the request asked for", vct)
+	}
+	return nil
 }
