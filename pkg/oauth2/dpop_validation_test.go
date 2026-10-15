@@ -500,14 +500,29 @@ func TestSameHTU_IPv6(t *testing.T) {
 		})
 	}
 
-	// An IPv4-mapped address and its dotted quad are one address, so they
-	// name one endpoint. RFC 5952 renders the mapped form as the quad,
-	// which is what makes the two agree.
-	if !SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.1/token") {
-		t.Fatal("an IPv4-mapped IPv6 literal names the same endpoint as its dotted quad")
+	// An IPv4-mapped literal and the dotted quad are ONE ADDRESS and TWO
+	// AUTHORITIES, and htu binds the authority. The two reach a server
+	// with different Host headers and can select different virtual hosts,
+	// so merging them would weaken the binding this comparison exists to
+	// make. net.IP.String would have merged them, by unmapping; netip
+	// preserves the family, which is why it is used.
+	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.1/token") {
+		t.Fatal("an IPv4-mapped IPv6 literal is a different authority from the dotted quad")
 	}
 	if SameHTU("https://[::ffff:127.0.0.1]/token", "https://127.0.0.2/token") {
 		t.Fatal("different addresses must stay different however they are spelled")
+	}
+
+	// Equivalent spellings of the mapped literal itself still agree: the
+	// refusal above is about the family, not about giving up on IPv6.
+	for _, pair := range [][2]string{
+		{"https://[::ffff:127.0.0.1]/token", "https://[::FFFF:127.0.0.1]/token"},
+		{"https://[::ffff:127.0.0.1]/token", "https://[0:0:0:0:0:ffff:127.0.0.1]/token"},
+		{"https://[::ffff:127.0.0.1]/token", "https://[::ffff:7f00:1]/token"},
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same authority", pair[0], pair[1])
+		}
 	}
 }
 
@@ -575,5 +590,41 @@ func TestSameHTU_PercentEncoding(t *testing.T) {
 				t.Fatalf("reversed: SameHTU(%q, %q) = %v, want %v", tc.endpoint, tc.htu, got, tc.want)
 			}
 		})
+	}
+}
+
+// IDNA does the case mapping itself, and Go's ToLower disagrees with it.
+//
+// Folding before the mapping turned "İ.example" (U+0130) into
+// "i.example", while UTS #46 maps the original to "xn--i-9bb.example" -
+// so a wallet's correctly canonicalised proof was REFUSED and one naming
+// the distinct authority "i.example" was ACCEPTED. Both directions are
+// asserted, because the accepting one is the security half.
+func TestSameHTU_UnicodeCaseIsIDNAsToDo(t *testing.T) {
+	const dotted = "https://İ.example/token"         // İ.example
+	const aLabel = "https://xn--i-9bb.example/token" // what UTS #46 maps it to
+	const plainI = "https://i.example/token"         // what ToLower makes of it
+
+	if !SameHTU(dotted, aLabel) {
+		t.Fatalf("%q is the A-label of %q; a proof naming either must satisfy the other", aLabel, dotted)
+	}
+	if SameHTU(dotted, plainI) {
+		t.Fatalf("%q and %q are different authorities", dotted, plainI)
+	}
+	if SameHTU(aLabel, plainI) {
+		t.Fatalf("%q and %q are different authorities", aLabel, plainI)
+	}
+
+	// The ordinary foldings still fold - the fix is about which component
+	// does the folding, not about giving it up.
+	for _, pair := range [][2]string{
+		{"https://MÜNCHEN.example/token", "https://xn--mnchen-3ya.example/token"},
+		{"https://München.example/token", "https://münchen.example/token"},
+		{"https://EXAMPLE.COM/token", "https://example.com/token"},
+		{"https://ẞ.example/token", "https://ß.example/token"}, // ẞ and ß
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same host", pair[0], pair[1])
+		}
 	}
 }
