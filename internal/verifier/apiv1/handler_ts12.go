@@ -58,6 +58,10 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 	} else {
 		for i := range dcql.Credentials {
 			if dcql.Credentials[i].ID == p.CredentialID {
+				if target != nil {
+					// DCQL requires unique ids; two matches leave it unclear which query's format and holder binding apply.
+					return nil, invalidPayment("credential_id %q names more than one credential query", p.CredentialID)
+				}
 				target = &dcql.Credentials[i]
 			}
 		}
