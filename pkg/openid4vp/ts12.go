@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // EC TS12 v1.0.1 ("Specification of Strong Customer Authentication (SCA)
@@ -21,7 +22,6 @@ const (
 )
 
 var (
-	ts12CurrencyRE = regexp.MustCompile(`^[A-Z]{3}$`)
 	// ts12AmountRE: TS12 4.3.1 says amount is a JSON number "consisting of major currency units as the integer component and an optional fraction part". A plain non-negative decimal, no exponent, no sign.
 	ts12AmountRE = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 	ts12ZeroRE   = regexp.MustCompile(`^0+(\.0+)?$`)
@@ -69,7 +69,8 @@ func (n *RawNumber) UnmarshalJSON(b []byte) error {
 
 // Validate applies the TS12 payment schema constraints this verifier can check, failing closed.
 func (p *TS12PaymentPayload) Validate() error {
-	if l := len(p.TransactionID); l < 1 || l > MaxTS12TransactionIDLength {
+	// JSON Schema maxLength counts Unicode code points, not UTF-8 bytes.
+	if l := utf8.RuneCountInString(p.TransactionID); l < 1 || l > MaxTS12TransactionIDLength {
 		return fmt.Errorf("transaction_id must be 1..%d characters", MaxTS12TransactionIDLength)
 	}
 	if strings.TrimSpace(p.Payee.Name) == "" {
@@ -78,8 +79,8 @@ func (p *TS12PaymentPayload) Validate() error {
 	if strings.TrimSpace(p.Payee.ID) == "" {
 		return fmt.Errorf("payee.id is required")
 	}
-	if !ts12CurrencyRE.MatchString(p.Currency) {
-		return fmt.Errorf("currency must be an ISO 4217 alpha-3 code")
+	if !iso4217Currencies[p.Currency] {
+		return fmt.Errorf("currency %q is not an ISO 4217 alpha-3 currency code", p.Currency)
 	}
 	if !ts12AmountRE.MatchString(string(p.Amount)) {
 		return fmt.Errorf("amount must be a plain decimal number")
@@ -121,3 +122,22 @@ func NewTS12PaymentTransactionData(payload TS12PaymentPayload, credentialIDs []s
 		Payload:                  payload,
 	}, nil
 }
+
+// iso4217Currencies is a snapshot of the ISO 4217 alpha-3 codes of currencies
+// in circulation (no precious metals, test or "no currency" codes, which are
+// not payment currencies). A code missing here is refused: fail closed beats
+// sending a code no wallet or payment system can interpret. BGN and HRK are
+// not listed (both withdrawn for the euro).
+var iso4217Currencies = func() map[string]bool {
+	codes := strings.Fields(`AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD
+		CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD
+		HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD
+		MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG
+		QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD
+		TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XCG XOF XPF YER ZAR ZMW ZWG`)
+	m := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		m[c] = true
+	}
+	return m
+}()

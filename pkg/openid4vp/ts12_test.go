@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -128,6 +129,22 @@ func TestNewTS12PaymentTransactionData(t *testing.T) {
 			_, err := NewTS12PaymentTransactionData(p, []string{"sca"}, nil)
 			assert.Error(t, err)
 		})
+	}
+
+	t.Run("transaction_id length counts characters, not bytes", func(t *testing.T) {
+		p := good
+		p.TransactionID = strings.Repeat("é", 36) // 72 bytes
+		_, err := NewTS12PaymentTransactionData(p, []string{"sca"}, nil)
+		assert.NoError(t, err)
+		p.TransactionID = strings.Repeat("é", 37)
+		_, err = NewTS12PaymentTransactionData(p, []string{"sca"}, nil)
+		assert.Error(t, err)
+	})
+	for _, c := range []string{"EUR", "SEK", "USD", "JPY", "XOF"} {
+		p := good
+		p.Currency = c
+		_, err := NewTS12PaymentTransactionData(p, []string{"sca"}, nil)
+		assert.NoError(t, err, c)
 	}
 
 	_, err = NewTS12PaymentTransactionData(good, nil, nil)
