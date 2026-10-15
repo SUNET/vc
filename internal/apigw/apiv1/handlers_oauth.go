@@ -1166,6 +1166,14 @@ type walletClientAuth struct {
 	RedirectURI string
 	Scope       string
 
+	// RedirectOptional drops the REQUIREMENT for a redirect_uri, not the
+	// check on one that is sent. The Authorization Challenge Endpoint is
+	// browserless - there is nowhere to send the user back to, and
+	// draft-ietf-oauth-first-party-apps makes the parameter optional on
+	// its request - so a registered wallet with no callback was refused
+	// with invalid_client, and only a wallet attestation got past it.
+	RedirectOptional bool
+
 	// ClientAttestation and ClientAttestationPoP are the headers
 	// draft-ietf-oauth-attestation-based-client-auth §3.1 defines.
 	ClientAttestation    string
@@ -1266,7 +1274,11 @@ func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (st
 }
 
 func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientAuth) (*oauth2.Client, error) {
-	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
+	allow := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow
+	if req.RedirectOptional {
+		allow = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.AllowWithoutRedirect
+	}
+	oauthClient, err := allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err == nil {
 		return oauthClient, nil
 	}

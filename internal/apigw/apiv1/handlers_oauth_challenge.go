@@ -256,13 +256,22 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	// scheme sanitisation, so that custom wallet schemes survive. A
 	// "javascript:" value therefore becomes script execution in the
 	// APIGW's own origin once the user consents.
-	if err := oauth2.ValidateRedirectURIScheme(req.RedirectURI); err != nil {
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid redirect_uri", 400, err)
+	//
+	// Only when one is sent. This endpoint is browserless and the
+	// parameter is optional on its request, so an absent redirect_uri is
+	// not a dangerous scheme - it is no URI at all, and nothing renders
+	// it. Validating "" refused every registered wallet that has no
+	// callback, which is the case this endpoint exists to serve.
+	if req.RedirectURI != "" {
+		if err := oauth2.ValidateRedirectURIScheme(req.RedirectURI); err != nil {
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid redirect_uri", 400, err)
+		}
 	}
 
 	oauthClient, err := c.authenticateOAuthClient(ctx, &walletClientAuth{
 		ClientID:             req.ClientID,
 		RedirectURI:          req.RedirectURI,
+		RedirectOptional:     true,
 		Scope:                req.Scope,
 		ClientAttestation:    req.ClientAttestation,
 		ClientAttestationPoP: req.ClientAttestationPoP,

@@ -458,3 +458,58 @@ func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
 	assert.Empty(t, stored.AuthSession, "the stored document must have had its handle cleared")
 	assert.Equal(t, "claim-reader-code", stored.Code, "and nothing else")
 }
+
+// ExtendExpiry promises the same query fields as Get, and three were
+// missing from the in-memory resolver: VerifierResponseCode,
+// EphemeralEncryptionKeyID and RequestObjectID. A query Get and Mongo's
+// ExtendExpiry both answered failed in memory with "no searchable field
+// set" - a backend difference that only shows up for some callers, which
+// is worse than either behaviour on its own.
+//
+// Get and ExtendExpiry now share one resolver, so the list of fields a
+// context can be found by lives in one place and cannot drift again. This
+// test asserts the contract through BOTH, for every field.
+func TestExtendExpiryResolvesEveryFieldGetDoes(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	base := int64(1000)
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:                "every-field",
+		RequestURI:               "urn:req:1",
+		Code:                     "code-1",
+		State:                    "state-1",
+		VerifierResponseCode:     "vrc-1",
+		EphemeralEncryptionKeyID: "kid-1",
+		RequestObjectID:          "roid-1",
+		AuthSession:              "handle-1",
+		ExpiresAt:                base,
+	}))
+
+	for name, query := range map[string]*AuthorizationContext{
+		"session_id":             {SessionID: "every-field"},
+		"request_uri":            {RequestURI: "urn:req:1"},
+		"code":                   {Code: "code-1"},
+		"state":                  {State: "state-1"},
+		"verifier_response_code": {VerifierResponseCode: "vrc-1"},
+		"ephemeral_key_id":       {EphemeralEncryptionKeyID: "kid-1"},
+		"request_object_id":      {RequestObjectID: "roid-1"},
+		"auth_session":           {AuthSession: "handle-1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Get answers it - the half that was always true.
+			found, err := store.Get(ctx, query)
+			require.NoError(t, err, "Get must resolve by %s", name)
+			require.Equal(t, "every-field", found.SessionID)
+
+			// And so must ExtendExpiry, which is the half that did not.
+			base++
+			require.NoError(t, store.ExtendExpiry(ctx, query, base),
+				"ExtendExpiry must resolve by %s, like Get and like the Mongo backend", name)
+
+			after, err := store.Get(ctx, &AuthorizationContext{SessionID: "every-field"})
+			require.NoError(t, err)
+			assert.Equal(t, base, after.ExpiresAt, "the extension must have been applied")
+		})
+	}
+}

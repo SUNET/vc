@@ -127,38 +127,11 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var sessionID string
-
-	// If sessionID is provided directly, use it
-	if query.SessionID != "" {
-		sessionID = query.SessionID
-	} else {
-		// Otherwise, look up sessionID via secondary indices
-		var indexKey string
-
-		if query.RequestURI != "" {
-			indexKey = fmt.Sprintf("request_uri:%s", query.RequestURI)
-		} else if query.Code != "" {
-			indexKey = fmt.Sprintf("code:%s", query.Code)
-		} else if query.State != "" {
-			indexKey = fmt.Sprintf("state:%s", query.State)
-		} else if query.VerifierResponseCode != "" {
-			indexKey = fmt.Sprintf("verifier_response_code:%s", query.VerifierResponseCode)
-		} else if query.EphemeralEncryptionKeyID != "" {
-			indexKey = fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
-		} else if query.RequestObjectID != "" {
-			indexKey = fmt.Sprintf("request_object_id:%s", query.RequestObjectID)
-		} else if query.AuthSession != "" {
-			indexKey = fmt.Sprintf("auth_session:%s", query.AuthSession)
-		} else {
-			return nil, errors.New("query must have at least one search field")
-		}
-
-		var ok bool
-		sessionID, ok = c.indices[indexKey]
-		if !ok {
-			return nil, ErrNoDocuments
-		}
+	// The same resolver ExtendExpiry uses, so the two cannot drift: the
+	// list of fields a context can be found by belongs in one place.
+	sessionID, err := c.resolveSessionIDLocked(query)
+	if err != nil {
+		return nil, err
 	}
 
 	// Retrieve from primary cache using sessionID
@@ -872,10 +845,20 @@ func (c *MemoryStore) resolveSessionIDLocked(query *AuthorizationContext) (strin
 	if query.SessionID != "" {
 		return query.SessionID, nil
 	}
+	// Every field Get resolves by, in the order Get tries them. The two
+	// must agree: ExtendExpiry's contract promises the same query fields,
+	// and three were missing here - VerifierResponseCode,
+	// EphemeralEncryptionKeyID and RequestObjectID - so a query that Get
+	// and Mongo's ExtendExpiry both answered failed in memory with "no
+	// searchable field set". A backend difference that only shows up for
+	// some callers is worse than either behaviour on its own.
 	for _, index := range []struct{ name, value string }{
 		{"request_uri", query.RequestURI},
 		{"code", query.Code},
 		{"state", query.State},
+		{"verifier_response_code", query.VerifierResponseCode},
+		{"ephemeral_key_id", query.EphemeralEncryptionKeyID},
+		{"request_object_id", query.RequestObjectID},
 		{"auth_session", query.AuthSession},
 	} {
 		if index.value == "" {
