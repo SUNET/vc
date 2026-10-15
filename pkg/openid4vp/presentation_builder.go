@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -195,6 +196,29 @@ func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []str
 	return copyDCQL(dcql), slices.Clone(template.GetOIDCScopes()), true
 }
 
+// copyAnyMap deep-copies an opaque JSON tree.
+//
+// Through the encoding rather than by walking it: the values are whatever
+// a Verifier configured, including shapes this build does not model, and a
+// hand-written walk would have to be taught every one of them. Nil in,
+// nil out, so a copied query is indistinguishable from the original.
+func copyAnyMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(src)
+	if err != nil {
+		// Unreachable for a tree that came off the wire or out of
+		// configuration; aliasing the original is better than losing it.
+		return src
+	}
+	var dst map[string]any
+	if err := decodeExact(encoded, &dst); err != nil {
+		return src
+	}
+	return dst
+}
+
 // copyDCQL creates a deep copy of a DCQL query
 func copyDCQL(src *DCQL) *DCQL {
 	if src == nil {
@@ -283,6 +307,25 @@ func copyDCQL(src *DCQL) *DCQL {
 					Values: valuesCopy,
 				}
 			}
+		}
+
+		// Copy the circuit_zk request. Params and Extra are opaque trees
+		// this package passes through unchanged, so they are deep-copied
+		// through their JSON encoding rather than walked field by field.
+		if len(cred.Req) > 0 {
+			dst.Credentials[i].Req = make([]ReqItem, len(cred.Req))
+			for j, item := range cred.Req {
+				dst.Credentials[i].Req[j] = ReqItem{
+					ID:     item.ID,
+					Return: item.Return,
+					Params: copyAnyMap(item.Params),
+					Extra:  copyAnyMap(item.Extra),
+				}
+			}
+		}
+		dst.Credentials[i].Extra = copyAnyMap(cred.Extra)
+		if cred.Raw != nil {
+			dst.Credentials[i].Raw = append(json.RawMessage(nil), cred.Raw...)
 		}
 
 		// Copy claim sets

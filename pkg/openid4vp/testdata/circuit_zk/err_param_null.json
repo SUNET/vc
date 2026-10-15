@@ -1,0 +1,22 @@
+{
+  "description": "A declared param that is JSON null is the wrong type, not absent.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "h",
+        "params": {
+          "le": null
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "param_wrong_type"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "description": "Both req and claims._req are present.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ],
+    "claims": {
+      "_req": [
+        {
+          "fn_id": "age_check",
+          "id": "age-range-123",
+          "params": {
+            "ge": "2008-10-10",
+            "le": "2013-10-09",
+            "source": {
+              "path": [
+                "birth_date"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "error": "req_ambiguous"
+  }
+}

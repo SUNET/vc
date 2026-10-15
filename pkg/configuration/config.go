@@ -292,6 +292,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkPresetValidationProfiles(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
