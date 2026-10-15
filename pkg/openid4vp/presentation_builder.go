@@ -509,19 +509,37 @@ func copyReflectedAt(src any, element reflect.Type, path *copyPath) (reflect.Val
 	return copied, true
 }
 
-// encoding/json serialises through EITHER of these, so either one makes
-// a value's own output authoritative and its insides none of this walk's
-// business. Recognising only json.Marshaler left a named map with a
-// MarshalText taking the structural path, where its elements were
-// retyped under it and serialising the copy then failed.
+// A value that serialises ITSELF is snapshotted whole: its output is the
+// request, and what is inside it is none of this walk's business.
+//
+// encoding/json dispatches to more than one interface, and recognising
+// only some of them is what repeatedly let a container through. The ones
+// below are the stdlib's; MarshalJSONTo is matched by NAME because it
+// belongs to encoding/json/v2, which this module reaches through the
+// jsonv2 GOEXPERIMENT rather than by import - naming it keeps this
+// correct whether that experiment is on or off, and snapshotting a type
+// json would NOT have dispatched to costs nothing, since encodeCopy
+// reproduces its bytes either way.
 var marshalerTypes = []reflect.Type{
 	reflect.TypeOf((*json.Marshaler)(nil)).Elem(),
 	reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem(),
+	reflect.TypeOf((*encoding.TextAppender)(nil)).Elem(),
 }
 
+var marshalerMethods = []string{"MarshalJSONTo"}
+
 func implementsMarshaler(t reflect.Type) bool {
+	pointer := reflect.PointerTo(t)
 	for _, marshaler := range marshalerTypes {
-		if t.Implements(marshaler) || reflect.PointerTo(t).Implements(marshaler) {
+		if t.Implements(marshaler) || pointer.Implements(marshaler) {
+			return true
+		}
+	}
+	for _, name := range marshalerMethods {
+		if _, found := t.MethodByName(name); found {
+			return true
+		}
+		if _, found := pointer.MethodByName(name); found {
 			return true
 		}
 	}
