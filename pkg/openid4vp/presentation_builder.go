@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"context"
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -336,6 +337,16 @@ func copyAnyValueAt(src any, path *copyPath) any {
 			// allocating here would send [] where the query said null.
 			return src
 		}
+		// This branch is a FAST PATH around the reflective walk, and it
+		// was skipping that walk's cycle guard with it: s[0] = s recursed
+		// here without ever recording the slice, so the guards on maps
+		// and on typed slices did nothing and the stack died.
+		key := containerKey(reflect.ValueOf(typed).Pointer(), len(typed))
+		if !path.enter(key) {
+			return src
+		}
+		defer path.leave(key)
+
 		dst := make([]any, len(typed))
 		for i, value := range typed {
 			dst[i] = copyAnyValueAt(value, path)
@@ -389,7 +400,7 @@ func copyTypedContainerAt(src any, path *copyPath) any {
 	// time.Time element would find a json.RawMessage there, and
 	// marshalling the copied request would fail. encodeCopy keeps the
 	// bytes the marshaller produced, which is what the request is.
-	if implementsJSONMarshaler(value.Type()) {
+	if implementsMarshaler(value.Type()) {
 		return encodeCopy(src)
 	}
 
@@ -498,10 +509,23 @@ func copyReflectedAt(src any, element reflect.Type, path *copyPath) (reflect.Val
 	return copied, true
 }
 
-var jsonMarshalerType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
+// encoding/json serialises through EITHER of these, so either one makes
+// a value's own output authoritative and its insides none of this walk's
+// business. Recognising only json.Marshaler left a named map with a
+// MarshalText taking the structural path, where its elements were
+// retyped under it and serialising the copy then failed.
+var marshalerTypes = []reflect.Type{
+	reflect.TypeOf((*json.Marshaler)(nil)).Elem(),
+	reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem(),
+}
 
-func implementsJSONMarshaler(t reflect.Type) bool {
-	return t.Implements(jsonMarshalerType) || reflect.PointerTo(t).Implements(jsonMarshalerType)
+func implementsMarshaler(t reflect.Type) bool {
+	for _, marshaler := range marshalerTypes {
+		if t.Implements(marshaler) || reflect.PointerTo(t).Implements(marshaler) {
+			return true
+		}
+	}
+	return false
 }
 
 // encodeCopy copies through the encoding, normalising a shape this build

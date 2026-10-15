@@ -1246,3 +1246,54 @@ func TestCopyKeepsCustomMarshalledContainersIntact(t *testing.T) {
 	assert.Equal(t, string(before), string(after))
 	assert.Contains(t, string(after), `{"x":1,"x":2}`, "and the raw leaf must survive")
 }
+
+// textStamped marshals through encoding.TextMarshaler rather than
+// json.Marshaler. encoding/json honours both.
+type textStamped map[string]any
+
+func (t textStamped) MarshalText() ([]byte, error) {
+	when, ok := t["at"].(time.Time)
+	if !ok {
+		return nil, fmt.Errorf("textStamped: at is %T, not a time.Time", t["at"])
+	}
+	return []byte(when.UTC().Format(time.RFC3339)), nil
+}
+
+// The []any fast path must enter the walk's path like everything else.
+//
+// It went around the reflective walk and took that walk's cycle guard
+// with it, so a self-referencing slice recursed until the stack died
+// while the guards on maps and on typed slices sat unused.
+func TestCopyTerminatesOnSelfReferencingSlices(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s := make([]any, 1)
+		s[0] = s
+		_ = copyAnyMap(map[string]any{"s": s})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("copying a self-referencing slice did not terminate")
+	}
+}
+
+// A text-marshalled container is snapshotted too.
+//
+// encoding/json serialises through encoding.TextMarshaler as readily as
+// through json.Marshaler, so recognising only the latter left a named map
+// with a MarshalText on the structural path: its time.Time element became
+// a json.RawMessage under a method that still expected a time.Time, and
+// serialising the copy failed where the original succeeded.
+func TestCopyKeepsTextMarshalledContainersIntact(t *testing.T) {
+	src := map[string]any{"t": textStamped{"at": time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)}}
+
+	before, err := json.Marshal(src)
+	require.NoError(t, err, "the original marshals")
+	after, err := json.Marshal(copyAnyMap(src))
+	require.NoError(t, err, "so must the copy: its MarshalText must still find a time.Time")
+	assert.Equal(t, string(before), string(after))
+	assert.Contains(t, string(after), "2026-10-15T12:00:00Z")
+}
