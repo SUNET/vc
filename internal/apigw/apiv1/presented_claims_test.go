@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"math"
+	"math/big"
 	"os"
 	"testing"
 	"time"
@@ -416,6 +417,94 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, float64(42), out["n"])
 	})
+}
+
+// A CBOR bignum must be refused unless it survives the issuer's round
+// trip, and "it serialises" is not that test.
+//
+// Tags 2 and 3 decode to a big.Int, which reaches neither integer
+// guard. Both shapes were verified before the fix rather than reasoned
+// about, under this repo's own GOEXPERIMENT=jsonv2:
+//
+//	big.Int value  -> {"c":{}}                   (an empty object!)
+//	*big.Int       -> {"c":18446744073709551617}
+//	                   issuer round trip ->  ...552000
+//
+// The value case is the sharp one: MarshalJSON is on the POINTER
+// receiver, so a non-addressable big.Int inside an `any` never reaches
+// it and the claim is emitted as an empty object where the holder
+// proved a number. Neither case is caught by asking whether the value
+// serialises, which is why the guard is on the round trip instead.
+func TestCBORBignumsAreRefusedUnlessTheySurvive(t *testing.T) {
+	tooBig, ok := new(big.Int).SetString("18446744073709551617", 10)
+	require.True(t, ok)
+
+	// The premises, both of them, so this test cannot pass by pinning
+	// some other behaviour.
+	encoded, err := json.Marshal(map[string]any{"c": *tooBig})
+	require.NoError(t, err, "a big.Int value serialises cleanly, which is the trap")
+	require.Contains(t, string(encoded), `"c":{}`, "and emits an empty object where a number was proved")
+
+	encoded, err = json.Marshal(map[string]any{"c": tooBig})
+	require.NoError(t, err)
+	var roundTripped map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &roundTripped), "what the issuer does to the document")
+	again, err := json.Marshal(roundTripped)
+	require.NoError(t, err)
+	require.NotContains(t, string(again), "18446744073709551617",
+		"the premise of the bug: the issuer's float64 parse changes the number")
+
+	for _, shape := range []struct {
+		name  string
+		value any
+	}{
+		{"a bignum value", *tooBig},
+		{"a bignum pointer", tooBig},
+		{"inside a copied object", map[any]any{"inner": tooBig}},
+		{"inside a copied array", []any{*tooBig}},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			copied, err := copiedMdocClaim(t, "odd", shape.value)
+			require.Error(t, err, "a number the document cannot carry must be refused, not published")
+			require.Nil(t, copied)
+		})
+	}
+
+	// json.Number takes the same rule, tested against documentValue
+	// directly: a CBOR presentation cannot carry one - json.Number is a
+	// string type, so it would encode as text and decode as a string -
+	// and this case is defensive, for a decoder set to UseNumber.
+	t.Run("a json.Number beyond the exact range", func(t *testing.T) {
+		_, err := documentValue(json.Number("18446744073709551617"))
+		require.Error(t, err, "the literal survives this hop and is rounded at the next one")
+	})
+	t.Run("a json.Number in range", func(t *testing.T) {
+		got, err := documentValue(json.Number("42"))
+		require.NoError(t, err)
+		require.Equal(t, int64(42), got)
+	})
+	t.Run("a json.Number that is not a number", func(t *testing.T) {
+		_, err := documentValue(json.Number("not a number"))
+		require.Error(t, err)
+	})
+
+	// A bignum inside the exact range is an ordinary number and still
+	// copies, or this guard would be "refuse every bignum".
+	for _, shape := range []struct {
+		name  string
+		value any
+	}{
+		{"a bignum value in range", *big.NewInt(9007199254740991)},
+		{"a bignum pointer in range", big.NewInt(-9007199254740991)},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			copied, err := copiedMdocClaim(t, "odd", shape.value)
+			require.NoError(t, err)
+			out, err := json.Marshal(copied)
+			require.NoError(t, err)
+			require.NotContains(t, string(out), "{}", "a carried number must not become an object")
+		})
+	}
 }
 
 // A CBOR map key that is not a string must be refused, not stringified.

@@ -2,9 +2,11 @@ package apiv1
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
+	"math/big"
 	"slices"
 	"time"
 
@@ -255,6 +257,28 @@ func documentValue(v any) (any, error) {
 	// Refusing is the only honest answer here. The value cannot be
 	// carried, and issuing a different number than the holder proved is
 	// exactly what this copy exists to prevent.
+	// A CBOR bignum (tags 2 and 3) decodes to a big.Int, which reaches
+	// neither integer guard below - and serialising cleanly is not the
+	// same as being carried faithfully, which is what the guard before
+	// the default branch can check and this cannot be left to.
+	//
+	// Both shapes are wrong in their own way, and both were verified
+	// rather than reasoned about. A *big.Int marshals as a number and
+	// the issuer's map[string]any parse rounds it:
+	// 18446744073709551617 is issued as ...552000. A big.Int VALUE is
+	// worse - MarshalJSON is on the pointer receiver, so a
+	// non-addressable value in an `any` does not reach it and the claim
+	// is emitted as `{}`, an empty object where a number was proved.
+	case big.Int:
+		return bignumValue(&typed)
+	case *big.Int:
+		return bignumValue(typed)
+
+	// And the same hazard for a decoder set to UseNumber: the literal
+	// survives this hop and is rounded at the next one.
+	case json.Number:
+		return numberValue(typed)
+
 	case int64:
 		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
 			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
@@ -340,6 +364,49 @@ func documentArray(in []any) ([]any, error) {
 		out[i] = converted
 	}
 	return out, nil
+}
+
+// bignumValue carries a CBOR bignum only when it survives the issuer's
+// float64 round trip, and refuses it otherwise - the same rule the int64
+// and uint64 cases apply, reached by a type neither of them sees.
+func bignumValue(n *big.Int) (any, error) {
+	if n == nil {
+		// Not reachable from a decoded presentation: a CBOR null
+		// decodes to an untyped nil, not to a typed nil pointer. So
+		// something built this by hand, and guessing what it meant is
+		// not this function's job.
+		return nil, errors.New("a claim value of nil *big.Int is not a number this document can carry")
+	}
+	if !n.IsInt64() {
+		return nil, fmt.Errorf("%s cannot be carried exactly through the issued document, where numbers are float64", n)
+	}
+	v := n.Int64()
+	if v > maxExactJSONInt || v < -maxExactJSONInt {
+		return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", v)
+	}
+	return v, nil
+}
+
+// numberValue carries a json.Number under the same rule, as an integer
+// where it is one and as a float otherwise.
+func numberValue(n json.Number) (any, error) {
+	if i, err := n.Int64(); err == nil {
+		if i > maxExactJSONInt || i < -maxExactJSONInt {
+			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", i)
+		}
+		return i, nil
+	}
+	f, err := n.Float64()
+	if err != nil {
+		return nil, fmt.Errorf("a claim value of %q is not a number this document can carry", n.String())
+	}
+	if err := refuseNonFinite(f); err != nil {
+		return nil, err
+	}
+	if f > maxExactJSONInt || f < -maxExactJSONInt {
+		return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", f)
+	}
+	return f, nil
 }
 
 // refuseUnserialisable refuses a leaf the issued document cannot carry.
