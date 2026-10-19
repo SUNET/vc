@@ -44,7 +44,7 @@ issuer:
     primary:
       model: derived
       secret_path: /etc/vc/seed/issuer.key   # base64url; >= 32 bytes DECODED
-      # seed_bytes: 16                       # default
+      # seed_bytes: 16                       # default, and the minimum
 ```
 
 The secret itself is never written in `config.yaml`. Either mount it and
@@ -215,6 +215,14 @@ can be replaced after a compromise, and this cannot.
 
 Changing `seed_bytes` has the same effect, and for the same reason: the
 length is part of the derivation, not just the output size.
+
+`seed_bytes` is also floored at 16, the default. The seed is the opening
+of a commitment that is published in a credential, so a short seed is a
+small search space rather than a short key: at one byte there are 256
+possible openings and anyone holding the commitment finds the right one,
+however long the derivation secret is. The same ceiling bounds how many
+subjects can hold distinct seeds, so a short length also hands two people
+the same pseudonym.
 
 ## Who can link a pseudonym to a person
 

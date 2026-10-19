@@ -38,6 +38,22 @@ const MinSecretBytes = 32
 // nym_auth's 16 bytes; a different consumer may ask for more.
 const DefaultSeedBytes = 16
 
+// MinSeedBytes is the shortest seed this package will produce.
+//
+// The seed is the opening of a commitment that is published in a
+// credential: ssc = SHA256(seed). A short seed is therefore not a short
+// key but a small SEARCH SPACE - with seed_bytes 1 there are 256 possible
+// openings, so anyone holding the commitment recovers the seed by trying
+// them, and the derivation secret's strength is irrelevant to that. The
+// same length also bounds how many distinct subjects can have distinct
+// seeds at all: 256 subjects exhaust it, after which two people share a
+// pseudonym.
+//
+// 16 bytes is the floor because it is also DefaultSeedBytes - the length
+// the nym_auth rulebook specifies - so this refuses only configurations
+// that are weaker than the default, never one that accepted the default.
+const MinSeedBytes = 16
+
 // MaxSeedBytes bounds what a configuration may ask for. HKDF-SHA256 can
 // expand to 255*32 bytes; anything near that in a credential claim is a
 // configuration mistake rather than a use case.
@@ -100,8 +116,8 @@ func NewDeriver(secret []byte, seedBytes int) (*Deriver, error) {
 	if seedBytes == 0 {
 		seedBytes = DefaultSeedBytes
 	}
-	if seedBytes < 1 || seedBytes > MaxSeedBytes {
-		return nil, fmt.Errorf("seed: seed length %d is outside 1..%d", seedBytes, MaxSeedBytes)
+	if seedBytes < MinSeedBytes || seedBytes > MaxSeedBytes {
+		return nil, fmt.Errorf("seed: seed length %d is outside %d..%d", seedBytes, MinSeedBytes, MaxSeedBytes)
 	}
 
 	// Copied, so a caller that zeroes or reuses its buffer cannot change

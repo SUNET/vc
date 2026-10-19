@@ -684,7 +684,12 @@ type SeedSource struct {
 	// It is part of the derivation, not just its output size, so changing
 	// it changes every seed - the same irreversible act as changing the
 	// secret.
-	SeedBytes int `yaml:"seed_bytes" validate:"omitempty,min=1,max=64" doc_example:"16"`
+	//
+	// 16 is also the MINIMUM. The seed is the opening of a published
+	// commitment, so a short one is a small search space rather than a
+	// short key: at 1 byte there are 256 possible openings and the
+	// commitment is trivially opened, however strong the secret is.
+	SeedBytes int `yaml:"seed_bytes" validate:"omitempty,min=16,max=64" doc_example:"16"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.

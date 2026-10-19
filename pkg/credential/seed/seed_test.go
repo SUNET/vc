@@ -7,9 +7,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -251,6 +254,55 @@ func TestNewDeriverSeedLength(t *testing.T) {
 		_, err := NewDeriver(testSecret, bad)
 		assert.Error(t, err, "seed length %d must be refused", bad)
 	}
+}
+
+// A seed shorter than the minimum is refused, however strong the secret.
+//
+// The seed is the OPENING of a published commitment, ssc = SHA256(seed),
+// so its length is a search space and not a key length: at seed_bytes 1
+// there are 256 possible seeds, and anyone who sees the commitment tries
+// all of them. The same ceiling limits how many subjects can hold
+// distinct seeds at all, so past 256 subjects two people share a
+// pseudonym. Neither consequence depends on the derivation secret, which
+// is why a 32-byte secret does not rescue a 1-byte seed.
+func TestShortSeedsAreRefused(t *testing.T) {
+	for _, bad := range []int{1, 2, 8, MinSeedBytes - 1} {
+		_, err := NewDeriver(testSecret, bad)
+		require.Errorf(t, err, "seed length %d is small enough to brute-force the commitment", bad)
+		assert.Contains(t, err.Error(), "outside")
+	}
+
+	// The floor is the default, so nothing that took the default is
+	// refused by it.
+	require.Equal(t, DefaultSeedBytes, MinSeedBytes,
+		"raising the floor above the default would refuse the rulebook's own length")
+	for _, ok := range []int{0, MinSeedBytes, 32, MaxSeedBytes} {
+		d, err := NewDeriver(testSecret, ok)
+		require.NoErrorf(t, err, "seed length %d must still be accepted", ok)
+		got, err := d.Seed(t.Context(), []string{"subject-1"}, "")
+		require.NoError(t, err)
+		want := ok
+		if ok == 0 {
+			want = DefaultSeedBytes
+		}
+		assert.Len(t, got, want)
+	}
+}
+
+// The configuration must refuse the same lengths the constructor does.
+//
+// They are two separate gates - config validation runs at startup over
+// the YAML, NewDeriver runs when the source is built - and a deployment
+// that passes validation and then fails to start is a worse outcome than
+// one that is told which field is wrong. The tag carried min=1, so
+// seed_bytes: 1 validated cleanly and only the constructor would have
+// stopped it, had it stopped it.
+func TestSeedBytesValidationMatchesTheConstructor(t *testing.T) {
+	tag := reflect.TypeOf(model.SeedSource{})
+	field, ok := tag.FieldByName("SeedBytes")
+	require.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("omitempty,min=%d,max=%d", MinSeedBytes, MaxSeedBytes), field.Tag.Get("validate"),
+		"configuration validation and NewDeriver must refuse the same seed lengths")
 }
 
 // The secret is copied in, so a caller reusing or zeroing its buffer
