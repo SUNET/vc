@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/nymauth"
@@ -28,8 +29,26 @@ type Request struct {
 	// as 20 ASCII bytes, YYYY-MM-DDThh:mm:ssZ.
 	Now time.Time
 
-	// Bounds are E and C, from the verifier's policy.
-	Bounds AgeBounds
+	// Inputs are the predicate contributions to this request, each
+	// naming the function it comes from.
+	//
+	// A LIST keyed by function id rather than a field per predicate,
+	// because predicates in circuit_zk apply to any claim and the set
+	// of functions is open-ended. The age check is the first registered
+	// one; a second needs no change here. See functions.go.
+	Inputs []CircuitInput
+
+	// SupportedFunctions are the function ids the selected circuit
+	// build supports, from the catalog's capabilities and the
+	// operator's allowlist.
+	//
+	// Data-driven on purpose: which circuit supports which predicate is
+	// not knowledge this package should carry, and new circuits are
+	// created elsewhere. Empty means none, so a request carrying a
+	// predicate is refused rather than passed to a circuit that cannot
+	// evaluate it - fail closed, because the alternative is a proof
+	// that verifies against a statement nobody checked.
+	SupportedFunctions []string
 
 	// E2 binds the proof to this session: SHA-256 of the device
 	// authentication message. See MdocE2.
@@ -75,10 +94,7 @@ func (r Request) Check() error {
 	if r.Now.IsZero() {
 		return fmt.Errorf("nymauth: no verification time; T is the verifier's own clock reading, and a zero value would check validity against the year 1")
 	}
-	if r.Bounds.Earliest == "" || r.Bounds.Cutoff == "" {
-		return fmt.Errorf("nymauth: the age bounds are unset; use AgeCheck.Bounds, which fills the disabling sentinels rather than leaving them empty")
-	}
-	if err := r.Bounds.checkRange(); err != nil {
+	if err := r.checkInputs(); err != nil {
 		return err
 	}
 	if r.E2 == ([32]byte{}) {
@@ -86,6 +102,36 @@ func (r Request) Check() error {
 	}
 	if r.VerifierInput == ([32]byte{}) {
 		return fmt.Errorf("nymauth: verifier_input is zero; the pseudonym would not be scoped to this verifier")
+	}
+	return nil
+}
+
+// checkInputs refuses predicates this request cannot honour.
+//
+// Generic: it asks the registry what a function fills and the request
+// what the circuit supports. It knows nothing about ages, dates or
+// claims, which is what lets a new predicate be added by registering
+// it.
+func (r Request) checkInputs() error {
+	seen := make(map[string]bool, len(r.Inputs))
+	for _, input := range r.Inputs {
+		if seen[input.FunctionID] {
+			// Two contributions from one function would fill the same
+			// circuit inputs twice, and the second would silently win.
+			return fmt.Errorf("nymauth: function %q contributes twice", input.FunctionID)
+		}
+		seen[input.FunctionID] = true
+
+		if err := input.check(); err != nil {
+			return err
+		}
+		if !slices.Contains(r.SupportedFunctions, input.FunctionID) {
+			// Fail closed. Passing it anyway would hand the circuit
+			// inputs it does not read, and the proof would verify
+			// against a statement nobody checked.
+			return fmt.Errorf("nymauth: the selected circuit does not support function %q; it supports %v",
+				input.FunctionID, r.SupportedFunctions)
+		}
 	}
 	return nil
 }

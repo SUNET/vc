@@ -26,7 +26,14 @@ func testRequest(t *testing.T) Request {
 	e2, err := MdocE2("https://verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ", "eu.europa.ec.eudi.nym_auth.1", nil)
 	require.NoError(t, err)
 
-	return Request{IssuerKey: &key.PublicKey, Now: time.Now(), Bounds: bounds, E2: e2, VerifierInput: input}
+	return Request{
+		IssuerKey:          &key.PublicKey,
+		Now:                time.Now(),
+		Inputs:             []CircuitInput{bounds.CircuitInput()},
+		SupportedFunctions: []string{FunctionAgeCheck},
+		E2:                 e2,
+		VerifierInput:      input,
+	}
 }
 
 // verifier_input is SHA-256 of the BARE verifier_id, and the rulebook's
@@ -76,16 +83,16 @@ func TestRequestRefusesWhatItCannotCheckAgainst(t *testing.T) {
 		assert.ErrorContains(t, r.Check(), "year 1")
 	})
 
-	t.Run("unset bounds", func(t *testing.T) {
+	t.Run("an input that leaves a circuit input unset", func(t *testing.T) {
 		r := testRequest(t)
-		r.Bounds = AgeBounds{}
-		assert.ErrorContains(t, r.Check(), "AgeCheck.Bounds")
+		r.Inputs = []CircuitInput{{FunctionID: FunctionAgeCheck, Values: map[string][]byte{InputEarliest: []byte("2000-01-01")}}}
+		assert.ErrorContains(t, r.Check(), "unset")
 	})
 
-	t.Run("a range the rulebook forbids", func(t *testing.T) {
+	t.Run("a function the circuit does not support", func(t *testing.T) {
 		r := testRequest(t)
-		r.Bounds = AgeBounds{Earliest: "2008-01-01", Cutoff: "2008-01-02"}
-		assert.ErrorContains(t, r.Check(), "at least 365")
+		r.SupportedFunctions = nil
+		assert.ErrorContains(t, r.Check(), "does not support")
 	})
 
 	t.Run("zero e2", func(t *testing.T) {
