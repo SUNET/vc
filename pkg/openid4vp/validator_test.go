@@ -1,78 +1,108 @@
 package openid4vp
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	jwtv5 "github.com/golang-jwt/jwt/v5"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Helper function to create a valid SD-JWT-VC token for testing
-func createTestVPToken(t *testing.T, nonce, aud string, includeBinding bool) string {
+// testHolderKey is the key the fixtures' credentials name in cnf, so a
+// presentation built here can actually be signed by the holder it claims.
+//
+// It used to be a cnf of {"x":"test","y":"test"} with a literal
+// "fake-kb-signature", which validated because holder binding was not
+// verified. A fixture that cannot produce a real proof cannot tell a
+// correct presentation from a forged one, which is the distinction these
+// tests exist to make.
+func testHolderKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	return key
+}
+
+// testCredentialNaming builds an issuer JWT naming holder in cnf.
+//
+// The ISSUER signature is still a placeholder: VPTokenValidator does not
+// verify it - that is EvaluateIssuerTrust's job, with a resolved key - so
+// a real one here would assert nothing these tests are about.
+func testCredentialNaming(t *testing.T, holder *ecdsa.PrivateKey, extraClaims map[string]any) string {
 	t.Helper()
 
-	// Create a simple JWT header
-	header := map[string]any{
-		"alg": "ES256",
-		"typ": "vc+sd-jwt",
-	}
-	headerJSON, _ := json.Marshal(header)
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	header, err := json.Marshal(map[string]any{"alg": "ES256", "typ": "vc+sd-jwt"})
+	require.NoError(t, err)
 
-	// Create JWT payload with claims
 	payload := map[string]any{
 		"iss": "https://issuer.example.com",
 		"iat": 1234567890,
 		"exp": 9999999999,
 		"vct": "https://example.com/TestCredential",
-		"cnf": map[string]any{
-			"jwk": map[string]any{
-				"kty": "EC",
-				"crv": "P-256",
-				"x":   "test",
-				"y":   "test",
-			},
-		},
+		// publicJWK, not a hand-rolled map: RFC 7518 requires P-256
+		// coordinates to be exactly 32 bytes, big.Int.Bytes() drops
+		// leading zeroes, and a strict parser rejects the short result -
+		// so hand-rolling makes this suite fail for roughly one generated
+		// key in 128.
+		"cnf": map[string]any{"jwk": publicJWK(t, holder.Public())},
 	}
-	payloadJSON, _ := json.Marshal(payload)
-	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	for k, v := range extraClaims {
+		payload[k] = v
+	}
+	payloadJSON, err := json.Marshal(payload)
+	require.NoError(t, err)
 
-	// Create a fake signature
-	signature := base64.RawURLEncoding.EncodeToString([]byte("fake-signature"))
+	return base64.RawURLEncoding.EncodeToString(header) + "." +
+		base64.RawURLEncoding.EncodeToString(payloadJSON) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte("issuer-signature-not-checked-here"))
+}
 
-	// Build SD-JWT (issuer-signed JWT)
-	sdJWT := headerB64 + "." + payloadB64 + "." + signature
+// testPresentation appends a Key Binding JWT signed by holder, with the
+// sd_hash that covers what is being presented.
+func testPresentation(t *testing.T, credential string, holder *ecdsa.PrivateKey, kbClaims map[string]any) string {
+	t.Helper()
 
-	// Add key binding JWT if requested
-	if includeBinding {
-		kbHeader := map[string]any{
-			"alg": "ES256",
-			"typ": "kb+jwt",
-		}
-		kbHeaderJSON, _ := json.Marshal(kbHeader)
-		kbHeaderB64 := base64.RawURLEncoding.EncodeToString(kbHeaderJSON)
+	sdJWT := credential + "~"
+	sum := sha256.Sum256([]byte(sdJWT))
 
-		kbPayload := map[string]any{
-			"nonce": nonce,
-			"aud":   aud,
-			"iat":   1234567890,
-		}
-		kbPayloadJSON, _ := json.Marshal(kbPayload)
-		kbPayloadB64 := base64.RawURLEncoding.EncodeToString(kbPayloadJSON)
-
-		kbSignature := base64.RawURLEncoding.EncodeToString([]byte("fake-kb-signature"))
-		kbJWT := kbHeaderB64 + "." + kbPayloadB64 + "." + kbSignature
-
-		// SD-JWT format: <Issuer-signed JWT>~<Disclosure 1>~...~<Disclosure N>~<KB-JWT>
-		// For testing without disclosures: <Issuer-signed JWT>~<KB-JWT>
-		return sdJWT + "~" + kbJWT
+	claims := jwtv5.MapClaims{"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:])}
+	for k, v := range kbClaims {
+		claims[k] = v
 	}
 
-	// Return without key binding (just the issuer JWT with trailing tilde)
-	return sdJWT + "~"
+	kb := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
+	kb.Header["typ"] = "kb+jwt"
+	signed, err := kb.SignedString(holder)
+	require.NoError(t, err)
+
+	return sdJWT + signed
+}
+
+func createTestVPToken(t *testing.T, nonce, aud string, includeBinding bool) string {
+	t.Helper()
+
+	holder := testHolderKey(t)
+	credential := testCredentialNaming(t, holder, nil)
+	if !includeBinding {
+		return credential + "~"
+	}
+	return testPresentation(t, credential, holder, map[string]any{
+		"nonce": nonce,
+		"aud":   aud,
+		// The moment of presentation, which is what iat means on a
+		// KB-JWT and what the validator now bounds.
+		"iat": time.Now().Unix(),
+	})
 }
 
 func TestVPTokenValidator_Validate_ValidToken(t *testing.T) {
@@ -426,19 +456,15 @@ func TestVPTokenValidator_ValidateNonce_MissingKeyBinding(t *testing.T) {
 }
 
 func TestVPTokenValidator_ValidateAudience_MissingInKeyBinding(t *testing.T) {
-	// Create a token with key binding but without audience claim
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"vc+sd-jwt"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://issuer.example.com","vct":"test","cnf":{"jwk":{"kty":"EC"}}}`))
-	signature := base64.RawURLEncoding.EncodeToString([]byte("sig"))
-	issuerJWT := header + "." + payload + "." + signature
-
-	// Create KB-JWT without audience
-	kbHeader := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"kb+jwt"}`))
-	kbPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"test-nonce","iat":123}`))
-	kbSig := base64.RawURLEncoding.EncodeToString([]byte("sig"))
-	kbJWT := kbHeader + "." + kbPayload + "." + kbSig
-
-	vpToken := issuerJWT + "~" + kbJWT
+	// Otherwise a perfectly good presentation - real holder key, real
+	// signature over the right sd_hash - with no aud claim. It has to be
+	// valid in every other respect or it fails at holder binding instead
+	// and stops testing the audience check it is named for.
+	holder := testHolderKey(t)
+	vpToken := testPresentation(t, testCredentialNaming(t, holder, nil), holder, map[string]any{
+		"nonce": "test-nonce",
+		"iat":   time.Now().Unix(),
+	})
 
 	validator := &VPTokenValidator{
 		Nonce:    "test-nonce",
@@ -471,43 +497,19 @@ func TestVPTokenValidator_EmptyDCQLQuery(t *testing.T) {
 func createTestVPTokenWithTxHashes(t *testing.T, nonce, aud string, hashes []string, hashAlg string) string {
 	t.Helper()
 
-	header := map[string]any{"alg": "ES256", "typ": "vc+sd-jwt"}
-	headerJSON, _ := json.Marshal(header)
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	holder := testHolderKey(t)
+	credential := testCredentialNaming(t, holder, nil)
 
-	payload := map[string]any{
-		"iss": "https://issuer.example.com",
-		"iat": 1234567890,
-		"exp": 9999999999,
-		"vct": "https://example.com/TestCredential",
-		"cnf": map[string]any{"jwk": map[string]any{"kty": "EC", "crv": "P-256", "x": "test", "y": "test"}},
-	}
-	payloadJSON, _ := json.Marshal(payload)
-	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
-
-	signature := base64.RawURLEncoding.EncodeToString([]byte("fake-signature"))
-	sdJWT := headerB64 + "." + payloadB64 + "." + signature
-
-	kbHeader := map[string]any{"alg": "ES256", "typ": "kb+jwt"}
-	kbHeaderJSON, _ := json.Marshal(kbHeader)
-	kbHeaderB64 := base64.RawURLEncoding.EncodeToString(kbHeaderJSON)
-
-	kbPayload := map[string]any{
+	kbClaims := map[string]any{
 		"nonce": nonce,
 		"aud":   aud,
-		"iat":   1234567890,
+		"iat":   time.Now().Unix(),
 	}
-	if len(hashes) > 0 {
-		kbPayload["transaction_data_hashes"] = hashes
-		kbPayload["transaction_data_hashes_alg"] = hashAlg
+	if hashes != nil {
+		kbClaims["transaction_data_hashes"] = hashes
+		kbClaims["transaction_data_hashes_alg"] = hashAlg
 	}
-	kbPayloadJSON, _ := json.Marshal(kbPayload)
-	kbPayloadB64 := base64.RawURLEncoding.EncodeToString(kbPayloadJSON)
-
-	kbSignature := base64.RawURLEncoding.EncodeToString([]byte("fake-kb-signature"))
-	kbJWT := kbHeaderB64 + "." + kbPayloadB64 + "." + kbSignature
-
-	return sdJWT + "~" + kbJWT
+	return testPresentation(t, credential, holder, kbClaims)
 }
 
 // encodeTxData encodes TransactionData structs into raw base64url strings for tests.

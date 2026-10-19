@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -306,13 +307,12 @@ type issuanceAuthBinding struct {
 	// Key Binding JWT that actually VERIFIES against the cnf key the
 	// Issuer bound the credential to.
 	//
-	// It is a flag rather than unconditional because the two channels are
-	// not in the same position. openid4vp.VPTokenValidator checks that a
-	// key binding proof is present and reads its nonce and audience, but
-	// never verifies its signature - so on its own it establishes that
-	// somebody sent a credential and a JWT, not that the Holder presented
-	// it. A copied credential with its disclosures, plus a proof the
-	// copier signs themselves, passes.
+	// VPTokenValidator already verifies the KB-JWT signature against the
+	// credential's cnf key on both channels. This flag adds two checks
+	// the validator does not make: the cnf key is taken from the issuer
+	// JWT whose signature was just verified (not from the presented
+	// claims), and the credential must be inside its validity window
+	// (exp/nbf), which signature verification does not enforce.
 	//
 	// Interactive Authorization sets it: the endpoint is new, nothing
 	// depends on the weaker behaviour, and the whole purpose of the
@@ -612,6 +612,9 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	}
 	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
 	if err != nil {
+		if errors.Is(err, helpers.ErrNoIdentityFound) {
+			return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+		}
 		return nil, serverFault(fmt.Errorf("failed to resolve identity from VP claims: %w", err))
 	}
 
@@ -689,12 +692,19 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, format)
 		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
-			ID:                                authScope,
-			Format:                            format,
-			Multiple:                          false,
-			Meta:                              meta,
-			RequireCryptographicHolderBinding: new(false),
-			Claims:                            scopeClaimQueries,
+			ID:       authScope,
+			Format:   format,
+			Multiple: false,
+			Meta:     meta,
+			// Left unset, which is the specification's default of TRUE.
+			//
+			// It said false, which told every wallet that a presentation
+			// authenticating an issuance need not prove possession - and
+			// the verifier did not check, so the two agreed. A
+			// presentation that proves nothing about who is presenting is
+			// not an authentication, and this is the flow that decides
+			// whose documents get issued.
+			Claims: scopeClaimQueries,
 		})
 		options = append(options, []string{authScope})
 	}

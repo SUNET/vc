@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -152,6 +153,23 @@ const (
 	// way to recognise the condition.
 	errInvalidSession = "invalid_session"
 )
+
+// walletErrorCodes are the OpenID4VP Authorization Error Response codes a
+// wallet's refusal may be reported with.
+var walletErrorCodes = []string{
+	openid4vp.ErrorInvalidScope,
+	openid4vp.ErrorInvalidRequest,
+	openid4vp.ErrorInvalidClient,
+	openid4vp.ErrorAccessDenied,
+	openid4vp.ErrorVPFormatsNotSupported,
+	openid4vp.ErrorInvalidRequestURIMethod,
+	openid4vp.ErrorInvalidTransactionData,
+	openid4vp.ErrorWalletUnavailable,
+}
+
+// errDescIACouldNotComplete is the fixed description of every server_error
+// this endpoint returns.
+const errDescIACouldNotComplete = "interactive authorization could not be completed"
 
 // invalidSession is the answer to an auth_session this endpoint cannot
 // continue. The cause is carried for the log and never for the wallet:
@@ -553,6 +571,13 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 	if envelope.Error != "" {
 		c.log.Info("CHALLENGE: wallet returned an OpenID4VP error",
 			"session_id", authCtx.SessionID, "error", envelope.Error)
+		// Only codes OpenID4VP §8.5 defines are echoed; anything else is a refusal.
+		if !slices.Contains(walletErrorCodes, envelope.Error) {
+			return nil, nil, &AuthorizationChallengeError{
+				ErrorCode:  openid4vp.ErrorAccessDenied,
+				HTTPStatus: 400,
+			}
+		}
 		return nil, nil, &AuthorizationChallengeError{
 			ErrorCode:        envelope.Error,
 			ErrorDescription: envelope.ErrorDescription,
@@ -580,7 +605,7 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 		c.log.Error(err, "CHALLENGE: cannot decrypt the response without the key the request was built with",
 			"session_id", authCtx.SessionID)
 		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-			"interactive authorization could not be completed", 500, err)
+			errDescIACouldNotComplete, 500, err)
 	}
 
 	decrypted, err := jwe.Decrypt([]byte(envelope.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
@@ -607,7 +632,7 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 func (c *Client) authSessionStoreFailure(err error, op string) error {
 	c.log.Error(err, "CHALLENGE: the authorization context store failed", "operation", op)
 	return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-		"interactive authorization could not be completed", 500, err)
+		errDescIACouldNotComplete, 500, err)
 }
 
 // interactiveAuthorizationFailure turns a presentation failure into the
@@ -640,7 +665,7 @@ func (c *Client) interactiveAuthorizationFailure(err error) error {
 	if errors.Is(err, ErrIssuanceAuthServerFault) {
 		c.log.Error(err, "CHALLENGE: interactive authorization failed on the server side")
 		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-			"interactive authorization could not be completed", 500, err)
+			errDescIACouldNotComplete, 500, err)
 	}
 
 	c.log.Info("CHALLENGE: presentation did not satisfy the request", "reason", err)
@@ -687,12 +712,58 @@ func (c *Client) interactiveAuthorizationSessionTranscript(ia *model.Interactive
 }
 
 // issuanceAuthDCQL builds the DCQL query the Wallet must satisfy for scope.
+//
+// It is a narrowed copy of the browser flow's query, built fresh so the
+// browser query is unchanged. mso_mdoc_zk alternatives are dropped because
+// the presentation pipeline cannot verify them, and the credential set is
+// required so a Wallet cannot answer with nothing - the endpoint consumes
+// the auth_session before it can reject an empty response.
 func (c *Client) issuanceAuthDCQL(scope string) (*openid4vp.DCQL, error) {
 	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
 	if vpAuth == nil {
 		return nil, fmt.Errorf("scope %q is not configured for openid4vp authentication", scope)
 	}
-	return buildIssuanceAuthDCQL(vpAuth, c.cfg)
+	dcql, err := buildIssuanceAuthDCQL(vpAuth, c.cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	supported := make(map[string]bool, len(dcql.Credentials))
+	for _, cq := range dcql.Credentials {
+		if cq.Format == openid4vp.FormatMsoMdocZk {
+			continue
+		}
+		supported[cq.ID] = true
+	}
+	credentials := make([]openid4vp.CredentialQuery, 0, len(supported))
+	for _, cq := range dcql.Credentials {
+		if supported[cq.ID] {
+			credentials = append(credentials, cq)
+		}
+	}
+	if len(credentials) == 0 {
+		return nil, fmt.Errorf("scope %q has no authentication alternative this endpoint can verify", scope)
+	}
+
+	var options [][]string
+	for _, set := range dcql.CredentialSets {
+		for _, option := range set.Options {
+			if len(option) > 0 && slices.ContainsFunc(option, func(id string) bool { return !supported[id] }) {
+				continue
+			}
+			options = append(options, slices.Clone(option))
+		}
+	}
+	if len(options) == 0 {
+		return nil, fmt.Errorf("scope %q has no authentication alternative this endpoint can verify", scope)
+	}
+
+	return &openid4vp.DCQL{
+		Credentials: credentials,
+		CredentialSets: []openid4vp.CredentialSetQuery{
+			{Options: options, Required: new(true)},
+		},
+	}, nil
 }
 
 // openID4VPCredentialSource finds the data source that backs scope through

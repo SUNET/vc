@@ -11,6 +11,7 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"hash"
 	"math"
@@ -660,7 +661,16 @@ func computeMAC(data, key []byte, algorithm int64) ([]byte, error) {
 }
 
 // VerifyCOSEMac0 verifies a COSE_Mac0 message.
-func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
+// VerifyCOSEMac0 verifies a COSE_Mac0, over detachedPayload when the message
+// carries none.
+//
+// The detached parameter mirrors Verify1 and exists for the same reason: ISO
+// 18013-5 9.1.3.4 says a DeviceMac "shall use a null value for the payload"
+// and that "the detached content is DeviceAuthenticationBytes". Without it
+// this MACed whatever the message carried, so a conformant wallet - which
+// sends no payload - could never verify, and a message that carried no
+// payload was authenticated over nothing at all.
+func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, detachedPayload []byte, externalAAD []byte) error {
 	// Must match Mac0's own nil-vs-empty normalization - see its comment.
 	if externalAAD == nil {
 		externalAAD = []byte{}
@@ -691,11 +701,24 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 		return fmt.Errorf("invalid algorithm type: %T", algRaw)
 	}
 
+	// nil, not len() == 0. An empty byte string is valid COSE content and
+	// a different thing from an absent payload: treating them alike would
+	// reject a MAC legitimately computed over h'', and would silently
+	// substitute detached content for an attached empty payload - a
+	// different message with a different tag.
+	payload := mac0.Payload
+	if payload == nil {
+		payload = detachedPayload
+	}
+	if payload == nil {
+		return errors.New("COSE_Mac0 has neither an attached nor a detached payload, so there is nothing it authenticates")
+	}
+
 	macStructure := []any{
 		"MAC0",
 		mac0.Protected,
 		externalAAD,
-		mac0.Payload,
+		payload,
 	}
 
 	toMAC, err := cbor.Marshal(macStructure)
