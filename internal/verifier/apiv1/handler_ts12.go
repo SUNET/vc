@@ -55,13 +55,40 @@ func (a *PaymentAmount) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// invalidInteraction refuses an interaction request with a structured
+// 400, carrying the payment prefix when the request WAS a payment one so
+// that a payment refused before buildPaymentTransactionData runs reads
+// like every other payment refusal rather than like a different class of
+// failure.
+func invalidInteraction(payment bool, format string, args ...any) error {
+	if payment {
+		return invalidPayment(format, args...)
+	}
+	return invalidInteractionRequest(format, args...)
+}
+
 func invalidPayment(format string, args ...any) error {
+	return invalidInteractionRequest("%s", "payment: "+fmt.Sprintf(format, args...))
+}
+
+// invalidInteractionRequest returns a structured 400 for an interaction
+// request the caller got wrong.
+//
+// Structured because an unstructured error carries no status: it reaches
+// httphelpers.StatusCode, which INFERS one from the message text. A
+// credential query the caller named "token" produces "credential query
+// \"token\" is invalid: ...", which matches that inference's
+// "unauthorized, authentication, token" case - so a malformed request is
+// answered 401, before the "invalid" case is ever reached, and the
+// description is dropped on the way out. A caller-chosen identifier must
+// not be able to choose the status code.
+func invalidInteractionRequest(format string, args ...any) error {
 	// The shared type: RegEndpoint renders pkg/oauth2.OAuthError (status and
 	// description); the verifier-local OAuthError would fall through to the
 	// generic handler and lose both.
 	return &oauth2.OAuthError{
 		ErrorCode:        ErrCodeInvalidRequest,
-		ErrorDescription: "payment: " + fmt.Sprintf(format, args...),
+		ErrorDescription: fmt.Sprintf(format, args...),
 		HTTPStatus:       http.StatusBadRequest,
 	}
 }
