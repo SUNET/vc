@@ -151,6 +151,23 @@ const (
 	errInvalidSession = "invalid_session"
 )
 
+// walletErrorCodes are the OpenID4VP Authorization Error Response codes a
+// wallet's refusal may be reported with.
+var walletErrorCodes = []string{
+	openid4vp.ErrorInvalidScope,
+	openid4vp.ErrorInvalidRequest,
+	openid4vp.ErrorInvalidClient,
+	openid4vp.ErrorAccessDenied,
+	openid4vp.ErrorVPFormatsNotSupported,
+	openid4vp.ErrorInvalidRequestURIMethod,
+	openid4vp.ErrorInvalidTransactionData,
+	openid4vp.ErrorWalletUnavailable,
+}
+
+// errDescIACouldNotComplete is the fixed description of every server_error
+// this endpoint returns.
+const errDescIACouldNotComplete = "interactive authorization could not be completed"
+
 // invalidSession is the answer to an auth_session this endpoint cannot
 // continue. The cause is carried for the log and never for the wallet:
 // "no such handle", "already claimed" and "expired" must not be
@@ -547,6 +564,13 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 	if envelope.Error != "" {
 		c.log.Info("CHALLENGE: wallet returned an OpenID4VP error",
 			"session_id", authCtx.SessionID, "error", envelope.Error)
+		// Only codes OpenID4VP §8.5 defines are echoed; anything else is a refusal.
+		if !slices.Contains(walletErrorCodes, envelope.Error) {
+			return nil, &AuthorizationChallengeError{
+				ErrorCode:  openid4vp.ErrorAccessDenied,
+				HTTPStatus: 400,
+			}
+		}
 		return nil, &AuthorizationChallengeError{
 			ErrorCode:        envelope.Error,
 			ErrorDescription: envelope.ErrorDescription,
@@ -574,7 +598,7 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 		c.log.Error(err, "CHALLENGE: cannot decrypt the response without the key the request was built with",
 			"session_id", authCtx.SessionID)
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-			"interactive authorization could not be completed", 500, err)
+			errDescIACouldNotComplete, 500, err)
 	}
 
 	decrypted, err := jwe.Decrypt([]byte(envelope.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
@@ -601,7 +625,7 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 func (c *Client) authSessionStoreFailure(err error, op string) error {
 	c.log.Error(err, "CHALLENGE: the authorization context store failed", "operation", op)
 	return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-		"interactive authorization could not be completed", 500, err)
+		errDescIACouldNotComplete, 500, err)
 }
 
 // interactiveAuthorizationFailure turns a presentation failure into the
@@ -634,7 +658,7 @@ func (c *Client) interactiveAuthorizationFailure(err error) error {
 	if errors.Is(err, ErrIssuanceAuthServerFault) {
 		c.log.Error(err, "CHALLENGE: interactive authorization failed on the server side")
 		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-			"interactive authorization could not be completed", 500, err)
+			errDescIACouldNotComplete, 500, err)
 	}
 
 	c.log.Info("CHALLENGE: presentation did not satisfy the request", "reason", err)

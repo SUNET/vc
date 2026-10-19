@@ -21,6 +21,14 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
+// draft-ietf-oauth-attestation-based-client-auth §3.1
+const (
+	headerClientAttestation    = "OAuth-Client-Attestation"
+	headerClientAttestationPoP = "OAuth-Client-Attestation-PoP"
+
+	logBindingError = "binding error"
+)
+
 // acceptsHTML reports whether the caller's Accept header explicitly asks
 // for text/html. Browsers always send it; standards-conformant headless
 // wallets (HAIP, OpenID4VCI test tooling) don't. Everything else is
@@ -37,7 +45,7 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 	request := &openid4vci.PARRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "binding error")
+		s.log.Error(err, logBindingError)
 		return nil, err
 	}
 
@@ -67,8 +75,8 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 	}
 
 	// Extract OAuth-Client-Attestation headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1)
-	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
-	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+	request.ClientAttestation = c.GetHeader(headerClientAttestation)
+	request.ClientAttestationPoP = c.GetHeader(headerClientAttestationPoP)
 
 	reply, err := s.apiv1.OAuthPar(ctx, request)
 	if err != nil {
@@ -103,7 +111,7 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 	request := &apiv1.AuthorizationChallengeRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "binding error")
+		s.log.Error(err, logBindingError)
 		// A body this endpoint cannot read is a malformed REQUEST, and a
 		// wallet is entitled to be told so in the protocol's own terms.
 		// Returned bare, the binding failure went to the generic renderer
@@ -122,8 +130,8 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 
 	// draft-ietf-oauth-attestation-based-client-auth §3.1, and RFC 9449 §4
 	// for the DPoP proof that binds the auth_session.
-	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
-	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+	request.ClientAttestation = c.GetHeader(headerClientAttestation)
+	request.ClientAttestationPoP = c.GetHeader(headerClientAttestationPoP)
 	request.DPOP = c.GetHeader("DPoP")
 
 	// Every response from this endpoint carries an authorization code or
@@ -228,8 +236,8 @@ func (s *Service) endpointOAuthToken(ctx context.Context, c *gin.Context) (any, 
 	}
 
 	// Extract OAuth-Client-Attestation headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1)
-	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
-	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+	request.ClientAttestation = c.GetHeader(headerClientAttestation)
+	request.ClientAttestationPoP = c.GetHeader(headerClientAttestationPoP)
 
 	reply, err := s.apiv1.OAuthToken(ctx, request)
 	if err != nil {
@@ -510,7 +518,7 @@ func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context,
 
 	request := &apiv1.OauthAuthorizationConsentCallbackRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		s.log.Error(err, "binding error")
+		s.log.Error(err, logBindingError)
 		return nil, err
 	}
 

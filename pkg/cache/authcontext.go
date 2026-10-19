@@ -802,7 +802,8 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 	// any key could spend.
 	stored.AuthSession = ""
 	delete(c.indices, indexKey)
-	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+	// Claiming must not extend the code's lifetime; the Mongo $unset does not either.
+	c.cache.Set(sessionID, stored, ttlcache.PreviousOrDefaultTTL)
 
 	return &claimed, nil
 }

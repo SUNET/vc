@@ -1110,21 +1110,6 @@ type walletClientAuth struct {
 	LogPrefix string
 }
 
-// authenticateOAuthClient resolves the wallet behind a request to an
-// oauth2.Client, by static configuration or by wallet attestation.
-//
-// A statically configured client that the allowlist accepts wins outright.
-// Anything else falls through to attestation, which is the normal path: a
-// wallet with a Wallet Instance Attestation is not in the static map and is
-// not expected to be. That is why an unknown client_id logs at Debug while
-// a CONFIGURED client that still fails logs at Warn - the second is a
-// mismatch somebody has to fix, the first is Tuesday.
-//
-// Extracted from OAuthPar unchanged. Interactive Authorization's
-// Authorization Challenge Endpoint has to authenticate the same wallets
-// the same way, and duplicating sixty lines of attestation handling - PoP
-// requirements, subject binding, SPOCP tier policy - is how two endpoints
-// come to disagree about who may ask for what.
 // checkInteractiveAuthorizationBinding refuses a redemption whose DPoP key
 // is not the one the authorization was obtained under.
 //
@@ -1195,6 +1180,21 @@ func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (st
 	return dpop.Thumbprint, nil
 }
 
+// authenticateOAuthClient resolves the wallet behind a request to an
+// oauth2.Client, by static configuration or by wallet attestation.
+//
+// A statically configured client that the allowlist accepts wins outright.
+// Anything else falls through to attestation, which is the normal path: a
+// wallet with a Wallet Instance Attestation is not in the static map and is
+// not expected to be. That is why an unknown client_id logs at Debug while
+// a CONFIGURED client that still fails logs at Warn - the second is a
+// mismatch somebody has to fix, the first is Tuesday.
+//
+// Extracted from OAuthPar unchanged. Interactive Authorization's
+// Authorization Challenge Endpoint has to authenticate the same wallets
+// the same way, and duplicating sixty lines of attestation handling - PoP
+// requirements, subject binding, SPOCP tier policy - is how two endpoints
+// come to disagree about who may ask for what.
 func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientAuth) (*oauth2.Client, error) {
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err == nil {
