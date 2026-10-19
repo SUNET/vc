@@ -457,6 +457,33 @@ func TestAFullDateDoesNotDependOnTheHostTimezone(t *testing.T) {
 			viaTag, err := normaliseFullDate(cbor.Tag{Number: 1, Content: int64(epoch)})
 			require.NoError(t, err)
 			require.Equal(t, got, viaTag)
+
+			// So must a date-time STRING for the same instant - a tag 0
+			// tdate, or an SD-JWT claim that carries a time.
+			viaString, err := normaliseFullDate("1990-01-15T02:00:00+02:00")
+			require.NoError(t, err)
+			require.Equal(t, got, viaString,
+				"one instant must issue one date, whatever shape it was presented in")
+
+			// And the case that distinguishes the two conventions: an
+			// offset that crosses midnight. Taken as written this is
+			// the 15th; as an instant it is 1990-01-14T22:30Z. The
+			// epoch route would call the same instant the 14th, so
+			// taking the date as written would mean the issued
+			// credential depended on which encoding the wallet chose.
+			crossing, err := normaliseFullDate("1990-01-15T00:30:00+02:00")
+			require.NoError(t, err)
+			require.Equal(t, "1990-01-14", crossing,
+				"a date-time is resolved as an instant, like every other shape here")
+			sameInstant, err := normaliseFullDate(time.Date(1990, 1, 14, 22, 30, 0, 0, time.UTC))
+			require.NoError(t, err)
+			require.Equal(t, crossing, sameInstant)
+
+			// A plain full-date is unaffected: no time, no offset. This
+			// is the ordinary case and must not move.
+			viaDate, err := normaliseFullDate("1990-01-15")
+			require.NoError(t, err)
+			require.Equal(t, "1990-01-15", viaDate)
 		})
 	}
 }

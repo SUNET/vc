@@ -158,10 +158,22 @@ func normaliseFullDate(v any) (string, error) {
 		return "", fmt.Errorf("value of type %T is not a date", v)
 	}
 	if d, err := time.Parse(time.DateOnly, s); err == nil {
+		// Already UTC - a full-date carries no time and no offset, and
+		// this is the ordinary case: an mdoc birth date is tag 1004 and
+		// an SD-JWT PID birthdate is "YYYY-MM-DD".
 		return fullDate(d)
 	}
 	if d, err := time.Parse(time.RFC3339, s); err == nil {
-		return fullDate(d)
+		// In UTC, like every other route here.
+		//
+		// The offset in a date-time string is arguably the holder's
+		// data rather than a decoding artifact, so taking the date as
+		// written has an argument for it. Consistency has a better one:
+		// a tag 0 date-time and a tag 1 epoch for the SAME INSTANT
+		// would otherwise issue dates a day apart, so which credential
+		// a subject gets would depend on which CBOR encoding their
+		// wallet happened to choose. One instant, one issued date.
+		return fullDate(d.UTC())
 	}
 	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
 }
