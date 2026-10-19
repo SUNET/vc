@@ -647,8 +647,19 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		file, fn string
 		calls    []string
 	}{
+		// The decoration moved when main extracted the shared consumer:
+		// VerificationDirectPost delegates, and the copy happens inside
+		// consumeIssuanceAuthPresentation - which is where both channels
+		// now reach it. So the guard pins the CHAIN rather than one
+		// function: the endpoint must still reach the consumer, and the
+		// consumer must still decorate. Pinning only the old call site
+		// would have gone green again by deleting the delegation.
 		{
 			file: "handlers_verifier.go", fn: "VerificationDirectPost",
+			calls: []string{"consumeIssuanceAuthPresentation"},
+		},
+		{
+			file: "handlers_verifier.go", fn: "consumeIssuanceAuthPresentation",
 			calls: []string{"decorateWithPresentedClaims"},
 		},
 		{
