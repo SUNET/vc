@@ -57,20 +57,19 @@ func run() error {
 		"a subject identifier; repeat IN ORDER for a configuration that derives from several (required)")
 	flag.Parse()
 
-	switch {
-	case *configPath == "":
-		return errors.New("-config is required")
-	case *sourceName == "":
-		return errors.New("-seed is required")
-	case len(subjects) == 0:
-		return errors.New("-subject is required (repeat it, in order, when several identifiers are configured)")
-	case *expect != "" && *pseudonymConfig == "":
-		// Refused rather than ignored, because the documented use is a
-		// loop over candidate subjects driven by the exit code. Exiting 0
-		// without having compared anything reports a MATCH for every
-		// candidate, and the operator concludes the first person they
-		// tried is the one behind the pseudonym.
-		return errors.New("-expect needs -pseudonym-config: there is nothing to compare against without one")
+	// Whether -expect was GIVEN, not whether it has a value. The two
+	// differ exactly where it matters: `-expect "$reported"` with an
+	// empty variable supplies the flag with an empty value, and reading
+	// the value alone cannot tell that from the flag being absent.
+	expectSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "expect" {
+			expectSet = true
+		}
+	})
+
+	if err := validateInvocation(*configPath, *sourceName, subjects, expectSet, *expect, *pseudonymConfig); err != nil {
+		return err
 	}
 
 	source, err := loadSeedSource(*configPath, *sourceName)
@@ -107,7 +106,7 @@ func run() error {
 	}
 	fmt.Printf("pseudonym:  %s\n", hex.EncodeToString(pseudonym))
 
-	if *expect == "" {
+	if !expectSet {
 		// Nothing to compare against: the pseudonym was asked for and is
 		// printed above. No "match" line, so a caller parsing output
 		// cannot read a comparison that did not happen.
@@ -125,6 +124,34 @@ func run() error {
 		os.Exit(2)
 	}
 	fmt.Println("match:      yes")
+	return nil
+}
+
+// validateInvocation refuses the flag combinations that would make the
+// EXIT CODE lie.
+//
+// This tool's documented use is a loop over candidate subjects driven by
+// the exit code - 0 means "this is the person behind that pseudonym" -
+// so every path that exits 0 without having compared anything is a false
+// accusation waiting to happen. Both -expect guards exist for that one
+// reason.
+func validateInvocation(configPath, sourceName string, subjects []string, expectSet bool, expect, pseudonymConfig string) error {
+	switch {
+	case configPath == "":
+		return errors.New("-config is required")
+	case sourceName == "":
+		return errors.New("-seed is required")
+	case len(subjects) == 0:
+		return errors.New("-subject is required (repeat it, in order, when several identifiers are configured)")
+	case expectSet && strings.TrimSpace(expect) == "":
+		// `-expect "$reported"` with an unset variable. Treating that as
+		// "no expectation" exits 0 having compared nothing, so a loop
+		// reports a MATCH for the first candidate it tries - and for
+		// every candidate after it.
+		return errors.New("-expect was given an empty value: a comparison was asked for and there is nothing to compare against")
+	case expectSet && pseudonymConfig == "":
+		return errors.New("-expect needs -pseudonym-config: there is nothing to compare against without one")
+	}
 	return nil
 }
 

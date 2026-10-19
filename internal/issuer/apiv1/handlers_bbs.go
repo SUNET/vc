@@ -77,7 +77,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// anything is signed: an injected claim is part of the document the
 	// validator has to pass, and part of what gets signed. A no-op for a
 	// scope with no commitments configured.
-	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{})
+	documentData, err := c.injectCommitments(ctx, req.Scope, signingFormatJWP, req.DocumentData, model.CredentialSchemas{})
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
 		return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())

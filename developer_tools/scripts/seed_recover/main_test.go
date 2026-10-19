@@ -70,6 +70,54 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 // "match: no" for every candidate - telling the operator that no subject
 // matches, when the truth is that the value they passed is not a
 // pseudonym at all.
+// An explicitly EMPTY -expect must refuse, not fall back to "no
+// expectation".
+//
+// The documented use is a loop over candidate subjects driven by the
+// exit code, where 0 means "this is the person behind that pseudonym".
+// `-expect "$reported"` with an unset shell variable supplies the flag
+// with an empty value; reading the VALUE alone cannot tell that from the
+// flag being absent, so the tool printed a pseudonym, compared nothing
+// and exited 0 - reporting a match for the first candidate tried, and
+// for every candidate after it.
+func TestAnEmptyExpectationRefusesRatherThanSkippingTheComparison(t *testing.T) {
+	const cfg, src, pc = "/etc/vc/config.yaml", "primary", "known-offender-matching-ssc"
+	subjects := []string{"198001011234"}
+
+	t.Run("given and empty", func(t *testing.T) {
+		err := validateInvocation(cfg, src, subjects, true, "", pc)
+		require.Error(t, err, "a comparison was asked for; exiting 0 without one accuses whoever is tried first")
+		assert.Contains(t, err.Error(), "empty value")
+	})
+
+	t.Run("given and whitespace", func(t *testing.T) {
+		err := validateInvocation(cfg, src, subjects, true, "  \t ", pc)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty value")
+	})
+
+	t.Run("omitted, which is the output-only mode and stays", func(t *testing.T) {
+		require.NoError(t, validateInvocation(cfg, src, subjects, false, "", pc),
+			"printing a pseudonym without comparing it is a legitimate use")
+	})
+
+	t.Run("given without a pseudonym configuration", func(t *testing.T) {
+		err := validateInvocation(cfg, src, subjects, true, "abc", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "-pseudonym-config")
+	})
+
+	t.Run("a real expectation passes", func(t *testing.T) {
+		require.NoError(t, validateInvocation(cfg, src, subjects, true, "9f86d081", pc))
+	})
+
+	// The required flags still refuse, or the cases above would be
+	// passing against a function that refuses everything.
+	assert.Error(t, validateInvocation("", src, subjects, false, "", ""))
+	assert.Error(t, validateInvocation(cfg, "", subjects, false, "", ""))
+	assert.Error(t, validateInvocation(cfg, src, nil, false, "", ""))
+}
+
 func TestExpectMustBeAFullLengthDigest(t *testing.T) {
 	const valid = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 

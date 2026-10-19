@@ -11,6 +11,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -57,7 +58,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("failed to parse inline VCTM: %w", err)
 	}
 
-	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{VCTM: vctm})
+	documentData, err := c.injectCommitments(ctx, req.Scope, openid4vp.FormatSDJWTVC, req.DocumentData, model.CredentialSchemas{VCTM: vctm})
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
 		return nil, err
@@ -222,7 +223,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	// entry that is marked VALID and belongs to no credential. The other
 	// three signing paths already inject before their allocation; this one
 	// did not.
-	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{MDoc: schema})
+	documentData, err := c.injectCommitments(ctx, req.Scope, openid4vp.FormatMsoMdoc, req.DocumentData, model.CredentialSchemas{MDoc: schema})
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
 		return nil, err

@@ -241,6 +241,32 @@ func (c *CredentialMetadata) checkFormatSupported() error {
 	}
 }
 
+// CommitmentsMatchSigningFormat reports whether this scope's commitments
+// were configured for the format that is ACTUALLY being signed.
+//
+// Everything about a commitment target - whether the document data is
+// flat or nested, which schema the claim path is checked against, and
+// whether the VCTM disclosure rules apply at all - is decided from the
+// configured format. The signing handler is chosen by the CALLER, so the
+// two can disagree: a MakeSDJWT request naming an mso_mdoc scope would
+// resolve mdoc targets, skip the VCTM check that requires the commitment
+// to be disclosable, and leave a stable per-subject identifier in the
+// clear signed payload of an SD-JWT, where the holder cannot withhold it.
+//
+// The SD-JWT spellings are equivalent to one another and to nothing
+// else, for the reason isSDJWTFormat exists. An empty signing format
+// matches nothing: it means the caller did not say, and a check that
+// passes because nobody said is not a check.
+func (c *CredentialMetadata) CommitmentsMatchSigningFormat(signing string) bool {
+	if signing == "" {
+		return false
+	}
+	if isSDJWTFormat(c.Format) && isSDJWTFormat(signing) {
+		return true
+	}
+	return c.Format == signing
+}
+
 // isSDJWTFormat reports whether a configured format reaches the SD-JWT
 // signing path.
 //

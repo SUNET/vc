@@ -200,6 +200,15 @@ type resolvedCommitment struct {
 	subjectIDs []string
 }
 
+// signingFormatJWP names the BBS/JWP signing path.
+//
+// Not an OpenID4VP format identifier, because there is no commitment
+// configuration this path can legitimately serve: W3C formats are
+// refused at startup, so a scope reaching MakeJWP with commitments
+// configured is by definition signing through the wrong handler. It only
+// has to be a value no commitment-capable scope can match.
+const signingFormatJWP = "jwp"
+
 // injectCommitments writes this scope's seed-backed claims into the
 // document data, and returns it re-encoded.
 //
@@ -209,10 +218,29 @@ type resolvedCommitment struct {
 // A no-op for a scope with no commitments configured, which is every scope
 // in a deployment that does not use the feature - including the encoding
 // round trip, so nothing changes for anybody else.
-func (c *Client) injectCommitments(ctx context.Context, scope string, documentData []byte, schemas model.CredentialSchemas) ([]byte, error) {
+func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte, schemas model.CredentialSchemas) ([]byte, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	if meta == nil || len(meta.Commitments) == 0 {
 		return documentData, nil
+	}
+
+	// The scope says which format its commitments were configured and
+	// validated for; this handler says which one is actually being
+	// signed. Everything below reads the CONFIGURED format - flat or
+	// nested document data, which schema the path is checked against,
+	// whether the VCTM disclosure rules apply - so a caller that signs a
+	// scope through a different handler gets a commitment resolved by one
+	// format's rules and signed under another's.
+	//
+	// The concrete loss: a MakeSDJWT request naming an mso_mdoc scope
+	// skips the VCTM check that requires the commitment to be
+	// disclosable, so a stable per-subject identifier ends up in the
+	// clear signed payload where the holder cannot withhold it - which is
+	// the one property the whole feature exists to provide.
+	if !meta.CommitmentsMatchSigningFormat(signingFormat) {
+		return nil, fmt.Errorf("scope %q configures commitments for format %q but is being signed as %q; "+
+			"the commitment would be resolved by one format's rules and signed under another's",
+			scope, meta.Format, signingFormat)
 	}
 
 	// UseNumber, so that re-encoding the document does not rewrite claims

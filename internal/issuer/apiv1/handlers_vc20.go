@@ -80,7 +80,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 
 	// Seed-backed claims, before anything is signed. A no-op for a scope
 	// with no commitments configured.
-	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{})
+	documentData, err := c.injectCommitments(ctx, req.Scope, openid4vp.FormatLdpVCDCQL, req.DocumentData, model.CredentialSchemas{})
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
 		return nil, err
