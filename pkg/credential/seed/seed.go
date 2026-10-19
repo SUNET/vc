@@ -63,7 +63,7 @@ var ErrNoSubject = errors.New("seed: subject identifier is empty")
 // drawn once per subject and kept - can replace the derived one without
 // anything above it changing. Deriver is the only implementation here.
 type Source interface {
-	Seed(ctx context.Context, subjectID, context_ string) ([]byte, error)
+	Seed(ctx context.Context, subjectIDs []string, context_ string) ([]byte, error)
 }
 
 // Deriver computes a subject's seed from a secret it holds.
@@ -112,15 +112,39 @@ func NewDeriver(secret []byte, seedBytes int) (*Deriver, error) {
 	return &Deriver{secret: &secretKey{bytes: owned}, seedBytes: seedBytes}, nil
 }
 
-// Seed derives the subject's seed.
+// Seed derives the subject's seed from an ORDERED list of subject
+// identifiers.
+//
+// A list because one identifier is often not unique on its own: a
+// national personal number needs its country, a document number needs its
+// scheme. Every entry must be an IMMUTABLE identifier of the subject.
+// This is not a place for attributes - a birth date corrected, or a name
+// changed after marriage, would derive a new seed and therefore a new
+// pseudonym for the same person, which is exactly what the capability
+// exists to prevent. A changed identifier IS a new subject here.
 //
 // context_ separates populations that must not share seeds. It is empty in
 // the ordinary case, because a subject has ONE seed: two credential types
 // issued to the same person have to lead back to the same person, and they
 // would not if the credential configuration were part of the derivation.
-func (d *Deriver) Seed(_ context.Context, subjectID, context_ string) ([]byte, error) {
-	if subjectID == "" {
+//
+// A single-element list encodes exactly as the single identifier did
+// before, so seeds already issued do not move.
+func (d *Deriver) Seed(_ context.Context, subjectIDs []string, context_ string) ([]byte, error) {
+	if len(subjectIDs) == 0 {
 		return nil, ErrNoSubject
+	}
+	if len(subjectIDs) > maxDerivationFields {
+		return nil, fmt.Errorf("seed: %d subject identifiers exceeds the limit of %d", len(subjectIDs), maxDerivationFields)
+	}
+	for i, id := range subjectIDs {
+		// An empty entry is refused rather than skipped. Skipping it
+		// would make ["a", ""] derive the seed of ["a"], so a
+		// misconfigured or missing identifier would silently produce
+		// another subject's seed instead of failing.
+		if id == "" {
+			return nil, fmt.Errorf("%w (identifier %d of %d)", ErrNoSubject, i, len(subjectIDs))
+		}
 	}
 
 	// The secret is the HKDF key and is deliberately NOT part of info.
@@ -134,7 +158,7 @@ func (d *Deriver) Seed(_ context.Context, subjectID, context_ string) ([]byte, e
 	// derivation whose output is a prefix of another derivation's is a
 	// surprise waiting for whoever reads this next. Naming the length
 	// makes the seed a function of all of its declared parameters.
-	info, err := derivationInfo(strconv.Itoa(d.seedBytes), context_, subjectID)
+	info, err := derivationInfo(append([]string{strconv.Itoa(d.seedBytes), context_}, subjectIDs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +240,26 @@ func derivationInfo(fields ...string) (string, error) {
 // derivation directly - seed_recover -context, say - cannot slip past a
 // check placed anywhere else.
 const maxDerivationField = 1<<16 - 1
+
+// maxDerivationFields bounds how many identifiers may be listed. A
+// subject is named by a handful of them - a country and a national
+// number, a scheme and a document number - so this is far beyond any real
+// configuration and simply stops an unbounded one.
+const maxDerivationFields = 16
+
+// The encoding carries NO field count, deliberately.
+//
+// It does not need one: every field is length-prefixed, so the stream is
+// self-delimiting and two different lists cannot encode alike. ["ab","c"]
+// is 0002 "ab" 0001 "c"; ["a","bc"] is 0001 "a" 0002 "bc"; ["abc"] is
+// 0003 "abc". Nothing follows the list, so there is no boundary left to
+// confuse.
+//
+// And it must not have one: a count would sit before the identifiers and
+// change the encoding of the single-identifier case, which is every seed
+// this deployment has already issued. Those cannot move. A count would
+// buy protection against a future field appended AFTER the list - which
+// is a change that must not be made for the same reason.
 
 // Commit returns the commitment a credential carries in place of the seed.
 //

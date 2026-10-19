@@ -2,8 +2,12 @@ package seed
 
 import (
 	"bytes"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,7 +114,7 @@ func TestDerivationGoldenVectors(t *testing.T) {
 			d, err := NewDeriver(testSecret, tc.seedBytes)
 			require.NoError(t, err)
 
-			got, err := d.Seed(t.Context(), tc.subject, tc.context)
+			got, err := d.Seed(t.Context(), []string{tc.subject}, tc.context)
 			require.NoError(t, err)
 			assert.Equal(t, tc.seed, hex.EncodeToString(got),
 				"the derivation has changed; every seed this deployment ever issued over is now different")
@@ -128,12 +132,12 @@ func TestDerivationGoldenVectors(t *testing.T) {
 func TestSeedIsStablePerSubject(t *testing.T) {
 	d := mustDeriver(t)
 
-	first, err := d.Seed(t.Context(), "subject-1", "")
+	first, err := d.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 	require.Len(t, first, DefaultSeedBytes)
 
 	for range 5 {
-		again, err := d.Seed(t.Context(), "subject-1", "")
+		again, err := d.Seed(t.Context(), []string{"subject-1"}, "")
 		require.NoError(t, err)
 		assert.Equal(t, first, again)
 	}
@@ -142,7 +146,7 @@ func TestSeedIsStablePerSubject(t *testing.T) {
 	// restart, and must agree.
 	other, err := NewDeriver(testSecret, 0)
 	require.NoError(t, err)
-	restarted, err := other.Seed(t.Context(), "subject-1", "")
+	restarted, err := other.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, first, restarted)
 }
@@ -155,7 +159,7 @@ func TestSeedSeparatesWhatItShould(t *testing.T) {
 
 	record := func(label, subject, context_ string) {
 		t.Helper()
-		s, err := d.Seed(t.Context(), subject, context_)
+		s, err := d.Seed(t.Context(), []string{subject}, context_)
 		require.NoError(t, err)
 		key := hex.EncodeToString(s)
 		if prev, clash := seen[key]; clash {
@@ -172,7 +176,7 @@ func TestSeedSeparatesWhatItShould(t *testing.T) {
 	// A different secret is a different deployment.
 	otherSecret, err := NewDeriver(bytes.Repeat([]byte("t"), MinSecretBytes), 0)
 	require.NoError(t, err)
-	fromOther, err := otherSecret.Seed(t.Context(), "subject-1", "")
+	fromOther, err := otherSecret.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 	assert.NotContains(t, seen, hex.EncodeToString(fromOther),
 		"a different secret must give unrelated seeds")
@@ -185,9 +189,9 @@ func TestSeedSeparatesWhatItShould(t *testing.T) {
 func TestContextAndSubjectCannotBeConfused(t *testing.T) {
 	d := mustDeriver(t)
 
-	left, err := d.Seed(t.Context(), "b.c", "a")
+	left, err := d.Seed(t.Context(), []string{"b.c"}, "a")
 	require.NoError(t, err)
-	right, err := d.Seed(t.Context(), "c", "a.b")
+	right, err := d.Seed(t.Context(), []string{"c"}, "a.b")
 	require.NoError(t, err)
 
 	assert.NotEqual(t, left, right,
@@ -199,7 +203,7 @@ func TestContextAndSubjectCannotBeConfused(t *testing.T) {
 // one shared seed, and therefore one shared pseudonym.
 func TestSeedRefusesAnEmptySubject(t *testing.T) {
 	d := mustDeriver(t)
-	_, err := d.Seed(t.Context(), "", "")
+	_, err := d.Seed(t.Context(), []string{""}, "")
 	require.ErrorIs(t, err, ErrNoSubject)
 }
 
@@ -228,7 +232,7 @@ func TestNewDeriverSeedLength(t *testing.T) {
 
 	d32, err := NewDeriver(testSecret, 32)
 	require.NoError(t, err)
-	s, err := d32.Seed(t.Context(), "subject-1", "")
+	s, err := d32.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 	assert.Len(t, s, 32)
 
@@ -238,7 +242,7 @@ func TestNewDeriverSeedLength(t *testing.T) {
 	// context the 32-byte seed would literally begin with the 16-byte one.
 	// Not a weakness, but a derivation whose output is a prefix of another
 	// derivation's is a trap for whoever reads this next.
-	short, err := mustDeriver(t).Seed(t.Context(), "subject-1", "")
+	short, err := mustDeriver(t).Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 	assert.NotEqual(t, short, s[:DefaultSeedBytes],
 		"the declared seed length must be part of the derivation, not just its output size")
@@ -256,14 +260,14 @@ func TestDeriverOwnsItsSecret(t *testing.T) {
 	d, err := NewDeriver(buf, 0)
 	require.NoError(t, err)
 
-	before, err := d.Seed(t.Context(), "subject-1", "")
+	before, err := d.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 
 	for i := range buf {
 		buf[i] = 0
 	}
 
-	after, err := d.Seed(t.Context(), "subject-1", "")
+	after, err := d.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
 }
@@ -335,25 +339,112 @@ func TestOverlongDerivationFieldsAreRefusedNotTruncated(t *testing.T) {
 	}
 
 	long := strings.Repeat("a", 65536) + strings.Repeat("b", 24929)
-	if _, err := deriver.Seed(t.Context(), long, ""); err == nil {
+	if _, err := deriver.Seed(t.Context(), []string{long}, ""); err == nil {
 		t.Fatal("an over-long subject must be refused, not truncated into a collision")
 	}
-	if _, err := deriver.Seed(t.Context(), strings.Repeat("b", 24929), strings.Repeat("a", 65536)); err == nil {
+	if _, err := deriver.Seed(t.Context(), []string{strings.Repeat("b", 24929)}, strings.Repeat("a", 65536)); err == nil {
 		t.Fatal("an over-long context must be refused too; seed_recover takes one directly")
 	}
 
 	// The boundary still derives, so ordinary callers are unaffected.
-	if _, err := deriver.Seed(t.Context(), strings.Repeat("a", 65535), ""); err != nil {
+	if _, err := deriver.Seed(t.Context(), []string{strings.Repeat("a", 65535)}, ""); err != nil {
 		t.Fatalf("the longest representable subject must still derive: %v", err)
 	}
 
 	// And an ordinary pair is unchanged by the guard - existing
 	// derivations must not move.
-	before, err := deriver.Seed(t.Context(), "subject-1", "")
+	before, err := deriver.Seed(t.Context(), []string{"subject-1"}, "")
 	if err != nil {
 		t.Fatalf("ordinary derivation: %v", err)
 	}
 	if len(before) != 16 {
 		t.Fatalf("expected a 16-byte seed, got %d", len(before))
+	}
+}
+
+// The identifier list must encode injectively, and a one-element list
+// must encode as the single identifier always did.
+//
+// Order and boundaries are both part of the subject: ["ab","c"],
+// ["a","bc"] and ["abc"] are three different subjects and must be three
+// different seeds. Length-prefixing every field is what makes that true
+// without a field count - and a count is not merely unnecessary but
+// forbidden, since it would sit before the identifiers and move every
+// seed already issued from a single one.
+func TestIdentifierListEncodesInjectively(t *testing.T) {
+	d := mustDeriver(t)
+	seedOf := func(t *testing.T, ids ...string) string {
+		t.Helper()
+		v, err := d.Seed(t.Context(), ids, "")
+		if err != nil {
+			t.Fatalf("Seed(%q): %v", ids, err)
+		}
+		return hex.EncodeToString(v)
+	}
+
+	// The boundary cases: same bytes, different splits.
+	abc := seedOf(t, "abc")
+	ab_c := seedOf(t, "ab", "c")
+	a_bc := seedOf(t, "a", "bc")
+	for _, pair := range [][2]string{{abc, ab_c}, {abc, a_bc}, {ab_c, a_bc}} {
+		if pair[0] == pair[1] {
+			t.Fatal("two different identifier lists derived the same seed")
+		}
+	}
+
+	// Order matters: a list is a sequence, not a set.
+	if seedOf(t, "a", "b") == seedOf(t, "b", "a") {
+		t.Fatal("reordering the identifiers must change the seed")
+	}
+
+	// A one-element list is the old single-identifier derivation. This is
+	// the compatibility guarantee: seeds already issued do not move.
+	single, err := d.Seed(t.Context(), []string{"subject-1"}, "")
+	if err != nil {
+		t.Fatalf("single: %v", err)
+	}
+	info, err := derivationInfo(strconv.Itoa(d.SeedBytes()), "", "subject-1")
+	if err != nil {
+		t.Fatalf("info: %v", err)
+	}
+	want, err := hkdf.Key(sha256.New, d.secret.bytes, nil, info, d.SeedBytes())
+	if err != nil {
+		t.Fatalf("hkdf: %v", err)
+	}
+	if !bytes.Equal(single, want) {
+		t.Fatal("a one-element list must derive exactly what the single identifier derived")
+	}
+
+	// The context is still separate from the identifiers, and cannot be
+	// confused with one.
+	if seedOf(t, "a", "b") == mustSeed(t, d, []string{"a"}, "b") {
+		t.Fatal("an identifier must not encode like the context")
+	}
+}
+
+func mustSeed(t *testing.T, d *Deriver, ids []string, context_ string) string {
+	t.Helper()
+	v, err := d.Seed(t.Context(), ids, context_)
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	return hex.EncodeToString(v)
+}
+
+// Bounds on the list itself.
+func TestIdentifierListBounds(t *testing.T) {
+	d := mustDeriver(t)
+	if _, err := d.Seed(t.Context(), nil, ""); !errors.Is(err, ErrNoSubject) {
+		t.Fatalf("an empty list must be ErrNoSubject, got %v", err)
+	}
+	if _, err := d.Seed(t.Context(), []string{"a", ""}, ""); !errors.Is(err, ErrNoSubject) {
+		t.Fatalf(`["a",""] must be refused, not treated as ["a"]: %v`, err)
+	}
+	many := make([]string, maxDerivationFields+1)
+	for i := range many {
+		many[i] = "x"
+	}
+	if _, err := d.Seed(t.Context(), many, ""); err == nil {
+		t.Fatal("an unbounded identifier list must be refused")
 	}
 }

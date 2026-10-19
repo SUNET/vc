@@ -44,7 +44,7 @@ func run() error {
 	var (
 		configPath      = flag.String("config", "", "path to the issuer config YAML (required)")
 		sourceName      = flag.String("seed", "", "name of the seed source in issuer.seeds (required)")
-		subject         = flag.String("subject", "", "the stable subject identifier (required)")
+		subjects        subjectList
 		derivContext    = flag.String("context", "", "the derivation context, if the credential configuration sets one")
 		pseudonymConfig = flag.String("pseudonym-config", "", "nym_auth pseudonym configuration to compute, e.g. known-offender-matching-ssc")
 		verifierID      = flag.String("verifier-id", "", "full verifier identifier including its prefix, e.g. x509_san_dns:rp.example")
@@ -53,6 +53,8 @@ func run() error {
 		expect          = flag.String("expect", "", "a pseudonym in hex to compare against; exit 0 on a match, 2 on a mismatch")
 		showSeed        = flag.Bool("show-seed", false, "also print the seed itself")
 	)
+	flag.Var(&subjects, "subject",
+		"a subject identifier; repeat IN ORDER for a configuration that derives from several (required)")
 	flag.Parse()
 
 	switch {
@@ -60,8 +62,8 @@ func run() error {
 		return errors.New("-config is required")
 	case *sourceName == "":
 		return errors.New("-seed is required")
-	case *subject == "":
-		return errors.New("-subject is required")
+	case len(subjects) == 0:
+		return errors.New("-subject is required (repeat it, in order, when several identifiers are configured)")
 	case *expect != "" && *pseudonymConfig == "":
 		// Refused rather than ignored, because the documented use is a
 		// loop over candidate subjects driven by the exit code. Exiting 0
@@ -76,7 +78,7 @@ func run() error {
 		return err
 	}
 
-	seedValue, err := source.Seed(context.Background(), *subject, *derivContext)
+	seedValue, err := source.Seed(context.Background(), []string(subjects), *derivContext)
 	if err != nil {
 		return err
 	}
@@ -123,6 +125,23 @@ func run() error {
 		os.Exit(2)
 	}
 	fmt.Println("match:      yes")
+	return nil
+}
+
+// subjectList collects a repeated -subject flag IN ORDER.
+//
+// Order is part of the derivation - ["a","bc"] and ["ab","c"] are
+// different subjects - so recovery has to reproduce the configured
+// sequence exactly, which a repeated flag does and a set would not.
+type subjectList []string
+
+func (s *subjectList) String() string { return strings.Join(*s, ", ") }
+
+func (s *subjectList) Set(v string) error {
+	if v == "" {
+		return errors.New("a subject identifier cannot be empty")
+	}
+	*s = append(*s, v)
 	return nil
 }
 

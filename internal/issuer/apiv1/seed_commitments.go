@@ -286,7 +286,7 @@ func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCo
 		return fmt.Errorf("%s: seed source %q is not available", where, p.target.Claim.Seed)
 	}
 
-	seedValue, err := source.Seed(ctx, p.subjectID, p.target.Claim.Context)
+	seedValue, err := source.Seed(ctx, []string{p.subjectID}, p.target.Claim.Context)
 	if err != nil {
 		// The subject identifier is NOT in this error: it is the thing
 		// that identifies the person, and this error reaches a log.

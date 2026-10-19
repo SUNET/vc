@@ -130,7 +130,7 @@ func TestCommitmentMatchesCommitOverTheDerivedSeed(t *testing.T) {
 	require.True(t, ok)
 
 	source := c.seedSources["primary"]
-	seedValue, err := source.Seed(t.Context(), "198001011234", "")
+	seedValue, err := source.Seed(t.Context(), []string{"198001011234"}, "")
 	require.NoError(t, err)
 	expected, err := seed.Commit("", seedValue) // "" is the registered default
 	require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestLiteralDottedKeyDoesNotShadowTheNestedPath(t *testing.T) {
 	})
 
 	source := c.seedSources["primary"]
-	nested, err := source.Seed(t.Context(), "198001011234", "")
+	nested, err := source.Seed(t.Context(), []string{"198001011234"}, "")
 	require.NoError(t, err)
 	want, err := seed.Commit("", nested)
 	require.NoError(t, err)
