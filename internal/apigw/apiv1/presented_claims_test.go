@@ -2,6 +2,9 @@ package apiv1
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
 	"os"
 	"testing"
@@ -564,4 +567,69 @@ func TestEpochAndRangeBoundariesAreRefused(t *testing.T) {
 			require.Equalf(t, tc.want, got, "%v", tc.in)
 		}
 	})
+}
+
+// The handlers must actually call the helpers these tests exercise.
+//
+// This is the gap one level up from the previous test, and the same one
+// review found before it: a unit test proves a helper works, never that
+// its caller runs it. Extracting decorateWithPresentedClaims made the
+// helper testable and left the CALL unpinned, and the issuer side was
+// never pinned at all - so the whole feature could be disconnected with
+// every test still green.
+//
+// Checked against the source, because that is the only thing that shows
+// a missing call. Fails closed: a function it cannot find is a failure,
+// not a pass.
+func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		file, fn string
+		calls    []string
+	}{
+		{
+			file: "handlers_verifier.go", fn: "VerificationDirectPost",
+			calls: []string{"decorateWithPresentedClaims"},
+		},
+		{
+			file: "handlers_issuer.go", fn: "VCICredential",
+			calls: []string{"provedClaims", "restoreProvedClaims", "ApplyDerivationsPinned"},
+		},
+	} {
+		t.Run(tc.fn, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, tc.file, nil, parser.SkipObjectResolution)
+			require.NoError(t, err)
+
+			var body *ast.FuncDecl
+			ast.Inspect(file, func(n ast.Node) bool {
+				fn, ok := n.(*ast.FuncDecl)
+				if ok && fn.Name.Name == tc.fn {
+					body = fn
+				}
+				return body == nil
+			})
+			require.NotNilf(t, body, "no %s in %s; this guard is not looking at anything", tc.fn, tc.file)
+
+			called := map[string]bool{}
+			ast.Inspect(body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch fn := call.Fun.(type) {
+				case *ast.Ident:
+					called[fn.Name] = true
+				case *ast.SelectorExpr:
+					called[fn.Sel.Name] = true
+				}
+				return true
+			})
+
+			for _, name := range tc.calls {
+				require.Truef(t, called[name],
+					"%s does not call %s: the helper's own tests would still pass, and a verified claim would reach the credential unpinned",
+					tc.fn, name)
+			}
+		})
+	}
 }
