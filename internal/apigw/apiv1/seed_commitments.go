@@ -13,6 +13,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/seed"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
@@ -26,15 +27,15 @@ import (
 // what it would find out is that a credential was issued without the claim
 // or with the wrong one. Both are worse than not starting.
 func (c *Client) initSeedSources() error {
-	if c.cfg.Issuer == nil {
+	if c.cfg.APIGW == nil {
 		return nil
 	}
 
 	c.seedSources = map[string]seed.Source{}
 
-	for name, src := range c.cfg.Issuer.Seeds {
+	for name, src := range c.cfg.APIGW.Seeds {
 		if src == nil {
-			return fmt.Errorf("issuer.seeds.%s: empty seed source", name)
+			return fmt.Errorf("apigw.seeds.%s: empty seed source", name)
 		}
 		switch src.Model {
 		case model.SeedModelDerived:
@@ -44,19 +45,16 @@ func (c *Client) initSeedSources() error {
 			}
 			deriver, err := seed.NewDeriver(secret, src.SeedBytes)
 			if err != nil {
-				return fmt.Errorf("issuer.seeds.%s: %w", name, err)
+				return fmt.Errorf("apigw.seeds.%s: %w", name, err)
 			}
 			c.seedSources[name] = deriver
 			c.log.Info("Initialized seed source", "name", name, "model", src.Model, "seed_bytes", deriver.SeedBytes())
-		case model.SeedModelStored:
-			// Refused rather than quietly treated as derived, which would
-			// hand every subject a seed the operator did not ask for and a
-			// pseudonym nobody could reproduce from the table they think
-			// they have.
-			return fmt.Errorf("issuer.seeds.%s: model %q needs a per-subject store, which this issuer does not have; not implemented yet",
-				name, src.Model)
 		default:
-			return fmt.Errorf("issuer.seeds.%s: unknown model %q", name, src.Model)
+			// "derived" is the only model. Configuration validation
+			// refuses anything else first; this is the second gate, so
+			// an unknown model cannot become a source that derives from
+			// nothing.
+			return fmt.Errorf("apigw.seeds.%s: unknown model %q", name, src.Model)
 		}
 	}
 
@@ -98,7 +96,7 @@ func (c *Client) checkCommitmentClaims() error {
 				return fmt.Errorf("%s: no seed source named", where)
 			}
 			if _, ok := c.seedSources[claim.Seed]; !ok {
-				return fmt.Errorf("%s: names seed source %q, which is not configured in issuer.seeds", where, claim.Seed)
+				return fmt.Errorf("%s: names seed source %q, which is not configured in apigw.seeds", where, claim.Seed)
 			}
 			if len(claim.Subjects) == 0 {
 				return fmt.Errorf("%s: no subject paths named; a seed must be a function of some stable identifier", where)
@@ -138,21 +136,21 @@ func (c *Client) checkCommitmentClaims() error {
 func seedSecret(name, path, inline string) ([]byte, error) {
 	switch {
 	case path != "" && inline != "":
-		return nil, fmt.Errorf("issuer.seeds.%s: set secret_path or the secret in the secrets file, not both", name)
+		return nil, fmt.Errorf("apigw.seeds.%s: set secret_path or the secret in the secrets file, not both", name)
 	case path != "":
-		decoded, err := readBase64URLFile(path)
+		decoded, err := helpers.ReadBase64URLFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("issuer.seeds.%s: failed to load the derivation secret: %w", name, err)
+			return nil, fmt.Errorf("apigw.seeds.%s: failed to load the derivation secret: %w", name, err)
 		}
 		return decoded, nil
 	case inline != "":
-		decoded, err := decodeBase64URL(inline)
+		decoded, err := helpers.DecodeBase64URL(inline)
 		if err != nil {
-			return nil, fmt.Errorf("issuer.seeds.%s: failed to load the derivation secret: %w", name, err)
+			return nil, fmt.Errorf("apigw.seeds.%s: failed to load the derivation secret: %w", name, err)
 		}
 		return decoded, nil
 	default:
-		return nil, fmt.Errorf("issuer.seeds.%s: set secret_path, or issuer.seeds.%s.secret in the secrets file", name, name)
+		return nil, fmt.Errorf("apigw.seeds.%s: set secret_path, or apigw.seeds.%s.secret in the secrets file", name, name)
 	}
 }
 
@@ -218,7 +216,7 @@ const signingFormatJWP = "jwp"
 // A no-op for a scope with no commitments configured, which is every scope
 // in a deployment that does not use the feature - including the encoding
 // round trip, so nothing changes for anybody else.
-func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte, schemas model.CredentialSchemas) ([]byte, error) {
+func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte) ([]byte, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	if meta == nil || len(meta.Commitments) == 0 {
 		return documentData, nil
@@ -262,7 +260,7 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 	// which an existing-value check made against the received document
 	// cannot catch - neither has been written yet, so both pass and the
 	// second write replaces the first commitment.
-	targets, err := meta.ResolveCommitmentTargets(schemas)
+	targets, err := meta.ResolveCommitmentTargets(commitmentSchemas(meta, signingFormat))
 	if err != nil {
 		return nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
@@ -306,6 +304,32 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 		return nil, fmt.Errorf("commitment claims for scope %q: %w", scope, err)
 	}
 	return injected, nil
+}
+
+// commitmentSchemas is the type metadata a commitment target must be
+// checked against for the format being signed.
+//
+// The apigw has both already - parsed at configuration load, and sent to
+// the issuer with every request - so it can resolve targets itself.
+// Previously each signing path inside the issuer passed whichever schema
+// it happened to hold, which is how an mdoc-configured scope signed as
+// SD-JWT ended up checked against nothing at all.
+//
+// A missing schema is REFUSED rather than skipped, by ResolveCommitmentTargets,
+// which is where the reasons live: an mdoc signer emits the elements its
+// schema declares and ignores anything else, so an undeclared commitment
+// path would inject cleanly and issue a credential with no commitment in
+// it; and the VCTM is what says the claim is selectively disclosable, so
+// without it there is nothing to stop a stable identifier being signed in
+// the clear.
+func commitmentSchemas(meta *model.CredentialMetadata, signingFormat string) model.CredentialSchemas {
+	if signingFormat == openid4vp.FormatMsoMdoc {
+		return model.CredentialSchemas{MDoc: meta.MDDL}
+	}
+	if meta.CommitmentsMatchSigningFormat(openid4vp.FormatSDJWTVC) {
+		return model.CredentialSchemas{VCTM: meta.VCTM}
+	}
+	return model.CredentialSchemas{}
 }
 
 func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCommitment, doc map[string]any, flat bool) error {

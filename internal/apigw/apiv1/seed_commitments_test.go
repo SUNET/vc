@@ -22,26 +22,44 @@ import (
 // seedSecretB64 is 32 bytes, base64url as the configuration takes it.
 var seedSecretB64 = base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))
 
-// commitmentClient builds an issuer configured for one seed-backed claim.
+// commitmentClient builds an apigw configured for one seed-backed claim.
 func commitmentClient(t *testing.T, format string, claim *model.CommitmentClaim, source *model.SeedSource) *Client {
 	t.Helper()
+	meta := &model.CredentialMetadata{
+		Format:      format,
+		Commitments: map[string]*model.CommitmentClaim{"ssc": claim},
+	}
+	if format == openid4vp.FormatMsoMdoc {
+		// An mdoc scope always has an MDDL, and the apigw reads it from
+		// here - a commitment target is checked against the schema that
+		// decides which elements the signer will emit.
+		meta.MDDL = defaultMDDL()
+	}
 	c := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialMetadata: map[string]*model.CredentialMetadata{
-					"nym_auth": {
-						Format:      format,
-						Commitments: map[string]*model.CommitmentClaim{"ssc": claim},
-					},
-				},
+				CredentialMetadata: map[string]*model.CredentialMetadata{"nym_auth": meta},
 			},
-			Issuer: &model.Issuer{
+			APIGW: &model.APIGW{
 				Seeds: map[string]*model.SeedSource{"primary": source},
 			},
 		},
 	}
 	return c
+}
+
+// defaultMDDL declares the elements the mdoc fixtures commit to.
+func defaultMDDL() *mdoc.MDDLSchema {
+	return &mdoc.MDDLSchema{
+		DocType: "eu.europa.ec.eudi.nym_auth.1",
+		Claims: map[string]mdoc.NamespaceClaims{
+			"eu.europa.ec.eudi.nym_auth.1": {
+				"birth_date": {Mandatory: true, ValueType: "full-date"},
+				"ssc":        {Mandatory: true, ValueType: "bstr"},
+			},
+		},
+	}
 }
 
 func derivedSource() *model.SeedSource {
@@ -67,7 +85,7 @@ func inject(t *testing.T, c *Client, doc map[string]any) map[string]any {
 	t.Helper()
 	in, err := json.Marshal(doc)
 	require.NoError(t, err)
-	out, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+	out, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 	require.NoError(t, err)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(out, &got))
@@ -165,7 +183,7 @@ func TestUpstreamCommitmentIsRefused(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already carries a value")
 }
@@ -192,7 +210,7 @@ func TestMissingSubjectRefusesIssuance(t *testing.T) {
 
 			in, err := json.Marshal(tc.doc)
 			require.NoError(t, err)
-			_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+			_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})
@@ -209,11 +227,11 @@ func TestScopeWithoutCommitmentsIsUntouched(t *testing.T) {
 		}}},
 	}
 	in := []byte(`{"given_name":"Anna","birth_date":"1980-01-01"}`)
-	out, err := c.injectCommitments(t.Context(), "pid", scopeFormat(c, "pid"), in, model.CredentialSchemas{})
+	out, err := c.injectCommitments(t.Context(), "pid", scopeFormat(c, "pid"), in)
 	require.NoError(t, err)
 	assert.Equal(t, in, out, "the bytes must be the same bytes, not re-encoded")
 
-	unknown, err := c.injectCommitments(t.Context(), "no-such-scope", scopeFormat(c, "no-such-scope"), in, model.CredentialSchemas{})
+	unknown, err := c.injectCommitments(t.Context(), "no-such-scope", scopeFormat(c, "no-such-scope"), in)
 	require.NoError(t, err)
 	assert.Equal(t, in, unknown)
 }
@@ -262,7 +280,7 @@ func TestAScopeSignedThroughTheWrongHandlerRefuses(t *testing.T) {
 		c := commitmentClient(t, openid4vp.FormatMsoMdoc, sscClaim(), derivedSource())
 		require.NoError(t, c.initSeedSources())
 
-		_, err := c.injectCommitments(t.Context(), "nym_auth", openid4vp.FormatSDJWTVC, doc, model.CredentialSchemas{})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", openid4vp.FormatSDJWTVC, doc)
 		require.Error(t, err, "the commitment would be resolved by mdoc rules and signed into a clear SD-JWT payload")
 		assert.Contains(t, err.Error(), "is being signed as")
 	})
@@ -271,7 +289,7 @@ func TestAScopeSignedThroughTheWrongHandlerRefuses(t *testing.T) {
 		c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
 		require.NoError(t, c.initSeedSources())
 
-		_, err := c.injectCommitments(t.Context(), "nym_auth", openid4vp.FormatMsoMdoc, doc, model.CredentialSchemas{})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", openid4vp.FormatMsoMdoc, doc)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "is being signed as")
 	})
@@ -280,7 +298,7 @@ func TestAScopeSignedThroughTheWrongHandlerRefuses(t *testing.T) {
 		c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
 		require.NoError(t, c.initSeedSources())
 
-		_, err := c.injectCommitments(t.Context(), "nym_auth", signingFormatJWP, doc, model.CredentialSchemas{})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", signingFormatJWP, doc)
 		require.Error(t, err)
 	})
 
@@ -288,7 +306,7 @@ func TestAScopeSignedThroughTheWrongHandlerRefuses(t *testing.T) {
 		c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
 		require.NoError(t, c.initSeedSources())
 
-		_, err := c.injectCommitments(t.Context(), "nym_auth", "", doc, model.CredentialSchemas{})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", "", doc)
 		require.Error(t, err, "a check that passes because nobody said is not a check")
 	})
 
@@ -300,7 +318,7 @@ func TestAScopeSignedThroughTheWrongHandlerRefuses(t *testing.T) {
 			c := commitmentClient(t, configured, sscClaim(), derivedSource())
 			require.NoError(t, c.initSeedSources())
 
-			_, err := c.injectCommitments(t.Context(), "nym_auth", openid4vp.FormatSDJWTVC, doc, model.CredentialSchemas{})
+			_, err := c.injectCommitments(t.Context(), "nym_auth", openid4vp.FormatSDJWTVC, doc)
 			require.NoError(t, err, "these are three spellings of one signing path")
 		})
 	}
@@ -379,7 +397,7 @@ func TestAnUnresolvedSubjectIdentifierRefusesRatherThanShorteningTheList(t *test
 	} {
 		in, err := json.Marshal(doc)
 		require.NoError(t, err)
-		_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+		_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 		require.Errorf(t, err, "%v must refuse rather than derive over what resolved", doc)
 		assert.Contains(t, err.Error(), "subject ")
 	}
@@ -423,7 +441,7 @@ func TestPathConflictRefusesRatherThanDeletingTheClaim(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 	require.Error(t, err, "a path conflict must refuse the issuance")
 	assert.Contains(t, err.Error(), "path conflict")
 }
@@ -433,23 +451,13 @@ func TestPathConflictRefusesRatherThanDeletingTheClaim(t *testing.T) {
 // does not declare therefore injects cleanly and issues a credential with
 // no commitment in it, reporting nothing.
 func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
-	schema := &mdoc.MDDLSchema{
-		DocType: "eu.europa.ec.eudi.nym_auth.1",
-		Claims: map[string]mdoc.NamespaceClaims{
-			"eu.europa.ec.eudi.nym_auth.1": {
-				"birth_date": {Mandatory: true, ValueType: "full-date"},
-				"ssc":        {Mandatory: true, ValueType: "bstr"},
-			},
-		},
-	}
-
 	doc, err := json.Marshal(map[string]any{"personal_administrative_number": "198001011234"})
 	require.NoError(t, err)
 
 	t.Run("declared, bare", func(t *testing.T) {
 		c := commitmentClient(t, openid4vp.FormatMsoMdoc, sscClaim(), derivedSource())
 		require.NoError(t, c.initSeedSources())
-		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc, model.CredentialSchemas{MDoc: schema})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc)
 		assert.NoError(t, err)
 	})
 
@@ -461,7 +469,7 @@ func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
 		}
 		require.NoError(t, c.initSeedSources())
 
-		out, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc, model.CredentialSchemas{MDoc: schema})
+		out, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc)
 		require.NoError(t, err, "the namespace-qualified spelling is how the claim is named everywhere else")
 
 		var got map[string]any
@@ -488,7 +496,7 @@ func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), withUpstream, model.CredentialSchemas{MDoc: schema})
+		_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), withUpstream)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already carries a value")
 	})
@@ -502,7 +510,7 @@ func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
 		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
 		require.NoError(t, c.initSeedSources())
 
-		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc, model.CredentialSchemas{MDoc: schema})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc)
 		require.Error(t, err, "a 64-character hex string decodes as base64 to 48 bytes, and nothing downstream could tell")
 		assert.Contains(t, err.Error(), "bstr")
 	})
@@ -514,7 +522,7 @@ func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
 			"psc": claim,
 		}
 		require.NoError(t, c.initSeedSources())
-		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc, model.CredentialSchemas{MDoc: schema})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), doc)
 		require.Error(t, err, "the signer would drop it and issue a credential without the commitment")
 		assert.Contains(t, err.Error(), "declares no such element")
 	})
@@ -543,7 +551,7 @@ func TestSubjectsResolveAgainstTheReceivedDocument(t *testing.T) {
 	in, err := json.Marshal(map[string]any{"personal_administrative_number": "198001011234"})
 	require.NoError(t, err)
 
-	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 	require.Error(t, err, "a subject that is not in the received document must refuse")
 	assert.Contains(t, err.Error(), "not present",
 		"and must never derive from a commitment written earlier in the same pass")
@@ -586,13 +594,16 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "a stored seed source, which needs a store this issuer has not got",
-			mutate: func(c *Client) { c.cfg.Issuer.Seeds["primary"].Model = model.SeedModelStored },
-			want:   "not implemented yet",
+			// "derived" is the only model. The former "stored" one is
+			// gone rather than refused, so it arrives here as any other
+			// unknown value would.
+			name:   "the stored model that used to exist",
+			mutate: func(c *Client) { c.cfg.APIGW.Seeds["primary"].Model = "stored" },
+			want:   "unknown model",
 		},
 		{
 			name:   "an unknown seed model",
-			mutate: func(c *Client) { c.cfg.Issuer.Seeds["primary"].Model = "magic" },
+			mutate: func(c *Client) { c.cfg.APIGW.Seeds["primary"].Model = "magic" },
 			want:   "unknown model",
 		},
 		{
@@ -607,7 +618,7 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 			mutate: func(c *Client) {
 				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"].Seed = "typo"
 			},
-			want: "not configured in issuer.seeds",
+			want: "not configured in apigw.seeds",
 		},
 		{
 			name: "a claim naming no seed source at all",
@@ -646,20 +657,20 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 		},
 		{
 			name:   "no derivation secret",
-			mutate: func(c *Client) { c.cfg.Issuer.Seeds["primary"].Secret = "" },
-			want:   "set secret_path, or issuer.seeds.primary.secret in the secrets file",
+			mutate: func(c *Client) { c.cfg.APIGW.Seeds["primary"].Secret = "" },
+			want:   "set secret_path, or apigw.seeds.primary.secret in the secrets file",
 		},
 		{
 			name: "two sources of truth for the derivation secret",
 			mutate: func(c *Client) {
-				c.cfg.Issuer.Seeds["primary"].SecretPath = "/etc/vc/seed.key"
+				c.cfg.APIGW.Seeds["primary"].SecretPath = "/etc/vc/seed.key"
 			},
 			want: "not both",
 		},
 		{
 			name: "a derivation secret below the minimum",
 			mutate: func(c *Client) {
-				c.cfg.Issuer.Seeds["primary"].Secret = base64.RawURLEncoding.EncodeToString([]byte("too short"))
+				c.cfg.APIGW.Seeds["primary"].Secret = base64.RawURLEncoding.EncodeToString([]byte("too short"))
 			},
 			want: "shorter than",
 		},
@@ -680,7 +691,7 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 func TestStartupErrorsDoNotCarryTheSecret(t *testing.T) {
 	raw := strings.Repeat("s", 32)
 	c := commitmentClient(t, openid4vp.FormatMsoMdoc, sscClaim(), derivedSource())
-	c.cfg.Issuer.Seeds["primary"].SecretPath = "/etc/vc/seed.key" // both set, so it fails
+	c.cfg.APIGW.Seeds["primary"].SecretPath = "/etc/vc/seed.key" // both set, so it fails
 
 	err := c.initSeedSources()
 	require.Error(t, err)
@@ -700,7 +711,7 @@ func TestInjectionErrorsDoNotCarryTheSubject(t *testing.T) {
 
 	in, err := json.Marshal(map[string]any{"personal_administrative_number": "198001011234"})
 	require.NoError(t, err)
-	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+	_, err = c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "198001011234",
 		"an error about a commitment must not name the person it was for")
@@ -732,8 +743,15 @@ func TestPathResolution(t *testing.T) {
 		got := inject(t, c, map[string]any{
 			"eu.europa.ec.eudi.pid.1.personal_administrative_number": "198001011234",
 		})
-		assert.NotEmpty(t, got["eu.europa.ec.eudi.nym_auth.1.ssc"],
-			"a dotted element identifier must be written flat, as mdoc document data is")
+		// The SUBJECT path is the point here: a dotted element
+		// identifier is one flat key in mdoc document data, not a
+		// descent. The commitment itself lands at the bare element id,
+		// because the schema normalises the namespace-qualified target
+		// - that is TestMdocSchemaMustDeclareTheCommitmentTarget's
+		// property, asserted here only so this test cannot pass by
+		// writing nothing at all.
+		assert.NotEmpty(t, got["ssc"],
+			"the subject must be read from the dotted key as written, and the commitment written where the signer looks")
 	})
 }
 
@@ -755,7 +773,7 @@ func TestInjectionPreservesEveryOtherClaimExactly(t *testing.T) {
 		`"negative":-9007199254740993,` +
 		`"nested":{"also_big":9007199254740993}}`)
 
-	out, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in, model.CredentialSchemas{})
+	out, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), in)
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -791,7 +809,7 @@ func TestTrailingBytesAfterTheDocumentAreRefused(t *testing.T) {
 		{name: "a stray brace", in: `{"personal_administrative_number":"198001011234"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), []byte(tc.in), model.CredentialSchemas{})
+			_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), []byte(tc.in))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "trailing")
 		})
@@ -804,13 +822,13 @@ func TestTrailingBytesAfterTheDocumentAreRefused(t *testing.T) {
 	t.Run("beyond the decoder's prefetch", func(t *testing.T) {
 		far := `{"personal_administrative_number":"198001011234"}` +
 			strings.Repeat(" ", 64*1024) + "trailing"
-		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), []byte(far), model.CredentialSchemas{})
+		_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"), []byte(far))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "trailing")
 	})
 
 	// Trailing WHITESPACE is not trailing garbage.
 	_, err := c.injectCommitments(t.Context(), "nym_auth", scopeFormat(c, "nym_auth"),
-		[]byte("{\"personal_administrative_number\":\"198001011234\"}\n\t "), model.CredentialSchemas{})
+		[]byte("{\"personal_administrative_number\":\"198001011234\"}\n\t "))
 	assert.NoError(t, err)
 }

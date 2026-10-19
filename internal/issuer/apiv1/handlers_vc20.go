@@ -12,7 +12,6 @@ import (
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
@@ -80,15 +79,10 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 
 	// Seed-backed claims, before anything is signed. A no-op for a scope
 	// with no commitments configured.
-	documentData, err := c.injectCommitments(ctx, req.Scope, openid4vp.FormatLdpVCDCQL, req.DocumentData, model.CredentialSchemas{})
-	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
-		return nil, err
-	}
 
 	// Parse document data into credential subject
 	var credentialSubject map[string]any
-	if err := json.Unmarshal(documentData, &credentialSubject); err != nil {
+	if err := json.Unmarshal(req.DocumentData, &credentialSubject); err != nil {
 		c.log.Error(err, "failed to parse document data")
 		return nil, fmt.Errorf("failed to parse document data: %w", err)
 	}

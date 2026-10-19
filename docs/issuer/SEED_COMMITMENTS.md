@@ -36,10 +36,10 @@ It **generates** the commitment and writes it. That is the whole of it.
 
 ## Configuration
 
-Two blocks. A seed source on the issuer:
+Two blocks. A seed source on the **apigw**:
 
 ```yaml
-issuer:
+apigw:
   seeds:
     primary:
       model: derived
@@ -47,11 +47,22 @@ issuer:
       # seed_bytes: 16                       # default, and the minimum
 ```
 
+Under `apigw`, not `issuer`. The seed is derived and its commitment
+injected before the issuer service is called, so the issuer receives an
+ordinary claim and never sees the derivation secret. A secret that only
+one service needs belongs in that service's configuration — keeping it
+where it is not used is how it ends up mounted somewhere it need not be.
+
+`model: derived` is the only model. A `stored` one — a random seed drawn
+on first sight of a subject and kept — was described here once and never
+implemented, because it needs a per-subject store that nothing on this
+path has.
+
 The secret itself is never written in `config.yaml`. Either mount it and
 point `secret_path` at it, as above, or put it in the **secrets file**:
 
 ```yaml
-issuer:
+apigw:
   seeds:
     primary:
       secret: <base64url>                    # >= 32 bytes DECODED

@@ -238,20 +238,20 @@ func loadSeedSource(configPath, name string) (seed.Source, error) {
 		cfg.ApplySecrets(secrets)
 	}
 
-	if cfg.Issuer == nil || len(cfg.Issuer.Seeds) == 0 {
-		return nil, fmt.Errorf("%s configures no issuer.seeds", configPath)
+	if cfg.APIGW == nil || len(cfg.APIGW.Seeds) == 0 {
+		return nil, fmt.Errorf("%s configures no apigw.seeds", configPath)
 	}
 
-	src, ok := cfg.Issuer.Seeds[name]
+	src, ok := cfg.APIGW.Seeds[name]
 	if !ok || src == nil {
-		named := make([]string, 0, len(cfg.Issuer.Seeds))
-		for k := range cfg.Issuer.Seeds {
+		named := make([]string, 0, len(cfg.APIGW.Seeds))
+		for k := range cfg.APIGW.Seeds {
 			named = append(named, k)
 		}
 		return nil, fmt.Errorf("no seed source %q; %s has %s", name, configPath, strings.Join(named, ", "))
 	}
 	if src.Model != model.SeedModelDerived {
-		return nil, fmt.Errorf("seed source %q has model %q; only %q can be reproduced without the issuer's store",
+		return nil, fmt.Errorf("seed source %q has model %q; only %q derives a reproducible seed",
 			name, src.Model, model.SeedModelDerived)
 	}
 

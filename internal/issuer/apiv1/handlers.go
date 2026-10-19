@@ -10,8 +10,6 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
-	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -58,12 +56,6 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("failed to parse inline VCTM: %w", err)
 	}
 
-	documentData, err := c.injectCommitments(ctx, req.Scope, openid4vp.FormatSDJWTVC, req.DocumentData, model.CredentialSchemas{VCTM: vctm})
-	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
-		return nil, err
-	}
-
 	// Build credential options. The VCTM bytes and integrity hash come from
 	// the caller (APIGW) which already loaded and verified them from config.
 	// By accepting the VCTM inline the issuer never fetches arbitrary URLs,
@@ -101,7 +93,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
 		req.VCTM,
-		documentData,
+		req.DocumentData,
 		req.JWK,
 		opts,
 	)
@@ -209,26 +201,6 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	}
 	schema.ZkSaltBytes = saltBytes
 
-	// Seed-backed claims. A no-op for a scope with no commitments
-	// configured.
-	//
-	// Below the schema load, because an mdoc signer emits the elements its
-	// schema declares and ignores anything else - so a commitment path the
-	// schema does not declare has to be refused here, and that needs the
-	// schema. Still BEFORE the status list entry is allocated: injection
-	// can refuse a
-	// document - no subject identifier, an upstream commitment, a path
-	// conflict - and the entry is allocated before signing and never
-	// handed back, so each such failure would otherwise burn a revocation
-	// entry that is marked VALID and belongs to no credential. The other
-	// three signing paths already inject before their allocation; this one
-	// did not.
-	documentData, err := c.injectCommitments(ctx, req.Scope, openid4vp.FormatMsoMdoc, req.DocumentData, model.CredentialSchemas{MDoc: schema})
-	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
-		return nil, err
-	}
-
 	// Allocate status list entry for revocation support (if registry is configured)
 	var statusSection, statusIndex int64
 	if c.registryClient != nil {
@@ -247,7 +219,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	// Issue the mdoc
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
-		DocumentData:    documentData,
+		DocumentData:    req.DocumentData,
 		Schema:          schema,
 	}
 

@@ -27,9 +27,9 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 	t.Run("the secret comes from the secrets file", func(t *testing.T) {
 		dir := t.TempDir()
 		secretsPath := write(t, dir, "secrets.yaml",
-			"issuer:\n  seeds:\n    pseudonym:\n      secret: \""+secret+"\"\n", 0o600)
+			"apigw:\n  seeds:\n    pseudonym:\n      secret: \""+secret+"\"\n", 0o600)
 		configPath := write(t, dir, "config.yaml",
-			"common:\n  secret_file_path: \""+secretsPath+"\"\nissuer:\n  seeds:\n    pseudonym:\n      model: derived\n", 0o600)
+			"common:\n  secret_file_path: \""+secretsPath+"\"\napigw:\n  seeds:\n    pseudonym:\n      model: derived\n", 0o600)
 
 		source, err := loadSeedSource(configPath, "pseudonym")
 		require.NoError(t, err, "the documented setup must be recoverable")
@@ -43,7 +43,7 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 	t.Run("an inline secret in the main config is not a source", func(t *testing.T) {
 		dir := t.TempDir()
 		configPath := write(t, dir, "config.yaml",
-			"issuer:\n  seeds:\n    pseudonym:\n      model: derived\n      secret: \""+secret+"\"\n", 0o600)
+			"apigw:\n  seeds:\n    pseudonym:\n      model: derived\n      secret: \""+secret+"\"\n", 0o600)
 
 		_, err := loadSeedSource(configPath, "pseudonym")
 		require.Error(t, err, "config.yaml is no longer a place the derivation secret can live")
@@ -53,9 +53,9 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 	t.Run("a secrets file this tool may not read is an error, not a fallback", func(t *testing.T) {
 		dir := t.TempDir()
 		secretsPath := write(t, dir, "secrets.yaml",
-			"issuer:\n  seeds:\n    pseudonym:\n      secret: \""+secret+"\"\n", 0o644)
+			"apigw:\n  seeds:\n    pseudonym:\n      secret: \""+secret+"\"\n", 0o644)
 		configPath := write(t, dir, "config.yaml",
-			"common:\n  secret_file_path: \""+secretsPath+"\"\nissuer:\n  seeds:\n    pseudonym:\n      model: derived\n", 0o600)
+			"common:\n  secret_file_path: \""+secretsPath+"\"\napigw:\n  seeds:\n    pseudonym:\n      model: derived\n", 0o600)
 
 		_, err := loadSeedSource(configPath, "pseudonym")
 		require.Error(t, err, "the issuer refuses a world-readable secrets file; recovery must not be laxer")

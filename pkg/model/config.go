@@ -576,17 +576,6 @@ type Issuer struct {
 	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 
-	// Seeds are the named per-subject seed sources this issuer can use.
-	//
-	// A seed source turns a stable subject identifier into that subject's
-	// permanent seed; a credential configuration then names one to back a
-	// commitment claim - see CredentialMetadata.Commitments. Empty means
-	// the issuer offers none, and any scope asking for one refuses at
-	// startup.
-	//
-	// Unrelated to PseudonymSeed above, which attaches a fresh random
-	// value per credential and is not a function of the subject at all.
-	Seeds map[string]*SeedSource `yaml:"seeds" validate:"omitempty,dive" doc_key:"seed source name"`
 	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
 	// BBS holds blind BBS issuance configuration. Absent disables the
@@ -609,13 +598,16 @@ type Issuer struct {
 }
 
 // Seed models a SeedSource may declare.
+//
+// There is one. A "stored" model - a random seed drawn on first sight of
+// a subject and kept - was described here and never implemented, because
+// it needs a per-subject store that nothing on this path has. It is gone
+// rather than left as a refused-at-startup option: a configuration knob
+// that only ever produces an error is a promise the code does not keep.
 const (
 	// SeedModelDerived computes a subject's seed from a secret and the
-	// subject identifier. Nothing is stored and the seed is recomputable.
+	// subject identifiers. Nothing is stored and the seed is recomputable.
 	SeedModelDerived = "derived"
-	// SeedModelStored draws a random seed on first sight of a subject and
-	// keeps it. Needs a per-subject store.
-	SeedModelStored = "stored"
 )
 
 // SeedSource configures one named per-subject seed source.
@@ -625,17 +617,10 @@ const (
 // reproduce a subject's seed, which is what makes anything derived from it
 // - a pseudonym, typically - remappable to a person later.
 type SeedSource struct {
-	// Model is how a subject's seed comes about.
-	//
-	// "derived" computes it from Secret and the subject identifier, so
-	// nothing is stored and the seed is recomputable forever.
-	//
-	// "stored" draws a random seed on first sight of a subject and keeps
-	// it. It needs a store, which the issuer does not have, so it is not
-	// implemented here - a configuration naming it is refused at startup
-	// rather than silently treated as "derived", which would hand every
-	// subject a seed the operator did not ask for.
-	Model string `yaml:"model" validate:"required,oneof=derived stored" doc_example:"\"derived\""`
+	// Model is how a subject's seed comes about. "derived" is the only
+	// one: the seed is computed from Secret and the subject identifiers,
+	// so nothing is stored and it is recomputable forever.
+	Model string `yaml:"model" validate:"required,oneof=derived" doc_example:"\"derived\""`
 
 	// SecretPath is a file holding the derivation secret, base64url-encoded
 	// (padding and trailing whitespace are tolerated), whose DECODED value
@@ -660,7 +645,7 @@ type SeedSource struct {
 	// least 32 bytes.
 	//
 	// NOT SETTABLE IN THE MAIN CONFIGURATION, by design. It is filled from
-	// issuer.seeds.<name>.secret in the SECRETS FILE, the same way Mongo,
+	// apigw.seeds.<name>.secret in the SECRETS FILE, the same way Mongo,
 	// SQL and the HA credentials are, so the most permanent secret an
 	// issuer holds never appears in the rendered config.
 	//
@@ -2086,6 +2071,23 @@ type APIGW struct {
 	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://issuer.sunet.se\""`
 	// IssuerClient is the gRPC client config for issuer
+	// Seeds are the named per-subject seed sources this deployment can
+	// use.
+	//
+	// A seed source turns a subject's stable identifiers into that
+	// subject's permanent seed; a credential configuration then names one
+	// to back a commitment claim - see CredentialMetadata.Commitments.
+	// Empty means none is offered, and any scope asking for one refuses
+	// at startup.
+	//
+	// HERE rather than under issuer, which is where it began. The seed is
+	// derived and its commitment injected BEFORE the issuer service is
+	// called, so the issuer receives an ordinary claim and never sees the
+	// derivation secret at all. A secret that only one service needs
+	// belongs in that service's configuration, and keeping it where it is
+	// not used is how it ends up mounted somewhere it need not be.
+	Seeds map[string]*SeedSource `yaml:"seeds" validate:"omitempty,dive" doc_key:"seed source name"`
+
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry
 	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
@@ -2377,7 +2379,7 @@ func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
 // seed is recomputable whenever it is wanted, so there is no moment at
 // which it has to be handed over to avoid losing it.
 type CommitmentClaim struct {
-	// Seed names the entry in issuer.seeds that backs this claim.
+	// Seed names the entry in apigw.seeds that backs this claim.
 	//
 	// Required for an issuer-held commitment. A claim whose commitment the
 	// HOLDER computes names no seed source - the issuer never sees that
