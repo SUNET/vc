@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,7 +136,14 @@ func claimString(v any) (string, bool) {
 func normaliseFullDate(v any) (string, error) {
 	switch t := v.(type) {
 	case time.Time:
-		return fullDate(t)
+		// In UTC, like epochFullDate does it explicitly. The zone on a
+		// decoded CBOR timestamp is the HOST's, not anything the holder
+		// presented, so without this the issued date depends on where
+		// the service runs: on a UTC-08 host, epoch 632361600 renders
+		// as 1990-01-14 instead of 1990-01-15. A birth date silently
+		// off by a day is exactly the kind of wrong this copy exists to
+		// prevent.
+		return fullDate(t.UTC())
 	case cbor.Tag:
 		if t.Number == 1 {
 			return epochFullDate(t.Content)
@@ -261,6 +269,20 @@ func documentValue(v any) (any, error) {
 	// and so a year the format cannot express is still refused here.
 	case time.Time:
 		return jsonTimestamp(typed)
+
+	// A decoded mdoc byte string is normalised for the same reason as a
+	// timestamp, and it is the only other type that changes shape across
+	// the cache: the memory store hands back []byte, while the
+	// Mongo-backed store round-trips through JSON and hands back the
+	// base64 string. A derivation reading the claim then behaves
+	// differently by backend.
+	case []byte:
+		if typed == nil {
+			// What json.Marshal does with it, kept so a null claim
+			// stays a null claim rather than becoming "".
+			return nil, nil
+		}
+		return base64.StdEncoding.EncodeToString(typed), nil
 
 	// An integer that cannot survive the issuer's float64 round trip is
 	// refused rather than quietly changed.
@@ -430,7 +452,10 @@ func numberValue(n json.Number) (any, error) {
 // that what a derivation reads does not depend on which cache backend
 // the deployment runs.
 func jsonTimestamp(t time.Time) (string, error) {
-	encoded, err := json.Marshal(t)
+	// UTC for the same reason normaliseFullDate uses it: the zone on a
+	// decoded CBOR timestamp is the host's, and a claim's issued value
+	// must not depend on where the service runs.
+	encoded, err := json.Marshal(t.UTC())
 	if err != nil {
 		return "", fmt.Errorf("a timestamp claim cannot be carried in the issued document: %w", err)
 	}

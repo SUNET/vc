@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -419,6 +420,84 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, float64(42), out["n"])
 	})
+}
+
+// The issued date must not depend on where the service runs.
+//
+// A decoded CBOR tag-1 timestamp arrives as a local-zone time.Time -
+// the HOST's zone, not anything the holder presented - so extracting
+// its date without normalising renders the day before on any host west
+// of UTC. epochFullDate already said .UTC() explicitly; the time.Time
+// branch did not, and a birth date silently off by one day is exactly
+// what copying the presented claim exists to prevent.
+//
+// Pinned under a non-UTC zone, because under UTC the bug is invisible.
+func TestAFullDateDoesNotDependOnTheHostTimezone(t *testing.T) {
+	// 1990-01-15T00:00:00Z. West of UTC this instant is still the 14th
+	// locally, which is what made it the wrong answer.
+	const epoch = 632361600
+	utc := time.Unix(epoch, 0).UTC()
+	require.Equal(t, "1990-01-15", utc.Format(time.DateOnly), "the premise: this instant is the 15th in UTC")
+
+	for _, zone := range []string{"America/Los_Angeles", "Pacific/Kiritimati", "UTC"} {
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			t.Skipf("zone database unavailable: %v", err)
+		}
+		t.Run(zone, func(t *testing.T) {
+			// What the CBOR decoder hands over on a host in this zone.
+			decoded := time.Unix(epoch, 0).In(loc)
+			got, err := normaliseFullDate(decoded)
+			require.NoError(t, err)
+			require.Equal(t, "1990-01-15", got,
+				"the host's timezone must not change the date the holder proved")
+
+			// And the tag-1 route, which already said UTC, must agree
+			// with it - the two must not drift apart again.
+			viaTag, err := normaliseFullDate(cbor.Tag{Number: 1, Content: int64(epoch)})
+			require.NoError(t, err)
+			require.Equal(t, got, viaTag)
+		})
+	}
+}
+
+// A copied byte string must read the same way on both cache backends.
+//
+// The same divergence as a timestamp, and the only other type that
+// changes shape across the cache: the memory store hands back []byte
+// while the Mongo-backed store round-trips through JSON and hands back
+// the base64 string, so a trim derivation fails on one backend and
+// succeeds on the other.
+func TestACopiedByteStringDerivesTheSameOnBothCacheBackends(t *testing.T) {
+	raw := []byte{0x01, 0x02, 0xfe, 0xff}
+
+	copied, err := copiedMdocClaim(t, "odd", raw)
+	require.NoError(t, err)
+	claim, ok := copied["odd"].(string)
+	require.Truef(t, ok, "a cached claim must not depend on the backend; got %T", copied["odd"])
+	require.Equal(t, base64.StdEncoding.EncodeToString(raw), claim,
+		"and must be exactly what the JSON round trip would have produced")
+
+	doc := &model.CompleteDocument{DocumentData: map[string]any{"odd": copied["odd"]}}
+	stored, err := json.Marshal(doc)
+	require.NoError(t, err)
+	var reloaded model.CompleteDocument
+	require.NoError(t, json.Unmarshal(stored, &reloaded))
+
+	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: "odd", Output: "odd"}}}
+	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, time.Now())
+	require.NoError(t, err, "the memory-backed path must derive")
+	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, time.Now())
+	require.NoError(t, err, "and so must the HA path")
+	require.Equal(t, fromMemory["odd"], fromMongo["odd"])
+
+	// Nested, and the null case, which must stay null rather than
+	// becoming an empty string.
+	nested, err := copiedMdocClaim(t, "odd", map[any]any{"inner": raw, "absent": []byte(nil)})
+	require.NoError(t, err)
+	obj := nested["odd"].(map[string]any)
+	require.Equal(t, base64.StdEncoding.EncodeToString(raw), obj["inner"])
+	require.Nil(t, obj["absent"], "a null byte string stays null")
 }
 
 // A copied timestamp must read the same way on both cache backends.
