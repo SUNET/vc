@@ -10,6 +10,25 @@ type CompleteDocument struct {
 	Meta               *MetaData      `json:"meta,omitempty" bson:"meta" validate:"required"`
 	IdentityMappingIDs []string       `json:"identity_mapping_ids,omitempty" bson:"identity_mapping_ids" validate:"required,min=1"`
 	DocumentData       map[string]any `json:"document_data,omitempty" bson:"document_data" validate:"required"`
+
+	// PresentedClaims names the top-level claims of DocumentData whose
+	// value came from a VERIFIED presentation rather than from the
+	// datastore, so issuance can keep them authoritative through the
+	// derivations it runs.
+	//
+	// It travels INSIDE the document because it describes that document.
+	// Carried beside it - on the authorization context - it was a second
+	// write that could interleave with this one: two direct-post requests
+	// matching different auth scopes could leave one request's document
+	// paired with the other's provenance, and a verified claim unpinned.
+	// One write cannot disagree with itself.
+	//
+	// json:"-" because it is not part of the credential or any API
+	// response; the bson tag is needed because the document cache is
+	// Mongo-backed under HA, where a transient field would silently not
+	// survive. It is only ever set on the cached copy a verification
+	// produces, never on a stored datastore document.
+	PresentedClaims []string `json:"-" bson:"presented_claims,omitempty"`
 }
 
 // DocumentList is a generic type for document list

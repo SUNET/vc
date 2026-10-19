@@ -72,15 +72,6 @@ type AuthContextStore interface {
 
 	// SetIdentifier sets the resolved identifier on an authorization context.
 	SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error
-
-	// SetPresentedClaims records which document claims came from the
-	// verified presentation.
-	//
-	// A targeted write, like the two above, rather than Update: Update
-	// REPLACES the stored context, so persisting this with it would let a
-	// slow request overwrite newer token state - resetting Forfeited and
-	// making a consumed authorization code redeemable again.
-	SetPresentedClaims(ctx context.Context, query *AuthorizationContext, claims []string) error
 }
 
 // Compile-time checks that backends implement the interface.

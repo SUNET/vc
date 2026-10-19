@@ -84,18 +84,6 @@ type AuthorizationContext struct {
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
 
-	// PresentedClaims names the top-level document claims whose value came
-	// from the VERIFIED presentation rather than from the datastore.
-	//
-	// Issuance reapplies them after derivations run. Without it a
-	// derivation writing one of these - birth_date computed from another
-	// stored field, say - silently replaces a value the holder actually
-	// proved, and the credential is issued asserting something that was
-	// never verified. The provenance has to travel because the auth scope
-	// that chose these claims is known only to the verifier half, and the
-	// derivations run in the issuance request.
-	PresentedClaims []string `json:"presented_claims,omitempty" bson:"presented_claims,omitempty"`
-
 	// PreAuthorized marks the context as belonging to an OID4VCI
 	// pre-authorized code offer. The token endpoint rejects cross-grant
 	// use so a pre-auth code cannot be redeemed via authorization_code

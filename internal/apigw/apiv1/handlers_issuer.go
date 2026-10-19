@@ -357,7 +357,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// would otherwise replace a verified value with a stored
 				// one, and the credential would assert something that was
 				// never presented.
-				proved := provedClaims(docData, authContext.PresentedClaims)
+				proved := provedClaims(docData, document.PresentedClaims)
 
 				// Pinned, not merely restored afterwards: each step's
 				// output feeds the next, so a dependent derivation must

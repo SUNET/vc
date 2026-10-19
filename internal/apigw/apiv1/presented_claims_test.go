@@ -2,22 +2,16 @@ package apiv1
 
 import (
 	"encoding/json"
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -337,143 +331,50 @@ func TestProvedClaimsSurviveTheRecursiveMerge(t *testing.T) {
 		"a member a derivation added inside it must not survive restoration")
 }
 
-// The provenance has to be PERSISTED, and the replace has to carry the
-// identifier.
+// The provenance travels INSIDE the document it describes.
 //
-// Two separate hazards, modelled the way the handler really meets them.
-// The handler holds a context it loaded BEFORE SetIdentifier wrote the
-// resolved identity straight to the store, so its copy does not have it -
-// and Update is a full replace, not a merge.
-func TestPresentedClaimsPersistenceCarriesTheIdentifier(t *testing.T) {
-	ctx := t.Context()
-	const session = "s1"
-
-	newStore := func(t *testing.T) *cache.MemoryStore {
-		t.Helper()
-		store := cache.NewMemoryStore(time.Minute)
-		require.NoError(t, store.Create(ctx, &cache.AuthorizationContext{
-			SessionID: session, ExpiresAt: time.Now().Add(time.Hour).Unix(),
-		}))
-		require.NoError(t, store.SetIdentifier(ctx, &cache.AuthorizationContext{SessionID: session}, "mapping-1"))
-		return store
+// Published beside it, on the authorization context, it was a second
+// write that could interleave with the document's: two direct-post
+// requests matching auth scopes with different document_claims could
+// leave one request's document paired with the other's provenance, and a
+// verified claim unpinned. One write cannot disagree with itself.
+func TestProvenanceTravelsWithTheDocument(t *testing.T) {
+	docs := map[string]*model.CompleteDocument{
+		"d": {DocumentData: map[string]any{"birth_date": "1970-01-01", "other": "x"}},
 	}
 
-	// What the handler has: a context loaded before SetIdentifier ran, so
-	// Identifier is empty on it even though the store has one.
-	handlerContext := func() *cache.AuthorizationContext {
-		return &cache.AuthorizationContext{
-			SessionID: session, ExpiresAt: time.Now().Add(time.Hour).Unix(),
-		}
-	}
+	out := applyPresentedDocumentClaims(docs, map[string]any{"birth_date": "2010-01-01"})
 
-	t.Run("a replace that does not carry the identifier erases it", func(t *testing.T) {
-		store := newStore(t)
-		stale := handlerContext()
-		stale.PresentedClaims = []string{"birth_date"}
+	require.Equal(t, []string{"birth_date"}, out["d"].PresentedClaims,
+		"the copy records which claims it took from the presentation")
+	require.Equal(t, "2010-01-01", out["d"].DocumentData["birth_date"],
+		"and carries the value in the same object")
 
-		require.NoError(t, store.Update(ctx, stale))
+	// Issuance reads the provenance from the document it is issuing from,
+	// so the two cannot be mismatched.
+	proved := provedClaims(out["d"].DocumentData, out["d"].PresentedClaims)
+	require.Equal(t, map[string]any{"birth_date": "2010-01-01"}, proved)
 
-		back, err := store.GetByID(ctx, session)
-		require.NoError(t, err)
-		require.Empty(t, back.Identifier,
-			"Update replaces the stored context; it does not merge into it")
-	})
-
-	t.Run("carrying it keeps both", func(t *testing.T) {
-		store := newStore(t)
-		carried := handlerContext()
-		carried.PresentedClaims = []string{"birth_date"}
-		carried.Identifier = "mapping-1"
-
-		require.NoError(t, store.Update(ctx, carried))
-
-		back, err := store.GetByID(ctx, session)
-		require.NoError(t, err)
-		require.Equal(t, []string{"birth_date"}, back.PresentedClaims,
-			"issuance must be able to read the provenance back")
-		require.Equal(t, "mapping-1", back.Identifier,
-			"and the identity just resolved must survive the replace")
-	})
+	// The datastore's own document is untouched, provenance included.
+	require.Nil(t, docs["d"].PresentedClaims)
 }
 
-// A pre-authorized child session must carry the provenance.
+// A number the issued document cannot carry exactly is refused, whichever
+// format it arrived in.
 //
-// The child is built FIELD BY FIELD, and the document it issues from is
-// fetched through docLookupSessionID, which follows SourceSessionID back
-// to the parent. A child missing PresentedClaims therefore gets the
-// parent's document and none of the provenance describing it: issuance
-// reads an empty list and a derivation is free to overwrite a claim the
-// holder proved, in exactly the flow that issues to several clients.
-//
-// Checked against the SOURCE rather than a hand-built child. A test that
-// assembles the struct itself passes whatever production does, which is
-// the one thing worth knowing here - the risk is a field-by-field copy
-// quietly omitting a field, and only the real literal can show that.
-func TestChildSessionLiteralCarriesPresentedClaims(t *testing.T) {
-	const source = "handlers_oauth.go"
-
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, source, nil, parser.SkipObjectResolution)
-	require.NoError(t, err)
-
-	var found, carries bool
-	ast.Inspect(file, func(n ast.Node) bool {
-		composite, ok := n.(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-		selector, ok := composite.Type.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "AuthorizationContext" {
-			return true
-		}
-		// The child is the one that points back at a parent.
-		var isChild bool
-		for _, element := range composite.Elts {
-			kv, ok := element.(*ast.KeyValueExpr)
-			if !ok {
-				continue
-			}
-			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "SourceSessionID" {
-				isChild = true
-			}
-		}
-		if !isChild {
-			return true
-		}
-		found = true
-		for _, element := range composite.Elts {
-			kv, ok := element.(*ast.KeyValueExpr)
-			if !ok {
-				continue
-			}
-			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "PresentedClaims" {
-				carries = true
-			}
-		}
-		return true
-	})
-
-	// Fail closed: a guard that found nothing to check proves nothing.
-	require.True(t, found, "no child AuthorizationContext literal found in %s; this guard is not looking at anything", source)
-	require.True(t, carries,
-		"the child session literal in %s must set PresentedClaims, or issuance from a pre-authorized child reads an empty provenance and derivations overwrite verified claims",
-		source)
-}
-
-// An integer the issued document cannot carry exactly is refused.
-//
-// CBOR keeps an integer exact, but the issuer parses the document JSON
-// into map[string]any where every number becomes a float64, so a
-// presented uint64(9007199254740993) was issued as 9007199254740992 -
-// a verified value altered by one, in a credential claiming it came from
-// the presentation.
-func TestPresentedIntegersThatCannotSurviveAreRefused(t *testing.T) {
+// An mdoc claim arrives CBOR-decoded, so an integer is exact until the
+// issuer parses the document JSON into map[string]any and every number
+// becomes a float64: uint64(9007199254740993) was issued as ...992. An
+// SD-JWT claim never gets that far - Token.Parse and disclosure decoding
+// unmarshal into `any`, so it is ALREADY a float64 when it is copied, and
+// walked past an integer-only guard untouched. Two formats, one guard.
+func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 	target := nymAuthTarget(t)
 	entry := model.AuthScopeEntry{
 		AuthClaims:     []string{"org.iso.18013.5.1.big"},
 		DocumentClaims: map[string]string{"org.iso.18013.5.1.big": "big"},
 	}
-	copyOne := func(t *testing.T, v any) (map[string]any, error) {
+	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
 		t.Helper()
 		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
 			"org.iso.18013.5.1": {"big": v},
@@ -481,35 +382,39 @@ func TestPresentedIntegersThatCannotSurviveAreRefused(t *testing.T) {
 		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
 	}
 
-	for _, tc := range []struct {
-		name string
-		v    any
-	}{
-		{"unsigned beyond float64's exact range", uint64(9007199254740993)},
-		{"signed beyond it", int64(-9007199254740993)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := copyOne(t, tc.v)
-			require.Error(t, err, "issuing a different number than was proved is not an option")
-			assert.Contains(t, err.Error(), "cannot be carried exactly")
-		})
-	}
+	t.Run("mdoc integers beyond float64's exact range", func(t *testing.T) {
+		for _, v := range []any{uint64(9007199254740993), int64(-9007199254740993)} {
+			_, err := fromMdoc(t, v)
+			require.Errorf(t, err, "%v must not be issued as a different number", v)
+			require.Contains(t, err.Error(), "cannot be carried exactly")
+		}
+	})
 
-	// At the boundary it still round-trips, so ordinary values are not
-	// caught by this.
-	for _, tc := range []struct {
-		name string
-		v    any
-	}{
-		{"the largest exact integer", uint64(9007199254740991)},
-		{"an everyday one", uint64(42)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			copied, err := copyOne(t, tc.v)
-			require.NoError(t, err)
-			encoded, err := json.Marshal(copied)
-			require.NoError(t, err)
-			assert.Contains(t, string(encoded), fmt.Sprintf("%d", tc.v))
-		})
-	}
+	t.Run("an SD-JWT number, which is already a float64", func(t *testing.T) {
+		sdEntry := model.AuthScopeEntry{
+			AuthClaims:     []string{"big"},
+			DocumentClaims: map[string]string{"big": "big"},
+		}
+		// What Token.Parse hands over: JSON decoded into `any`.
+		presented := map[string]any{"big": float64(9007199254740993)}
+		_, err := presentedDocumentClaims("dc+sd-jwt", presented, sdEntry, target)
+		require.Error(t, err, "an unsafe-range float64 must not slip past the integer guards")
+		require.Contains(t, err.Error(), "exceeds the range")
+	})
+
+	t.Run("ordinary numbers still copy", func(t *testing.T) {
+		copied, err := fromMdoc(t, uint64(9007199254740991))
+		require.NoError(t, err, "the largest exact integer must still be copyable")
+		encoded, err := json.Marshal(copied)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), "9007199254740991")
+
+		sdEntry := model.AuthScopeEntry{
+			AuthClaims:     []string{"n"},
+			DocumentClaims: map[string]string{"n": "n"},
+		}
+		out, err := presentedDocumentClaims("dc+sd-jwt", map[string]any{"n": float64(42)}, sdEntry, target)
+		require.NoError(t, err)
+		require.Equal(t, float64(42), out["n"])
+	})
 }

@@ -421,31 +421,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			c.log.Error(err, "cannot copy presented claims into the issued document", "matched_auth_scope", matchedAuthScope, "scope", scope)
 			return nil, fmt.Errorf("presented claim copy failed: %w", err)
 		}
+		// The provenance travels inside the documents, written in the
+		// same single cache Set below. Recording it separately - on the
+		// authorization context - was a second write that could
+		// interleave with this one, leaving one request's document paired
+		// with another's provenance.
 		documents = applyPresentedDocumentClaims(documents, copied)
-
-		// Record which claims the presentation supplied, so issuance can
-		// reapply them after derivations. The matched auth scope that
-		// chose them is known only here.
-		//
-		// PERSISTED, not just assigned. With HA the store decodes into a
-		// fresh value and hands back a copy, so writing to authCtx alone
-		// reaches nothing: the credential request would read an empty
-		// list and let a derivation overwrite a verified claim - silently,
-		// and only in the HA deployments.
-		//
-		// Through a TARGETED write, like SetIdentifier above, and
-		// deliberately not through Update. Update is a ReplaceOne, and
-		// authCtx was loaded before verification and the datastore reads;
-		// writing it back whole would discard whatever happened to the
-		// session meanwhile. With two direct-post requests in flight the
-		// slower one would replace the faster one's token state and reset
-		// Forfeited, making a consumed authorization code redeemable
-		// again - a far worse bug than the one being fixed.
-		authCtx.PresentedClaims = slices.Sorted(maps.Keys(copied))
-		if err := c.cacheService.AuthContext.SetPresentedClaims(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, authCtx.PresentedClaims); err != nil {
-			c.log.Error(err, "cannot persist the presented-claim provenance", "session_id", authCtx.SessionID)
-			return nil, fmt.Errorf("failed to persist presented claims: %w", err)
-		}
 	}
 
 	// Cache PID documents for session

@@ -523,32 +523,6 @@ func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationCon
 	return nil
 }
 
-// SetPresentedClaims records the claims the verified presentation
-// supplied, without disturbing anything else on the context.
-func (c *MemoryStore) SetPresentedClaims(ctx context.Context, query *AuthorizationContext, claims []string) error {
-	if query == nil {
-		return errors.New("query cannot be nil")
-	}
-	if query.SessionID == "" {
-		return errors.New("session_id cannot be empty")
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	item := c.cache.Get(query.SessionID)
-	if item == nil {
-		return ErrNoDocuments
-	}
-
-	doc := item.Value()
-	doc.PresentedClaims = slices.Clone(claims)
-
-	c.cache.Set(query.SessionID, doc, ttlcache.DefaultTTL)
-
-	return nil
-}
-
 // updateIndices updates secondary indices for a document (must be called with lock held)
 func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.RequestURI != "" {

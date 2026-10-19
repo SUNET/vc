@@ -257,6 +257,21 @@ func documentValue(v any) (any, error) {
 		}
 		return typed, nil
 
+	// An SD-JWT claim never reaches the cases above. Token.Parse and
+	// disclosure decoding unmarshal JSON into `any`, so every number is
+	// ALREADY a float64 by the time it is copied - 9007199254740993
+	// arrives as ...992 and walks past both integer guards unchanged.
+	//
+	// The damage is done before this point and cannot be undone here, so
+	// the only honest move is to refuse a magnitude that cannot have
+	// survived: beyond 2^53 a float64 is not a trustworthy integer, and
+	// issuing it would assert a number the holder may never have proved.
+	case float64:
+		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
+			return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", typed)
+		}
+		return typed, nil
+
 	default:
 		return v, nil
 	}
@@ -293,6 +308,7 @@ func applyPresentedDocumentClaims(docs map[string]*model.CompleteDocument, claim
 			Meta:               doc.Meta,
 			IdentityMappingIDs: doc.IdentityMappingIDs,
 			DocumentData:       data,
+			PresentedClaims:    slices.Sorted(maps.Keys(claims)),
 		}
 	}
 	return out
