@@ -90,6 +90,17 @@ type VPTokenValidator struct {
 
 // Validate validates the VP Token according to OpenID4VP spec Section 8.6
 func (v *VPTokenValidator) Validate(vpToken string) error {
+	// The jti output belongs to THIS presentation, so it is cleared
+	// before anything can read it.
+	//
+	// It is written only when an SCA entry applies, and the caller claims
+	// a non-empty value in a JTIStore - a state change that refuses the
+	// presentation if the value was already claimed. A validator reused
+	// for a second presentation that is not an SCA one would otherwise
+	// still carry the first jti, and the caller would claim it a second
+	// time and reject an unrelated, valid presentation as a replay.
+	v.PresentedJTI = ""
+
 	// 1. Validate VP Token format (Section 8.1)
 	token := sdjwtvc.Token(vpToken)
 	parsed, err := token.Parse()

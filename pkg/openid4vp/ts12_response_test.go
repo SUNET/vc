@@ -251,6 +251,50 @@ func TestTS12Response_JTIAndResponseMode(t *testing.T) {
 	require.NoError(t, c.validate(t), "the DC API variant of the same request is a legitimate channel")
 }
 
+// A reused validator must not carry the previous presentation's jti.
+//
+// PresentedJTI is an output, and the caller CLAIMS a non-empty one in a
+// JTIStore after issuer authentication - a state change that refuses any
+// later presentation reusing that jti. So a stale value is not a cosmetic
+// leak: validate an SCA presentation, then reuse the validator for an
+// unrelated one that sets no jti, and the caller claims the first jti a
+// second time and rejects a valid presentation as a replay.
+func TestTS12Response_ReusedValidatorDoesNotCarryTheJTI(t *testing.T) {
+	holder := testHolderKey(t)
+	cred := testCredentialNaming(t, holder, nil)
+
+	scaEntry, hash := ts12Entry(t)
+	v := &VPTokenValidator{
+		Nonce: "n-1", ClientID: "x509_hash:verifier",
+		TransactionData: []string{scaEntry}, CredentialQueryID: "pay",
+		ResponseModes: []string{"direct_post.jwt"},
+	}
+
+	sca := testPresentation(t, cred, holder, map[string]any{
+		"nonce": "n-1", "aud": "x509_hash:verifier", "iat": time.Now().Unix(),
+		"response_mode": "direct_post.jwt", "amr": goodAMR,
+		"jti": "first-jti", "transaction_data_hashes": []string{hash},
+	})
+	require.NoError(t, v.Validate(sca))
+	require.Equal(t, "first-jti", v.PresentedJTI, "the premise: the first presentation reports a jti to claim")
+
+	// The same validator, now pointed at an unrelated query with no SCA
+	// entry. Nothing writes PresentedJTI on this path.
+	other := decodedFor(t, `{"type":"https://example.com/other","credential_ids":["age"]}`)
+	hashes, err := HashTransactionData([]string{other}, "sha-256")
+	require.NoError(t, err)
+	v.TransactionData = []string{other}
+	v.CredentialQueryID = "age"
+
+	second := testPresentation(t, cred, holder, map[string]any{
+		"nonce": "n-1", "aud": "x509_hash:verifier", "iat": time.Now().Unix(),
+		"transaction_data_hashes": hashes,
+	})
+	require.NoError(t, v.Validate(second))
+	assert.Empty(t, v.PresentedJTI,
+		"a presentation that reports no jti must leave nothing for the caller to claim")
+}
+
 // A non-SCA transaction type keeps the generic OID4VP rules only.
 func TestTS12Response_NonSCATypeNeedsNoSCAClaims(t *testing.T) {
 	raw := decodedFor(t, `{"type":"https://example.com/other","credential_ids":["pay"]}`)
