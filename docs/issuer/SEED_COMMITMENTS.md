@@ -224,6 +224,131 @@ the envelope value instead. For SD-JWT VC that is `iat`, `nbf`, `exp`,
 formats it is the subject's `id`. The root segment is what counts, because
 `status` is assigned as a whole object and takes `status.value` with it.
 
+## A worked example: `nym_auth` with seed delivery
+
+Everything a deployment needs for a `nym_auth` credential that carries a
+commitment **and** hands the wallet the seed to open it. Hostnames,
+scope names and paths are **placeholders** — replace them.
+
+### 1. The seed source (apigw)
+
+```yaml
+apigw:
+  seeds:
+    primary:
+      model: derived
+      secret_path: /etc/vc/seed/issuer.key   # base64url; >= 32 bytes DECODED
+      # seed_bytes: 16                       # default, and the minimum
+```
+
+### 2. The credential, its schema, and the commitment
+
+```yaml
+common:
+  credential_metadata:
+    nym_auth:                                 # <- the scope/configuration id
+      format: mso_mdoc
+      mddl_file_path: /etc/vc/mddl/nym_auth.mdoc.json
+      commitments:
+        ssc:
+          seed: primary
+          subjects:                           # ORDER is part of the derivation
+            - issuing_country
+            - personal_administrative_number
+          deliver: true                       # hand the SEED to the wallet
+          # namespace: org.siros.nym_auth     # default
+          # commit: sha-256                   # default
+          # encoding: base64                  # default for mso_mdoc
+```
+
+`deliver: true` is the whole difference between "the credential carries a
+commitment" and "the wallet can prove with it". Leave it out and nothing
+about the earlier behaviour changes.
+
+### 3. The MDDL must declare the claim
+
+An mdoc signer emits the elements its schema declares and ignores
+anything else, so a commitment path the schema does not declare would
+inject cleanly and issue a credential with no commitment in it:
+
+```json
+{
+  "docType": "eu.europa.ec.eudi.nym_auth.1",
+  "claims": {
+    "eu.europa.ec.eudi.nym_auth.1": {
+      "ssc": { "mandatory": true, "value_type": "bstr" }
+    }
+  }
+}
+```
+
+For SD-JWT VC the VCTM must declare the claim **`sd: always`** instead:
+a commitment the holder cannot withhold is not a pseudonym.
+
+### 4. The configuration must be offered
+
+`nym_auth` has to appear in `apigw.issuer_metadata` as a credential
+configuration. A scope that delivers a seed and is not offered **refuses
+at startup** rather than being silently unreachable.
+
+### What the issuer then publishes and sends
+
+Issuer metadata gains, for that configuration, the namespace NAMES:
+
+```json
+"credential_metadata": {
+  "org.siros.secret_seed": { "namespaces": ["org.siros.nym_auth"] }
+}
+```
+
+and the Credential Response — **only** when the wallet requested
+`credential_response_encryption` — carries the seed itself:
+
+```json
+"credential_metadata": {
+  "org.siros.secret_seed": { "org.siros.nym_auth": "<32 lowercase hex>" }
+},
+"notification_id": "<minted>"
+```
+
+A request without `credential_response_encryption` **fails**. It is not
+downgraded to issuing without the seed: that would hand the wallet a
+credential whose commitment it can never open, and it would find out
+when a proof was needed rather than at issuance.
+
+## DEPLOYMENT NOTES
+
+What a build of this needs. Written as a brief for whoever owns the
+environment, not as something this repository configures.
+
+**Build inputs (issuer side).** Nothing special: the ordinary vc build.
+Seed derivation and delivery are pure Go, need no cgo and no build tag.
+
+**Config keys.** `apigw.seeds.<name>` (`model`, and exactly one of
+`secret_path` or the secrets-file `secret`); `common.credential_metadata.<scope>.commitments.<claim>`
+(`seed`, `subjects`, `deliver`, optional `namespace`); the scope present
+in `apigw.issuer_metadata`.
+
+**Secrets.** One: the derivation secret, base64url, **>= 32 bytes
+decoded**. Either a mounted file (`secret_path`) or
+`apigw.seeds.<name>.secret` in the secrets file — never both, and never
+inline in `config.yaml`. It is **permanent**: every commitment ever
+written under it is a function of it, so it must be backed up somewhere
+that survives the host, and rotating it repseudonymises everyone.
+
+**Wallet requirement.** The wallet MUST request
+`credential_response_encryption`, or issuance fails. The namespace
+advertisement in issuer metadata is what tells it to.
+
+**Ports, URLs, env vars.** Unchanged by this feature.
+
+**Verifier side (when the nym_auth verifier lands).** Not needed to
+issue, listed so it can be planned: a cgo build with `-tags zknative`
+and the native ZK libraries staged under `third_party/`, pinned by
+revision; `zk_circuits` sources pointing at the circuit catalog; and an
+operator-owned allowlist of approved circuit builds keyed by circuit id
+and artifact digest. The catalog supplies artifacts, never approval.
+
 ## The derivation secret is permanent
 
 ```
