@@ -90,8 +90,14 @@ func (a *AuthorizationContext) UnmarshalBSON(data []byte) error {
 	if a.DCQLQueryExact == "" {
 		return nil
 	}
-	var exact openid4vp.DCQL
-	if err := json.Unmarshal([]byte(a.DCQLQueryExact), &exact); err != nil {
+	// The TRUSTED decoder, because these are bytes this verifier wrote.
+	// A request the raw escape hatch built - one a conformance harness
+	// sends to see what a wallet does with a malformed query - is
+	// refused by wire ingress on purpose, and refusing it here too meant
+	// such a request could be published and then reload nowhere, not
+	// even on the node that built it.
+	exact, err := openid4vp.UnmarshalTrustedDCQL([]byte(a.DCQLQueryExact))
+	if err != nil {
 		// Not fatal on its own - the rounded copy is still there and is
 		// what an older build would have used - but it means the exact
 		// copy was corrupted in storage, which is worth refusing rather
@@ -99,6 +105,6 @@ func (a *AuthorizationContext) UnmarshalBSON(data []byte) error {
 		// from the one that was sent.
 		return fmt.Errorf("authorization context: the exact dcql query is unreadable: %w", err)
 	}
-	a.DCQLQuery = &exact
+	a.DCQLQuery = exact
 	return nil
 }
