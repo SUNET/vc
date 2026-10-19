@@ -170,6 +170,36 @@ type VerificationDirectPostResponse struct {
 // single cache Set. Recording it separately - on the authorization
 // context - was a second write that could interleave with that one,
 // leaving one request's document paired with another's provenance.
+// publishPresentedDocuments decorates the datastore documents with the
+// verified presentation and publishes the RESULT for issuance.
+//
+// One function because the two steps are one fact: what is published has
+// to be what was decorated. Keeping them apart in the handler made that
+// fact unobservable - the AST wiring guard can see that
+// decorateWithPresentedClaims is CALLED, not that its return value is
+// what reaches the cache, and discarding it left every test in this
+// package green while the overrides and their provenance were lost.
+//
+// Nothing is published when the decoration refuses, which is the other
+// half: issuing from datastore values would assert claims the holder
+// never presented.
+func (c *Client) publishPresentedDocuments(
+	ctx context.Context,
+	sessionID string,
+	documents map[string]*model.CompleteDocument,
+	sourceFormat string,
+	credential map[string]any,
+	entry model.AuthScopeEntry,
+	scope, matchedAuthScope string,
+) error {
+	decorated, err := c.decorateWithPresentedClaims(documents, sourceFormat, credential, entry, scope, matchedAuthScope)
+	if err != nil {
+		return err
+	}
+	c.cacheService.Document.Set(ctx, sessionID, decorated)
+	return nil
+}
+
 func (c *Client) decorateWithPresentedClaims(
 	documents map[string]*model.CompleteDocument,
 	sourceFormat string,
@@ -660,14 +690,12 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	// Copy the configured claims of the verified presentation over the
 	// datastore document (e.g. the birth date of a nym_auth attestation is
 	// the one in the PID/mDL/Photo ID the holder just presented, not a
-	// stored copy of it). Fails closed when a configured claim is missing.
-	documents, err = c.decorateWithPresentedClaims(documents, authSourceFormat, credential, authScopeEntry, scope, matchedAuthScope)
-	if err != nil {
+	// stored copy of it), and publish the result. Fails closed when a
+	// configured claim is missing.
+	if err := c.publishPresentedDocuments(ctx, authCtx.SessionID, documents,
+		authSourceFormat, credential, authScopeEntry, scope, matchedAuthScope); err != nil {
 		return nil, err
 	}
-
-	// Cache PID documents for session
-	c.cacheService.Document.Set(ctx, authCtx.SessionID, documents)
 
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 

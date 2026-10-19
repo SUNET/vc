@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -419,6 +421,54 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 	})
 }
 
+// A copied timestamp must read the same way on both cache backends.
+//
+// This PR has lost to memory-vs-HA divergence three times already, and
+// a time.Time leaf is the same trap once more: MemoryStore hands back
+// the value it was given, so a derivation reading the claim sees a
+// time.Time, while the Mongo-backed store round-trips the document
+// through JSON and hands back a string. A trim derivation then works
+// on one backend and fails with "must be a string or []string" on the
+// other - under HA only, which is where it is hardest to see.
+//
+// So the normalisation happens before anything is cached, and this
+// asserts the derivation input on BOTH sides of the round trip.
+func TestACopiedTimestampDerivesTheSameOnBothCacheBackends(t *testing.T) {
+	when := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	copied, err := copiedMdocClaim(t, "odd", when)
+	require.NoError(t, err)
+	claim, ok := copied["odd"].(string)
+	require.Truef(t, ok, "a cached claim must not depend on the backend; got %T", copied["odd"])
+
+	// The same instant, rendered as RFC 3339 - which is what the JSON
+	// round trip would have produced from the decoded value, so the two
+	// backends cannot disagree about the value either. Compared as an
+	// instant rather than as text because the CBOR decode hands back a
+	// local-zone time, so the literal depends on the host's zone.
+	parsed, err := time.Parse(time.RFC3339Nano, claim)
+	require.NoError(t, err, "the claim must be a timestamp a verifier can read back")
+	require.True(t, parsed.Equal(when), "and the same instant the holder presented")
+
+	// What MongoCache.marshalEntry does to a cached document: json, not
+	// bson.
+	doc := &model.CompleteDocument{DocumentData: map[string]any{"odd": copied["odd"]}}
+	stored, err := json.Marshal(doc)
+	require.NoError(t, err)
+	var reloaded model.CompleteDocument
+	require.NoError(t, json.Unmarshal(stored, &reloaded))
+
+	// The derivation is the thing that actually breaks, so it is what
+	// the test runs - on the memory-backed value and the HA one.
+	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: "odd", Output: "odd"}}}
+	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, when)
+	require.NoError(t, err, "the memory-backed path must derive")
+	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, when)
+	require.NoError(t, err, "and so must the HA path, or the deployment fails only under HA")
+	require.Equal(t, fromMemory["odd"], fromMongo["odd"],
+		"a derivation must not depend on which cache backend is configured")
+}
+
 // A CBOR bignum must be refused unless it survives the issuer's round
 // trip, and "it serialises" is not that test.
 //
@@ -683,6 +733,95 @@ func TestProvenanceSurvivesCacheSerialisation(t *testing.T) {
 // document carries the overrides AND the provenance, and a source claim
 // the presentation does not have is an error rather than a quiet
 // fallback to datastore values.
+// What reaches the CACHE is what was decorated, and a refusal publishes
+// nothing.
+//
+// The AST wiring guard can see that decorateWithPresentedClaims is
+// called; it cannot see that its RESULT is what is published. Discarding
+// the return value compiled and left every test in this package green
+// while the overrides and their provenance were silently dropped - so
+// this test drives publication and reads the cache back, and then runs
+// the issuance-side derivation against what it finds there.
+func TestPublishedDocumentsAreTheDecoratedOnes(t *testing.T) {
+	newClient := func(t *testing.T) (*Client, *apigwcache.Service) {
+		t.Helper()
+		cacheService := &apigwcache.Service{
+			Document: apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute),
+		}
+		return &Client{
+			log: logger.NewSimple("test"),
+			cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+				"nym_auth": {Format: openid4vp.FormatSDJWTVC, VCTM: &sdjwtvc.VCTM{VCT: "urn:x"}},
+			}}},
+			cacheService: cacheService,
+		}, cacheService
+	}
+	docs := func() map[string]*model.CompleteDocument {
+		return map[string]*model.CompleteDocument{
+			"d": {DocumentData: map[string]any{"birth_date": "1970-01-01", "family_name": "stored"}},
+		}
+	}
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"birthdate"},
+		DocumentClaims: map[string]string{"birthdate": "birth_date"},
+	}
+
+	t.Run("the cached document carries the override and its provenance", func(t *testing.T) {
+		c, cacheService := newClient(t)
+
+		require.NoError(t, c.publishPresentedDocuments(t.Context(), "sess-1", docs(),
+			openid4vp.FormatSDJWTVC, map[string]any{"birthdate": "2010-01-01"}, entry, "nym_auth", "nym_auth"))
+
+		cached, ok := cacheService.Document.Get(t.Context(), "sess-1")
+		require.True(t, ok, "the session's documents must have been published")
+		require.Equal(t, "2010-01-01", cached["d"].DocumentData["birth_date"],
+			"the cache must hold the DECORATED document, not the one read from the datastore")
+		require.Equal(t, []string{"birth_date"}, cached["d"].PresentedClaims,
+			"and its provenance, or issuance has nothing to pin")
+
+		// The issuance side, run against what was actually published: a
+		// derivation that would overwrite the presented claim must lose
+		// to it. This is the pairing the handler exists to guarantee,
+		// and it cannot be checked without the cached document.
+		//
+		// The three steps in the order issuance runs them, because the
+		// pin alone is not the guarantee: ApplyDerivationsPinned
+		// deliberately LEAVES the attempt in its output - that is how a
+		// caller sees which derivations tried - so restoreProvedClaims
+		// is what makes the proved value the issued one, and reports
+		// the conflict.
+		docData := cached["d"].DocumentData
+		proved := provedClaims(docData, cached["d"].PresentedClaims)
+		require.Equal(t, map[string]any{"birth_date": "2010-01-01"}, proved,
+			"the provenance must name the presented claim and its proved value")
+
+		conflicting := []primitives.Derivation{{
+			Trim: &primitives.TrimArgs{Input: "family_name", Output: "birth_date"},
+		}}
+		derived, err := credential.ApplyDerivationsPinned(conflicting, docData, time.Now(), proved)
+		require.NoError(t, err)
+		require.Equal(t, "stored", derived["birth_date"],
+			"the attempt is reported, which is what makes the conflict visible")
+
+		conflicts := restoreProvedClaims(docData, derived, proved)
+		require.Equal(t, []string{"birth_date"}, conflicts, "and the conflict is named")
+		require.Equal(t, "2010-01-01", docData["birth_date"],
+			"what is ISSUED is the claim the holder proved, not the derivation's")
+	})
+
+	t.Run("a refusal publishes nothing at all", func(t *testing.T) {
+		c, cacheService := newClient(t)
+
+		err := c.publishPresentedDocuments(t.Context(), "sess-2", docs(),
+			openid4vp.FormatSDJWTVC, map[string]any{"something_else": "x"}, entry, "nym_auth", "nym_auth")
+		require.Error(t, err, "issuing from datastore values would assert what was never presented")
+
+		_, ok := cacheService.Document.Get(t.Context(), "sess-2")
+		require.False(t, ok,
+			"nothing may be published when the presentation cannot be honoured; a stale document here is issued from")
+	})
+}
+
 func TestHandlerDecoratesDocumentsOrRefuses(t *testing.T) {
 	c := &Client{
 		log: logger.NewSimple("test"),
@@ -878,6 +1017,10 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		},
 		{
 			file: "handlers_verifier.go", fn: "consumeIssuanceAuthPresentation",
+			calls: []string{"publishPresentedDocuments"},
+		},
+		{
+			file: "handlers_verifier.go", fn: "publishPresentedDocuments",
 			calls: []string{"decorateWithPresentedClaims"},
 		},
 		{

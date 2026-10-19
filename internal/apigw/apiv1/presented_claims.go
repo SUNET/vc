@@ -245,6 +245,23 @@ func documentValue(v any) (any, error) {
 	case mdoc.TDate:
 		return string(typed), nil
 
+	// A decoded CBOR timestamp is normalised to the string the document
+	// will carry anyway, rather than left as a time.Time.
+	//
+	// Left alone it diverges by cache backend, which is the failure this
+	// PR has already had three times: MemoryStore hands back the stored
+	// value, so a derivation reading this claim sees a time.Time, while
+	// the Mongo-backed store round-trips through JSON and hands back a
+	// string. A `trim` derivation then works on one backend and fails
+	// with "must be a string or []string" on the other - and only under
+	// HA, which is where it is hardest to see.
+	//
+	// Through the encoder rather than a chosen layout, so the value is
+	// byte-identical to what the JSON round trip would have produced,
+	// and so a year the format cannot express is still refused here.
+	case time.Time:
+		return jsonTimestamp(typed)
+
 	// An integer that cannot survive the issuer's float64 round trip is
 	// refused rather than quietly changed.
 	//
@@ -407,6 +424,21 @@ func numberValue(n json.Number) (any, error) {
 		return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", f)
 	}
 	return f, nil
+}
+
+// jsonTimestamp renders a timestamp exactly as encoding/json would, so
+// that what a derivation reads does not depend on which cache backend
+// the deployment runs.
+func jsonTimestamp(t time.Time) (string, error) {
+	encoded, err := json.Marshal(t)
+	if err != nil {
+		return "", fmt.Errorf("a timestamp claim cannot be carried in the issued document: %w", err)
+	}
+	var rendered string
+	if err := json.Unmarshal(encoded, &rendered); err != nil {
+		return "", fmt.Errorf("a timestamp claim cannot be carried in the issued document: %w", err)
+	}
+	return rendered, nil
 }
 
 // refuseUnserialisable refuses a leaf the issued document cannot carry.
