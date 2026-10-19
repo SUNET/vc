@@ -512,15 +512,20 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// scopes, finds none, and reports success for a response that answered
 	// a request asking for nothing. Refused here, where the caller can still
 	// be told what was wrong with its request.
+	//
+	// Both refusals here are STRUCTURED 400s. An unstructured error carries
+	// no status, so the status is inferred from its text - and the text
+	// contains a credential query id the caller chose. One named "token"
+	// answers 401 instead of 400 and loses the description with it.
 	if len(req.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "rejected a UI interaction request whose DCQL asks for no credential at all")
-		return nil, errors.New("dcql_query must request at least one credential")
+		return nil, invalidInteraction(req.Payment != nil, "dcql_query must request at least one credential")
 	}
 
 	for _, credential := range req.DCQLQuery.Credentials {
 		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
 			c.log.Error(err, "rejected an invalid credential query from the UI interaction request", "credential_id", credential.ID, "format", credential.Format)
-			return nil, fmt.Errorf("credential query %q is invalid: %w", credential.ID, err)
+			return nil, invalidInteraction(req.Payment != nil, "credential query %q is invalid: %v", credential.ID, err)
 		}
 	}
 
