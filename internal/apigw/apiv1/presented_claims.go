@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"time"
 
@@ -305,14 +306,51 @@ func documentValue(v any) (any, error) {
 	// survived: beyond 2^53 a float64 is not a trustworthy integer, and
 	// issuing it would assert a number the holder may never have proved.
 	case float64:
+		if err := refuseNonFinite(typed); err != nil {
+			return nil, err
+		}
 		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
 			return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", typed)
 		}
 		return typed, nil
 
 	default:
+		// A float that is not plain float64 - a narrower CBOR float a
+		// decoder option could keep, or a named float type - would
+		// otherwise be returned unchecked, and a non-finite one is
+		// refused for the same reason as above.
+		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Float32 || rv.Kind() == reflect.Float64 {
+			if err := refuseNonFinite(rv.Float()); err != nil {
+				return nil, err
+			}
+		}
 		return v, nil
 	}
+}
+
+// refuseNonFinite refuses NaN and the infinities.
+//
+// NaN is the one numeric value that walks past a range guard: every
+// comparison with it is false, so `n > max || n < -max` lets it through.
+// It then reaches the issued document, where encoding/json cannot
+// represent it - and where that failure lands decides whether anyone
+// hears about it. With the Mongo-backed cache, MongoCache.upsertAt logs
+// the marshal error and DROPS the write while VerificationDirectPost
+// still returns a successful redirect: a presentation reported as
+// published that was never stored.
+//
+// The infinities are caught by the range guard, but its message - "exceeds
+// the range a JSON number carries exactly" - describes a precision loss
+// rather than a value JSON has no syntax for at all, so they are named
+// here instead.
+func refuseNonFinite(f float64) error {
+	if math.IsNaN(f) {
+		return fmt.Errorf("a claim value of NaN is not a number JSON can carry, so it cannot be copied from the presentation")
+	}
+	if math.IsInf(f, 0) {
+		return fmt.Errorf("a claim value of %v is not a number JSON can carry, so it cannot be copied from the presentation", f)
+	}
+	return nil
 }
 
 // applyPresentedDocumentClaims returns copies of docs with the copied

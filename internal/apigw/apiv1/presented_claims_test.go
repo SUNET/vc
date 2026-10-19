@@ -425,6 +425,67 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 	})
 }
 
+// A non-finite float must be refused before anything is published.
+//
+// NaN is the value a range guard cannot catch: every comparison with it
+// is false, so "n > max || n < -max" is false for NaN and it travels on
+// into the issued document. There encoding/json refuses it - and under
+// HA that refusal is SILENT: MongoCache.upsertAt logs the marshal error
+// and drops the write while the direct_post handler still returns a
+// successful redirect, so the caller is told a presentation was published
+// that was never stored.
+//
+// Infinities take the same route into the document; they are caught by
+// the range guard, but with a message about exact ranges, so they are
+// pinned here too.
+func TestNonFinitePresentedNumbersAreRefused(t *testing.T) {
+	target := nymAuthTarget(t)
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"org.iso.18013.5.1.odd"},
+		DocumentClaims: map[string]string{"org.iso.18013.5.1.odd": "odd"},
+	}
+	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
+		t.Helper()
+		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+			"org.iso.18013.5.1": {"odd": v},
+		})
+		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+	}
+
+	// What makes this a publication bug rather than a formatting one.
+	_, err := json.Marshal(map[string]any{"odd": math.NaN()})
+	require.Error(t, err, "the premise of this test: a NaN claim cannot be serialised at all")
+
+	for _, shape := range []struct {
+		name  string
+		value any
+	}{
+		{"directly", math.NaN()},
+		{"inside a copied object", map[any]any{"inner": math.NaN()}},
+		{"inside a copied array", []any{float64(1), math.NaN()}},
+		{"nested two deep", map[any]any{"a": []any{map[any]any{"b": math.NaN()}}}},
+		{"positive infinity", math.Inf(1)},
+		{"negative infinity", math.Inf(-1)},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			copied, err := fromMdoc(t, shape.value)
+			require.Errorf(t, err, "%v must be refused, not published", shape.value)
+			require.Nil(t, copied, "nothing may be returned alongside the refusal")
+			require.Contains(t, err.Error(), "JSON can carry")
+		})
+	}
+
+	// An SD-JWT NaN reaches the same guard by the other route: the claim
+	// is already a float64 when it is copied.
+	sdEntry := model.AuthScopeEntry{
+		AuthClaims:     []string{"odd"},
+		DocumentClaims: map[string]string{"odd": "odd"},
+	}
+	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"odd": math.NaN()}, sdEntry, target)
+	require.Error(t, err, "an SD-JWT NaN must be refused as well")
+	require.Contains(t, err.Error(), "JSON can carry")
+}
+
 // The provenance must survive the cache's serialisation.
 //
 // The document cache is Mongo-backed under HA and serialises through
