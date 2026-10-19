@@ -226,41 +226,11 @@ const maxExactJSONInt = 1<<53 - 1
 func documentValue(v any) (any, error) {
 	switch typed := v.(type) {
 	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			converted, err := documentValue(item)
-			if err != nil {
-				return nil, fmt.Errorf("member %q: %w", key, err)
-			}
-			out[key] = converted
-		}
-		return out, nil
-
+		return documentObject(typed)
 	case map[any]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			name, ok := key.(string)
-			if !ok {
-				return nil, fmt.Errorf("map key of type %T cannot be a JSON member name", key)
-			}
-			converted, err := documentValue(item)
-			if err != nil {
-				return nil, fmt.Errorf("member %q: %w", name, err)
-			}
-			out[name] = converted
-		}
-		return out, nil
-
+		return documentObject(typed)
 	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			converted, err := documentValue(item)
-			if err != nil {
-				return nil, fmt.Errorf("element %d: %w", i, err)
-			}
-			out[i] = converted
-		}
-		return out, nil
+		return documentArray(typed)
 
 	case cbor.Tag, *cbor.Tag:
 		if s, ok := claimString(typed); ok {
@@ -333,6 +303,43 @@ func documentValue(v any) (any, error) {
 		}
 		return v, nil
 	}
+}
+
+// documentObject converts a decoded object, whichever map type it
+// arrived as: a CBOR map decodes to map[any]any and a JSON one to
+// map[string]any, and both have to become a JSON object.
+//
+// Generic over the key so the two cases share one body. A non-string key
+// is refused rather than stringified - JSON has no member name for it,
+// and inventing one would put a claim in the credential under a name
+// nobody presented.
+func documentObject[K comparable](in map[K]any) (map[string]any, error) {
+	out := make(map[string]any, len(in))
+	for key, item := range in {
+		name, ok := any(key).(string)
+		if !ok {
+			return nil, fmt.Errorf("map key of type %T cannot be a JSON member name", key)
+		}
+		converted, err := documentValue(item)
+		if err != nil {
+			return nil, fmt.Errorf("member %q: %w", name, err)
+		}
+		out[name] = converted
+	}
+	return out, nil
+}
+
+// documentArray converts a decoded array, element by element.
+func documentArray(in []any) ([]any, error) {
+	out := make([]any, len(in))
+	for i, item := range in {
+		converted, err := documentValue(item)
+		if err != nil {
+			return nil, fmt.Errorf("element %d: %w", i, err)
+		}
+		out[i] = converted
+	}
+	return out, nil
 }
 
 // refuseUnserialisable refuses a leaf the issued document cannot carry.

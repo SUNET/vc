@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -425,6 +426,50 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 	})
 }
 
+// A CBOR map key that is not a string must be refused, not stringified.
+//
+// CBOR allows any type as a map key, JSON allows only strings. Writing
+// such a key into the credential as fmt's rendering of it would put a
+// claim under a name nobody presented - and the holder proved a claim
+// at the key 1, not at the key "1". Found by probing: the guard existed
+// and nothing exercised it.
+func TestNonStringCBORMapKeysAreRefused(t *testing.T) {
+	target := nymAuthTarget(t)
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"org.iso.18013.5.1.odd"},
+		DocumentClaims: map[string]string{"org.iso.18013.5.1.odd": "odd"},
+	}
+	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
+		t.Helper()
+		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+			"org.iso.18013.5.1": {"odd": v},
+		})
+		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+	}
+
+	for _, shape := range []struct {
+		name  string
+		value any
+	}{
+		{"an integer key", map[any]any{uint64(1): "value"}},
+		{"a boolean key", map[any]any{true: "value"}},
+		{"nested under a string key", map[any]any{"inner": map[any]any{uint64(2): "value"}}},
+		{"inside an array", []any{map[any]any{uint64(3): "value"}}},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			copied, err := fromMdoc(t, shape.value)
+			require.Error(t, err, "a key JSON has no member name for must be refused, not invented")
+			require.Nil(t, copied)
+			require.Contains(t, err.Error(), "cannot be a JSON member name")
+		})
+	}
+
+	// String keys still copy, so the guard is not "refuse every map".
+	copied, err := fromMdoc(t, map[any]any{"inner": "value"})
+	require.NoError(t, err)
+	require.Contains(t, fmt.Sprintf("%v", copied), "value")
+}
+
 // A decoded CBOR timestamp must be refused when it cannot be carried.
 //
 // CBOR tag 1 decodes to a time.Time. For a target other than full-date
@@ -697,6 +742,45 @@ func TestEpochAndRangeBoundariesAreRefused(t *testing.T) {
 // never pinned at all - so the whole feature could be disconnected with
 // every test still green.
 //
+// callsMadeBy names every function called inside fn, read from the
+// source of file.
+//
+// Fails closed: a function it cannot find is a failure, not an empty
+// set that every assertion would then fail on for the wrong reason.
+func callsMadeBy(t *testing.T, file, fn string) map[string]bool {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, file, nil, parser.SkipObjectResolution)
+	require.NoError(t, err)
+
+	var body *ast.FuncDecl
+	ast.Inspect(parsed, func(n ast.Node) bool {
+		decl, ok := n.(*ast.FuncDecl)
+		if ok && decl.Name.Name == fn {
+			body = decl
+		}
+		return body == nil
+	})
+	require.NotNilf(t, body, "no %s in %s; this guard is not looking at anything", fn, file)
+
+	called := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch callee := call.Fun.(type) {
+		case *ast.Ident:
+			called[callee.Name] = true
+		case *ast.SelectorExpr:
+			called[callee.Sel.Name] = true
+		}
+		return true
+	})
+	return called
+}
+
 // Checked against the source, because that is the only thing that shows
 // a missing call. Fails closed: a function it cannot find is a failure,
 // not a pass.
@@ -726,35 +810,7 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		},
 	} {
 		t.Run(tc.fn, func(t *testing.T) {
-			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, tc.file, nil, parser.SkipObjectResolution)
-			require.NoError(t, err)
-
-			var body *ast.FuncDecl
-			ast.Inspect(file, func(n ast.Node) bool {
-				fn, ok := n.(*ast.FuncDecl)
-				if ok && fn.Name.Name == tc.fn {
-					body = fn
-				}
-				return body == nil
-			})
-			require.NotNilf(t, body, "no %s in %s; this guard is not looking at anything", tc.fn, tc.file)
-
-			called := map[string]bool{}
-			ast.Inspect(body, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				switch fn := call.Fun.(type) {
-				case *ast.Ident:
-					called[fn.Name] = true
-				case *ast.SelectorExpr:
-					called[fn.Sel.Name] = true
-				}
-				return true
-			})
-
+			called := callsMadeBy(t, tc.file, tc.fn)
 			for _, name := range tc.calls {
 				require.Truef(t, called[name],
 					"%s does not call %s: the helper's own tests would still pass, and a verified claim would reach the credential unpinned",
