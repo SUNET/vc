@@ -376,17 +376,9 @@ func TestProvenanceTravelsWithTheDocument(t *testing.T) {
 // unmarshal into `any`, so it is ALREADY a float64 when it is copied, and
 // walked past an integer-only guard untouched. Two formats, one guard.
 func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
-	target := nymAuthTarget(t)
-	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"org.iso.18013.5.1.big"},
-		DocumentClaims: map[string]string{"org.iso.18013.5.1.big": "big"},
-	}
 	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
 		t.Helper()
-		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
-			"org.iso.18013.5.1": {"big": v},
-		})
-		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+		return copiedMdocClaim(t, "big", v)
 	}
 
 	t.Run("mdoc integers beyond float64's exact range", func(t *testing.T) {
@@ -404,7 +396,7 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 		}
 		// What Token.Parse hands over: JSON decoded into `any`.
 		presented := map[string]any{"big": float64(9007199254740993)}
-		_, err := presentedDocumentClaims("dc+sd-jwt", presented, sdEntry, target)
+		_, err := presentedDocumentClaims("dc+sd-jwt", presented, sdEntry, nymAuthTarget(t))
 		require.Error(t, err, "an unsafe-range float64 must not slip past the integer guards")
 		require.Contains(t, err.Error(), "exceeds the range")
 	})
@@ -420,7 +412,7 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 			AuthClaims:     []string{"n"},
 			DocumentClaims: map[string]string{"n": "n"},
 		}
-		out, err := presentedDocumentClaims("dc+sd-jwt", map[string]any{"n": float64(42)}, sdEntry, target)
+		out, err := presentedDocumentClaims("dc+sd-jwt", map[string]any{"n": float64(42)}, sdEntry, nymAuthTarget(t))
 		require.NoError(t, err)
 		require.Equal(t, float64(42), out["n"])
 	})
@@ -434,17 +426,9 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 // at the key 1, not at the key "1". Found by probing: the guard existed
 // and nothing exercised it.
 func TestNonStringCBORMapKeysAreRefused(t *testing.T) {
-	target := nymAuthTarget(t)
-	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"org.iso.18013.5.1.odd"},
-		DocumentClaims: map[string]string{"org.iso.18013.5.1.odd": "odd"},
-	}
 	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
 		t.Helper()
-		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
-			"org.iso.18013.5.1": {"odd": v},
-		})
-		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+		return copiedMdocClaim(t, "odd", v)
 	}
 
 	for _, shape := range []struct {
@@ -483,17 +467,9 @@ func TestNonStringCBORMapKeysAreRefused(t *testing.T) {
 // type enumeration is what kept being incomplete - this is the second
 // shape to reach the same fallback holding something JSON cannot carry.
 func TestUnserialisableDecodedCBORValuesAreRefused(t *testing.T) {
-	target := nymAuthTarget(t)
-	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"org.iso.18013.5.1.odd"},
-		DocumentClaims: map[string]string{"org.iso.18013.5.1.odd": "odd"},
-	}
 	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
 		t.Helper()
-		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
-			"org.iso.18013.5.1": {"odd": v},
-		})
-		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+		return copiedMdocClaim(t, "odd", v)
 	}
 
 	// What a CBOR tag 1 of 253402300800 decodes to.
@@ -542,17 +518,9 @@ func TestUnserialisableDecodedCBORValuesAreRefused(t *testing.T) {
 // the range guard, but with a message about exact ranges, so they are
 // pinned here too.
 func TestNonFinitePresentedNumbersAreRefused(t *testing.T) {
-	target := nymAuthTarget(t)
-	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"org.iso.18013.5.1.odd"},
-		DocumentClaims: map[string]string{"org.iso.18013.5.1.odd": "odd"},
-	}
 	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
 		t.Helper()
-		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
-			"org.iso.18013.5.1": {"odd": v},
-		})
-		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+		return copiedMdocClaim(t, "odd", v)
 	}
 
 	// What makes this a publication bug rather than a formatting one.
@@ -584,7 +552,7 @@ func TestNonFinitePresentedNumbersAreRefused(t *testing.T) {
 		AuthClaims:     []string{"odd"},
 		DocumentClaims: map[string]string{"odd": "odd"},
 	}
-	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"odd": math.NaN()}, sdEntry, target)
+	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"odd": math.NaN()}, sdEntry, nymAuthTarget(t))
 	require.Error(t, err, "an SD-JWT NaN must be refused as well")
 	require.Contains(t, err.Error(), "JSON can carry")
 }
@@ -779,6 +747,25 @@ func callsMadeBy(t *testing.T, file, fn string) map[string]bool {
 		return true
 	})
 	return called
+}
+
+// copiedMdocClaim presents one mdoc element carrying v and returns the
+// claims copied into the issued document.
+//
+// Shared by every test that asks "what happens when a presented value is
+// X": the setup is the same each time and only the value differs, so a
+// copy per test was four places to keep in step.
+func copiedMdocClaim(t *testing.T, element string, v any) (map[string]any, error) {
+	t.Helper()
+	qualified := "org.iso.18013.5.1." + element
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{qualified},
+		DocumentClaims: map[string]string{qualified: element},
+	}
+	presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+		"org.iso.18013.5.1": {element: v},
+	})
+	return presentedDocumentClaims("mso_mdoc", presented, entry, nymAuthTarget(t))
 }
 
 // Checked against the source, because that is the only thing that shows
