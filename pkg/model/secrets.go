@@ -12,6 +12,28 @@ type Secrets struct {
 	APIGW    *APIGWSecrets    `yaml:"apigw,omitempty"`
 	Registry *RegistrySecrets `yaml:"registry,omitempty"`
 	Verifier *VerifierSecrets `yaml:"verifier,omitempty"`
+	Issuer   *IssuerSecrets   `yaml:"issuer,omitempty"`
+}
+
+// IssuerSecrets holds secrets from the issuer section.
+//
+// Empty today: the seed derivation secrets it used to carry moved to
+// APIGWSecrets when derivation moved to the apigw. Kept as a type so the
+// section still parses, and so adding an issuer secret later does not
+// have to re-introduce the plumbing.
+type IssuerSecrets struct{}
+
+// SeedSourceSecrets holds the derivation secret for one seed source.
+type SeedSourceSecrets struct {
+	// Secret is the base64url-encoded derivation secret, the same value
+	// apigw.seeds.<name>.secret takes in the main configuration.
+	//
+	// This is where it belongs when it cannot be a mounted file: the
+	// secrets file is how this deployment keeps secrets out of the
+	// rendered config, and a derivation secret is the most permanent one
+	// an issuer has - every commitment ever written under it is a
+	// function of it.
+	Secret string `yaml:"secret,omitempty"`
 }
 
 // CommonSecrets holds secrets from the common section
@@ -68,6 +90,10 @@ type MariaDBSecrets struct {
 type APIGWSecrets struct {
 	APIServer     APIServerSecrets     `yaml:"api_server,omitempty"`
 	AuthProviders AuthProvidersSecrets `yaml:"auth_providers,omitempty"`
+
+	// Seeds carries the derivation secret for each named seed source,
+	// keyed exactly as apigw.seeds is in the main configuration.
+	Seeds map[string]SeedSourceSecrets `yaml:"seeds,omitempty"`
 }
 
 // AuthProvidersSecrets holds secrets for auth providers
@@ -183,6 +209,28 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 			}
 			if cfg.Common.HA.PubSub.Password == "" && secrets.Common.HA.PubSub.Password != "" {
 				cfg.Common.HA.PubSub.Password = secrets.Common.HA.PubSub.Password
+			}
+		}
+	}
+
+	// Seed derivation secrets, same backfill rule as everything above:
+	// the main config wins where it has a value, so a deployment can keep
+	// this in config.yaml, in a mounted file via secret_path, or here.
+	//
+	// Only sources the main config already names are filled. A secrets
+	// file naming a seed source that does not exist is a mistake worth
+	// leaving visible - inventing the source here would hand a subject a
+	// seed from a configuration nobody wrote.
+	//
+	// Under apigw.seeds, which is where the sources moved when derivation
+	// moved: the issuer service never sees a derivation secret now.
+	if secrets.APIGW != nil && cfg.APIGW != nil {
+		for name, source := range cfg.APIGW.Seeds {
+			if source == nil || source.Secret != "" {
+				continue
+			}
+			if fromFile, ok := secrets.APIGW.Seeds[name]; ok && fromFile.Secret != "" {
+				source.Secret = fromFile.Secret
 			}
 		}
 	}

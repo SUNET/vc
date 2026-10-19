@@ -109,6 +109,32 @@ func TestChallengeMatchesTheSharedVectors(t *testing.T) {
 	}
 }
 
+// There is NO minimum length on the session transcript here.
+//
+// Vega accepts a short one - the shared digest vector's transcript is 12
+// bytes, from the Kotlin fixture - while Longfellow's core API requires
+// its transcript_seed to be 32..65536 bytes. That floor is LONGFELLOW'S,
+// not this package's, and real DC API SessionTranscripts are over 50
+// bytes, so it only bites on fixtures. Adding the floor here would look
+// like hardening and would instead refuse an input one of the two
+// backends accepts, before either backend is consulted.
+func TestNoMinimumTranscriptLength(t *testing.T) {
+	vectors := loadChallengeVectors(t)
+
+	shortest := 0
+	for _, tc := range vectors.Digest {
+		transcript, err := hex.DecodeString(tc.SessionTranscriptHex)
+		require.NoError(t, err)
+		if shortest == 0 || len(transcript) < shortest {
+			shortest = len(transcript)
+		}
+		_, err = MdocChallengeDigest(transcript, tc.DocType)
+		require.NoErrorf(t, err, "a %d-byte transcript is accepted by Vega and must not be refused here", len(transcript))
+	}
+	assert.Less(t, shortest, 32,
+		"the vectors must still exercise a transcript shorter than Longfellow's own floor, or this guard proves nothing")
+}
+
 // Every input the provers refuse, this verifier must refuse too.
 //
 // Accepting one would build a challenge no prover reproduces, and the
