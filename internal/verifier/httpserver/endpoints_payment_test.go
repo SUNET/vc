@@ -59,6 +59,40 @@ func TestPaymentPage(t *testing.T) {
 		assert.Contains(t, body, "[hidden] { display: none !important; }", "Bulma's .box would otherwise keep hidden panels visible")
 		assert.NotContains(t, body, "{{", "template actions must all have been expanded")
 	})
+
+	// A successful /ui/interaction response that cannot be read must fail
+	// loudly, not quietly become {}.
+	//
+	// The page used one decode with an empty fallback for BOTH outcomes.
+	// On a truncated or unreadable success body that left reply = {}, so
+	// the page set the QR image to "data:image/png;base64,undefined",
+	// linked to "undefined" and polled session_id=undefined 150 times -
+	// the operator sees a payment waiting for a wallet that was never
+	// asked for anything. There is no JS test runner here, so this pins
+	// the structure: the empty fallback lives on the error branch only,
+	// and the success branch checks that the reply carries what the page
+	// goes on to use.
+	t.Run("a successful reply is decoded without a silent fallback", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		paymentPageEngine(t, true, []string{"https://psp.example/sca"}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/payment", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+
+		start := strings.Index(body, "await fetch(\"/ui/interaction\"")
+		require.Positive(t, start, "the submit handler must still post to /ui/interaction")
+		end := strings.Index(body[start:], "await poll(")
+		require.Positive(t, end, "the submit handler must still start polling")
+		handler := body[start : start+end]
+
+		ok := strings.Index(handler, "if (!res.ok)")
+		require.Positive(t, ok, "the handler must branch on res.ok")
+		success := handler[strings.Index(handler, "var reply = await res.json()"):]
+		require.NotEmpty(t, success, "the success path must decode the reply")
+		assert.NotContains(t, success, "catch(",
+			"a decode failure on a SUCCESSFUL response must propagate, not become an empty object")
+		assert.Contains(t, success, "is missing",
+			"and a reply without session_id, qr_code or authorization_request must be refused too")
+	})
 }
 
 // The payment object the page posts must survive the HTTP binding into the

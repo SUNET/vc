@@ -83,8 +83,20 @@
             var res = await fetch("/ui/interaction", {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
             });
-            var reply = await res.json().catch(function () { return {}; });
-            if (!res.ok) { throw new Error(reply.error_description || reply.error || ("HTTP " + res.status)); }
+            if (!res.ok) {
+                // An ERROR response may legitimately not be JSON, so the
+                // empty fallback belongs here and only here.
+                var problem = await res.json().catch(function () { return {}; });
+                throw new Error(problem.error_description || problem.error || ("HTTP " + res.status));
+            }
+            // A SUCCESSFUL response has to be readable and complete. Falling
+            // back to {} here - or accepting a reply missing a member - would
+            // render a QR code from "undefined", link to "undefined" and then
+            // poll session_id=undefined 150 times, so a truncated body would
+            // look like a payment waiting for a wallet rather than a failure.
+            var reply = await res.json();
+            var missing = ["session_id", "qr_code", "authorization_request"].filter(function (k) { return !reply[k]; });
+            if (missing.length) { throw new Error("the verifier's reply is missing " + missing.join(", ")); }
             $("summary").textContent = "Pay " + body.payment.amount + " " + body.payment.currency + " to " + body.payment.payee_name;
             $("qr").src = "data:image/png;base64," + reply.qr_code;
             $("link").href = reply.authorization_request;
