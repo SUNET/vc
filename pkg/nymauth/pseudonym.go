@@ -81,10 +81,10 @@ func Pseudonym(config string, seed, proverInput, verifierInput []byte) ([]byte, 
 	return h.Sum(nil), nil
 }
 
-// Verifier identifier prefixes the rulebook defines. A verifier_id is
-// exactly one of these followed by a non-empty value; the two yield
-// unrelated pseudonyms for the same Relying Party, which is a property of
-// the rulebook and not something to normalise away.
+// Client Identifier prefixes the OpenID4VP Client Identifier scheme uses.
+//
+// They are NOT part of the hashed input. They are listed here only so
+// that a value carrying one can be refused: see checkVerifierID.
 const (
 	VerifierIDSemantic   = "semantic_id:"
 	VerifierIDX509SANDNS = "x509_san_dns:"
@@ -93,22 +93,40 @@ const (
 // checkVerifierID refuses an identifier no conforming Verifier could have
 // reported.
 //
-// Hashing whatever it is given would succeed and return a 32-byte
-// pseudonym indistinguishable from a correct one - so a remapping loop
-// comparing against a Verifier's real pseudonym would simply never match,
-// and the operator would conclude the subject is not the one they are
-// looking for. A wrong answer, not an error.
+// The hashed input is the BARE verifier_id - "verifier.example" - never
+// the prefixed Client Identifier and never client_id as it appears in the
+// request. verifier_id_type is agreed out of band and is not hashed. The
+// rulebook states this with worked digests and marks the prefixed form
+// MUST NOT:
+//
+//	SHA256("verifier.example")              = be6a6400...4a41   (MUST)
+//	SHA256("x509_san_dns:verifier.example") = 6eae85a0...6bab   (MUST NOT)
+//
+// So a PREFIXED value is refused here, which is the opposite of what this
+// function did when it was written against the earlier reading. The
+// reason for refusing rather than stripping is unchanged: hashing
+// whatever it is given succeeds and returns a 32-byte pseudonym
+// indistinguishable from a correct one, so a remapping loop comparing
+// against a Verifier's real pseudonym would simply never match, and the
+// operator would conclude the subject is not the one they are looking
+// for. A wrong answer, not an error.
+//
+// Stripping the prefix would be the tempting repair and is worse: it
+// would accept a caller that is confused about which value it holds, and
+// a caller confused about that is one whose OTHER inputs deserve a second
+// look.
 func checkVerifierID(verifierID string) error {
+	if verifierID == "" {
+		return fmt.Errorf("nymauth: no verifier_id")
+	}
 	for _, prefix := range []string{VerifierIDSemantic, VerifierIDX509SANDNS} {
-		if value, ok := strings.CutPrefix(verifierID, prefix); ok {
-			if value == "" {
-				return fmt.Errorf("nymauth: verifier_id %q has no value after its prefix", verifierID)
-			}
-			return nil
+		if strings.HasPrefix(verifierID, prefix) {
+			return fmt.Errorf("nymauth: verifier_id %q carries the Client Identifier prefix %q; "+
+				"the hashed input is the bare verifier_id, and hashing the prefixed form yields a pseudonym no Verifier reports",
+				verifierID, prefix)
 		}
 	}
-	return fmt.Errorf("nymauth: verifier_id must begin with %q or %q, which is what a Verifier reports; got %q",
-		VerifierIDSemantic, VerifierIDX509SANDNS, verifierID)
+	return nil
 }
 
 // KnownOffenderMatching computes the pseudonym a Verifier identified by
@@ -118,10 +136,9 @@ func checkVerifierID(verifierID string) error {
 //
 // prover_input is null; verifier_input is SHA256(verifier_id).
 //
-// verifierID is the full identifier including its prefix, as the rulebook
-// defines it: "semantic_id:..." or "x509_san_dns:...". The two forms give
-// unrelated pseudonyms for the same Relying Party, which is a property of
-// the rulebook and not something to normalise away here.
+// verifierID is the BARE identifier - "verifier.example" - without the
+// Client Identifier prefix and without verifier_id_type, which is agreed
+// out of band and not hashed. See checkVerifierID.
 func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byte, error) {
 	switch config {
 	case ConfigKnownOffenderMatchingSSC, ConfigKnownOffenderMatchingPSC:
@@ -138,7 +155,8 @@ func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byt
 // AccountRecovery computes the pseudonym for account-recovery-ssc.
 //
 // prover_input is null; verifier_input is
-// SHA256(SHA256(verifier_id) || SHA256(verifier_context)).
+// SHA256(SHA256(verifier_id) || SHA256(verifier_context)), over the BARE
+// verifier_id as in KnownOffenderMatching.
 func AccountRecovery(seed []byte, verifierID, verifierContext string) ([]byte, error) {
 	if err := checkVerifierID(verifierID); err != nil {
 		return nil, err

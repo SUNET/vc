@@ -35,11 +35,11 @@ func TestPseudonymIsTheSpecifiedConstruction(t *testing.T) {
 // under two configurations is unrelated - which is what stops an account
 // recovery pseudonym being usable for offender matching.
 func TestConfigurationSeparatesPseudonyms(t *testing.T) {
-	a, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "x509_san_dns:rp.example")
+	a, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "rp.example")
 	require.NoError(t, err)
-	b, err := KnownOffenderMatching(ConfigKnownOffenderMatchingPSC, testSeed, "x509_san_dns:rp.example")
+	b, err := KnownOffenderMatching(ConfigKnownOffenderMatchingPSC, testSeed, "rp.example")
 	require.NoError(t, err)
-	c, err := AccountRecovery(testSeed, "x509_san_dns:rp.example", "account-1")
+	c, err := AccountRecovery(testSeed, "rp.example", "account-1")
 	require.NoError(t, err)
 
 	assert.NotEqual(t, a, b)
@@ -50,29 +50,31 @@ func TestConfigurationSeparatesPseudonyms(t *testing.T) {
 // Known-offender matching only works if one Verifier always sees the same
 // pseudonym for one person, and different Verifiers never do.
 func TestKnownOffenderMatchingPerVerifier(t *testing.T) {
-	first, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "x509_san_dns:rp.example")
+	first, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "rp.example")
 	require.NoError(t, err)
-	again, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "x509_san_dns:rp.example")
+	again, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "rp.example")
 	require.NoError(t, err)
 	assert.Equal(t, first, again)
 
-	other, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "x509_san_dns:other.example")
+	other, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "other.example")
 	require.NoError(t, err)
 	assert.NotEqual(t, first, other)
 
-	// The rulebook's two identifier forms are unrelated identities, and
-	// the note saying so is a property to preserve, not to smooth over.
-	semantic, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "semantic_id:rp.example")
+	// Two bare identifiers that differ at all are unrelated identities.
+	// (This used to assert that the rulebook's two PREFIXED forms of one
+	// Relying Party were unrelated; the prefix is no longer hashed, so
+	// what is left is the plain property that different ids differ.)
+	nearby, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "rp.example.semantic")
 	require.NoError(t, err)
-	assert.NotEqual(t, first, semantic)
+	assert.NotEqual(t, first, nearby)
 }
 
 // Account recovery is per verifier AND per context, which is what makes
 // it per account rather than per person.
 func TestAccountRecoveryIsPerContext(t *testing.T) {
-	one, err := AccountRecovery(testSeed, "x509_san_dns:rp.example", "account-1")
+	one, err := AccountRecovery(testSeed, "rp.example", "account-1")
 	require.NoError(t, err)
-	two, err := AccountRecovery(testSeed, "x509_san_dns:rp.example", "account-2")
+	two, err := AccountRecovery(testSeed, "rp.example", "account-2")
 	require.NoError(t, err)
 	assert.NotEqual(t, one, two)
 }
@@ -92,17 +94,17 @@ func TestInputValidation(t *testing.T) {
 	_, err = Pseudonym("c", testSeed, good, good[:31])
 	assert.Error(t, err)
 
-	_, err = KnownOffenderMatching(ConfigAccountRecoverySSC, testSeed, "x509_san_dns:rp.example")
+	_, err = KnownOffenderMatching(ConfigAccountRecoverySSC, testSeed, "rp.example")
 	assert.Error(t, err, "account recovery has a different verifier_input and must not come through here")
 	_, err = KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "")
 	assert.Error(t, err)
 
 	// The rulebook bounds verifier_context at 1-64 bytes.
-	_, err = AccountRecovery(testSeed, "x509_san_dns:rp.example", "")
+	_, err = AccountRecovery(testSeed, "rp.example", "")
 	assert.Error(t, err)
-	_, err = AccountRecovery(testSeed, "x509_san_dns:rp.example", string(bytes.Repeat([]byte("c"), 65)))
+	_, err = AccountRecovery(testSeed, "rp.example", string(bytes.Repeat([]byte("c"), 65)))
 	assert.Error(t, err)
-	_, err = AccountRecovery(testSeed, "x509_san_dns:rp.example", string(bytes.Repeat([]byte("c"), 64)))
+	_, err = AccountRecovery(testSeed, "rp.example", string(bytes.Repeat([]byte("c"), 64)))
 	assert.NoError(t, err)
 
 	_, err = UserManagedXsite(testSeed, "")
@@ -135,7 +137,7 @@ func TestSeedLengthIsFixedByTheRulebook(t *testing.T) {
 		assert.Error(t, err, "a %d-byte seed must be refused", n)
 	}
 
-	_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, bytes.Repeat([]byte{7}, 32), "x509_san_dns:rp.example")
+	_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, bytes.Repeat([]byte{7}, 32), "rp.example")
 	assert.Error(t, err, "the configuration helpers must refuse it too, not just Pseudonym")
 
 	_, err = Pseudonym("c", bytes.Repeat([]byte{7}, SeedBytes), good, good)
@@ -148,24 +150,54 @@ func TestSeedLengthIsFixedByTheRulebook(t *testing.T) {
 // Verifier actually reported would never match, and the operator would
 // conclude the subject is not the one they are looking for. A wrong
 // answer, not an error.
-func TestVerifierIDMustBeAFormTheRulebookDefines(t *testing.T) {
+// The hashed verifier input is the BARE verifier_id.
+//
+// This test used to assert the opposite - that a prefixed Client
+// Identifier was the form to hash - and it was wrong. The rulebook
+// states the bare form with worked digests and marks the prefixed one
+// MUST NOT; verifier_id_type is agreed out of band and is not hashed.
+// Hashing the prefix produces a 32-byte value indistinguishable from a
+// correct pseudonym that no Verifier will ever report, so a remapping
+// loop would simply never match and an operator would conclude the
+// subject is innocent.
+func TestVerifierInputIsTheBareVerifierID(t *testing.T) {
+	// The rulebook's worked digests, recomputed here rather than
+	// copied as opaque constants: if either moves, this says which.
+	bare := sha256.Sum256([]byte("verifier.example"))
+	prefixed := sha256.Sum256([]byte("x509_san_dns:verifier.example"))
+	require.Equal(t, "be6a6400", hex.EncodeToString(bare[:])[:8],
+		"the rulebook's MUST digest for the bare verifier_id")
+	require.Equal(t, "6eae85a0", hex.EncodeToString(prefixed[:])[:8],
+		"and its MUST NOT digest for the prefixed Client Identifier")
+
 	for _, bad := range []string{
-		"rp.example",              // no prefix at all
-		"semantic_id:",            // prefix, no value
-		"x509_san_dns:",           // prefix, no value
-		"x509_hash:abcd",          // a prefix the rulebook excludes
-		"X509_SAN_DNS:rp.example", // prefixes are exact
+		"semantic_id:rp.example",  // a Client Identifier, not a verifier_id
+		"x509_san_dns:rp.example", // the form the rulebook marks MUST NOT
+		"semantic_id:",
+		"x509_san_dns:",
 		"",
 	} {
 		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, bad)
-		assert.Error(t, err, "verifier_id %q is not a form any Verifier reports", bad)
+		assert.Errorf(t, err, "verifier_id %q is not what the rulebook hashes", bad)
 
 		_, err = AccountRecovery(testSeed, bad, "account-1")
-		assert.Error(t, err, "account recovery must refuse %q too", bad)
+		assert.Errorf(t, err, "account recovery must refuse %q too", bad)
 	}
 
-	for _, good := range []string{"semantic_id:rp.example", "x509_san_dns:rp.example"} {
+	// Bare identifiers, including ones that merely CONTAIN a colon -
+	// the guard is about the two known prefixes, not about punctuation.
+	for _, good := range []string{"rp.example", "verifier.example", "https://rp.example/path", "x509_hash:abcd"} {
 		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, good)
-		assert.NoError(t, err, "%q is a form the rulebook defines", good)
+		assert.NoErrorf(t, err, "%q is a bare verifier_id", good)
 	}
+
+	// And the pseudonym really is computed over the bare form: the same
+	// Relying Party written the prefixed way is refused, so there is no
+	// pair of inputs that both succeed and disagree.
+	fromBare, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "verifier.example")
+	require.NoError(t, err)
+	want, err := Pseudonym(ConfigKnownOffenderMatchingSSC, testSeed, nullInput, bare[:])
+	require.NoError(t, err)
+	assert.Equal(t, want, fromBare,
+		"verifier_input must be SHA256 of the bare id, with nothing prepended")
 }

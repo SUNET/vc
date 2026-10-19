@@ -277,7 +277,7 @@ make build-seed-recover
 ./bin/seed_recover -config /etc/vc/config.yaml -seed primary \
     -subject SE -subject 198001011234 \
     -pseudonym-config known-offender-matching-ssc \
-    -verifier-id x509_san_dns:rp.example \
+    -verifier-id verifier.example \
     -expect <pseudonym the verifier reported>
 ```
 
@@ -292,11 +292,22 @@ there is nothing to compare against, and exiting 0 regardless would report
 a match for every candidate. The seed itself is printed only with
 `-show-seed`.
 
-`-verifier-id` must be one of the two forms the rulebook defines —
-`semantic_id:<value>` or `x509_san_dns:<value>` — and is refused otherwise.
-Hashing anything else would succeed and return a pseudonym no Verifier
-could have reported, so the loop would simply never match and the operator
-would conclude the subject is innocent.
+`-verifier-id` is the **bare** verifier_id — `verifier.example` — not the
+prefixed Client Identifier and not `client_id` as it appears in the
+request. `verifier_id_type` is agreed out of band between wallet and
+verifier and is not hashed. The rulebook states this with worked digests
+and marks the prefixed form MUST NOT:
+
+```
+SHA256("verifier.example")              = be6a6400…4a41   (MUST)
+SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
+```
+
+A value carrying `semantic_id:` or `x509_san_dns:` is therefore **refused**
+rather than stripped. Hashing it would succeed and return a pseudonym no
+Verifier could have reported, so the loop would simply never match and the
+operator would conclude the subject is innocent — and stripping it would
+quietly accept a caller that is confused about which value it holds.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can
