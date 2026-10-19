@@ -418,3 +418,31 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 		require.Equal(t, float64(42), out["n"])
 	})
 }
+
+// The provenance must survive the cache's serialisation.
+//
+// The document cache is Mongo-backed under HA and serialises through
+// MongoCache.marshalEntry, which calls json.Marshal - not bson. A
+// json:"-" field was therefore dropped on exactly that path, so issuance
+// read no pinned claims and a derivation was free to replace a verified
+// birth date, while the memory-backed path kept working.
+func TestProvenanceSurvivesCacheSerialisation(t *testing.T) {
+	docs := map[string]*model.CompleteDocument{
+		"d": {
+			Meta:            &model.MetaData{AuthenticSource: "SUNET"},
+			DocumentData:    map[string]any{"birth_date": "2010-01-01"},
+			PresentedClaims: []string{"birth_date"},
+		},
+	}
+
+	// What MongoCache.marshalEntry does to the cached value.
+	encoded, err := json.Marshal(docs)
+	require.NoError(t, err)
+
+	var back map[string]*model.CompleteDocument
+	require.NoError(t, json.Unmarshal(encoded, &back))
+
+	require.Equal(t, []string{"birth_date"}, back["d"].PresentedClaims,
+		"issuance reads this after the round trip; losing it unpins every verified claim")
+	require.Equal(t, "2010-01-01", back["d"].DocumentData["birth_date"])
+}
