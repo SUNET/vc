@@ -255,6 +255,22 @@ type CredentialMetadata struct {
 
 	// Claims: OPTIONAL. A non-empty array of claims description objects as defined in Appendix B.2.
 	Claims []ClaimDescription `json:"claims,omitempty" yaml:"claims,omitempty"`
+
+	// Extensions are the members this type does not model, keyed by
+	// their collision-resistant names.
+	//
+	// OpenID4VCI 1.1 extends credential_metadata by adding such a name
+	// holding an object - which is how org.siros.secret_seed delivers a
+	// seed (privatedata-spec SPEC 2.6 section 5A). Carried here rather
+	// than modelled as a field so that this type stays an OpenID4VCI
+	// type: a member vc has never heard of survives a round trip
+	// through it, because a relay MUST preserve what it does not
+	// understand.
+	//
+	// yaml:"-" because configuration does not write extensions: the
+	// seed member is computed per response, and the advertisement is
+	// built from the commitment configuration.
+	Extensions map[string]json.RawMessage `json:"-" yaml:"-"`
 }
 
 // ClaimDescription describes a claim within a Credential for display purposes.

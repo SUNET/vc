@@ -216,10 +216,10 @@ const signingFormatJWP = "jwp"
 // A no-op for a scope with no commitments configured, which is every scope
 // in a deployment that does not use the feature - including the encoding
 // round trip, so nothing changes for anybody else.
-func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte) ([]byte, error) {
+func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte) ([]byte, map[string]string, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	if meta == nil || len(meta.Commitments) == 0 {
-		return documentData, nil
+		return documentData, nil, nil
 	}
 
 	// The scope says which format its commitments were configured and
@@ -236,7 +236,7 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 	// clear signed payload where the holder cannot withhold it - which is
 	// the one property the whole feature exists to provide.
 	if !meta.CommitmentsMatchSigningFormat(signingFormat) {
-		return nil, fmt.Errorf("scope %q configures commitments for format %q but is being signed as %q; "+
+		return nil, nil, fmt.Errorf("scope %q configures commitments for format %q but is being signed as %q; "+
 			"the commitment would be resolved by one format's rules and signed under another's",
 			scope, meta.Format, signingFormat)
 	}
@@ -249,7 +249,7 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 	// injection is a silent data change for every number in the document.
 	doc, err := decodeDocumentData(documentData)
 	if err != nil {
-		return nil, fmt.Errorf("commitment claims for scope %q: %w", scope, err)
+		return nil, nil, fmt.Errorf("commitment claims for scope %q: %w", scope, err)
 	}
 
 	flat := flatDocument(meta.Format)
@@ -262,7 +262,7 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 	// second write replaces the first commitment.
 	targets, err := meta.ResolveCommitmentTargets(commitmentSchemas(meta, signingFormat))
 	if err != nil {
-		return nil, fmt.Errorf("scope %q: %w", scope, err)
+		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
 
 	// Every subject identifier is resolved from the document AS RECEIVED,
@@ -282,28 +282,54 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 		// bare value under a namespace-qualified configuration, and that
 		// value is the one that would be signed.
 		if existing, present := lookupPath(doc, target.Element, flat); present && existing != nil {
-			return nil, fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
+			return nil, nil, fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
 		}
 
 		subjectIDs, err := subjectIdentifiers(doc, target.Claim.Subjects, flat)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", where, err)
+			return nil, nil, fmt.Errorf("%s: %w", where, err)
 		}
 
 		pending = append(pending, resolvedCommitment{target: target, subjectIDs: subjectIDs})
 	}
 
+	// Seeds to deliver, by namespace. Held only for the length of this
+	// request: nothing here is persisted, cached, logged or traced, and
+	// the map goes out of scope with the response.
+	var delivered map[string]string
+
 	for _, p := range pending {
-		if err := c.writeCommitment(ctx, scope, p, doc, flat); err != nil {
-			return nil, err
+		seedValue, err := c.writeCommitment(ctx, scope, p, doc, flat)
+		if err != nil {
+			return nil, nil, err
 		}
+		if !p.target.Claim.Deliver {
+			continue
+		}
+		namespace := p.target.Claim.Namespace
+		if namespace == "" {
+			namespace = model.DefaultSeedNamespace
+		}
+		if delivered == nil {
+			delivered = map[string]string{}
+		}
+		if existing, clash := delivered[namespace]; clash && existing != hex.EncodeToString(seedValue) {
+			// Two claims of one scope delivering DIFFERENT seeds under
+			// one namespace. The response carries one value per
+			// namespace, so one of them would silently win and the
+			// wallet's commitment check would fail against the other
+			// credential - which reads as a bad credential rather than
+			// a bad configuration.
+			return nil, nil, fmt.Errorf("scope %q delivers two different seeds under namespace %q", scope, namespace)
+		}
+		delivered[namespace] = hex.EncodeToString(seedValue)
 	}
 
 	injected, err := json.Marshal(doc)
 	if err != nil {
-		return nil, fmt.Errorf("commitment claims for scope %q: %w", scope, err)
+		return nil, nil, fmt.Errorf("commitment claims for scope %q: %w", scope, err)
 	}
-	return injected, nil
+	return injected, delivered, nil
 }
 
 // commitmentSchemas is the type metadata a commitment target must be
@@ -332,7 +358,7 @@ func commitmentSchemas(meta *model.CredentialMetadata, signingFormat string) mod
 	return model.CredentialSchemas{}
 }
 
-func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCommitment, doc map[string]any, flat bool) error {
+func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCommitment, doc map[string]any, flat bool) ([]byte, error) {
 	where := fmt.Sprintf("commitment claim %q for scope %q", p.target.Path, scope)
 
 	source, ok := c.seedSources[p.target.Claim.Seed]
@@ -340,26 +366,26 @@ func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCo
 		// Unreachable if initSeedSources ran, which is the point of
 		// checking here too: this function must not fall back to deriving
 		// from nothing.
-		return fmt.Errorf("%s: seed source %q is not available", where, p.target.Claim.Seed)
+		return nil, fmt.Errorf("%s: seed source %q is not available", where, p.target.Claim.Seed)
 	}
 
 	seedValue, err := source.Seed(ctx, p.subjectIDs, p.target.Claim.Context)
 	if err != nil {
 		// The subject identifier is NOT in this error: it is the thing
 		// that identifies the person, and this error reaches a log.
-		return fmt.Errorf("%s: %w", where, err)
+		return nil, fmt.Errorf("%s: %w", where, err)
 	}
 
 	commitment, err := seed.Commit(p.target.Claim.Commit, seedValue)
 	if err != nil {
-		return fmt.Errorf("%s: %w", where, err)
+		return nil, fmt.Errorf("%s: %w", where, err)
 	}
 	expected, err := seed.CommitmentBytes(p.target.Claim.Commit)
 	if err != nil {
-		return fmt.Errorf("%s: %w", where, err)
+		return nil, fmt.Errorf("%s: %w", where, err)
 	}
 	if len(commitment) != expected {
-		return fmt.Errorf("%s: commitment is %d bytes, expected %d", where, len(commitment), expected)
+		return nil, fmt.Errorf("%s: commitment is %d bytes, expected %d", where, len(commitment), expected)
 	}
 
 	var encoded string
@@ -369,13 +395,13 @@ func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCo
 	case model.CommitmentEncodingBase64:
 		encoded = base64.StdEncoding.EncodeToString(commitment)
 	default:
-		return fmt.Errorf("%s: unknown encoding %q", where, p.target.Encoding)
+		return nil, fmt.Errorf("%s: unknown encoding %q", where, p.target.Encoding)
 	}
 
 	if err := setPath(doc, p.target.Element, encoded, flat); err != nil {
-		return fmt.Errorf("%s: %w", where, err)
+		return nil, fmt.Errorf("%s: %w", where, err)
 	}
-	return nil
+	return seedValue, nil
 }
 
 // subjectIdentifier reads the stable subject identifier out of the

@@ -504,7 +504,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	//
 	// A no-op for a scope with no commitments configured, which is every
 	// scope in a deployment that does not use the feature.
-	documentData, err = c.injectCommitments(ctx, scope, format, documentData)
+	documentData, deliveredSeeds, err := c.injectCommitments(ctx, scope, format, documentData)
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", scope)
 		return nil, err
@@ -555,7 +555,21 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 
-	return c.newCredentialResponse(credentials, scope, configurationID), nil
+	response := c.newCredentialResponse(credentials, scope, configurationID)
+
+	// The seed, if this scope delivers one. Last, so that a refusal
+	// here cannot leave a credential issued and unreported: the
+	// response is built but not returned, and the caller sees the
+	// failure rather than a credential whose commitment the wallet can
+	// never open.
+	if err := c.deliverSeeds(response, deliveredSeeds, req.CredentialResponseEncryption); err != nil {
+		// Deliberately not logged with the scope's seeds in scope: the
+		// error names a namespace at most, never a value.
+		c.log.Error(err, "seed delivery refused", "scope", scope)
+		return nil, err
+	}
+
+	return response, nil
 }
 
 // newCredentialResponse assembles the Credential Response.

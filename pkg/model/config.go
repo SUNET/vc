@@ -2372,6 +2372,24 @@ func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
 	})
 }
 
+// DefaultSeedNamespace is the namespace a delivered seed is written
+// under when a commitment claim names none.
+//
+// The credential type designates the namespace; this is the one
+// nym_auth uses, and the only consumer today.
+const DefaultSeedNamespace = "org.siros.nym_auth"
+
+// SeedMetadataMember is the collision-resistant member name delivered
+// seeds travel under, at the top level of the response-level
+// credential_metadata object. Fixed by privatedata-spec section 5A, not
+// configurable: a wallet looks for exactly this name.
+const SeedMetadataMember = "org.siros.secret_seed"
+
+// SeedNamespacesMember is the member the issuer-metadata advertisement
+// uses to list namespace NAMES. Reserved: a namespace may not be called
+// this, or an advertisement and a delivery would be indistinguishable.
+const SeedNamespacesMember = "namespaces"
+
 // CommitmentClaim configures one seed-backed claim.
 //
 // What is written into the credential is commit(seed) - never the seed.
@@ -2423,6 +2441,31 @@ type CommitmentClaim struct {
 	// absent entry would be worse, since ["a",""] would then derive what
 	// ["a"] derives and hand one subject another subject's pseudonym.
 	Subjects []string `yaml:"subjects,omitempty" validate:"required_with=Seed,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
+
+	// Deliver, when true, sends the SEED to the wallet alongside the
+	// credential, in the response-level credential_metadata object
+	// (privatedata-spec SPEC 2.6 section 5A).
+	//
+	// Off by default, and deliberately an explicit opt-in: delivering a
+	// secret is a different act from committing to one. A deployment
+	// that only wants the commitment in a credential - the original
+	// capability - is unaffected by this field existing.
+	//
+	// Turning it on brings requirements with it, all refused at
+	// issuance rather than degraded: the response MUST be JWE-encrypted
+	// (the wallet has to have asked), it MUST carry a notification_id,
+	// and the seed is never persisted, logged or traced.
+	Deliver bool `yaml:"deliver,omitempty" doc_example:"true"`
+
+	// Namespace names the member the seed is delivered under, inside
+	// org.siros.secret_seed. Empty means DefaultSeedNamespace.
+	//
+	// It is what the WALLET looks the seed up by when it checks
+	// SHA256(secret_seed) == ssc, so it has to be the namespace the
+	// credential type designates. A namespace of "namespaces" is
+	// refused: that name is reserved for the issuer-metadata
+	// advertisement, and a response carrying it would be malformed.
+	Namespace string `yaml:"namespace,omitempty" validate:"omitempty,max=64" doc_example:"\"org.siros.nym_auth\""`
 
 	// Commit names the commitment function. Empty means "sha-256", which
 	// is the only one registered.
