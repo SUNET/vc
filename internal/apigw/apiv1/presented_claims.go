@@ -3,6 +3,7 @@ package apiv1
 import (
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"time"
 
@@ -131,18 +132,10 @@ func claimString(v any) (string, bool) {
 func normaliseFullDate(v any) (string, error) {
 	switch t := v.(type) {
 	case time.Time:
-		return t.UTC().Format(time.DateOnly), nil
+		return fullDate(t)
 	case cbor.Tag:
 		if t.Number == 1 {
-			switch n := t.Content.(type) {
-			case uint64:
-				return time.Unix(int64(n), 0).UTC().Format(time.DateOnly), nil
-			case int64:
-				return time.Unix(n, 0).UTC().Format(time.DateOnly), nil
-			case float64:
-				return time.Unix(int64(n), 0).UTC().Format(time.DateOnly), nil
-			}
-			return "", fmt.Errorf("unsupported epoch content %T", t.Content)
+			return epochFullDate(t.Content)
 		}
 	case *cbor.Tag:
 		if t != nil {
@@ -154,12 +147,57 @@ func normaliseFullDate(v any) (string, error) {
 		return "", fmt.Errorf("value of type %T is not a date", v)
 	}
 	if d, err := time.Parse(time.DateOnly, s); err == nil {
-		return d.Format(time.DateOnly), nil
+		return fullDate(d)
 	}
 	if d, err := time.Parse(time.RFC3339, s); err == nil {
-		return d.UTC().Format(time.DateOnly), nil
+		return fullDate(d)
 	}
 	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
+}
+
+// epochFullDate converts a CBOR tag 1 epoch, refusing the values that
+// would convert into a different date instead of failing.
+//
+// uint64 is NOT int64: 18446744073709551615 wraps to -1 and dates to
+// 1969-12-31, a verified birth date silently replaced by a plausible
+// one. And a negative fraction truncates TOWARD ZERO, so -0.5 became
+// 1970-01-01 when the second it falls in is 1969-12-31; seconds since
+// the epoch floor, they do not round to it.
+func epochFullDate(content any) (string, error) {
+	switch n := content.(type) {
+	case uint64:
+		if n > math.MaxInt64 {
+			return "", fmt.Errorf("epoch %d is beyond the representable range", n)
+		}
+		return fullDate(time.Unix(int64(n), 0).UTC())
+	case int64:
+		return fullDate(time.Unix(n, 0).UTC())
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return "", fmt.Errorf("epoch %v is not a number", n)
+		}
+		seconds := math.Floor(n)
+		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
+			return "", fmt.Errorf("epoch %v is beyond the representable range", n)
+		}
+		return fullDate(time.Unix(int64(seconds), 0).UTC())
+	}
+	return "", fmt.Errorf("unsupported epoch content %T", content)
+}
+
+// fullDate renders a time as an RFC 3339 full-date, refusing one the
+// format cannot express.
+//
+// Applied to EVERY shape, not just the epoch: a time.Time or a date-time
+// string can carry a year outside 0001-9999 just as an epoch can, and
+// 253402300800 formatted happily as "10000-01-01" - four digits of year
+// is what the grammar allows, so that string is not a full-date at all
+// and no verifier reading it gets the date the holder presented.
+func fullDate(t time.Time) (string, error) {
+	if year := t.Year(); year < 1 || year > 9999 {
+		return "", fmt.Errorf("year %d is outside the range an RFC 3339 full-date can express", year)
+	}
+	return t.Format(time.DateOnly), nil
 }
 
 // maxExactJSONInt is the largest integer a float64 represents exactly,

@@ -2,14 +2,17 @@ package apiv1
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/stretchr/testify/require"
@@ -445,4 +448,120 @@ func TestProvenanceSurvivesCacheSerialisation(t *testing.T) {
 	require.Equal(t, []string{"birth_date"}, back["d"].PresentedClaims,
 		"issuance reads this after the round trip; losing it unpins every verified claim")
 	require.Equal(t, "2010-01-01", back["d"].DocumentData["birth_date"])
+}
+
+// The handler must decorate the documents it publishes, and refuse
+// before publishing anything when it cannot.
+//
+// The helper tests above all pass with the handler's call to them
+// removed: they prove applyPresentedDocumentClaims works, not that
+// issuance ever sees its result. This pins the wiring - a decorated
+// document carries the overrides AND the provenance, and a source claim
+// the presentation does not have is an error rather than a quiet
+// fallback to datastore values.
+func TestHandlerDecoratesDocumentsOrRefuses(t *testing.T) {
+	c := &Client{
+		log: logger.NewSimple("test"),
+		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+			"nym_auth": {Format: openid4vp.FormatSDJWTVC, VCTM: &sdjwtvc.VCTM{VCT: "urn:x"}},
+		}}},
+	}
+	docs := func() map[string]*model.CompleteDocument {
+		return map[string]*model.CompleteDocument{
+			"d": {DocumentData: map[string]any{"birth_date": "1970-01-01", "family_name": "stored"}},
+		}
+	}
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"birthdate"},
+		DocumentClaims: map[string]string{"birthdate": "birth_date"},
+	}
+
+	t.Run("the published document carries the override and the provenance", func(t *testing.T) {
+		out, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+			map[string]any{"birthdate": "2010-01-01"}, entry, "nym_auth", "nym_auth")
+		require.NoError(t, err)
+		require.Equal(t, "2010-01-01", out["d"].DocumentData["birth_date"],
+			"the verified value must reach the cached document")
+		require.Equal(t, []string{"birth_date"}, out["d"].PresentedClaims,
+			"and so must the provenance, or issuance cannot pin it")
+		require.Equal(t, "stored", out["d"].DocumentData["family_name"],
+			"claims the presentation did not name are left alone")
+	})
+
+	t.Run("a missing source claim refuses, before anything is published", func(t *testing.T) {
+		out, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+			map[string]any{"something_else": "x"}, entry, "nym_auth", "nym_auth")
+		require.Error(t, err, "issuing from datastore values would assert what was never presented")
+		require.Nil(t, out, "nothing to publish when the presentation cannot be honoured")
+		require.Contains(t, err.Error(), "presented claim copy failed")
+	})
+
+	t.Run("an unconvertible source claim refuses too", func(t *testing.T) {
+		_, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+			map[string]any{"birthdate": float64(1 << 60)}, entry, "nym_auth", "nym_auth")
+		require.Error(t, err)
+	})
+
+	t.Run("no configured claims is not an error", func(t *testing.T) {
+		out, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+			map[string]any{}, model.AuthScopeEntry{}, "nym_auth", "nym_auth")
+		require.NoError(t, err)
+		require.Nil(t, out["d"].PresentedClaims, "nothing was taken from the presentation")
+	})
+}
+
+// A date conversion must fail rather than produce a different date.
+//
+// uint64 is not int64: 18446744073709551615 wrapped to -1 and dated to
+// 1969-12-31 - a verified birth date silently replaced by a plausible
+// one. A negative fraction truncated toward zero, so -0.5 became
+// 1970-01-01 when the second it falls in is 1969-12-31. And 253402300800
+// formatted happily as "10000-01-01", which the RFC 3339 grammar cannot
+// express, so no verifier reading it gets the presented date.
+func TestEpochAndRangeBoundariesAreRefused(t *testing.T) {
+	epoch := func(v any) (string, error) { return normaliseFullDate(cbor.Tag{Number: 1, Content: v}) }
+
+	t.Run("a uint64 that would wrap", func(t *testing.T) {
+		_, err := epoch(uint64(18446744073709551615))
+		require.Error(t, err, "wrapping to -1 would date this to 1969-12-31")
+		require.Contains(t, err.Error(), "representable range")
+	})
+
+	t.Run("a negative fraction floors, it does not truncate", func(t *testing.T) {
+		got, err := epoch(float64(-0.5))
+		require.NoError(t, err)
+		require.Equal(t, "1969-12-31", got, "-0.5 falls in the second before the epoch")
+	})
+
+	t.Run("a year the format cannot express", func(t *testing.T) {
+		_, err := epoch(int64(253402300800))
+		require.Error(t, err, `"10000-01-01" is not an RFC 3339 full-date`)
+		require.Contains(t, err.Error(), "outside the range")
+	})
+
+	t.Run("the same range check applies to a time.Time", func(t *testing.T) {
+		_, err := normaliseFullDate(time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC))
+		require.Error(t, err, "every shape needs the range check, not just the epoch")
+	})
+
+	t.Run("not a number", func(t *testing.T) {
+		_, err := epoch(math.NaN())
+		require.Error(t, err)
+	})
+
+	t.Run("ordinary epochs still convert", func(t *testing.T) {
+		for _, tc := range []struct {
+			in   any
+			want string
+		}{
+			{int64(0), "1970-01-01"},
+			{uint64(1262304000), "2010-01-01"},
+			{float64(1262304000.9), "2010-01-01"},
+			{int64(-1), "1969-12-31"},
+		} {
+			got, err := epoch(tc.in)
+			require.NoErrorf(t, err, "%v", tc.in)
+			require.Equalf(t, tc.want, got, "%v", tc.in)
+		}
+	})
 }

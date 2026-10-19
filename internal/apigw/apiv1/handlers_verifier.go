@@ -132,6 +132,38 @@ type VerificationDirectPostResponse struct {
 	RedirectURI                       string `json:"redirect_uri"`
 }
 
+// decorateWithPresentedClaims copies the configured claims of the
+// verified presentation over the datastore documents, and records which
+// claims it took.
+//
+// Separated from VerificationDirectPost so both of its outcomes can be
+// tested: that a decorated document carries the overrides AND the
+// provenance, and that a missing or unconvertible source claim returns an
+// error - which, because this runs before the caller publishes anything,
+// means nothing is cached for a presentation that could not be honoured.
+//
+// The provenance travels inside the documents, written in the caller's
+// single cache Set. Recording it separately - on the authorization
+// context - was a second write that could interleave with that one,
+// leaving one request's document paired with another's provenance.
+func (c *Client) decorateWithPresentedClaims(
+	documents map[string]*model.CompleteDocument,
+	sourceFormat string,
+	credential map[string]any,
+	entry model.AuthScopeEntry,
+	scope, matchedAuthScope string,
+) (map[string]*model.CompleteDocument, error) {
+	if len(entry.DocumentClaims) == 0 {
+		return documents, nil
+	}
+	copied, err := presentedDocumentClaims(sourceFormat, credential, entry, c.cfg.GetCredentialMetadata(scope))
+	if err != nil {
+		c.log.Error(err, "cannot copy presented claims into the issued document", "matched_auth_scope", matchedAuthScope, "scope", scope)
+		return nil, fmt.Errorf("presented claim copy failed: %w", err)
+	}
+	return applyPresentedDocumentClaims(documents, copied), nil
+}
+
 func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDirectPostRequest) (*VerificationDirectPostResponse, error) {
 	c.log.Debug("Verification direct-post")
 
@@ -415,18 +447,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// datastore document (e.g. the birth date of a nym_auth attestation is
 	// the one in the PID/mDL/Photo ID the holder just presented, not a
 	// stored copy of it). Fails closed when a configured claim is missing.
-	if len(authScopeEntry.DocumentClaims) > 0 {
-		copied, err := presentedDocumentClaims(authSourceFormat, credential, authScopeEntry, c.cfg.GetCredentialMetadata(scope))
-		if err != nil {
-			c.log.Error(err, "cannot copy presented claims into the issued document", "matched_auth_scope", matchedAuthScope, "scope", scope)
-			return nil, fmt.Errorf("presented claim copy failed: %w", err)
-		}
-		// The provenance travels inside the documents, written in the
-		// same single cache Set below. Recording it separately - on the
-		// authorization context - was a second write that could
-		// interleave with this one, leaving one request's document paired
-		// with another's provenance.
-		documents = applyPresentedDocumentClaims(documents, copied)
+	documents, err = c.decorateWithPresentedClaims(documents, authSourceFormat, credential, authScopeEntry, scope, matchedAuthScope)
+	if err != nil {
+		return nil, err
 	}
 
 	// Cache PID documents for session
