@@ -38,11 +38,16 @@ export function armWalletLink(link, sessionID, origin, env = browserHandoffEnv()
             return;
         }
         ev.preventDefault();
+        // Not awaited - a click handler cannot be - but the rejection is
+        // caught, so a failure here is a line in the console rather than
+        // an unhandled rejection the operator never sees.
         handOffToWallet(
             link.href,
             new URL("/verification/session-preference", origin).toString(),
             { session_id: sessionID, wallet_follows_redirect: true },
             env,
-        );
+        ).catch((err) => {
+            console.error("Failed to hand the payment request to the wallet", err);
+        });
     };
 }
