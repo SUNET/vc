@@ -126,6 +126,20 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		return nil, fmt.Errorf("failed to generate issuer metadata: %w", err)
 	}
 
+	// The seed-namespace advertisement, for every configuration that
+	// delivers one.
+	//
+	// After Generate rather than inside it: Generate builds the public
+	// OpenID4VCI document from the credential metadata, and this is the
+	// one member of it derived from the COMMITMENT configuration. It
+	// has to exist before a wallet asks for the credential, because the
+	// specification only encrypts a response the wallet requested
+	// encryption for - so without it a wallet has no reason to ask, and
+	// would be refused at issuance with no way to know why.
+	if err := c.advertiseSeedNamespaces(); err != nil {
+		return nil, err
+	}
+
 	// Advertise attest_jwt_client_auth only when the evaluator will actually be wired below (needs Enabled + PDPURL).
 	walletAttestationAdvertised := cfg.APIGW.Trust.WalletAttestation.Enabled && cfg.APIGW.Trust.PDPURL != ""
 	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL, walletAttestationAdvertised, cfg.APIGW.Trust.AllowedSignatureAlgorithms)

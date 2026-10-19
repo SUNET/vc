@@ -144,3 +144,56 @@ func seedAdvertisement(namespaces []string) json.RawMessage {
 	}
 	return encoded
 }
+
+// advertiseSeedNamespaces publishes, for each credential configuration
+// that delivers a seed, the NAMES of the namespaces it delivers:
+//
+//	"credential_metadata": {
+//	  "org.siros.secret_seed": {"namespaces": ["org.siros.nym_auth"]}
+//	}
+//
+// Names only, never a value. An issuer-metadata entry carrying
+// hexadecimal seeds is malformed, and a wallet treats a malformed entry
+// as if the configuration were not offered (SPEC 2.6 section 5A.3) - so
+// publishing a seed here would not merely leak it, it would take the
+// configuration out of service.
+//
+// This and the issuance-time refusal are one mechanism. The
+// specification encrypts a response only when the wallet ASKED, so a
+// wallet that cannot see in advance that a seed is coming has no reason
+// to request credential_response_encryption, and would then be refused
+// at issuance with nothing to tell it why.
+func (c *Client) advertiseSeedNamespaces() error {
+	if c.issuerMetadata == nil || c.cfg == nil || c.cfg.Common == nil {
+		return nil
+	}
+	for scope, meta := range c.cfg.Common.CredentialMetadata {
+		namespaces := seedNamespacesForScope(meta)
+		if len(namespaces) == 0 {
+			continue
+		}
+		config, ok := c.issuerMetadata.CredentialConfigurationsSupported[scope]
+		if !ok {
+			// A scope that delivers a seed but is not offered at all.
+			// Refused rather than skipped: the configuration says this
+			// credential hands out a permanent per-subject secret, and
+			// the operator should learn that it is unreachable now
+			// rather than from its absence later.
+			return fmt.Errorf("scope %q configures seed delivery but is not an offered credential configuration", scope)
+		}
+		if config.CredentialMetadata == nil {
+			config.CredentialMetadata = &openid4vci.CredentialMetadata{}
+		}
+		if config.CredentialMetadata.Extensions == nil {
+			config.CredentialMetadata.Extensions = map[string]json.RawMessage{}
+		}
+		config.CredentialMetadata.Extensions[model.SeedMetadataMember] = seedAdvertisement(namespaces)
+		// The map holds VALUES, not pointers: without this the
+		// advertisement would be written into a copy and never
+		// published, which is the kind of omission that looks like the
+		// feature simply not working.
+		c.issuerMetadata.CredentialConfigurationsSupported[scope] = config
+		c.log.Info("Advertising seed namespaces", "scope", scope, "namespaces", namespaces)
+	}
+	return nil
+}
