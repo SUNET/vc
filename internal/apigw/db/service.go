@@ -30,6 +30,7 @@ type Service struct {
 	IdentityMappingsColl    IdentityMappingStore
 	CredentialOfferColl     CredentialOfferStore
 	DynamicRegistrationColl DynamicRegistrationStore
+	CredentialStatusColl    CredentialStatusStore
 }
 
 // New creates a new database service. The storage backend is selected by
@@ -56,6 +57,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		service.IdentityMappingsColl = NewSQLIdentityMappingsColl(service, conn.SQLDB, conn.Dialect)
 		service.CredentialOfferColl = NewSQLCredentialOfferColl(service, conn.SQLDB, conn.Dialect)
 		service.DynamicRegistrationColl = NewSQLDynamicRegistrationColl(service, conn.SQLDB, conn.Dialect)
+		service.CredentialStatusColl = NewSQLCredentialStatusColl(service, conn.SQLDB, conn.Dialect)
 
 		service.log.Info("Started", "backend", cfg.Common.SQL.Backend)
 		return service, nil
@@ -96,6 +98,13 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	service.DynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create dynamic registration collection")
+		service.disconnectMongoOnStartupError()
+		return nil, err
+	}
+
+	service.CredentialStatusColl, err = NewCredentialStatusColl(ctx, "credential_status_entries", service, log.New("VCCredentialStatusColl"))
+	if err != nil {
+		service.log.Error(err, "failed to create credential status collection")
 		service.disconnectMongoOnStartupError()
 		return nil, err
 	}

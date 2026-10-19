@@ -29,6 +29,7 @@ var allTables = []string{
 	"token_status_list_metadata",
 	"credential_subjects",
 	"cache_entries",
+	"credential_status_entries",
 }
 
 func TestApplySchema_Postgres(t *testing.T) {

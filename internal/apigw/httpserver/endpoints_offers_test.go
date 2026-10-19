@@ -29,6 +29,10 @@ type offersAPI struct {
 	err      error
 }
 
+func (o *offersAPI) RevokeCredential(_ context.Context, _ *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error) {
+	panic("not used by these tests")
+}
+
 func (o *offersAPI) UICreateCredentialOffer(_ context.Context, req *apiv1.UICredentialOfferRequest) (*apiv1.CredentialOfferReply, error) {
 	o.gotScope = req.Scope
 	o.calls++

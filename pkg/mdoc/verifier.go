@@ -264,7 +264,7 @@ func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *DocumentM
 }
 
 // parseIssuerAuthArray handles cases where IssuerAuth is already a decoded slice.
-func (v *Verifier) parseIssuerAuthArray(arr []any) (*COSESign1, error) {
+func parseIssuerAuthArray(arr []any) (*COSESign1, error) {
 	if len(arr) != 4 {
 		return nil, fmt.Errorf("invalid COSE_Sign1 array length: %d", len(arr))
 	}
@@ -304,10 +304,17 @@ func (v *Verifier) parseIssuerAuthArray(arr []any) (*COSESign1, error) {
 
 // parseIssuerAuth parses the IssuerAuth into a COSESign1 structure.
 func (v *Verifier) parseIssuerAuth(data any) (*COSESign1, error) {
+	return ParseIssuerAuth(data)
+}
+
+// ParseIssuerAuth parses a document's IssuerAuth into a COSESign1 structure.
+// It does not verify the signature - callers that need the MSO's contents to
+// be trustworthy must verify the document first.
+func ParseIssuerAuth(data any) (*COSESign1, error) {
 	byteData, ok := data.([]byte)
 	if !ok {
 		if arrayData, ok := data.([]any); ok {
-			return v.parseIssuerAuthArray(arrayData)
+			return parseIssuerAuthArray(arrayData)
 		}
 		return nil, fmt.Errorf("expected []byte for issuer auth, got %T", data)
 	}

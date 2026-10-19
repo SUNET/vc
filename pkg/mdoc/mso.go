@@ -69,6 +69,7 @@ type MSOBuilder struct {
 	certChain       []*x509.Certificate
 	namespaces      map[string][]MSOIssuerSignedItem
 	digestIDCounter map[string]uint
+	status          *StatusReference
 	// saltBytes, when non-zero, fixes EVERY element's random salt to
 	// exactly this length - see WithSaltBytes's doc.
 	saltBytes int
@@ -111,6 +112,15 @@ func (b *MSOBuilder) WithSigner(key crypto.Signer, certChain []*x509.Certificate
 		b.signerCert = certChain[0]
 	}
 	b.certChain = certChain
+	return b
+}
+
+// WithStatus attaches a Token Status List reference to the MSO, per
+// draft-ietf-oauth-status-list Section 6.3. Passing nil leaves the MSO
+// without a status parameter, which is what an issuer that allocated no
+// status entry must produce.
+func (b *MSOBuilder) WithStatus(ref *StatusReference) *MSOBuilder {
+	b.status = ref
 	return b
 }
 
@@ -263,6 +273,17 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 		},
 	}
 
+	// The status parameter is omitted entirely when no entry was allocated;
+	// an empty one would advertise revocability the issuer cannot deliver.
+	if b.status != nil {
+		mso["status"] = map[string]any{
+			"status_list": map[string]any{
+				"idx": b.status.Index,
+				"uri": b.status.URI,
+			},
+		}
+	}
+
 	// Encode MSO as CBOR
 	msoBytes, err := encoder.Marshal(mso)
 	if err != nil {
@@ -331,6 +352,13 @@ func VerifyMSO(signedMSO *COSESign1, issuerCert *x509.Certificate) (*MobileSecur
 	if err := Verify1(signedMSO, signedMSO.Payload, issuerCert.PublicKey, nil); err != nil {
 		return nil, fmt.Errorf("MSO signature verification failed: %w", err)
 	}
+	return DecodeMSOPayload(signedMSO)
+}
+
+// DecodeMSOPayload decodes the MSO carried in a COSE_Sign1 payload WITHOUT
+// verifying the signature. Only call it on a document whose signature has
+// already been verified; VerifyMSO is the function that does both.
+func DecodeMSOPayload(signedMSO *COSESign1) (*MobileSecurityObject, error) {
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
