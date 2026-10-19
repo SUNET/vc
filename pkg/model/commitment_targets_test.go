@@ -639,8 +639,24 @@ func TestDisclosableDescendantOfACommitmentTargetIsRefused(t *testing.T) {
 	assert.Contains(t, err.Error(), "identity.name")
 	assert.Contains(t, err.Error(), "non-object")
 
-	// A descendant that is NOT selectively disclosed is not processed by
-	// MakeCredential, so it is not this failure and must still load.
+	// A MANDATORY descendant is refused however it is disclosed, or not
+	// disclosed at all: ValidateDocument requires it to exist, and
+	// nothing exists beneath a string.
+	for _, sd := range []string{"allowed", "never", ""} {
+		mandatory := &sdjwtvc.VCTM{
+			VCT: "urn:example:1",
+			Claims: []sdjwtvc.Claim{
+				{Path: segment("identity"), SD: "always"},
+				{Path: segment("identity", "name"), SD: sd, Mandatory: true},
+			},
+		}
+		_, err = meta("identity").ResolveCommitmentTargets(CredentialSchemas{VCTM: mandatory})
+		require.Errorf(t, err, "a mandatory descendant with sd %q cannot survive a commitment", sd)
+		assert.Contains(t, err.Error(), "mandatory")
+	}
+
+	// A descendant that is neither disclosed nor mandatory is processed
+	// by nothing, so it is not this failure and must still load.
 	notDisclosed := &sdjwtvc.VCTM{
 		VCT: "urn:example:1",
 		Claims: []sdjwtvc.Claim{
@@ -649,7 +665,7 @@ func TestDisclosableDescendantOfACommitmentTargetIsRefused(t *testing.T) {
 		},
 	}
 	_, err = meta("identity").ResolveCommitmentTargets(CredentialSchemas{VCTM: notDisclosed})
-	assert.NoError(t, err, "only a disclosed descendant collides with the commitment")
+	assert.NoError(t, err, "an optional, undisclosed descendant collides with nothing")
 
 	// And a sibling is not a descendant.
 	sibling := &sdjwtvc.VCTM{

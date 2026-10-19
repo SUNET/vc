@@ -316,3 +316,44 @@ func TestDeriverDoesNotPrintItsSecret(t *testing.T) {
 // Deriver satisfies Source, which is what lets a stored implementation
 // replace it later without anything above changing.
 var _ Source = (*Deriver)(nil)
+
+// Two different subjects must not share a seed.
+//
+// The length prefix is what separates the fields, so a length it cannot
+// hold stops separating them: uint16(90465) is 24929, and
+// ("", "a"x65536+"b"x24929) encoded byte for byte like
+// ("a"x65536, "b"x24929). Same secret, same seed, different subjects -
+// and for nym_auth that is the same pseudonym for two people.
+func TestOverlongDerivationFieldsAreRefusedNotTruncated(t *testing.T) {
+	secret := make([]byte, 32)
+	for i := range secret {
+		secret[i] = byte(i)
+	}
+	deriver, err := NewDeriver(secret, 16)
+	if err != nil {
+		t.Fatalf("NewDeriver: %v", err)
+	}
+
+	long := strings.Repeat("a", 65536) + strings.Repeat("b", 24929)
+	if _, err := deriver.Seed(t.Context(), long, ""); err == nil {
+		t.Fatal("an over-long subject must be refused, not truncated into a collision")
+	}
+	if _, err := deriver.Seed(t.Context(), strings.Repeat("b", 24929), strings.Repeat("a", 65536)); err == nil {
+		t.Fatal("an over-long context must be refused too; seed_recover takes one directly")
+	}
+
+	// The boundary still derives, so ordinary callers are unaffected.
+	if _, err := deriver.Seed(t.Context(), strings.Repeat("a", 65535), ""); err != nil {
+		t.Fatalf("the longest representable subject must still derive: %v", err)
+	}
+
+	// And an ordinary pair is unchanged by the guard - existing
+	// derivations must not move.
+	before, err := deriver.Seed(t.Context(), "subject-1", "")
+	if err != nil {
+		t.Fatalf("ordinary derivation: %v", err)
+	}
+	if len(before) != 16 {
+		t.Fatalf("expected a 16-byte seed, got %d", len(before))
+	}
+}

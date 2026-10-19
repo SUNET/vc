@@ -134,7 +134,10 @@ func (d *Deriver) Seed(_ context.Context, subjectID, context_ string) ([]byte, e
 	// derivation whose output is a prefix of another derivation's is a
 	// surprise waiting for whoever reads this next. Naming the length
 	// makes the seed a function of all of its declared parameters.
-	info := derivationInfo(strconv.Itoa(d.seedBytes), context_, subjectID)
+	info, err := derivationInfo(strconv.Itoa(d.seedBytes), context_, subjectID)
+	if err != nil {
+		return nil, err
+	}
 	key, err := hkdf.Key(sha256.New, d.secret.bytes, nil, info, d.seedBytes)
 	if err != nil {
 		return nil, fmt.Errorf("seed: derivation failed: %w", err)
@@ -187,14 +190,32 @@ func (d Deriver) Format(f fmt.State, _ rune) {
 // two fields can be slid into one another: with a separator, a context of
 // "a" and a subject of "b.c" would produce the same info as "a.b" and "c",
 // and two different people would share a seed.
-func derivationInfo(fields ...string) string {
+func derivationInfo(fields ...string) (string, error) {
 	var out []byte
 	for _, f := range append([]string{derivationLabel}, fields...) {
+		if len(f) > maxDerivationField {
+			// The prefix is what separates the fields, so a length it
+			// cannot hold stops separating them. uint16(90465) is 24929,
+			// and ("", "a"x65536+"b"x24929) then encodes byte for byte
+			// like ("a"x65536, "b"x24929): two different subjects, one
+			// seed, from the same secret.
+			//
+			// Refused rather than widened: the prefix width is part of
+			// the derivation, so growing it would change every seed ever
+			// produced. No real subject identifier is this long.
+			return "", fmt.Errorf("seed: a derivation field of %d bytes exceeds the %d-byte limit, and would collide with a different one", len(f), maxDerivationField)
+		}
 		out = binary.BigEndian.AppendUint16(out, uint16(len(f)))
 		out = append(out, f...)
 	}
-	return string(out)
+	return string(out), nil
 }
+
+// maxDerivationField is the longest value a 2-byte length prefix can
+// describe. Enforced where the prefix is written, so a caller reaching
+// derivation directly - seed_recover -context, say - cannot slip past a
+// check placed anywhere else.
+const maxDerivationField = 1<<16 - 1
 
 // Commit returns the commitment a credential carries in place of the seed.
 //

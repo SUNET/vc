@@ -431,11 +431,27 @@ func (c *CredentialMetadata) checkDisclosable(vctm *sdjwtvc.VCTM, element string
 // above is written from.
 func checkNoDisclosableDescendants(vctm *sdjwtvc.VCTM, element string) error {
 	for _, claim := range vctm.Claims {
-		if claim.SD != "always" || !claimPathDescends(claim.Path, element) {
+		if !claimPathDescends(claim.Path, element) {
 			continue
 		}
-		return fmt.Errorf("the type metadata also discloses %q beneath it, and a commitment replaces that object with a string, so the issuer fails with \"invalid path: non-object\" after a status-list entry has been allocated",
-			flattenClaimPath(claim.Path))
+		switch {
+		case claim.SD == "always":
+			return fmt.Errorf("the type metadata also discloses %q beneath it, and a commitment replaces that object with a string, so the issuer fails with \"invalid path: non-object\" after a status-list entry has been allocated",
+				flattenClaimPath(claim.Path))
+		case claim.Mandatory:
+			// A different check, reached by a different route, with the
+			// same cost. ValidateDocument requires every mandatory claim
+			// to EXIST, whatever its sd, and nothing exists beneath a
+			// string - so this is refused however the descendant is
+			// disclosed, or not disclosed at all.
+			//
+			// The earlier version of this check looked only at sd
+			// "always", reasoning that MakeCredential processes nothing
+			// else. True, and beside the point: the document validator
+			// rejects it before that matters.
+			return fmt.Errorf("the type metadata marks %q beneath it mandatory, and a commitment replaces that object with a string, so document validation fails with \"mandatory claim is missing\" after a status-list entry has been allocated",
+				flattenClaimPath(claim.Path))
+		}
 	}
 	return nil
 }
