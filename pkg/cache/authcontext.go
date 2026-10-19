@@ -102,6 +102,9 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.RequestObjectID != "" {
 		c.indices[fmt.Sprintf("request_object_id:%s", doc.RequestObjectID)] = doc.SessionID
 	}
+	if doc.AuthSession != "" {
+		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -145,6 +148,8 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 			indexKey = fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
 		} else if query.RequestObjectID != "" {
 			indexKey = fmt.Sprintf("request_object_id:%s", query.RequestObjectID)
+		} else if query.AuthSession != "" {
+			indexKey = fmt.Sprintf("auth_session:%s", query.AuthSession)
 		} else {
 			return nil, errors.New("query must have at least one search field")
 		}
@@ -543,6 +548,9 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.RequestObjectID != "" {
 		c.indices[fmt.Sprintf("request_object_id:%s", doc.RequestObjectID)] = doc.SessionID
 	}
+	if doc.AuthSession != "" {
+		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -696,6 +704,9 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	if doc.RequestObjectID != "" {
 		delete(c.indices, fmt.Sprintf("request_object_id:%s", doc.RequestObjectID))
 	}
+	if doc.AuthSession != "" {
+		delete(c.indices, fmt.Sprintf("auth_session:%s", doc.AuthSession))
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.Token.AccessToken))
 	}
@@ -736,4 +747,63 @@ func (c *MemoryStore) MarkCodeAsForfeited(ctx context.Context, id string) error 
 // Create is an alias for Save to match the Session API
 func (c *MemoryStore) Create(ctx context.Context, doc *AuthorizationContext) error {
 	return c.Save(ctx, doc)
+}
+
+// ClaimAuthSession atomically takes the Interactive Authorization handle off
+// the context it names. See AuthContextStore.ClaimAuthSession.
+//
+// The returned document is a COPY, deliberately. Get hands out the pointer
+// the cache holds, so a caller that cleared a field on it would be mutating
+// the stored document - which is exactly how this was broken before: the
+// clear reached the stored copy first, deleteIndices then saw an empty
+// AuthSession and left the index behind, and the handle stayed resolvable.
+func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
+	if authSession == "" {
+		return nil, errors.New("authSession cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("auth_session:%s", authSession)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	stored := item.Value()
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if stored.AuthSession != authSession {
+		return nil, ErrNoDocuments
+	}
+
+	claimed := *stored
+
+	// The handle is cleared on the RETURNED copy too, not just the stored
+	// one. The caller already has the handle - it is what they asked with -
+	// and anything downstream that persists this document would otherwise
+	// write it straight back and make the exchange claimable again. That is
+	// not hypothetical: finalisePresentationVerification updates the
+	// context it is handed, so a presentation-sourced scope resurrected the
+	// handle it had just consumed.
+	claimed.AuthSession = ""
+
+	// Only the handle. AuthSessionDPoPThumbprint is the binding the
+	// authorization code inherits, and the Token Endpoint checks it when
+	// the code is redeemed - clearing it here would hand out a code that
+	// any key could spend.
+	stored.AuthSession = ""
+	delete(c.indices, indexKey)
+	// Claiming must not extend the code's lifetime; the Mongo $unset does not either.
+	c.cache.Set(sessionID, stored, ttlcache.PreviousOrDefaultTTL)
+
+	return &claimed, nil
 }

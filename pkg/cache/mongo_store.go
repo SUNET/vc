@@ -54,6 +54,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetSparse(true),
 		},
 		{
+			Keys:    bson.D{{Key: "auth_session", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			Keys:    bson.D{{Key: "request_object_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
@@ -601,5 +605,47 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	if query.RequestObjectID != "" {
 		return bson.M{"request_object_id": query.RequestObjectID}
 	}
+	if query.AuthSession != "" {
+		return bson.M{"auth_session": query.AuthSession}
+	}
 	return nil
+}
+
+// ClaimAuthSession atomically takes the Interactive Authorization handle off
+// the context it names. See AuthContextStore.ClaimAuthSession.
+//
+// One FindOneAndUpdate, returning the document as it was BEFORE the unset,
+// so the caller still sees the DPoP thumbprint the exchange is bound to.
+// The filter matching the handle is what makes it one-shot: the second
+// request to arrive matches nothing, because the first has already removed
+// the field it filters on.
+//
+// Replacing the whole document with Update could not do this - two requests
+// that both read the context would both write it, and both would proceed.
+func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
+	if authSession == "" {
+		return nil, errors.New("authSession cannot be empty")
+	}
+
+	filter := bson.M{"auth_session": authSession}
+	// Only the handle. The thumbprint is the binding the authorization
+	// code inherits - see the memory store's note.
+	update := bson.M{"$unset": bson.M{"auth_session": ""}}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
+	var claimed AuthorizationContext
+	if err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&claimed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to claim auth_session: %w", err)
+	}
+
+	// Before-image, so the decoded document still carries the handle.
+	// Cleared for the same reason the memory store clears it: a caller that
+	// persists this document would write the handle back - see the note
+	// there.
+	claimed.AuthSession = ""
+
+	return &claimed, nil
 }
