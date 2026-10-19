@@ -31,7 +31,7 @@ func mdocMeta(commitments map[string]*CommitmentClaim) *CredentialMetadata {
 	}
 }
 
-func sscClaim() *CommitmentClaim { return &CommitmentClaim{Seed: "primary", Subject: "pan"} }
+func sscClaim() *CommitmentClaim { return &CommitmentClaim{Seed: "primary", Subjects: []string{"pan"}} }
 
 // An mdoc document is flat and keyed by BARE element identifier. The
 // namespace-qualified spelling is how the claim is named everywhere else

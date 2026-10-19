@@ -48,7 +48,7 @@ func derivedSource() *model.SeedSource {
 }
 
 func sscClaim() *model.CommitmentClaim {
-	return &model.CommitmentClaim{Seed: "primary", Subject: "personal_administrative_number"}
+	return &model.CommitmentClaim{Seed: "primary", Subjects: []string{"personal_administrative_number"}}
 }
 
 func inject(t *testing.T, c *Client, doc map[string]any) map[string]any {
@@ -211,7 +211,7 @@ func TestScopeWithoutCommitmentsIsUntouched(t *testing.T) {
 // first would derive the seed from the wrong subject - and report nothing,
 // because both lookups succeed.
 func TestLiteralDottedKeyDoesNotShadowTheNestedPath(t *testing.T) {
-	claim := &model.CommitmentClaim{Seed: "primary", Subject: "identity.national_number"}
+	claim := &model.CommitmentClaim{Seed: "primary", Subjects: []string{"identity.national_number"}}
 	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
 	require.NoError(t, c.initSeedSources())
 
@@ -231,10 +231,89 @@ func TestLiteralDottedKeyDoesNotShadowTheNestedPath(t *testing.T) {
 		"a nested format must read the nested path, not a literal key that happens to spell it")
 }
 
+// Several configured identifiers are derived over IN ORDER.
+//
+// One identifier is frequently not an identifier: a personnummer is
+// unique within its country, a document number within its scheme. A
+// deployment issuing across populations configures the discriminator
+// too, and the seed must then be a function of both, in the configured
+// order - not of the first one, and not of whichever the map iteration
+// happened to hand over.
+func TestOrderedSubjectIdentifiersAreDerivedOverInOrder(t *testing.T) {
+	claim := &model.CommitmentClaim{
+		Seed:     "primary",
+		Subjects: []string{"issuing_country", "personal_administrative_number"},
+	}
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
+	require.NoError(t, c.initSeedSources())
+
+	doc := map[string]any{
+		"issuing_country":                "SE",
+		"personal_administrative_number": "198001011234",
+	}
+	got := inject(t, c, doc)
+
+	source := c.seedSources["primary"]
+	both, err := source.Seed(t.Context(), []string{"SE", "198001011234"}, "")
+	require.NoError(t, err)
+	want, err := seed.Commit("", both)
+	require.NoError(t, err)
+	assert.Equal(t, hex.EncodeToString(want), got["ssc"],
+		"the commitment must be over both configured identifiers, in the configured order")
+
+	// Not the first identifier alone, which is what dropping the rest of
+	// the list would silently produce.
+	first, err := source.Seed(t.Context(), []string{"SE"}, "")
+	require.NoError(t, err)
+	alone, err := seed.Commit("", first)
+	require.NoError(t, err)
+	assert.NotEqual(t, hex.EncodeToString(alone), got["ssc"])
+
+	// And order is part of the derivation: the same two identifiers
+	// configured the other way round are a different subject.
+	reversed := &model.CommitmentClaim{
+		Seed:     "primary",
+		Subjects: []string{"personal_administrative_number", "issuing_country"},
+	}
+	rc := commitmentClient(t, openid4vp.FormatSDJWTVC, reversed, derivedSource())
+	require.NoError(t, rc.initSeedSources())
+	assert.NotEqual(t, got["ssc"], inject(t, rc, doc)["ssc"],
+		"reordering the configured list must repseudonymise, not be a no-op")
+}
+
+// A configured identifier that is not in the document refuses the
+// issuance; it is never dropped from the list.
+//
+// Dropping it is the repair that looks harmless and is not: with
+// ["issuing_country","pan"] and no country present, deriving over ["pan"]
+// alone produces exactly the seed a single-identifier deployment issues
+// for that same personnummer - so a subject missing one identifier would
+// be handed another subject's pseudonym, with nothing reported.
+func TestAnUnresolvedSubjectIdentifierRefusesRatherThanShorteningTheList(t *testing.T) {
+	claim := &model.CommitmentClaim{
+		Seed:     "primary",
+		Subjects: []string{"issuing_country", "personal_administrative_number"},
+	}
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
+	require.NoError(t, c.initSeedSources())
+
+	for _, doc := range []map[string]any{
+		{"personal_administrative_number": "198001011234"},
+		{"issuing_country": "", "personal_administrative_number": "198001011234"},
+		{"issuing_country": "SE"},
+	} {
+		in, err := json.Marshal(doc)
+		require.NoError(t, err)
+		_, err = c.injectCommitments(t.Context(), "nym_auth", in, model.CredentialSchemas{})
+		require.Errorf(t, err, "%v must refuse rather than derive over what resolved", doc)
+		assert.Contains(t, err.Error(), "subject ")
+	}
+}
+
 // And the commitment itself is written nested, where the format has
 // nesting - otherwise the signer looks for a claim that is not there.
 func TestNestedFormatWritesTheCommitmentNested(t *testing.T) {
-	claim := &model.CommitmentClaim{Seed: "primary", Subject: "national_number"}
+	claim := &model.CommitmentClaim{Seed: "primary", Subjects: []string{"national_number"}}
 	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
 	c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
 		"nym.ssc": claim,
@@ -256,7 +335,7 @@ func TestNestedFormatWritesTheCommitmentNested(t *testing.T) {
 // missing an attribute nobody asked to remove. Silently, because the
 // injection succeeded.
 func TestPathConflictRefusesRatherThanDeletingTheClaim(t *testing.T) {
-	claim := &model.CommitmentClaim{Seed: "primary", Subject: "national_number"}
+	claim := &model.CommitmentClaim{Seed: "primary", Subjects: []string{"national_number"}}
 	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
 	c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
 		"identity.ssc": claim,
@@ -379,10 +458,10 @@ func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
 func TestSubjectsResolveAgainstTheReceivedDocument(t *testing.T) {
 	c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
 	c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
-		"a_ssc": {Seed: "primary", Subject: "personal_administrative_number"},
+		"a_ssc": {Seed: "primary", Subjects: []string{"personal_administrative_number"}},
 		// Sorts AFTER a_ssc, and its subject is a_ssc's target - which the
 		// received document does not carry.
-		"z_other": {Seed: "primary", Subject: "a_ssc"},
+		"z_other": {Seed: "primary", Subjects: []string{"a_ssc"}},
 	}
 	require.NoError(t, c.initSeedSources())
 
@@ -403,9 +482,9 @@ func TestInjectionIsOrderIndependent(t *testing.T) {
 	for i := range 50 {
 		c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
 		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
-			"ssc":   {Seed: "primary", Subject: "personal_administrative_number"},
-			"other": {Seed: "primary", Subject: "given_name", Context: "other"},
-			"third": {Seed: "primary", Subject: "family_name", Context: "third"},
+			"ssc":   {Seed: "primary", Subjects: []string{"personal_administrative_number"}},
+			"other": {Seed: "primary", Subjects: []string{"given_name"}, Context: "other"},
+			"third": {Seed: "primary", Subjects: []string{"family_name"}, Context: "third"},
 		}
 		require.NoError(t, c.initSeedSources())
 
@@ -463,11 +542,18 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 			want: "no seed source named",
 		},
 		{
-			name: "a claim with no subject path",
+			name: "a claim with no subject paths",
 			mutate: func(c *Client) {
-				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"].Subject = ""
+				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"].Subjects = nil
 			},
-			want: "no subject path named",
+			want: "no subject paths named",
+		},
+		{
+			name: "a claim with an empty subject path among several",
+			mutate: func(c *Client) {
+				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"].Subjects = []string{"issuing_country", "  "}
+			},
+			want: "subject path 2 of 2 is empty",
 		},
 		{
 			name: "an unregistered commitment function",
@@ -550,7 +636,7 @@ func TestInjectionErrorsDoNotCarryTheSubject(t *testing.T) {
 // actually is rather than descended into.
 func TestPathResolution(t *testing.T) {
 	t.Run("nested", func(t *testing.T) {
-		claim := &model.CommitmentClaim{Seed: "primary", Subject: "identity.national_number"}
+		claim := &model.CommitmentClaim{Seed: "primary", Subjects: []string{"identity.national_number"}}
 		c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
 		require.NoError(t, c.initSeedSources())
 
@@ -561,7 +647,7 @@ func TestPathResolution(t *testing.T) {
 	})
 
 	t.Run("a flat key containing dots", func(t *testing.T) {
-		claim := &model.CommitmentClaim{Seed: "primary", Subject: "eu.europa.ec.eudi.pid.1.personal_administrative_number"}
+		claim := &model.CommitmentClaim{Seed: "primary", Subjects: []string{"eu.europa.ec.eudi.pid.1.personal_administrative_number"}}
 		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
 		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
 			"eu.europa.ec.eudi.nym_auth.1.ssc": claim,

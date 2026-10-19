@@ -2393,19 +2393,34 @@ type CommitmentClaim struct {
 	// configuration naming it is refused at startup.
 	Source string `yaml:"source,omitempty" validate:"omitempty,oneof=holder" doc_example:"\"holder\""`
 
-	// Subject is a dotted path into the document data naming the stable
-	// subject identifier this claim's seed is derived from.
+	// Subjects is an ORDERED list of dotted paths into the document data
+	// naming the stable subject identifiers this claim's seed is derived
+	// from.
 	//
-	// It is the ONE input that separates one person's seed from another's,
-	// so what it points at decides what "the same person" means for every
-	// pseudonym built on this credential. A deployment issuing a Swedish
-	// PID might point it at the personnummer.
+	// They are the only inputs that separate one person's seed from
+	// another's, so what they point at decides what "the same person"
+	// means for every pseudonym built on this credential.
 	//
-	// A path that resolves to nothing, or to an empty string, refuses the
-	// issuance. There is no fallback: deriving over "" would hand every
-	// subject whose identity did not resolve the same seed, and therefore
-	// the same pseudonym.
-	Subject string `yaml:"subject,omitempty" validate:"required_with=Seed" doc_example:"\"personal_administrative_number\""`
+	// A list rather than one path because one identifier is frequently
+	// not an identifier on its own: a national personal number is unique
+	// within its country and a document number within its scheme, so the
+	// country or the scheme has to be derived over as well or two people
+	// in different populations collide. A deployment issuing a Swedish
+	// PID might configure the personnummer alone; one issuing across
+	// member states configures the issuing country and the personnummer,
+	// in that order.
+	//
+	// ORDER IS PART OF THE DERIVATION. ["a","b"] and ["b","a"] are
+	// different seeds, so reordering this list repseudonymises everyone
+	// as surely as changing the secret does. A one-element list derives
+	// exactly what that identifier derived on its own.
+	//
+	// Every path must resolve, to a non-empty string. There is no
+	// fallback and no skipping: deriving over "" would hand every subject
+	// whose identity did not resolve the same seed - and dropping an
+	// absent entry would be worse, since ["a",""] would then derive what
+	// ["a"] derives and hand one subject another subject's pseudonym.
+	Subjects []string `yaml:"subjects,omitempty" validate:"required_with=Seed,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
 
 	// Commit names the commitment function. Empty means "sha-256", which
 	// is the only one registered.

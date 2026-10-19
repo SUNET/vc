@@ -100,8 +100,13 @@ func (c *Client) checkCommitmentClaims() error {
 			if _, ok := c.seedSources[claim.Seed]; !ok {
 				return fmt.Errorf("%s: names seed source %q, which is not configured in issuer.seeds", where, claim.Seed)
 			}
-			if claim.Subject == "" {
-				return fmt.Errorf("%s: no subject path named; a seed must be a function of some stable identifier", where)
+			if len(claim.Subjects) == 0 {
+				return fmt.Errorf("%s: no subject paths named; a seed must be a function of some stable identifier", where)
+			}
+			for i, path := range claim.Subjects {
+				if strings.TrimSpace(path) == "" {
+					return fmt.Errorf("%s: subject path %d of %d is empty", where, i+1, len(claim.Subjects))
+				}
 			}
 			if _, err := seed.CommitmentBytes(claim.Commit); err != nil {
 				return fmt.Errorf("%s: %w", where, err)
@@ -191,8 +196,8 @@ func decodeDocumentData(documentData []byte) (map[string]any, error) {
 // pass needs already settled: nothing below reads configuration or the
 // document again, which is what makes the pass order-independent.
 type resolvedCommitment struct {
-	target    model.CommitmentTarget
-	subjectID string
+	target     model.CommitmentTarget
+	subjectIDs []string
 }
 
 // injectCommitments writes this scope's seed-backed claims into the
@@ -254,12 +259,12 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 			return nil, fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
 		}
 
-		subjectID, err := subjectIdentifier(doc, target.Claim.Subject, flat)
+		subjectIDs, err := subjectIdentifiers(doc, target.Claim.Subjects, flat)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", where, err)
 		}
 
-		pending = append(pending, resolvedCommitment{target: target, subjectID: subjectID})
+		pending = append(pending, resolvedCommitment{target: target, subjectIDs: subjectIDs})
 	}
 
 	for _, p := range pending {
@@ -286,7 +291,7 @@ func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCo
 		return fmt.Errorf("%s: seed source %q is not available", where, p.target.Claim.Seed)
 	}
 
-	seedValue, err := source.Seed(ctx, []string{p.subjectID}, p.target.Claim.Context)
+	seedValue, err := source.Seed(ctx, p.subjectIDs, p.target.Claim.Context)
 	if err != nil {
 		// The subject identifier is NOT in this error: it is the thing
 		// that identifies the person, and this error reaches a log.
@@ -328,6 +333,30 @@ func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCo
 // over "" would give every subject whose identity did not resolve the same
 // seed, and so the same pseudonym - which is the exact failure the
 // identifier exists to prevent, arriving silently.
+// subjectIdentifiers resolves the configured paths IN ORDER.
+//
+// Every path must resolve to a non-empty string, and a failure refuses
+// the issuance rather than deriving over what did resolve. Skipping an
+// absent entry would be the dangerous repair: ["a",""] would then derive
+// what ["a"] derives, so a subject missing one identifier would be handed
+// the seed - and the pseudonym - of a different subject.
+func subjectIdentifiers(doc map[string]any, paths []string, flat bool) ([]string, error) {
+	if len(paths) == 0 {
+		// Unreachable past startup validation, which is why it is here:
+		// an empty list would otherwise derive from nothing at all.
+		return nil, errors.New("no subject paths are configured")
+	}
+	out := make([]string, 0, len(paths))
+	for i, path := range paths {
+		id, err := subjectIdentifier(doc, path, flat)
+		if err != nil {
+			return nil, fmt.Errorf("subject %d of %d: %w", i+1, len(paths), err)
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 func subjectIdentifier(doc map[string]any, path string, flat bool) (string, error) {
 	raw, present := lookupPath(doc, path, flat)
 	if !present || raw == nil {

@@ -73,7 +73,9 @@ common:
       commitments:
         ssc:
           seed: primary
-          subject: personal_administrative_number
+          subjects:
+            - issuing_country
+            - personal_administrative_number
           # commit: sha-256     # default, and the only registered function
           # context: ""         # default; see below before setting one
           # encoding: base64    # default by format; see below
@@ -95,22 +97,36 @@ paths against the pinned contexts and refusing undefined or non-absolute
 predicates, which belongs with the JSON-LD context handling rather than
 here.
 
-### `subject` — what "the same person" means
+### `subjects` — what "the same person" means
 
-`subject` is a path into the document data the issuer receives, naming the
-stable identifier the seed is derived from. It is the **one** input that
-separates one person's seed from another's, so what it points at decides
-what "the same person" means for every pseudonym built on this credential.
-A deployment issuing a Swedish PID might point it at the personnummer.
+`subjects` is an **ordered list** of paths into the document data the
+issuer receives, naming the stable identifiers the seed is derived from.
+They are the only inputs that separate one person's seed from another's,
+so what they point at decides what "the same person" means for every
+pseudonym built on this credential.
+
+A list rather than one path because one identifier is frequently not an
+identifier on its own: a national personal number is unique within its
+country and a document number within its scheme. A deployment issuing a
+Swedish PID to Swedish residents may configure the personnummer alone; one
+issuing across member states configures the issuing country *and* the
+personnummer, or two people who share a number in different populations
+share a pseudonym.
+
+**Order is part of the derivation.** `[a, b]` and `[b, a]` are different
+seeds, so reordering the list repseudonymises everyone exactly as changing
+the secret does. A one-element list derives precisely what that identifier
+derived on its own, so adding a discriminator to an existing deployment is
+a repseudonymisation and nothing else is.
 
 For `mso_mdoc` the document data is flat and keyed by element identifier,
 so the path is the element identifier — including one containing dots,
 which is read as a single key and not as a descent. For every other format
 a dotted path descends into the JSON object.
 
-`subject` is read from the document data **as received**, before any
-commitment is written into it. A `subject` naming another commitment's
-claim path therefore refuses rather than deriving a seed from a value this
+Each path is read from the document data **as received**, before any
+commitment is written into it. A path naming another commitment's claim
+path therefore refuses rather than deriving a seed from a value this
 issuer just computed.
 
 For `mso_mdoc`, the claim path must be an element the schema declares. The
@@ -124,10 +140,13 @@ where it has the schemas; the issuer refuses it at issuance, where it
 receives them inline.
 
 A path that resolves to nothing, to a non-string, or to an empty string
-**refuses the issuance**. There is no fallback: deriving over `""` would
-give every subject whose identity failed to resolve the same seed, and so
-the same pseudonym — which is exactly the failure the identifier exists to
-prevent, arriving silently.
+**refuses the issuance**. There is no fallback and no skipping. Deriving
+over `""` would give every subject whose identity failed to resolve the
+same seed; dropping the entry instead would be worse still, because
+`[issuing_country, pan]` with no country present would then derive what
+`[pan]` derives — handing a subject the pseudonym of a different subject
+in a single-identifier deployment, silently, which is exactly the failure
+these identifiers exist to prevent.
 
 ### `context` — leave it empty
 
@@ -188,12 +207,20 @@ formats it is the subject's `id`. The root segment is what counts, because
 
 ```
 seed = HKDF-SHA256(secret, info = lp("vc/seed/v1") || lp(seed_bytes)
-                                  || lp(context) || lp(subject))
+                                  || lp(context)
+                                  || lp(subject_1) || ... || lp(subject_n))
 commitment = SHA-256(seed)
 ```
 
 `lp(x)` is a two-byte big-endian length followed by the bytes, so no two
-context fields can be slid into one another.
+context fields can be slid into one another, and a field longer than 65535
+bytes is refused rather than truncated into a collision.
+
+There is deliberately **no field count** in the info string. It is
+unnecessary — length-prefixed fields are self-delimiting, so `["ab","c"]`,
+`["a","bc"]` and `["abc"]` already derive three different seeds — and it
+is forbidden, because a count would sit before the identifiers and change
+what a one-element list derives, moving every seed ever issued.
 
 The file holds the secret **base64url-encoded**, and the decoded value must
 be at least 32 bytes — 32 raw bytes in the file decode to 24 or fail
@@ -248,11 +275,16 @@ on:
 make build-seed-recover
 
 ./bin/seed_recover -config /etc/vc/config.yaml -seed primary \
-    -subject 198001011234 \
+    -subject SE -subject 198001011234 \
     -pseudonym-config known-offender-matching-ssc \
     -verifier-id x509_san_dns:rp.example \
     -expect <pseudonym the verifier reported>
 ```
+
+Repeat `-subject` once per configured path, **in the configured order**:
+order is part of the derivation, so the same identifiers given the other
+way round reproduce a different seed and the tool will report no match
+rather than report an error.
 
 It exits 0 on a match and 2 on a mismatch, so it can drive a loop over
 candidate subjects. `-expect` requires `-pseudonym-config`: without one
