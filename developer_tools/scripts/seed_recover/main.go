@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
@@ -110,9 +111,9 @@ func run() error {
 		// cannot read a comparison that did not happen.
 		return nil
 	}
-	want, err := hex.DecodeString(strings.TrimSpace(*expect))
+	want, err := parseExpectation(*expect)
 	if err != nil {
-		return fmt.Errorf("-expect is not hex: %w", err)
+		return err
 	}
 	// Constant time, which matters less here than the habit of it: this
 	// compares a value a Verifier supplied against one computed from a
@@ -123,6 +124,25 @@ func run() error {
 	}
 	fmt.Println("match:      yes")
 	return nil
+}
+
+// parseExpectation reads the -expect pseudonym.
+//
+// Length is checked as well as encoding. A pseudonym is a SHA-256 digest,
+// so a valid-hex value of any other length cannot match any subject - and
+// reporting that as "match: no" tells the operator the wrong thing: the
+// documented remapping loop walks every candidate and reports a mismatch
+// for each, when the input was never a pseudonym at all. An input error
+// says so once, instead.
+func parseExpectation(expect string) ([]byte, error) {
+	want, err := hex.DecodeString(strings.TrimSpace(expect))
+	if err != nil {
+		return nil, fmt.Errorf("-expect is not hex: %w", err)
+	}
+	if len(want) != sha256.Size {
+		return nil, fmt.Errorf("-expect decodes to %d bytes; a pseudonym is %d, so this value cannot match any subject", len(want), sha256.Size)
+	}
+	return want, nil
 }
 
 func computePseudonym(config string, seedValue []byte, verifierID, verifierContext, userValue string) ([]byte, error) {

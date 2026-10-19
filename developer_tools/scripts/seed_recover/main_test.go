@@ -62,3 +62,39 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 		assert.Contains(t, err.Error(), "permissive")
 	})
 }
+
+// A malformed -expect is an input error, not a mismatch.
+//
+// A valid-hex value of the wrong length decoded happily and then compared
+// unequal to everything, so the documented remapping loop reported
+// "match: no" for every candidate - telling the operator that no subject
+// matches, when the truth is that the value they passed is not a
+// pseudonym at all.
+func TestExpectMustBeAFullLengthDigest(t *testing.T) {
+	const valid = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+
+	for _, tc := range []struct{ name, in string }{
+		{"too short", "00"},
+		{"one byte short", valid[:len(valid)-2]},
+		{"too long", valid + "ab"},
+		{"whitespace only", "   "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseExpectation(tc.in)
+			require.Error(t, err, "this cannot match any subject, so it must not be reported as a mismatch")
+			assert.Contains(t, err.Error(), "-expect")
+		})
+	}
+
+	t.Run("not hex at all", func(t *testing.T) {
+		_, err := parseExpectation("zz")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not hex")
+	})
+
+	t.Run("a real digest, with surrounding whitespace", func(t *testing.T) {
+		got, err := parseExpectation("  " + valid + "\n")
+		require.NoError(t, err, "an operator pasting a value must not be punished for a newline")
+		assert.Len(t, got, 32)
+	})
+}
