@@ -241,3 +241,48 @@ func TestPinnedClaimsStayAuthoritativeBetweenDerivationSteps(t *testing.T) {
 		t.Fatal("a derivation that tried to write the pinned claim must stay visible in the outputs")
 	}
 }
+
+// An object-valued pin must not be mutated by the steps it survives.
+//
+// MergeNestedClaims writes INTO existing nested maps, so assigning the pin
+// itself into the working claims let a derivation change it: a step
+// rewriting a presented address.country changed the pin too, and every
+// later step - and the caller's final restoration - then used the derived
+// value while believing it was the proved one. Cloning the snapshot once
+// is not enough; it has to be cloned on each restoration.
+//
+// The derivation has to write INTO the pinned object for this to bite,
+// which is what a dotted output does; a step that merely runs alongside
+// never touches it, and a test using one passes either way.
+func TestObjectValuedPinSurvivesTheChain(t *testing.T) {
+	list := []primitives.Derivation{
+		{Lowercase: &primitives.LowercaseArgs{Input: "address.country"}},
+	}
+	pin := map[string]any{"address": map[string]any{"country": "DK"}}
+	claims := map[string]any{
+		"address": map[string]any{"country": "SE", "street_address": "stored"},
+	}
+
+	out, err := ApplyDerivationsPinned(list, claims, time.Now(), pin)
+	if err != nil {
+		t.Fatalf("pinned: %v", err)
+	}
+
+	// The derivation ran against the PINNED value, not the stored one.
+	derivedAddress, ok := out["address"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a nested address output, got %T", out["address"])
+	}
+	if derivedAddress["country"] != "dk" {
+		t.Fatalf("the step should have read the pinned DK, got %v", derivedAddress["country"])
+	}
+
+	// And the caller's pin is untouched by it.
+	address, ok := pin["address"].(map[string]any)
+	if !ok {
+		t.Fatal("the pin lost its shape")
+	}
+	if address["country"] != "DK" {
+		t.Fatalf("the pin was mutated: country=%v", address["country"])
+	}
+}

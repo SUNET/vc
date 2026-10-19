@@ -162,6 +162,10 @@ func normaliseFullDate(v any) (string, error) {
 	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
 }
 
+// maxExactJSONInt is the largest integer a float64 represents exactly,
+// which is what the issued document's numbers become.
+const maxExactJSONInt = 1<<53 - 1
+
 // documentValue turns a presented claim value into one the issued document
 // can carry: JSON-encodable, and sharing nothing with the presentation.
 //
@@ -229,6 +233,29 @@ func documentValue(v any) (any, error) {
 		return string(typed), nil
 	case mdoc.TDate:
 		return string(typed), nil
+
+	// An integer that cannot survive the issuer's float64 round trip is
+	// refused rather than quietly changed.
+	//
+	// CBOR keeps an integer exact, but the issuer parses the document
+	// JSON into map[string]any (pkg/mdoc/issuer.go), where every number
+	// becomes a float64. A presented uint64(9007199254740993) is issued
+	// as 9007199254740992: a verified value altered by one, in a
+	// credential that says it came from the presentation.
+	//
+	// Refusing is the only honest answer here. The value cannot be
+	// carried, and issuing a different number than the holder proved is
+	// exactly what this copy exists to prevent.
+	case int64:
+		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
+			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
+		}
+		return typed, nil
+	case uint64:
+		if typed > maxExactJSONInt {
+			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
+		}
+		return typed, nil
 
 	default:
 		return v, nil

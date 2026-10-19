@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -16,6 +17,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -456,4 +458,58 @@ func TestChildSessionLiteralCarriesPresentedClaims(t *testing.T) {
 	require.True(t, carries,
 		"the child session literal in %s must set PresentedClaims, or issuance from a pre-authorized child reads an empty provenance and derivations overwrite verified claims",
 		source)
+}
+
+// An integer the issued document cannot carry exactly is refused.
+//
+// CBOR keeps an integer exact, but the issuer parses the document JSON
+// into map[string]any where every number becomes a float64, so a
+// presented uint64(9007199254740993) was issued as 9007199254740992 -
+// a verified value altered by one, in a credential claiming it came from
+// the presentation.
+func TestPresentedIntegersThatCannotSurviveAreRefused(t *testing.T) {
+	target := nymAuthTarget(t)
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"org.iso.18013.5.1.big"},
+		DocumentClaims: map[string]string{"org.iso.18013.5.1.big": "big"},
+	}
+	copyOne := func(t *testing.T, v any) (map[string]any, error) {
+		t.Helper()
+		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+			"org.iso.18013.5.1": {"big": v},
+		})
+		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+	}
+
+	for _, tc := range []struct {
+		name string
+		v    any
+	}{
+		{"unsigned beyond float64's exact range", uint64(9007199254740993)},
+		{"signed beyond it", int64(-9007199254740993)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := copyOne(t, tc.v)
+			require.Error(t, err, "issuing a different number than was proved is not an option")
+			assert.Contains(t, err.Error(), "cannot be carried exactly")
+		})
+	}
+
+	// At the boundary it still round-trips, so ordinary values are not
+	// caught by this.
+	for _, tc := range []struct {
+		name string
+		v    any
+	}{
+		{"the largest exact integer", uint64(9007199254740991)},
+		{"an everyday one", uint64(42)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copied, err := copyOne(t, tc.v)
+			require.NoError(t, err)
+			encoded, err := json.Marshal(copied)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), fmt.Sprintf("%d", tc.v))
+		})
+	}
 }
