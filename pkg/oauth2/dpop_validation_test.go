@@ -460,6 +460,21 @@ func TestSameHTU(t *testing.T) {
 		assert.False(t, SameHTU("https://i.example/token", "https://İ.example/token"))
 	})
 
+	// A resolver IDNA profile rejects "_", and the old lowercase fallback
+	// then turned İ.my_host.example into i.my_host.example.
+	t.Run("a host with an underscore is mapped, not lowercased", func(t *testing.T) {
+		assert.True(t, SameHTU("https://İ.my_host.example/token", "https://xn--i-9bb.my_host.example/token"))
+		assert.True(t, SameHTU("https://xn--i-9bb.my_host.example/token", "https://İ.my_host.example/token"))
+		assert.True(t, SameHTU("https://MY_HOST.Example/token", "https://my_host.example/token"))
+		assert.False(t, SameHTU("https://İ.my_host.example/token", "https://i.my_host.example/token"))
+		assert.False(t, SameHTU("https://i.my_host.example/token", "https://İ.my_host.example/token"))
+	})
+
+	t.Run("a host IDNA rejects is compared as written", func(t *testing.T) {
+		assert.False(t, SameHTU("https://A\u200dB.example/token", "https://a\u200db.example/token"))
+		assert.True(t, SameHTU("https://a\u200db.example/token", "https://a\u200db.example/token"))
+	})
+
 	t.Run("a non-default port with a leading zero is the same port", func(t *testing.T) {
 		assert.True(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com:8443/token"))
 		assert.False(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com/token"))

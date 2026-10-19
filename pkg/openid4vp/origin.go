@@ -10,7 +10,7 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// browserHost serialises a hostname the way a URL parser in a browser
+// BrowserHost serialises a hostname the way a URL parser in a browser
 // does: UTS #46 ToASCII with the flags the WHATWG URL Standard specifies
 // for a non-strict parse.
 //
@@ -21,7 +21,7 @@ import (
 // no comparison could ever match. So those three are turned back off
 // after it, and the bidi and joiner checks, which a browser does apply,
 // are kept.
-var browserHost = idna.New(
+var BrowserHost = idna.New(
 	idna.MapForLookup(),
 	idna.BidiRule(),
 	idna.StrictDomainName(false),
@@ -87,7 +87,7 @@ func CanonicalOrigin(rawURL string) (string, error) {
 	default:
 		// ToASCII does the case folding too, as part of the UTS #46
 		// mapping, so there is no ToLower here to disagree with it.
-		host, err = browserHost.ToASCII(host)
+		host, err = BrowserHost.ToASCII(host)
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}

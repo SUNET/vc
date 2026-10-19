@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/net/idna"
 )
 
 var (
@@ -337,13 +337,14 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	// pre-lowercasing would merge distinct hosts and split equivalent ones.
 	if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = addr.String()
-	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
-		// A Unicode host and its A-label are the same host. ToASCII only
-		// ever narrows the spelling, so a failure leaves the lowercased
-		// form rather than rejecting a proof over it.
+	} else if ascii, err := openid4vp.BrowserHost.ToASCII(host); err == nil {
+		// A Unicode host and its A-label are the same host. The browser
+		// profile accepts hosts a resolver profile rejects (e.g. "_").
 		host = ascii
 	} else {
-		host = strings.ToLower(host)
+		// No fallback: lowercasing an unmappable host can merge it with a
+		// distinct one, so the caller compares as written instead.
+		return "", false
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
