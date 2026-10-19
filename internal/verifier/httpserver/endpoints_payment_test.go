@@ -60,6 +60,44 @@ func TestPaymentPage(t *testing.T) {
 		assert.NotContains(t, body, "{{", "template actions must all have been expanded")
 	})
 
+	// The wallet link must hand off through the shared helper, so the
+	// session is marked same-device.
+	//
+	// /verification/direct_post only returns redirect_uri for a session
+	// marked same-device, so without the preference POST the wallet has
+	// nowhere to send the user back to and the operator has to find this
+	// page again by hand. It cannot be an awaited fetch before the
+	// navigation either: Chrome on Android only lets a page launch a
+	// custom scheme while it still holds the click's transient
+	// activation, and one await loses it silently. wallet-handoff.js is
+	// where that ordering is worked out, so the page imports it rather
+	// than growing a second copy.
+	//
+	// Only the LINK is armed: scanning the QR code is a cross-device
+	// flow and must not be marked same-device.
+	t.Run("the wallet link hands off through the shared helper", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		paymentPageEngine(t, true, []string{"https://psp.example/sca"}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/payment", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+
+		assert.Contains(t, body, `import { armWalletLink } from "/static/payment-handoff.js"`,
+			"the page must use the shared handoff, not a second implementation of it")
+		assert.Contains(t, body, `<script type="module">`,
+			"a static import needs a module script, or the import is a syntax error and the whole page is dead")
+		// Armed on the link element, and on nothing else: scanning the
+		// QR code is a cross-device flow. What the handoff then does -
+		// which clicks count, what the preference says, and that
+		// nothing is awaited before a custom-scheme launch - is tested
+		// in tests/payment-handoff.test.js, where it can be driven.
+		arm := strings.Index(body, "armWalletLink(")
+		require.Positive(t, arm, "the link must still be armed")
+		assert.Contains(t, body[arm:arm+120], `armWalletLink($("link"), reply.session_id`,
+			"the link is armed with THIS session; a cookie fallback would claim another tab's")
+		assert.NotContains(t, body, `armWalletLink($("qr")`,
+			"the QR code is a cross-device flow and must not be marked same-device")
+	})
+
 	// A successful /ui/interaction response that cannot be read must fail
 	// loudly, not quietly become {}.
 	//

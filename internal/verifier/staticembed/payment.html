@@ -44,7 +44,9 @@
     <p id="error" class="notification is-danger" hidden></p>
 </div>
 </section>
-<script>
+<script type="module">
+import { armWalletLink } from "/static/payment-handoff.js";
+
 (function () {
     var defaults = {{json .}};
     var $ = function (id) { return document.getElementById(id); };
@@ -100,6 +102,9 @@
             $("summary").textContent = "Pay " + body.payment.amount + " " + body.payment.currency + " to " + body.payment.payee_name;
             $("qr").src = "data:image/png;base64," + reply.qr_code;
             $("link").href = reply.authorization_request;
+            // Armed on the LINK only: scanning the QR code is a
+            // cross-device flow, which must not be marked same-device.
+            armWalletLink($("link"), reply.session_id, window.location.origin);
             $("pending").hidden = false;
             await poll(reply.session_id);
         } catch (e) {
