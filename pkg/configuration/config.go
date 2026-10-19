@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -269,6 +270,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	if err := checkIssuancePolicies(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
+	if err := checkInteractiveAuthorization(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
@@ -995,4 +1000,44 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	}
 
 	return secrets, nil
+}
+
+// checkInteractiveAuthorization refuses a configuration that advertises
+// Interactive Authorization as REQUIRED without offering it.
+//
+// OpenID4VCI 1.1 says require_interactive_authorization MUST NOT be present
+// without authorization_challenge_endpoint, and the reason is practical: a
+// wallet reading that document is told the only accepted path to issuance
+// is a mechanism this server does not expose, which leaves it nothing to
+// do. The metadata itself refuses the pair too - the field carries
+// excluded_without - but that refusal arrives at serving time with no
+// operator watching. This one arrives at startup, with a message.
+func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+	ia := cfg.APIGW.Delivery.InteractiveAuthorization
+	if model.BoolVal(ia.RequireInteractiveAuthorization, false) && !model.BoolVal(ia.Enable, false) {
+		return errors.New(
+			"apigw.delivery.interactive_authorization.require_interactive_authorization is true " +
+				"but enable is false: a server cannot require a mechanism it does not offer " +
+				"(OpenID4VCI 1.1, Authorization Server Metadata)")
+	}
+
+	// The two configured metadata member names are free text, and they are
+	// written straight into the published document. A name that collides
+	// with a member the document already has - "issuer" being the way to do
+	// real damage - would replace it; two names configured the same would
+	// leave map iteration deciding which of the two survives, so the served
+	// document could differ between restarts and stop matching its own
+	// signature.
+	//
+	// The marshaller refuses both, but that refusal arrives when a wallet
+	// asks for the document, with nobody watching. This one arrives at
+	// startup.
+	if err := oauth2.ValidateMetadataNames(ia.MetadataNames()); err != nil {
+		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
+	}
+
+	return nil
 }

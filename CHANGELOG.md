@@ -79,6 +79,22 @@
   deterministic order. Verification behaviour for a single-proof document is
   unchanged.
 
+### Added
+
+- **Interactive Authorization (OpenID4VCI 1.1)**: an Authorization Challenge
+  Endpoint at `POST /authorize-challenge`, off by default and enabled with
+  `apigw.delivery.interactive_authorization.enable`. A wallet asks for
+  authorization, is answered with an OpenID4VP presentation request, presents
+  a credential and receives an authorization code - no browser involved.
+  `auth_session` is one-shot and DPoP-bound, and the code must be redeemed at
+  `/token` with the same key. SD-JWT VC presentations must carry a Key Binding
+  JWT that verifies against the issuer-signed `cnf`, and the credential must
+  be within its validity window. Rate limited by the new
+  `apigw.rate_limit.authorization_challenge_requests_per_minute` (default 20).
+- `openid4vp.CanonicalOrigin` now serialises an origin as a browser would
+  (IDNA A-labels, WHATWG IPv6, default ports dropped), and the verifier's
+  DC API origin uses it.
+
 ### Changed
 
 - The issuer's `/offers` page now renders one credential offer three ways:

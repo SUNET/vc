@@ -6,10 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/oauth2client/oauth2clienttest"
 )
 
 // testServer creates a mock Edu-API server with realistic Ladok-style data and
@@ -19,15 +17,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 
 	mux := http.NewServeMux()
 
-	// OAuth 2.0 token endpoint
-	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
-			"access_token": "test-token",
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-		})
-	})
+	oauth2clienttest.RegisterTokenHandler(mux, "/oauth2/token", "test-token")
 
 	// GET /persons/{personId}
 	mux.HandleFunc("/ims/oneroster/rostering/v1p2/persons/p-lisa", func(w http.ResponseWriter, r *http.Request) {
@@ -184,24 +174,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	})
 
 	srv := httptest.NewServer(mux)
-
-	log, err := logger.New("test", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	client, err := NewClient(ClientConfig{
-		BaseURL:      srv.URL,
-		TokenURL:     srv.URL + "/oauth2/token",
-		ClientID:     "test-client",
-		ClientSecret: "test-secret",
-		TokenCache:   cache.NewMemoryCache[string](1 * time.Hour),
-	}, log)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return srv, client
+	return srv, NewClient(oauth2clienttest.NewClient(t, srv.URL, "application/json", "eduapi"))
 }
 
 func TestGetPerson(t *testing.T) {
