@@ -451,6 +451,15 @@ func TestSameHTU(t *testing.T) {
 		assert.True(t, SameHTU("https://münchen.example/token", "https://xn--mnchen-3ya.example/token"))
 	})
 
+	// Unicode lowercasing is not the IDNA mapping: İ lowercases to i but
+	// maps to xn--i-9bb, so the host must reach IDNA as written.
+	t.Run("IDNA maps the host as written, not its Unicode lowercase", func(t *testing.T) {
+		assert.True(t, SameHTU("https://İ.example/token", "https://xn--i-9bb.example/token"))
+		assert.True(t, SameHTU("https://xn--i-9bb.example/token", "https://İ.example/token"))
+		assert.False(t, SameHTU("https://İ.example/token", "https://i.example/token"))
+		assert.False(t, SameHTU("https://i.example/token", "https://İ.example/token"))
+	})
+
 	t.Run("a non-default port with a leading zero is the same port", func(t *testing.T) {
 		assert.True(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com:8443/token"))
 		assert.False(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com/token"))

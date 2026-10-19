@@ -312,7 +312,7 @@ func normalizeURIForComparison(raw string) (string, bool) {
 
 	scheme := strings.ToLower(u.Scheme)
 
-	host := strings.ToLower(u.Hostname())
+	host := u.Hostname()
 	// An address is normalized as an address, not as a name. IPv6 has many
 	// spellings of one address - 2001:0db8:0:0:0:0:0:1 and 2001:db8::1 are
 	// the same endpoint - and lowercasing alone leaves them different, so a
@@ -331,6 +331,10 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	//
 	// Before the IDNA mapping, not after: an address is not a domain name
 	// and has no business being mapped as one.
+	//
+	// IDNA gets the host as written, not lowercased: Unicode lowercasing is
+	// not the IDNA mapping (İ lowercases to i, but maps to xn--i-9bb), so
+	// pre-lowercasing would merge distinct hosts and split equivalent ones.
 	if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = addr.String()
 	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
@@ -338,6 +342,8 @@ func normalizeURIForComparison(raw string) (string, bool) {
 		// ever narrows the spelling, so a failure leaves the lowercased
 		// form rather than rejecting a proof over it.
 		host = ascii
+	} else {
+		host = strings.ToLower(host)
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
