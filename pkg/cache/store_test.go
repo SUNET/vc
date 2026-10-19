@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -225,6 +227,102 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 
 	t.Run("GetByAccessToken_Empty", func(t *testing.T) {
 		_, err := store.GetByAccessToken(ctx, "")
+		assert.Error(t, err)
+	})
+
+	// The one-shot guarantee the Authorization Challenge Endpoint runs on,
+	// asserted against every backend rather than only the one the handler
+	// tests happen to use.
+	//
+	// It is implemented differently in each - a locked read-modify-write in
+	// memory, a single FindOneAndUpdate in MongoDB - and MongoDB is the
+	// deployment where it matters, because that is where two APIGW
+	// instances can be answering the same wallet's retry at once. A
+	// contract that is only exercised in memory says nothing about the
+	// implementation that carries the risk.
+	t.Run("ClaimAuthSession", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:                 "contract-claim-1",
+			Code:                      "contract-claim-code-1",
+			AuthSession:               "contract-handle-1",
+			AuthSessionDPoPThumbprint: "contract-thumbprint-1",
+		}))
+
+		claimed, err := store.ClaimAuthSession(ctx, "contract-handle-1")
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+
+		// The claimant is handed the exchange as it was, because the DPoP
+		// binding is what the authorization code inherits...
+		assert.Equal(t, "contract-thumbprint-1", claimed.AuthSessionDPoPThumbprint)
+		// ...but not the handle. Anything downstream that persists this
+		// document would otherwise write it straight back.
+		assert.Empty(t, claimed.AuthSession)
+
+		// Exactly one claimant: the second request finds nothing, whether
+		// it is a retry or the other half of a race.
+		second, err := store.ClaimAuthSession(ctx, "contract-handle-1")
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
+
+		// And the handle stops resolving, while the context it named
+		// stays reachable by the code it produced.
+		_, err = store.Get(ctx, &AuthorizationContext{AuthSession: "contract-handle-1"})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+
+		stored, err := store.GetByID(ctx, "contract-claim-1")
+		require.NoError(t, err)
+		assert.Empty(t, stored.AuthSession)
+		assert.Equal(t, "contract-thumbprint-1", stored.AuthSessionDPoPThumbprint)
+	})
+
+	// Sequentially, the second claim arrives after the first has finished.
+	// The case the implementation actually has to survive is the one where
+	// it does not - two APIGW instances answering the same wallet's retry
+	// at the same moment - and that is a property of the STORE, which is
+	// why it is asserted here against each of them.
+	t.Run("ClaimAuthSession_Concurrent", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:                 "contract-claim-race",
+			Code:                      "contract-claim-race-code",
+			AuthSession:               "contract-handle-race",
+			AuthSessionDPoPThumbprint: "contract-thumbprint-race",
+		}))
+
+		const contenders = 8
+		var (
+			start     sync.WaitGroup
+			finished  sync.WaitGroup
+			succeeded atomic.Int32
+		)
+		start.Add(1)
+		finished.Add(contenders)
+
+		for range contenders {
+			go func() {
+				defer finished.Done()
+				start.Wait()
+				claimed, err := store.ClaimAuthSession(ctx, "contract-handle-race")
+				if err == nil && claimed != nil {
+					succeeded.Add(1)
+				}
+			}()
+		}
+		start.Done()
+		finished.Wait()
+
+		assert.Equal(t, int32(1), succeeded.Load(),
+			"exactly one of %d concurrent claimants may take the handle", contenders)
+	})
+
+	t.Run("ClaimAuthSession_Unknown", func(t *testing.T) {
+		claimed, err := store.ClaimAuthSession(ctx, "contract-handle-never-issued")
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, claimed)
+	})
+
+	t.Run("ClaimAuthSession_Empty", func(t *testing.T) {
+		_, err := store.ClaimAuthSession(ctx, "")
 		assert.Error(t, err)
 	})
 }

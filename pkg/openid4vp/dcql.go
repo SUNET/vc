@@ -905,6 +905,38 @@ func (q CredentialQuery) RequiresCryptographicHolderBinding() bool {
 	return *q.RequireCryptographicHolderBinding
 }
 
+// withCryptographicHolderBinding returns a copy of q in which every
+// credential query requires cryptographic holder binding, leaving q itself
+// untouched.
+//
+// For a channel whose receiving endpoint VERIFIES holder binding. A query
+// that says the binding is optional, answered at an endpoint that rejects
+// an unbound credential, is a request that lies to the wallet: the wallet
+// is entitled to select a credential the request permits, and finds out
+// only after the user has consented and answered that this endpoint will
+// not take it.
+//
+// The flag is set rather than cleared to the §6.1 default, so the request
+// states the requirement explicitly and keeps stating it if that default
+// ever moves.
+//
+// The copy is one level deep - a fresh Credentials slice with fresh
+// elements - because that is exactly what is written to. Everything inside
+// an element (its Claims, its Meta's slices) is still shared, under the
+// same immutability contract RequestObject.WithDCAPIRequest documents.
+func (q *DCQL) withCryptographicHolderBinding() *DCQL {
+	if q == nil {
+		return nil
+	}
+	variant := *q
+	variant.Credentials = make([]CredentialQuery, len(q.Credentials))
+	copy(variant.Credentials, q.Credentials)
+	for i := range variant.Credentials {
+		variant.Credentials[i].RequireCryptographicHolderBinding = new(true)
+	}
+	return &variant
+}
+
 // MetaQuery represents format-specific metadata constraints for credential queries.
 // For SD-JWT VC format (dc+sd-jwt): use VCTValues
 // For W3C VC format (ldp_vc): use TypeValues

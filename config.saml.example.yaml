@@ -99,6 +99,15 @@ apigw:
       client_id: "vc-ladok"
       scopes:
         - "https://purl.imsglobal.org/spec/or/v1p2/scope/roster-core.readonly"
+    # Open Education API (OEAPI v6.0) remote. base_url is the host root; the
+    # "/v6" version path is appended automatically.
+    oeapi_demo:
+      type: oeapi
+      base_url: "https://demo01.eduapi.nl"
+      token_url: "https://demo01.eduapi.nl/oauth2/token"
+      client_id: "vc-oeapi"
+      scopes:
+        - "me.read"
 
   # ── Auth providers ───────────────────────────────────────────────
   auth_providers:

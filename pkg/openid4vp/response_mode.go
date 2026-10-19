@@ -121,3 +121,54 @@ func (r *RequestObject) WithDCAPIRequest(expectedOrigin string) *RequestObject {
 
 	return &variant
 }
+
+// WithInteractiveAuthorization returns a copy of r as OpenID4VCI 1.1
+// Interactive Authorization requires it.
+//
+// The draft defines the request by difference: "the same as for requests
+// passed to the Digital Credentials API ... except" the response mode, and
+// except that expected_origins, if present, carries only the derived Origin
+// of the Authorization Challenge Endpoint. So this is WithDCAPIRequest with
+// the response mode replaced, and deliberately not a second construction of
+// the same object - the two channels have to stay the same request seen
+// through different delivery paths.
+//
+// One difference is this build's rather than the draft's: the query is
+// narrowed to require cryptographic holder binding, because this endpoint
+// verifies it. See the note at that line.
+//
+// responseMode is passed in rather than taken from the constants here
+// because its spelling is configurable (CS01_07); it is expected to be one
+// of ResponseModeIAPost or ResponseModeIAPostJWT, or whatever a deployment
+// has renamed those to.
+//
+// The copy is SHALLOW, with the same constraint on callers that
+// WithDCAPIRequest documents: treat both objects as immutable once created.
+func (r *RequestObject) WithInteractiveAuthorization(responseMode, expectedOrigin string) *RequestObject {
+	variant := r.WithDCAPIRequest(expectedOrigin)
+	if variant == nil {
+		return nil
+	}
+	variant.ResponseMode = responseMode
+
+	// The fourth difference from the browser's request, and the only one
+	// that is not about delivery.
+	//
+	// The Authorization Challenge Endpoint verifies holder binding: the
+	// whole point of the exchange is to establish WHO is asking for an
+	// issuance, so an unbound credential cannot satisfy it. The query
+	// these requests are built from is shared with the browser channel,
+	// which sets require_cryptographic_holder_binding to false - so
+	// without this the request tells the wallet the binding is optional
+	// and the endpoint then refuses what the wallet was invited to send,
+	// after the user has already consented.
+	//
+	// Narrowing a request rather than widening it: a credential that
+	// satisfies this also satisfies the browser channel's query. The
+	// browser object is not touched, and the two channels still ask for
+	// the same credential - this one says out loud what answering it
+	// requires.
+	variant.DCQLQuery = variant.DCQLQuery.withCryptographicHolderBinding()
+
+	return variant
+}
