@@ -731,6 +731,66 @@ func checkRawConstraints(raw json.RawMessage) error {
 	return nil
 }
 
+// UnmarshalTrustedDCQL decodes a query THIS verifier built and stored,
+// rather than one that arrived from a caller.
+//
+// The two cannot use the same decoder, and the asymmetry is deliberate on
+// both sides. Wire ingress refuses a modelled member of the right JSON
+// kind whose value the model rejects - `"doctype_value": 1` - because
+// sending it to Raw would launder a decode error into a query that
+// validates: the SD-JWT and mdoc rules read the shadow, and an
+// unreadable member leaves nothing there to judge. But
+// NewRawCredentialQuery accepts exactly those shapes on purpose, because
+// a conformance harness has to be able to SEND a malformed request to
+// see what a wallet does with it.
+//
+// Put together, a request the escape hatch built could be published and
+// then reload nowhere - not even on the node that built it, once the
+// context had been through the cache. This is the same defect
+// TestMalformedReqSurvivesACacheRoundTrip fixed for req shapes, reaching
+// meta by the other route.
+//
+// What is NOT relaxed: checkRawConstraints still runs, through
+// NewRawCredentialQuery, so a duplicate or case-aliased constraint is
+// still refused on the way back in. The trust here is only that this
+// verifier wrote the bytes, not that they may mean two things.
+func UnmarshalTrustedDCQL(data []byte) (*DCQL, error) {
+	var strict DCQL
+	strictErr := json.Unmarshal(data, &strict)
+	if strictErr == nil {
+		return &strict, nil
+	}
+
+	var outer struct {
+		Credentials    []json.RawMessage    `json:"credentials"`
+		CredentialSets []CredentialSetQuery `json:"credential_sets,omitempty"`
+	}
+	if err := json.Unmarshal(data, &outer); err != nil {
+		// The outer shape is not a DCQL at all, which is a different
+		// problem from a query the model cannot hold. Report the
+		// original failure rather than this one.
+		return nil, strictErr
+	}
+
+	rebuilt := &DCQL{
+		Credentials:    make([]CredentialQuery, 0, len(outer.Credentials)),
+		CredentialSets: outer.CredentialSets,
+	}
+	for i, raw := range outer.Credentials {
+		var query CredentialQuery
+		if err := json.Unmarshal(raw, &query); err == nil {
+			rebuilt.Credentials = append(rebuilt.Credentials, query)
+			continue
+		}
+		built, err := NewRawCredentialQuery(raw)
+		if err != nil {
+			return nil, fmt.Errorf("credential query %d: %w", i, strictErr)
+		}
+		rebuilt.Credentials = append(rebuilt.Credentials, built)
+	}
+	return rebuilt, nil
+}
+
 func NewRawCredentialQuery(raw json.RawMessage) (CredentialQuery, error) {
 	if !json.Valid(raw) {
 		return CredentialQuery{}, fmt.Errorf("credential query: raw is not valid JSON")

@@ -2,6 +2,8 @@ package cache
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -82,6 +84,87 @@ func TestAuthorizationContextKeepsARawQueryThroughBSON(t *testing.T) {
 		"and the shadow the response path matches by")
 }
 
+// A query the MODEL cannot hold survives the cache too, not just one the
+// model has never seen.
+//
+// Wire ingress refuses a modelled member of the right JSON kind whose
+// value the model rejects - `"doctype_value": 1` - on purpose: sending
+// it to Raw would launder a decode error into a query that validates.
+// NewRawCredentialQuery accepts exactly those shapes, also on purpose,
+// because a conformance harness has to be able to SEND a malformed
+// request to see what a wallet does with it. The two together meant such
+// a request could be published and then reload nowhere, not even on the
+// node that built it, once its context had been through the cache.
+//
+// Driven from the vendored vectors rather than hand-written JSON: these
+// are the shapes the shared conformance set says a verifier must be able
+// to send, so if they change, this changes with them.
+func TestAuthorizationContextKeepsAModelRejectedQueryThroughBSON(t *testing.T) {
+	for _, name := range []string{
+		"err_meta_doctype_not_string.json",     // meta.doctype_value is a number
+		"err_meta_vct_values_not_strings.json", // meta.vct_values holds a number
+	} {
+		t.Run(name, func(t *testing.T) {
+			wire := vendoredVectorQuery(t, name)
+
+			// The premise, in both directions: the escape hatch accepts
+			// it and strict ingress does not. If either changes, this
+			// test is pinning something else.
+			built, err := openid4vp.NewRawCredentialQuery(wire)
+			require.NoError(t, err, "the constructor accepts it; that is the escape hatch")
+			var strict openid4vp.CredentialQuery
+			require.Error(t, json.Unmarshal(wire, &strict),
+				"and wire ingress refuses it, which is what made the reload fail")
+
+			stored, err := bson.Marshal(&AuthorizationContext{
+				SessionID: "s",
+				DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{built}},
+			})
+			require.NoError(t, err)
+
+			var loaded AuthorizationContext
+			require.NoError(t, bson.Unmarshal(stored, &loaded),
+				"a request this verifier published must reload")
+			require.NotNil(t, loaded.DCQLQuery)
+			require.Len(t, loaded.DCQLQuery.Credentials, 1)
+			require.NotNil(t, loaded.DCQLQuery.Credentials[0].Raw,
+				"a shape the model cannot hold must reload raw, not be repaired into it")
+
+			// And what reloaded is what was stored, byte for byte in
+			// meaning: a reload that normalised the request would pass
+			// everything above and still change what the wallet gets.
+			again, err := json.Marshal(loaded.DCQLQuery.Credentials[0])
+			require.NoError(t, err)
+			assert.JSONEq(t, string(wire), string(again))
+		})
+	}
+}
+
+// What is NOT relaxed by the trusted decode: a stored query whose
+// constraint members mean two different things to two readers is still
+// refused on the way back in.
+//
+// The trust is only that this verifier wrote the bytes. A duplicate or
+// case-aliased constraint is a request whose meaning depends on the
+// reader, and reloading one would resurrect exactly the hazard
+// checkRawConstraints exists to stop - the shadow reports one
+// constraint, the emitted bytes carry another.
+func TestAuthorizationContextStillRefusesAnAmbiguousStoredQuery(t *testing.T) {
+	const ambiguous = `{"credentials":[{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["a"]},"meta":{"vct_values":["b"]}}]}`
+
+	type plain struct {
+		SessionID      string `bson:"session_id"`
+		DCQLQueryExact string `bson:"dcql_query_exact,omitempty"`
+	}
+	stored, err := bson.Marshal(plain{SessionID: "s", DCQLQueryExact: ambiguous})
+	require.NoError(t, err)
+
+	var loaded AuthorizationContext
+	err = bson.Unmarshal(stored, &loaded)
+	require.Error(t, err, "a query that means two things must not reload, however it got into the store")
+	assert.Contains(t, err.Error(), "more than once")
+}
+
 // An absent query stays absent rather than becoming an empty one.
 func TestAuthorizationContextWithoutADCQLQuery(t *testing.T) {
 	stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s"})
@@ -98,8 +181,10 @@ func TestAuthorizationContextSurvivesARollingUpgrade(t *testing.T) {
 	query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
 		ID: "nym", Format: openid4vp.FormatCircuitZk,
 		Meta: openid4vp.MetaQuery{DoctypeValue: "d"},
-		Req: []openid4vp.ReqItem{{ID: openid4vp.FunctionPseudonym, Return: "nym-1",
-			Params: map[string]any{"p": json.Number("1.00000000000000001")}}},
+		Req: []openid4vp.ReqItem{{
+			ID: openid4vp.FunctionPseudonym, Return: "nym-1",
+			Params: map[string]any{"p": json.Number("1.00000000000000001")},
+		}},
 	}}}
 
 	t.Run("a new replica reads an old document", func(t *testing.T) {
@@ -331,4 +416,18 @@ func TestAuthorizationContextKeepsExactClaimValuesThroughBSON(t *testing.T) {
 				"the other replica has to send the value that was configured")
 		})
 	}
+}
+
+// vendoredVectorQuery returns the "query" member of a vendored circuit_zk
+// conformance vector.
+func vendoredVectorQuery(t *testing.T, name string) json.RawMessage {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "openid4vp", "testdata", "circuit_zk", name))
+	require.NoError(t, err)
+	var doc struct {
+		Query json.RawMessage `json:"query"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	require.NotEmpty(t, doc.Query, "the vector must carry a query")
+	return doc.Query
 }
