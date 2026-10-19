@@ -1,10 +1,13 @@
 package apiv1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -55,13 +58,40 @@ func (a *PaymentAmount) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// invalidInteraction refuses an interaction request with a structured
+// 400, carrying the payment prefix when the request WAS a payment one so
+// that a payment refused before buildPaymentTransactionData runs reads
+// like every other payment refusal rather than like a different class of
+// failure.
+func invalidInteraction(payment bool, format string, args ...any) error {
+	if payment {
+		return invalidPayment(format, args...)
+	}
+	return invalidInteractionRequest(format, args...)
+}
+
 func invalidPayment(format string, args ...any) error {
+	return invalidInteractionRequest("%s", "payment: "+fmt.Sprintf(format, args...))
+}
+
+// invalidInteractionRequest returns a structured 400 for an interaction
+// request the caller got wrong.
+//
+// Structured because an unstructured error carries no status: it reaches
+// httphelpers.StatusCode, which INFERS one from the message text. A
+// credential query the caller named "token" produces "credential query
+// \"token\" is invalid: ...", which matches that inference's
+// "unauthorized, authentication, token" case - so a malformed request is
+// answered 401, before the "invalid" case is ever reached, and the
+// description is dropped on the way out. A caller-chosen identifier must
+// not be able to choose the status code.
+func invalidInteractionRequest(format string, args ...any) error {
 	// The shared type: RegEndpoint renders pkg/oauth2.OAuthError (status and
 	// description); the verifier-local OAuthError would fall through to the
 	// generic handler and lose both.
 	return &oauth2.OAuthError{
 		ErrorCode:        ErrCodeInvalidRequest,
-		ErrorDescription: "payment: " + fmt.Sprintf(format, args...),
+		ErrorDescription: fmt.Sprintf(format, args...),
 		HTTPStatus:       http.StatusBadRequest,
 	}
 }
@@ -136,10 +166,56 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 // and link, and dc_api.jwt for the Digital Credentials API variant when that
 // is enabled. The response arrives at one endpoint whichever was used, so a
 // TS12 KB-JWT may echo either. Recorded on the session at issuance.
+// TS12 KB-JWT may echo either.
 func (c *Client) issuedResponseModes() []string {
 	modes := []string{openid4vp.ResponseModeDirectPostJWT}
 	if c.cfg.Verifier.DigitalCredentials.Enable {
 		modes = append(modes, openid4vp.ResponseModeDCAPIJWT)
 	}
 	return modes
+}
+
+// claimJTI records a presented jti, refusing a repeat. With no replay cache it
+// refuses: jti uniqueness cannot be honoured, so the presentation cannot be.
+func (c *Client) claimJTI(ctx context.Context, jti string) error {
+	refuse := func(format string, args ...any) error {
+		return &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf(format, args...)}
+	}
+	if c.cacheService == nil || c.cacheService.UsedJTI == nil {
+		return refuse("cannot verify jti freshness: no replay store configured")
+	}
+	// Atomic: a concurrent second submission of the same KB-JWT loses SetNX.
+	fresh, err := c.cacheService.UsedJTI.SetNX(ctx, jti, true)
+	if err != nil {
+		return refuse("cannot verify jti freshness: %v", err)
+	}
+	if !fresh {
+		return refuse("jti has been used before")
+	}
+	return nil
+}
+
+// checkBoundCredentialType refuses a presented credential whose vct is not one
+// the bound credential query asked for. Fails closed: when the query cannot be
+// found for this session (for example the DCQL is not available on this
+// replica) the type cannot be compared and the presentation is refused.
+func (c *Client) checkBoundCredentialType(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string, claims map[string]any) error {
+	refuse := func(format string, args ...any) error {
+		return &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf(format, args...)}
+	}
+	query, ok := c.requestedQueryExact(authCtx, scopeQueryIDs, scope)
+	if !ok {
+		return refuse("cannot compare the credential type: the request's credential query is not available")
+	}
+	if len(query.Meta.VCTValues) == 0 {
+		return refuse("cannot compare the credential type: the request named no vct_values")
+	}
+	vct, _ := claims["vct"].(string)
+	if vct == "" {
+		return refuse("credential has no vct")
+	}
+	if !slices.Contains(query.Meta.VCTValues, vct) {
+		return refuse("credential vct %q is not one the request asked for", vct)
+	}
+	return nil
 }
