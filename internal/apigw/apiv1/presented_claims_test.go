@@ -425,6 +425,64 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 	})
 }
 
+// A decoded CBOR timestamp must be refused when it cannot be carried.
+//
+// CBOR tag 1 decodes to a time.Time. For a target other than full-date
+// nothing converts it, so it reached the fallback unchanged - and
+// time.Time.MarshalJSON refuses a year outside 0001-9999, which is where
+// epoch 253402300800 lands. Under HA that refusal is SILENT:
+// MongoCache.upsertAt logs the marshal error and drops the document
+// write while direct-post still returns a successful redirect.
+//
+// The guard is on SERIALISABILITY rather than on time.Time, because the
+// type enumeration is what kept being incomplete - this is the second
+// shape to reach the same fallback holding something JSON cannot carry.
+func TestUnserialisableDecodedCBORValuesAreRefused(t *testing.T) {
+	target := nymAuthTarget(t)
+	entry := model.AuthScopeEntry{
+		AuthClaims:     []string{"org.iso.18013.5.1.odd"},
+		DocumentClaims: map[string]string{"org.iso.18013.5.1.odd": "odd"},
+	}
+	fromMdoc := func(t *testing.T, v any) (map[string]any, error) {
+		t.Helper()
+		presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
+			"org.iso.18013.5.1": {"odd": v},
+		})
+		return presentedDocumentClaims("mso_mdoc", presented, entry, target)
+	}
+
+	// What a CBOR tag 1 of 253402300800 decodes to.
+	tooLate := time.Unix(253402300800, 0).UTC()
+	require.Equal(t, 10000, tooLate.Year(), "the premise: this is the year the format cannot express")
+	_, err := json.Marshal(tooLate)
+	require.Error(t, err, "and the premise of the bug: encoding/json refuses it")
+
+	for _, shape := range []struct {
+		name  string
+		value any
+	}{
+		{"directly", tooLate},
+		{"inside a copied object", map[any]any{"inner": tooLate}},
+		{"inside a copied array", []any{"ok", tooLate}},
+		{"nested two deep", map[any]any{"a": []any{map[any]any{"b": tooLate}}}},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			copied, err := fromMdoc(t, shape.value)
+			require.Error(t, err, "a value the document cannot carry must be refused, not published")
+			require.Nil(t, copied)
+			require.Contains(t, err.Error(), "cannot be carried in the issued document")
+		})
+	}
+
+	// And an ordinary timestamp still copies, or the guard above would be
+	// "refuse every time".
+	copied, err := fromMdoc(t, time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC))
+	require.NoError(t, err, "a representable timestamp must still be copyable")
+	encoded, err := json.Marshal(copied)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "2020-01-02")
+}
+
 // A non-finite float must be refused before anything is published.
 //
 // NaN is the value a range guard cannot catch: every comparison with it

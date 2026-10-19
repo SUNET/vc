@@ -1,10 +1,10 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
 	"slices"
 	"time"
 
@@ -315,17 +315,38 @@ func documentValue(v any) (any, error) {
 		return typed, nil
 
 	default:
-		// A float that is not plain float64 - a narrower CBOR float a
-		// decoder option could keep, or a named float type - would
-		// otherwise be returned unchecked, and a non-finite one is
-		// refused for the same reason as above.
-		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Float32 || rv.Kind() == reflect.Float64 {
-			if err := refuseNonFinite(rv.Float()); err != nil {
-				return nil, err
-			}
+		// The fallback returns the value unchanged, so it is the one
+		// place a shape nobody enumerated reaches the document. What the
+		// caller is owed here is not a Go type, it is a value the issued
+		// document can CARRY - so that is what is checked, once, rather
+		// than a type case added each time a reviewer finds another one.
+		//
+		// time.Time proved the point. A CBOR tag 1 epoch decodes to one,
+		// and for a target other than full-date it arrived here
+		// untouched; year 10000 converts happily and then fails inside
+		// encoding/json - where, with the Mongo-backed cache, the
+		// failure is SILENT: upsertAt logs the marshal error and drops
+		// the write while the handler still returns a successful
+		// redirect. A narrower or named float reached it the same way.
+		if err := refuseUnserialisable(v); err != nil {
+			return nil, err
 		}
 		return v, nil
 	}
+}
+
+// refuseUnserialisable refuses a leaf the issued document cannot carry.
+//
+// It asks the encoder rather than enumerating types, because the
+// enumeration is what kept being incomplete: every value that reaches the
+// fallback is eventually handed to json.Marshal, so handing it one here -
+// where the claim can still be named and the issuance refused - is the
+// same question asked at a point where the answer is actionable.
+func refuseUnserialisable(v any) error {
+	if _, err := json.Marshal(v); err != nil {
+		return fmt.Errorf("a claim value of type %T cannot be carried in the issued document: %w", v, err)
+	}
+	return nil
 }
 
 // refuseNonFinite refuses NaN and the infinities.
