@@ -468,6 +468,16 @@ type UIInteractionReply struct {
 
 // UIInteraction handles front-end interactions, replying with an Authorization Request that contains a Request URI and DCQL query, the latter for UI to show.
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
+	// A request carrying no query at all, which is not merely invalid:
+	// everything below dereferences it, so this PANICS without the
+	// guard. The HTTP binding skips decoding a body of zero length
+	// entirely - no decode, no validation, no error - so a caller that
+	// sends an empty body arrives here with a zero-valued request and
+	// gets a stack trace and a 500 where a 400 was owed.
+	if req == nil || req.DCQLQuery == nil {
+		return nil, invalidInteractionRequest("dcql_query is required")
+	}
+
 	c.log.Debug("uiInteraction", "dcql_query", req.DCQLQuery)
 
 	// Augment BEFORE the reuse check: the stored request object was

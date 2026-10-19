@@ -133,6 +133,90 @@ func TestTS12Response_HashAlgNegotiation(t *testing.T) {
 	}}.validate(t), "not one the request allowed")
 }
 
+// The allowed hash algorithms are the INTERSECTION of every scoped
+// entry's list, not the first entry's.
+//
+// Every other multi-entry test here uses entries that carry identical
+// defaults, so a regression that read only the first entry - or that
+// unioned the lists instead of intersecting them - would pass all of
+// them. These cases make the entries disagree on purpose, and check
+// both directions: the algorithm inside the intersection is accepted,
+// and every algorithm outside it is refused. A union bug would show up
+// as an accepted algorithm only one entry allowed, which is a wallet
+// hashing with something the other entry's issuer never agreed to.
+func TestTS12Response_HashAlgIsTheIntersectionOfEveryEntry(t *testing.T) {
+	entry := func(t *testing.T, name string, algs ...string) string {
+		t.Helper()
+		obj := map[string]any{
+			"type":           "urn:eudi:sca:payment:1",
+			"credential_ids": []string{"pay"},
+			// Distinct per entry, so the two are different strings and
+			// hash differently - an entry silently dropped shows up as
+			// a count mismatch rather than passing by coincidence.
+			"payload": map[string]any{"id": name},
+		}
+		if algs != nil {
+			obj["transaction_data_hashes_alg"] = algs
+		}
+		raw, err := json.Marshal(obj)
+		require.NoError(t, err)
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	run := func(t *testing.T, alg string, entries ...string) error {
+		t.Helper()
+		hashes, err := HashTransactionData(entries, alg)
+		require.NoError(t, err)
+		return ts12Case{entries: entries, queryID: "pay", claims: map[string]any{
+			"transaction_data_hashes":     hashes,
+			"transaction_data_hashes_alg": alg,
+		}}.validate(t)
+	}
+
+	t.Run("overlapping lists allow only what both named", func(t *testing.T) {
+		a := entry(t, "a", "sha-256", "sha-384")
+		b := entry(t, "b", "sha-384", "sha-512")
+
+		require.NoError(t, run(t, "sha-384", a, b), "sha-384 is in both lists")
+		requireTxError(t, run(t, "sha-256", a, b), "not one the request allowed")
+		requireTxError(t, run(t, "sha-512", a, b), "not one the request allowed")
+
+		// And the first entry alone really would have allowed sha-256,
+		// which is what makes the refusal above meaningful rather than
+		// a blanket rejection.
+		require.NoError(t, run(t, "sha-256", a))
+	})
+
+	t.Run("disjoint lists allow nothing at all", func(t *testing.T) {
+		a := entry(t, "a", "sha-256")
+		b := entry(t, "b", "sha-512")
+
+		requireTxError(t, run(t, "sha-256", a, b), "not one the request allowed")
+		requireTxError(t, run(t, "sha-512", a, b), "not one the request allowed")
+		requireTxError(t, run(t, "sha-384", a, b), "not one the request allowed")
+	})
+
+	t.Run("an absent list contributes the sha-256 default", func(t *testing.T) {
+		explicit := entry(t, "a", "sha-256", "sha-384")
+		absent := entry(t, "b")
+
+		require.NoError(t, run(t, "sha-256", explicit, absent),
+			"the default is in the explicit list, so it survives the intersection")
+		requireTxError(t, run(t, "sha-384", explicit, absent),
+			"not one the request allowed")
+	})
+
+	t.Run("an explicit list without the default, paired with an absent one", func(t *testing.T) {
+		// The intersection is empty: one entry allows only sha-384, the
+		// other only the sha-256 default. Nothing the wallet can send
+		// is acceptable, and saying so is better than picking one.
+		explicit := entry(t, "a", "sha-384")
+		absent := entry(t, "b")
+
+		requireTxError(t, run(t, "sha-384", explicit, absent), "not one the request allowed")
+		requireTxError(t, run(t, "sha-256", explicit, absent), "not one the request allowed")
+	})
+}
+
 func TestTS12Response_HashesMissingCountAndOrder(t *testing.T) {
 	a := vectorByName(t, "conforming_compact")
 	b := vectorByName(t, "conforming_escapes")
