@@ -78,3 +78,33 @@ func TestUIInteraction_AnInvalidCredentialQueryIsA400(t *testing.T) {
 		})
 	}
 }
+
+// A request with no query at all must refuse, not panic.
+//
+// The HTTP binding skips decoding a body of zero length entirely - no
+// decode, no validation, no error - so a caller that POSTs an empty
+// body arrives here with a zero-valued request. Everything in
+// UIInteraction dereferences the query, so this used to be a nil
+// pointer dereference: a stack trace and a 500 where a structured 400
+// was owed, and on a server without recovery middleware, worse.
+func TestUIInteraction_ARequestWithNoQueryRefusesInsteadOfPanicking(t *testing.T) {
+	client := newSigningTestClient(t)
+
+	for _, tc := range []struct {
+		name string
+		req  *UIInteractionRequest
+	}{
+		{"a zero-valued request, which is what an empty body produces", &UIInteractionRequest{}},
+		{"no request at all", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := client.UIInteraction(t.Context(), tc.req)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "dcql_query is required")
+				assert.Equal(t, http.StatusBadRequest, httphelpers.StatusCode(t.Context(), err),
+					"a request that carries nothing is the caller's mistake")
+			})
+		})
+	}
+}

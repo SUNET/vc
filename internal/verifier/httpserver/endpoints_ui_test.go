@@ -441,3 +441,51 @@ func newStreamRecorder() *streamRecorder {
 }
 
 func (r *streamRecorder) CloseNotify() <-chan bool { return r.closed }
+
+// A body that carries no JSON at all is the caller's mistake, not a
+// server fault.
+//
+// The decoder reports two different errors for "there is no value
+// here": io.ErrUnexpectedEOF when the body stops part-way through one,
+// and plain io.EOF when it ends before one starts - which is what an
+// empty or whitespace-only body with a positive Content-Length
+// produces. Only the first was mapped to 400; the second fell through
+// to the status mapper, which has no status to read and answers 500,
+// telling the caller the verifier is broken.
+func TestEndpointUIInteraction_ABodyWithNoJSONIsA400(t *testing.T) {
+	// An EMPTY body is a different path and is covered in apiv1: the
+	// binding skips decoding a zero-length body entirely, so no error
+	// reaches this layer and the zero-valued request is forwarded - see
+	// TestUIInteraction_ARequestWithNoQueryRefusesInsteadOfPanicking.
+	for _, tc := range []struct{ name, body string }{
+		{"whitespace only", "   \n\t "},
+		{"truncated part-way through a value", `{"dcql_query":`},
+		{"not JSON at all", "}{"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, _ := setupUIEndpointEngine(t, &uiInteractionApiv1{replySessionID: "s-1"})
+
+			req := httptest.NewRequest(http.MethodPost, "/ui/interaction", bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("Content-Type", "application/json")
+			req.ContentLength = int64(len(tc.body))
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"a malformed request must not be reported as a server fault")
+			assert.Contains(t, w.Body.String(), "not valid for this endpoint",
+				"and the caller must be told what was wrong")
+		})
+	}
+
+	// The control: a well-formed body still reaches the handler, or the
+	// cases above would pass against an endpoint that refuses
+	// everything.
+	t.Run("a well-formed body still works", func(t *testing.T) {
+		engine, _ := setupUIEndpointEngine(t, &uiInteractionApiv1{replySessionID: "s-1"})
+		w := postUIInteraction(t, engine, nil, map[string]any{"dcql_query": map[string]any{
+			"credentials": []any{map[string]any{"id": "pid", "format": "dc+sd-jwt"}},
+		}})
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
