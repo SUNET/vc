@@ -193,7 +193,19 @@ func parseExpectation(expect string) ([]byte, error) {
 
 func computePseudonym(config string, seedValue []byte, verifierID, verifierContext, userValue string) ([]byte, error) {
 	switch config {
-	case nymauth.ConfigKnownOffenderMatchingSSC, nymauth.ConfigKnownOffenderMatchingPSC:
+	case nymauth.ConfigKnownOffenderMatchingPSC:
+		// Refused, although the library helper computes it.
+		//
+		// psc opens a HOLDER-held private_seed. This tool only ever
+		// has the issuer's derived seed, so it would compute a
+		// pseudonym over the wrong secret, get no match, and report an
+		// ordinary mismatch - which in a loop over candidates reads as
+		// "this subject is not the one", for every subject including
+		// the right one. A tool whose exit code accuses people must not
+		// have a mode that exonerates them all.
+		return nil, fmt.Errorf("%s opens a holder-held private_seed, which this tool does not have; "+
+			"it can only reproduce the issuer-held %s", config, nymauth.ConfigKnownOffenderMatchingSSC)
+	case nymauth.ConfigKnownOffenderMatchingSSC:
 		return nymauth.KnownOffenderMatching(config, seedValue, verifierID)
 	case nymauth.ConfigAccountRecoverySSC:
 		return nymauth.AccountRecovery(seedValue, verifierID, verifierContext)

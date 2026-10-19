@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/nymauth"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,6 +64,28 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 		require.Error(t, err, "the issuer refuses a world-readable secrets file; recovery must not be laxer")
 		assert.Contains(t, err.Error(), "permissive")
 	})
+}
+
+// psc is refused, because this tool cannot compute it.
+//
+// known-offender-matching-psc opens a HOLDER-held private_seed. All this
+// tool has is the issuer's derived seed, so computing it would hash the
+// wrong secret, find no match, and report an ordinary mismatch - which
+// in a loop over candidate subjects reads as "not this one", for every
+// candidate including the right one. A tool whose exit code accuses
+// people must not have a mode that quietly exonerates all of them.
+func TestPSCIsRefusedRatherThanComputedFromTheWrongSeed(t *testing.T) {
+	seedValue := bytes.Repeat([]byte{7}, 16)
+
+	_, err := computePseudonym(nymauth.ConfigKnownOffenderMatchingPSC, seedValue, "verifier.example", "", "")
+	require.Error(t, err, "this tool does not hold the holder's private_seed")
+	assert.Contains(t, err.Error(), "holder-held")
+
+	// The ssc configuration it CAN reproduce still works, or the
+	// refusal above would be indistinguishable from refusing everything.
+	got, err := computePseudonym(nymauth.ConfigKnownOffenderMatchingSSC, seedValue, "verifier.example", "", "")
+	require.NoError(t, err)
+	assert.Len(t, got, 32)
 }
 
 // A malformed -expect is an input error, not a mismatch.

@@ -17,13 +17,23 @@ seed length are all configuration.
 
 It **generates** the commitment and writes it. That is the whole of it.
 
-- **It does not deliver the seed.** What reaches a wallet is the
-  commitment, as a claim. There is no response member and no endpoint for
-  the seed, and there is not going to be one: a derived seed is
-  recomputable whenever it is wanted, so there is no moment at which it
-  must be handed over to avoid losing it. A credential is consequently not
-  usable in a proof that needs the seed until the seed reaches the holder
-  by some route defined elsewhere.
+- **It does not deliver the seed — yet.** What this change puts in a
+  credential is the commitment, as a claim. Delivery is a FOLLOW-UP, and
+  the shape is settled: the seed travels in the response-level
+  `credential_metadata` object of the OpenID4VCI 1.1 Credential Response,
+  under `org.siros.secret_seed`, keyed by namespace (privatedata-spec
+  §5A). It comes with safeguards that are part of the same follow-up —
+  the issuer advertises the seed NAMESPACES in its metadata so a wallet
+  knows to ask for an encrypted response, refuses the issuance outright
+  when the request did not ask, and never puts the seed in display or
+  claims metadata. Until that lands, a credential is not usable in a
+  proof that needs the seed.
+
+  (An earlier version of this document said there would never be a
+  response member for the seed, on the reasoning that a derived seed is
+  recomputable and so need never be handed over. That decision was
+  reversed in #791: the WALLET cannot recompute it, and it is the wallet
+  that has to prove with it.)
 - **It does not keep the commitment from being disclosed.** A commitment
   claim is an ordinary selectively-disclosable element, and a Verifier is
   free to ask for it. Whether it is ever answered is enforced by the

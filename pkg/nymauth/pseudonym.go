@@ -95,12 +95,24 @@ const (
 //
 // The hashed input is the BARE verifier_id - "verifier.example" - never
 // the prefixed Client Identifier and never client_id as it appears in the
-// request. verifier_id_type is agreed out of band and is not hashed. The
-// rulebook states this with worked digests and marks the prefixed form
-// MUST NOT:
+// request. verifier_id_type is agreed out of band and is not hashed.
+//
+// WHICH RULEBOOK: nym_auth_rulebook PR #7, "verifier_input: SHA-256 over
+// the bare verifier_id, never the prefixed client_id" (stacked on #5).
+// Pinned explicitly because the published v0.3 on that repo's main says
+// the opposite - its matching and account-recovery formulas hash the
+// full prefixed identifier - so a reader comparing this against main
+// will find a contradiction rather than a bug. #7 supersedes it, states
+// the rule with worked digests, and marks the prefixed form MUST NOT:
 //
 //	SHA256("verifier.example")              = be6a6400...4a41   (MUST)
 //	SHA256("x509_san_dns:verifier.example") = 6eae85a0...6bab   (MUST NOT)
+//
+// #7 also records that the nym_auth circuits SPEC section 3 still shows
+// the prefixed form and that its reference values need regenerating; the
+// prefix is not bound inside the circuit, which takes verifier_input as
+// a 32-byte digest public input, so a conforming verifier passing the
+// bare digest verifies against current circuit builds.
 //
 // So a PREFIXED value is refused here, which is the opposite of what this
 // function did when it was written against the earlier reading. The

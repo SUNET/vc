@@ -2202,7 +2202,6 @@ verifier:
       subject_salt: "random-salt-for-pairwise-subjects"
       static_clients:
         <client_id>: "<client_secret>"
-issuer: "<secret-value>"
 ```
 
 

@@ -1065,6 +1065,15 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 		if childDef != nil && len(childDef.Fields) > 0 {
 			buf.WriteString(fmt.Sprintf("%s%s:\n", prefix, f.Tag.YAMLName))
 			buf.WriteString(generateSecretsExample(reg, childDef, indent+1))
+		} else if childDef != nil {
+			// A struct section with NO fields. Falling through to the
+			// scalar branch below emitted `issuer: "<value>"`, which
+			// cannot decode into a struct at all - so anyone copying
+			// the generated example got a secrets file that refuses to
+			// load and a service that will not start. Omitted entirely:
+			// an empty section carries no secret, so there is nothing
+			// to show and nothing to fill in.
+			continue
 		} else if mapType, ok := asMapType(f.TypeExpr); ok {
 			buf.WriteString(fmt.Sprintf("%s%s:\n", prefix, f.Tag.YAMLName))
 			keyPH := mapKeyPlaceholder(f.Tag)
