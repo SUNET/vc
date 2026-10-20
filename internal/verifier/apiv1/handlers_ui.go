@@ -94,6 +94,17 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
+
+	// SourceFormat is the stored attestation a zkp_req proof is made
+	// over, and is set ONLY for a zkp_req request.
+	//
+	// Derived rather than configured: it is the scope's own
+	// credential_metadata format - the credential the wallet actually
+	// holds - and a preset asking for zkp_req is asking for a proof
+	// over that. Making an operator state it twice would let the two
+	// disagree, and the disagreement would surface as a wallet
+	// refusing the request rather than as a configuration error.
+	SourceFormat string `json:"source_format,omitempty"`
 	// TypeValues is the W3C formats' constraint, from credential_type_values
 	// (expanded IRIs) - not the credential_types the issuer metadata uses.
 	TypeValues [][]string `json:"type_values,omitempty"`
@@ -413,6 +424,15 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
 					uiCred.Req = scopeCfg.Req
+					if scopeCfg.Format == openid4vp.FormatZkpReq {
+						// meta.source_format is REQUIRED for zkp_req:
+						// the matcher's planner refuses a meta without
+						// one (invalid_meta), so a request built
+						// without it is one no wallet will answer.
+						// It is the scope's stored format, which is
+						// what uiCred.Format held before the override.
+						uiCred.Meta.SourceFormat = meta.Format
+					}
 				}
 
 				// scopeCfg may be nil (scope with no overrides)
@@ -595,6 +615,31 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	if len(req.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "rejected a UI interaction request whose DCQL asks for no credential at all")
 		return nil, errors.New("dcql_query must request at least one credential")
+	}
+
+	// meta.source_format for every zkp_req query, server-side.
+	//
+	// The preset listing already carries it, but the DCQL arrives
+	// from the browser and a client that rebuilds the query from the
+	// fields it knows would drop a member it has never heard of. The
+	// request would then go to the wallet without source_format, the
+	// matcher's planner would refuse it as invalid_meta, and the
+	// failure would look like a wallet problem.
+	//
+	// Filled from the scope's own credential_metadata - the
+	// credential the wallet holds - and only when absent, so a client
+	// that does send one is not overruled.
+	for i := range req.DCQLQuery.Credentials {
+		credential := &req.DCQLQuery.Credentials[i]
+		if !openid4vp.IsZkpReqFormat(credential.Format) || credential.Meta.SourceFormat != "" {
+			continue
+		}
+		meta, known := c.cfg.Common.CredentialMetadata[credential.ID]
+		if !known || meta == nil || meta.Format == "" {
+			return nil, fmt.Errorf("credential query %q asks for zkp_req but scope %q has no credential_metadata format to use as meta.source_format",
+				credential.ID, credential.ID)
+		}
+		credential.Meta.SourceFormat = meta.Format
 	}
 
 	for _, credential := range req.DCQLQuery.Credentials {
