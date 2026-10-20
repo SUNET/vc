@@ -167,6 +167,23 @@ func checkSessionTranscript(sessionTranscript []byte) error {
 		return fmt.Errorf("nymauth: the session transcript has %d items; ISO 18013-5 fixes it at %d",
 			len(items), sessionTranscriptItems)
 	}
+
+	// And the CONTENTS, which the decode above does not look at.
+	//
+	// A cbor.RawMessage is bytes: fxamacker checks the shape of each
+	// item but not what is inside it, so a text string holding
+	// invalid UTF-8 decodes into one without complaint. That is not a
+	// curiosity - it is the same failure as every other case here. An
+	// ill-formed transcript hashes perfectly cleanly into a challenge
+	// no prover reproduces, and the resulting mismatch is reported as
+	// a bad proof rather than as the malformed input it is.
+	//
+	// Decoding into `any` forces each item to be interpreted, which
+	// is what applies the UTF-8 check.
+	var contents []any
+	if err := cbor.Unmarshal(sessionTranscript, &contents); err != nil {
+		return fmt.Errorf("nymauth: the session transcript is not well-formed CBOR: %w", err)
+	}
 	return nil
 }
 
