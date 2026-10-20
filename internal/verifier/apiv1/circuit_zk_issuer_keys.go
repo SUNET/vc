@@ -72,7 +72,7 @@ const longfellowIssuerKeySetSize = 1
 // Fail closed, and deliberately not "nothing is trusted, carry on": a
 // verifier that cannot ask whether an issuer is trusted must not read
 // its own silence as a yes.
-var ErrNoTrustEvaluator = errors.New("circuit_zk: no trust evaluator is configured, so no issuer key can be trusted")
+var ErrNoTrustEvaluator = errors.New("zkp_req: no trust evaluator is configured, so no issuer key can be trusted")
 
 // ErrAllowAllTrustEvaluator is the refusal for a deployment whose trust
 // configuration trusts everything.
@@ -95,7 +95,7 @@ var ErrNoTrustEvaluator = errors.New("circuit_zk: no trust evaluator is configur
 // Allow-all is a legitimate mode for other formats, where a holder
 // cannot supply the key it is measured against. It is not legitimate
 // here, so this refuses rather than inheriting it.
-var ErrAllowAllTrustEvaluator = errors.New("circuit_zk: verifier.trust.pdp_url is not set, so every issuer is trusted; " +
+var ErrAllowAllTrustEvaluator = errors.New("zkp_req: verifier.trust.pdp_url is not set, so every issuer is trusted; " +
 	"nym_auth takes the issuer key from the holder's own certificate chain and cannot be used without a PDP")
 
 // circuitZkIssuerKey validates the presentation's issuer chain and
