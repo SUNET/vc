@@ -51,7 +51,7 @@ binary. There is no configuration that turns this on.
 verifier:
   nym_auth:
     enable: true
-    verifier_id: verifier.example
+    verifier_id: x509_san_dns:verifier.example
     circuits:
       allow:
         - config: known-offender-matching-ssc
@@ -68,9 +68,22 @@ verifier:
       proof_system_values: ["longfellow-libzk-v1"]
   trust:
     pdp_url: https://pdp.example/pdp     # BASE url; /evaluation is appended
+  presets:
+    "Pseudonym":
+      credentials:
+        nym_auth:                        # a common.credential_metadata scope
+          format: zkp_req
+          validate: nym_auth             # optional, and worth having
+          req:
+            - fn_id: pseudonym
+              return: nym
+              params:
+                config: known-offender-matching-ssc
+                ver: 1
+                prf: sha-256
 ```
 
-Four separate things have to be right, and each fails differently. They are
+Five separate things have to be right, and each fails differently. They are
 separate on purpose: each one is a different question, and folding any two
 together would make the answer to one depend on the other.
 
@@ -157,6 +170,71 @@ system_id "urn:…" is not one this request offered
 A verifier that offered **no** list offered nothing, and every response is
 then refused. That is the intended reading rather than an oversight: the
 alternative is the holder choosing what it is verified against.
+
+### The preset — `req`, and the two keys that are not the wire's
+
+A `zkp_req` request asks for the output of functions. Everything it yields
+is named in `req`, so a preset with an empty one asks for nothing, and a
+wallet answers it with nothing.
+
+Two key names differ from the rulebook on purpose, and both fail silently
+if you follow the rulebook here instead of this page:
+
+| rulebook (the wire) | preset (this configuration) |
+|---|---|
+| `_req` | **`req`** |
+| `fn_id` | `fn_id` — same |
+
+Configuration is deliberately not loaded strictly, so an unknown key is not
+an error anywhere else in this file; `_req` would simply leave the preset
+with no items. That one is now refused at startup:
+
+```
+verifier.presets."Pseudonym".credentials."nym_auth" asks for format zkp_req
+but its req is empty, so the request would ask the wallet for nothing; the
+preset key is `req` (the wire member it becomes is `_req`)
+```
+
+`ver` and `prf` are REQUIRED parameters of `pseudonym` in rulebook v0.4.
+`sha-256` is the one defined over a stored mdoc. A preset missing either is
+well formed and unsatisfiable: wallets decline it.
+
+`meta.source_format` is **derived, never configured.** It names the stored
+attestation the proof is made over, which is the scope's own
+`common.credential_metadata` format — the credential the wallet actually
+holds. A second place to state it is a second place for the two to
+disagree, and a disagreement surfaces as a wallet refusing the request
+rather than as a configuration error. A request built without one is
+refused by the wallet's matcher as `invalid_meta` before it reads anything
+else.
+
+`validate: nym_auth` is optional and checks the preset against the rulebook
+at startup, where you can still do something about it. It is the same set
+of rules the shared conformance vectors state, so a preset that passes it
+is one the other implementations agree is satisfiable — with one deliberate
+exception: `known-offender-matching-psc` is refused here while no circuit
+in the allowlist can prove it.
+
+An age check is a second item in the same preset, not a second preset:
+
+```yaml
+          req:
+            - fn_id: pseudonym
+              return: nym
+              params:
+                config: known-offender-matching-ssc
+                ver: 1
+                prf: sha-256
+            - fn_id: age_check
+              return: age
+              params:
+                ge: "2008-10-10"
+                le: "2013-10-09"
+```
+
+`ge`/`le` are full dates and bound a birth-date range, and the range must
+span at least 365 days: a narrower one is an exact birth date wearing a
+predicate's clothes.
 
 ### `trust.pdp_url` — the BASE url, and mandatory here
 
