@@ -23,7 +23,7 @@ func testRequest(t *testing.T) Request {
 	input, err := VerifierInput("verifier.example")
 	require.NoError(t, err)
 
-	e2, err := MdocE2("https://verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ", "eu.europa.ec.eudi.nym_auth.1", nil)
+	transcript, err := MdocSessionTranscript("https://verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ", nil)
 	require.NoError(t, err)
 
 	return Request{
@@ -31,9 +31,28 @@ func testRequest(t *testing.T) Request {
 		Now:                time.Now(),
 		Inputs:             []CircuitInput{bounds.CircuitInput()},
 		SupportedFunctions: []string{FunctionAgeCheck},
-		E2:                 e2,
+		SessionTranscript:  transcript,
+		DocType:            testDocType,
 		VerifierInput:      input,
 	}
+}
+
+// testDocType is the docType the shared challenge vectors use, so a
+// request built from the fixture derives a digest those vectors pin.
+const testDocType = "eu.europa.ec.eudi.nym_auth.1"
+
+// e2 is DERIVED from the request's own transcript and docType, and the
+// value it derives is the one the shared vectors pin. A request that
+// carried e2 as a field could name one session in the seed and another
+// in the digest; this is what makes that unrepresentable.
+func TestRequestDerivesThePinnedChallengeDigest(t *testing.T) {
+	r := testRequest(t)
+	got, err := r.E2()
+	require.NoError(t, err)
+	assert.Equal(t,
+		"7eea0f8e073961c3e82e9562e0f79edaa66dbfc17eaf0ac0596a987733516dd9",
+		hex.EncodeToString(got[:]),
+		"challenge-vectors.json, verifier 1")
 }
 
 // verifier_input is SHA-256 of the BARE verifier_id, and the rulebook's
@@ -95,10 +114,30 @@ func TestRequestRefusesWhatItCannotCheckAgainst(t *testing.T) {
 		assert.ErrorContains(t, r.Check(), "does not support")
 	})
 
-	t.Run("zero e2", func(t *testing.T) {
+	t.Run("no transcript seed", func(t *testing.T) {
 		r := testRequest(t)
-		r.E2 = [32]byte{}
-		assert.ErrorContains(t, r.Check(), "not bound to this session")
+		r.SessionTranscript = nil
+		assert.ErrorContains(t, r.Check(), "the transcript seed is 0 bytes")
+	})
+
+	t.Run("a transcript seed over the circuits' bound", func(t *testing.T) {
+		r := testRequest(t)
+		r.SessionTranscript = make([]byte, MaxTranscriptBytes+1)
+		assert.ErrorContains(t, r.Check(), "the circuits take 32 to 65536")
+	})
+
+	t.Run("a transcript seed that is not one CBOR array", func(t *testing.T) {
+		// Trailing bytes: long enough to clear the length bound, so
+		// what refuses it is the shape check in the derivation.
+		r := testRequest(t)
+		r.SessionTranscript = append(append([]byte{}, r.SessionTranscript...), 0x00)
+		assert.ErrorContains(t, r.Check(), "not a single CBOR array")
+	})
+
+	t.Run("no docType", func(t *testing.T) {
+		r := testRequest(t)
+		r.DocType = ""
+		assert.ErrorContains(t, r.Check(), "binds the proof to this credential type")
 	})
 
 	t.Run("zero verifier_input", func(t *testing.T) {

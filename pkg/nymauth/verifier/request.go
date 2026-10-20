@@ -50,9 +50,21 @@ type Request struct {
 	// that verifies against a statement nobody checked.
 	SupportedFunctions []string
 
-	// E2 binds the proof to this session: SHA-256 of the device
-	// authentication message. See MdocE2.
-	E2 [32]byte
+	// SessionTranscript is the ISO 18013-5 SessionTranscript this
+	// presentation is bound to, built from the verifier's own origin
+	// and nonce. The circuits take it whole, as the transcript seed.
+	//
+	// e2 is DERIVED from it (see E2) rather than carried beside it.
+	// The circuits take both, and a request that carried them as two
+	// independent fields could name one session in the seed and
+	// another in the digest - a proof that verifies against a
+	// transcript nobody in this session built.
+	SessionTranscript []byte
+
+	// DocType is the credential's mdoc document type, which the
+	// device-authentication message binds the proof to. Not a circuit
+	// input of its own: it is what makes e2 this credential type's.
+	DocType string
 
 	// VerifierInput is SHA-256 of the BARE verifier_id - never the
 	// prefixed Client Identifier, never client_id as it appears in the
@@ -62,6 +74,23 @@ type Request struct {
 
 // TimeLayout is how the circuits take T for an mdoc: 20 ASCII bytes.
 const TimeLayout = "2006-01-02T15:04:05Z"
+
+// Bounds on the transcript seed the circuits accept. A seed outside
+// them is refused here, with the length named, rather than at the
+// native boundary, which reports it as a generic invalid input.
+const (
+	MinTranscriptBytes = 32
+	MaxTranscriptBytes = 65536
+)
+
+// E2 is the challenge digest this request binds the proof to: SHA-256
+// of the device-authentication message over SessionTranscript and
+// DocType.
+//
+// Derived, never a field. See SessionTranscript.
+func (r Request) E2() ([32]byte, error) {
+	return MdocChallengeDigest(r.SessionTranscript, r.DocType)
+}
 
 // VerifierInput returns SHA-256 of the bare verifier_id.
 //
@@ -97,8 +126,15 @@ func (r Request) Check() error {
 	if err := r.checkInputs(); err != nil {
 		return err
 	}
-	if r.E2 == ([32]byte{}) {
-		return fmt.Errorf("nymauth: e2 is zero; without it the proof is not bound to this session at all")
+	if n := len(r.SessionTranscript); n < MinTranscriptBytes || n > MaxTranscriptBytes {
+		return fmt.Errorf("nymauth: the transcript seed is %d bytes; the circuits take %d to %d",
+			n, MinTranscriptBytes, MaxTranscriptBytes)
+	}
+	if _, err := r.E2(); err != nil {
+		// Derivation is the only check of the transcript's shape and
+		// of the docType, so a request is not checked until it has
+		// run.
+		return err
 	}
 	if r.VerifierInput == ([32]byte{}) {
 		return fmt.Errorf("nymauth: verifier_input is zero; the pseudonym would not be scoped to this verifier")
