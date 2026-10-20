@@ -146,45 +146,75 @@ func (c *NymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, evid
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
+
+	existing, err := c.resetByEvidence(ctx, subjectKey, evidenceRef)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+	if existing != nil {
+		// This evidence has already been used, so the trail is written
+		// and this call must not write a second row. It may still have
+		// work to do: without transactions the audit insert and the
+		// record removal are two operations, and a crash between them
+		// leaves the audited commitment in place. Finishing it is what
+		// makes the retry a retry rather than a no-op reporting success
+		// for a reset that never completed.
+		return c.removeAuditedRecord(ctx, subjectKey, existing.ResetOf, record)
+	}
 	if record == nil {
-		// Nothing to reset - unless this evidence already reset it, in
-		// which case the subject may since have re-established a
-		// record and this is a retry that must change nothing.
-		count, countErr := c.ResetsColl.CountDocuments(ctx, bson.M{"subject_key": subjectKey, "evidence_ref": evidenceRef})
-		if countErr != nil {
-			span.SetStatus(codes.Error, countErr.Error())
-			return countErr
-		}
-		if count > 0 {
-			return nil
-		}
 		return ErrPSCNoRecord
 	}
 
+	audited := ResetOf(record.PSC)
 	_, err = c.ResetsColl.InsertOne(ctx, NymAuthPSCReset{
 		SubjectKey:  subjectKey,
 		EvidenceRef: evidenceRef,
-		ResetOf:     ResetOf(record.PSC),
+		ResetOf:     audited,
 		ApprovedBy:  approvedBy,
 		ApprovedAt:  now.UTC(),
 	})
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			// This evidence has already been used. The record present
-			// above is therefore one the subject re-established after
-			// that reset, and discarding it is exactly what idempotency
-			// is here to prevent.
+			// Another call won the race for this evidence; it owns the
+			// removal and this one has nothing left to do.
 			return nil
 		}
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
-	if _, err := c.Coll.DeleteOne(ctx, bson.M{"subject_key": subjectKey, "psc": record.PSC}); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return err
+	return c.removeAuditedRecord(ctx, subjectKey, audited, record)
+}
+
+// resetByEvidence returns the audit row for this evidence, or nil.
+func (c *NymAuthPSCColl) resetByEvidence(ctx context.Context, subjectKey, evidenceRef string) (*NymAuthPSCReset, error) {
+	var row NymAuthPSCReset
+	err := c.ResetsColl.FindOne(ctx, bson.M{"subject_key": subjectKey, "evidence_ref": evidenceRef}).Decode(&row)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return nil
+	return &row, nil
+}
+
+// removeAuditedRecord deletes the record the trail says was reset, and
+// only that one.
+//
+// The predicate names the COMMITMENT, not just the subject, so a record
+// the subject legitimately re-established after the reset - a different
+// value, hashing to something else - is left alone. That is the
+// difference between completing an interrupted reset and undoing a
+// subject's recovery, and on a retry those two look identical from the
+// subject key alone.
+func (c *NymAuthPSCColl) removeAuditedRecord(ctx context.Context, subjectKey, audited string, record *NymAuthPSCRecord) error {
+	if record == nil || ResetOf(record.PSC) != audited {
+		return nil
+	}
+	_, err := c.Coll.DeleteOne(ctx, bson.M{"subject_key": subjectKey, "psc": record.PSC})
+	return err
 }
 
 // Resets returns the subject's audit trail, oldest first.
@@ -211,13 +241,27 @@ func (c *NymAuthPSCColl) Erase(ctx context.Context, subjectKey string) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:nymauth_psc:erase")
 	defer span.End()
 
-	if _, err := c.ResetsColl.DeleteMany(ctx, bson.M{"subject_key": subjectKey}); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return err
-	}
+	// The RECORD first. A reset needs a record to act on, so once it is
+	// gone no new audit row can be created for this subject. Deleting
+	// the trail first left a window in which a concurrent reset read
+	// the record, inserted its row after this delete, and erasure
+	// returned success with that row retained - a kept identifier for
+	// a subject who asked to be forgotten.
 	if _, err := c.Coll.DeleteOne(ctx, bson.M{"subject_key": subjectKey}); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
+	}
+	for range 2 {
+		// Twice, for a reset that read the record before the delete
+		// above and inserted its row after the first sweep. Without
+		// transactions the window cannot be closed, only narrowed to
+		// requiring a reset to span both sweeps - and this is a subject
+		// exercising erasure, where a leftover row is not an acceptable
+		// remainder.
+		if _, err := c.ResetsColl.DeleteMany(ctx, bson.M{"subject_key": subjectKey}); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			return err
+		}
 	}
 	return nil
 }

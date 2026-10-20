@@ -2,10 +2,12 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -89,4 +91,83 @@ func TestNymAuthPSCColl_Mongo(t *testing.T) {
 	require.NoError(t, err)
 
 	testNymAuthPSCStoreContract(t, store)
+}
+
+// A reset interrupted between its two writes is completed by a retry.
+//
+// Mongo-specific, and deliberately so: the SQL store does both writes
+// in one transaction and cannot reach this state, while this one has no
+// transaction to lean on. Without the compensation the retry sees the
+// evidence already used, returns success, and the audited commitment
+// stays on record - an issuer reporting a reset that did not happen,
+// which is the one answer an operator must never be given here.
+func TestNymAuthPSCColl_MongoCompletesAnInterruptedReset(t *testing.T) {
+	client, cleanup := startMongoContainerForTest(t)
+	defer cleanup()
+
+	svc := newTestServiceWithMongo(t, client)
+	store, err := NewNymAuthPSCColl(t.Context(), "nymauth_psc_interrupted", svc, testsupport.TestLogger(t))
+	require.NoError(t, err)
+
+	ctx := t.Context()
+	subject := pscDigest("interrupted")
+	psc := pscDigest("private-seed-interrupted")
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+
+	require.NoError(t, store.Accept(ctx, subject, psc, now))
+
+	// The audit row lands; the delete never does.
+	_, err = store.ResetsColl.InsertOne(ctx, NymAuthPSCReset{
+		SubjectKey:  subject,
+		EvidenceRef: "evidence-interrupted",
+		ResetOf:     ResetOf(psc),
+		ApprovedBy:  "operator-i",
+		ApprovedAt:  now,
+	})
+	require.NoError(t, err)
+
+	record, err := store.Get(ctx, subject)
+	require.NoError(t, err)
+	require.NotNil(t, record, "the fixture must leave the record in place")
+
+	// The retry finishes it.
+	require.NoError(t, store.Reset(ctx, subject, "operator-i", "evidence-interrupted", now))
+
+	record, err = store.Get(ctx, subject)
+	require.NoError(t, err)
+	assert.Nil(t, record, "a retry must complete the interrupted reset, not report success and leave it")
+
+	trail, err := store.Resets(ctx, subject)
+	require.NoError(t, err)
+	assert.Len(t, trail, 1, "and must not write a second audit row")
+}
+
+// ...but a retry must NOT remove a commitment the subject has since
+// re-established. The trail names a commitment; only that one is
+// removed, and on a retry those two cases are indistinguishable from
+// the subject key alone.
+func TestNymAuthPSCColl_MongoRetryLeavesAReEstablishedRecord(t *testing.T) {
+	client, cleanup := startMongoContainerForTest(t)
+	defer cleanup()
+
+	svc := newTestServiceWithMongo(t, client)
+	store, err := NewNymAuthPSCColl(t.Context(), "nymauth_psc_reestablished", svc, testsupport.TestLogger(t))
+	require.NoError(t, err)
+
+	ctx := t.Context()
+	subject := pscDigest("reestablished")
+	oldPSC := pscDigest("private-seed-old")
+	newPSC := pscDigest("private-seed-new")
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+
+	require.NoError(t, store.Accept(ctx, subject, oldPSC, now))
+	require.NoError(t, store.Reset(ctx, subject, "operator-r", "evidence-r", now))
+	require.NoError(t, store.Accept(ctx, subject, newPSC, now.Add(time.Hour)))
+
+	require.NoError(t, store.Reset(ctx, subject, "operator-r", "evidence-r", now.Add(2*time.Hour)))
+
+	record, err := store.Get(ctx, subject)
+	require.NoError(t, err)
+	require.NotNil(t, record, "the re-established record must survive the replayed reset")
+	assert.Equal(t, newPSC, record.PSC)
 }

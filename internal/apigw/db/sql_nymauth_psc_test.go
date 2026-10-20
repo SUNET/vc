@@ -3,7 +3,9 @@ package db
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,6 +147,79 @@ func testNymAuthPSCStoreContract(t *testing.T, store NymAuthPSCStore) {
 		trail, err := store.Resets(ctx, subject)
 		require.NoError(t, err)
 		assert.Empty(t, trail, "a trail outliving its record is a retained identifier with no purpose")
+	})
+
+	t.Run("concurrent resets with different evidence do not both remove", func(t *testing.T) {
+		// Two operators acting at once. Whatever the interleaving, the
+		// trail must describe what was actually removed: a reset that
+		// audits commitment A and deletes commitment B would destroy a
+		// record the subject had legitimately re-established and leave
+		// a trail saying otherwise.
+		subject := pscDigest("concurrent-resets")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs[i] = store.Reset(ctx, subject, "operator-c", fmt.Sprintf("evidence-c%d", i), now)
+			}()
+		}
+		wg.Wait()
+
+		succeeded := 0
+		for _, err := range errs {
+			if err == nil {
+				succeeded++
+			}
+		}
+		assert.GreaterOrEqual(t, succeeded, 1, "at least one reset must take effect")
+
+		got, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+		assert.Nil(t, got, "the audited commitment must be gone")
+
+		trail, err := store.Resets(ctx, subject)
+		require.NoError(t, err)
+		for _, row := range trail {
+			assert.Equal(t, ResetOf(first), row.ResetOf,
+				"every trail row must name the commitment that was actually removed")
+		}
+		require.NoError(t, store.Erase(ctx, subject))
+	})
+
+	t.Run("a reset racing an erasure leaves nothing behind", func(t *testing.T) {
+		// Erasure is a subject asking to be forgotten. A trail row
+		// surviving it is a retained identifier with no record left to
+		// describe.
+		subject := pscDigest("reset-vs-erase")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = store.Reset(ctx, subject, "operator-d", "evidence-d", now)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = store.Erase(ctx, subject)
+		}()
+		wg.Wait()
+
+		// Erasure may have landed first, in which case the reset found
+		// nothing; either way a second erasure settles it and nothing
+		// may remain after it.
+		require.NoError(t, store.Erase(ctx, subject))
+
+		got, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+		trail, err := store.Resets(ctx, subject)
+		require.NoError(t, err)
+		assert.Empty(t, trail)
 	})
 
 	t.Run("malformed arguments are refused before they reach the table", func(t *testing.T) {

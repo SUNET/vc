@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/SUNET/vc/pkg/sqlstore"
@@ -135,8 +136,16 @@ func (c *SQLNymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, e
 		return nil
 	}
 
+	// FOR UPDATE: the row is read, audited and deleted across three
+	// statements, and READ COMMITTED - the default in both backends -
+	// gives each statement a fresh snapshot. Without the lock, two
+	// resets can both read commitment A; the first commits, the wallet
+	// legitimately records commitment B, and the second then deletes B
+	// while its audit row says it reset A. A destroyed record and an
+	// untrue trail, from an operator action that is supposed to be the
+	// careful one.
 	var row nymAuthPSCRow
-	query = c.dialect.Rebind(`SELECT subject_key, psc, accepted_at FROM nymauth_psc WHERE subject_key = ?`)
+	query = c.dialect.Rebind(`SELECT subject_key, psc, accepted_at FROM nymauth_psc WHERE subject_key = ? FOR UPDATE`)
 	if err := tx.GetContext(ctx, &row, query, subjectKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrPSCNoRecord
@@ -152,10 +161,27 @@ func (c *SQLNymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, e
 		return err
 	}
 
-	query = c.dialect.Rebind(`DELETE FROM nymauth_psc WHERE subject_key = ?`)
-	if _, err := tx.ExecContext(ctx, query, subjectKey); err != nil {
+	// Conditional on the value that was audited, so that even if the
+	// lock above were ever lost this cannot delete a commitment the
+	// trail does not describe. Belt and braces on purpose: the whole
+	// store exists to keep one invariant, and the cheapest place to
+	// keep it is in the predicate.
+	query = c.dialect.Rebind(`DELETE FROM nymauth_psc WHERE subject_key = ? AND psc = ?`)
+	result, err := tx.ExecContext(ctx, query, subjectKey, row.PSC)
+	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+	if affected == 0 {
+		// The commitment changed under us. Roll back rather than
+		// commit an audit row for a reset that did not remove what it
+		// names.
+		return fmt.Errorf("nymauth: the commitment changed while the reset was in progress; nothing was reset")
 	}
 	return tx.Commit()
 }
@@ -197,9 +223,21 @@ func (c *SQLNymAuthPSCColl) Erase(ctx context.Context, subjectKey string) error 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// The RECORD first, and under the same lock a reset takes, so a
+	// reset cannot be mid-flight while this runs. Deleting the trail
+	// first left a window in which a concurrent reset inserted its row
+	// afterwards and erasure returned success with that row retained -
+	// a retained identifier for a subject who asked to be forgotten.
+	var row nymAuthPSCRow
+	query := c.dialect.Rebind(`SELECT subject_key, psc, accepted_at FROM nymauth_psc WHERE subject_key = ? FOR UPDATE`)
+	if err := tx.GetContext(ctx, &row, query, subjectKey); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
 	for _, stmt := range []string{
-		`DELETE FROM nymauth_psc_resets WHERE subject_key = ?`,
 		`DELETE FROM nymauth_psc WHERE subject_key = ?`,
+		`DELETE FROM nymauth_psc_resets WHERE subject_key = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, c.dialect.Rebind(stmt), subjectKey); err != nil {
 			span.SetStatus(codes.Error, err.Error())
