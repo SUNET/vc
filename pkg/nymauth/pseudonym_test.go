@@ -171,10 +171,9 @@ func TestVerifierInputIsTheBareVerifierID(t *testing.T) {
 		"and its MUST NOT digest for the prefixed Client Identifier")
 
 	for _, bad := range []string{
-		"semantic_id:rp.example",  // a Client Identifier, not a verifier_id
 		"x509_san_dns:rp.example", // the form the rulebook marks MUST NOT
-		"semantic_id:",
 		"x509_san_dns:",
+		"semantic_id:", // the semantic form naming nobody
 		"",
 	} {
 		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, bad)
@@ -185,11 +184,36 @@ func TestVerifierInputIsTheBareVerifierID(t *testing.T) {
 	}
 
 	// Bare identifiers, including ones that merely CONTAIN a colon -
-	// the guard is about the two known prefixes, not about punctuation.
-	for _, good := range []string{"rp.example", "verifier.example", "https://rp.example/path", "x509_hash:abcd"} {
+	// the guard is about the Client Identifier Prefix, not about
+	// punctuation.
+	//
+	// "semantic_id:rp.example" is in this list on purpose. The rulebook
+	// says that string is part of the `semantic` verifier_id VALUE and
+	// not a Client Identifier Prefix, so it is hashed whole. Refusing it
+	// would leave every semantic deployment unable to derive
+	// verifier_input, and the failure would look like a bad pseudonym
+	// rather than a rejected identifier.
+	for _, good := range []string{
+		"rp.example",
+		"verifier.example",
+		"semantic_id:rp.example",
+		"https://rp.example/path",
+		"x509_hash:abcd",
+	} {
 		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, good)
 		assert.NoErrorf(t, err, "%q is a bare verifier_id", good)
 	}
+
+	// And a semantic verifier_id is hashed WHOLE: the digest is over
+	// "semantic_id:rp.example", not over "rp.example".
+	semantic := sha256.Sum256([]byte("semantic_id:rp.example"))
+	identifierOnly := sha256.Sum256([]byte("rp.example"))
+	require.NotEqual(t, semantic, identifierOnly)
+	gotSemantic, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "semantic_id:rp.example")
+	require.NoError(t, err)
+	wantSemantic, err := Pseudonym(ConfigKnownOffenderMatchingSSC, testSeed, nullInput, semantic[:])
+	require.NoError(t, err)
+	assert.Equal(t, wantSemantic, gotSemantic)
 
 	// And the pseudonym really is computed over the bare form: the same
 	// Relying Party written the prefixed way is refused, so there is no
