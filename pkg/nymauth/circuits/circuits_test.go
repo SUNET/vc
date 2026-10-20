@@ -164,6 +164,8 @@ func TestAllowlistRefusesAMalformedEntry(t *testing.T) {
 		{"an unknown configuration", func(e *model.NymAuthCircuit) { e.Config = "something-else" }, "not a known-offender-matching configuration"},
 		{"a non-hex circuit id", func(e *model.NymAuthCircuit) { e.HashCircuitID = "not-hex" }, "hash_circuit_id is not hex"},
 		{"one circuit id used twice", func(e *model.NymAuthCircuit) { e.SigCircuitID = e.HashCircuitID }, "the same, which no real build has"},
+		{"no block_enc_hash", func(e *model.NymAuthCircuit) { e.BlockEncHash = 0 }, "block_enc_hash is zero"},
+		{"no block_enc_sig", func(e *model.NymAuthCircuit) { e.BlockEncSig = 0 }, "block_enc_sig is zero"},
 		{"a digest that is not a SHA-256", func(e *model.NymAuthCircuit) { e.ArtifactSHA256 = "abcd" }, "64-character hex SHA-256"},
 		{"no declared length", func(e *model.NymAuthCircuit) { e.ArtifactBytes = 0 }, "must be positive"},
 		{"neither a path nor an id", func(e *model.NymAuthCircuit) { e.ArtifactPath = "" }, "exactly one of artifact_path and artifact_id"},
