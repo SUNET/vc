@@ -92,7 +92,7 @@ func TestCircuitZkSessionRefusesAnUnsupportedChannel(t *testing.T) {
 // channel selection exists to prevent.
 func TestCircuitZkSessionBuildsTheRedirectTranscript(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
-		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
+		NymAuth: model.NymAuthVerifier{VerifierID: "x509_san_dns:verifier.example"},
 	}}}
 	thumbprint := bytes.Repeat([]byte{0x11}, 32)
 
