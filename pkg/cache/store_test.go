@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -682,4 +683,26 @@ func TestExtendExpiryResolvesEveryFieldGetDoes(t *testing.T) {
 			assert.Equal(t, base, after.ExpiresAt, "the extension must have been applied")
 		})
 	}
+}
+
+// A malformed replacement must be refused before the claim, as MongoStore
+// does, so the issuer_state stays claimable on both backends.
+func TestClaimIssuerStateValidatesBeforeClaiming(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	prepared := &AuthorizationContext{SessionID: "resume-invalid", IssuerState: "invalid-istate"}
+	require.NoError(t, store.Save(ctx, prepared))
+
+	opened := *prepared
+	opened.AuthSession = "invalid-handle"
+	opened.CodeChallenge = strings.Repeat("c", 129)
+
+	claimed, err := store.ClaimIssuerState(ctx, "invalid-istate", &opened)
+	require.Error(t, err)
+	require.Nil(t, claimed)
+
+	still, err := store.Get(ctx, &AuthorizationContext{IssuerState: "invalid-istate"})
+	require.NoError(t, err, "a refused replacement must not consume the issuer_state")
+	assert.Empty(t, still.AuthSession)
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -729,6 +730,20 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPrepareIssuance")
 	defer span.End()
 
+	// An anonymous admin session is not an authenticated principal.
+	//
+	// The startup check refuses configurations that grant one, but a
+	// cookie issued before the configuration changed stays valid for its
+	// lifetime - session keys persist across restarts in HA deployments -
+	// and SessionOrAPIAuth accepts it in place of a bearer token.
+	if isAnonymousAdminSession(c) {
+		err := helpers.NewErrorDetailsWithStatus("anonymous_session_not_allowed",
+			"an anonymous admin session cannot prepare an issuance", http.StatusForbidden)
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "anonymous admin session refused")
+		return nil, err
+	}
+
 	// Refused before binding, because binding is where the two readings
 	// of this body diverge.
 	//
@@ -764,6 +779,21 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	}
 
 	return reply, nil
+}
+
+// isAnonymousAdminSession reports whether the request is authenticated by
+// an admin session granted anonymously by /ui/login.
+func isAnonymousAdminSession(c *gin.Context) bool {
+	v, ok := c.Get(sessions.DefaultKey)
+	if !ok {
+		return false
+	}
+	session, ok := v.(sessions.Session)
+	if !ok || session.Get(adminSessionKey) != true {
+		return false
+	}
+	subject, _ := session.Get("admin_subject").(string)
+	return subject == anonymousAdminSubject
 }
 
 // requireCanonicalJSONBody refuses any request body that the authorization

@@ -1,10 +1,12 @@
 package apiv1
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -389,4 +391,52 @@ func TestIssuerInitiated_ResumeAppliesTheSameRequestGuards(t *testing.T) {
 		assert.Equal(t, 403, opened.HTTPStatus)
 		assert.Equal(t, "insufficient_authorization", opened.ErrorCode)
 	})
+}
+
+// A store that will not answer is ours: the prepared issuance is still
+// valid and unclaimed, so the wallet must be told to retry rather than
+// that its offer is dead.
+func TestIssuerInitiated_StoreFailureOnResolveIsAServerError(t *testing.T) {
+	client := newChallengeClient(t)
+	issuerState := prepareIssuance(t, client, portalMatch())
+
+	failing := &failingAuthContextStore{AuthContextStore: client.cacheService.AuthContext}
+	client.cacheService.AuthContext = failing
+	failing.getErr = errors.New("connection refused")
+
+	req := initialChallenge(t)
+	req.Scope = ""
+	req.IssuerState = issuerState
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+	assert.Equal(t, 500, oauthErr.HTTPStatus)
+}
+
+// A scope prepared while it resolved to a presentation can resolve to a
+// browser interaction after a configuration change. The resume must refuse
+// before claiming, so the offer is not spent on an unusable exchange.
+func TestIssuerInitiated_RefusesANonPresentationInteractionBeforeClaiming(t *testing.T) {
+	client := newChallengeClient(t)
+	issuerState := prepareIssuance(t, client, portalMatch())
+
+	scopeCfg := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
+	scopeCfg.AuthProvider = model.AuthProviderOIDC
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopeCfg
+
+	req := initialChallenge(t)
+	req.Scope = ""
+	req.IssuerState = issuerState
+
+	_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
+	require.Error(t, err)
+	var challengeErr *AuthorizationChallengeError
+	assert.False(t, errors.As(err, &challengeErr) && challengeErr.AuthSession != "",
+		"no exchange may be opened")
+
+	resolved, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		IssuerState: issuerState,
+	})
+	require.NoError(t, err, "the issuer_state must still be claimable")
+	assert.Empty(t, resolved.AuthSession)
 }

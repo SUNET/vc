@@ -806,6 +806,14 @@ func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, 
 		return nil, errors.New("opened document with session_id is required")
 	}
 
+	// Validated before anything is touched, as MongoStore does, so a
+	// malformed replacement leaves the issuer_state claimable.
+	stored := *opened
+	stored.IssuerState = ""
+	if err := stored.Validate(); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -831,10 +839,9 @@ func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, 
 	}
 
 	// The claimant's document wins wholesale, with the handle gone from
-	// it: anything that persisted a document still carrying the handle
-	// would re-create its index and make the issuance claimable again.
-	stored := *opened
-	stored.IssuerState = ""
+	// it (cleared on stored above): anything that persisted a document
+	// still carrying the handle would re-create its index and make the
+	// issuance claimable again.
 
 	// The OLD document's indices go first, exactly as Update does it.
 	//

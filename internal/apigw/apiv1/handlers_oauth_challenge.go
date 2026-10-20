@@ -1132,12 +1132,16 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	// The claim at the bottom is what makes it one-shot: two wallets
 	// scanning the same offer both reach it, and exactly one wins.
 	resolved, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
-	if err != nil || resolved == nil {
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments), err == nil && resolved == nil:
 		// Unknown and expired are one answer, for the same reason they are
 		// at the intermediate request: otherwise the endpoint reports
 		// which issuer_state values exist.
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 			"issuer_state is invalid or has expired", 400)
+	case err != nil:
+		// The prepared issuance is untouched, so the wallet can retry.
+		return nil, c.authSessionStoreFailure(err, "resolve issuer_state")
 	}
 
 	// A COPY, because this request is about to write to it.
@@ -1178,6 +1182,15 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	required, _, err := c.interactionTypeForScope(ia, scope)
 	if err != nil {
 		return nil, err
+	}
+	// Only a presentation can evaluate the identity match, and the rest of
+	// this path builds an OpenID4VP request. A configuration change since
+	// preparation can resolve the scope elsewhere; refuse before the claim.
+	if required != ia.InteractionType(model.InteractionOpenID4VPPresentation) {
+		c.log.Error(nil, "CHALLENGE: prepared issuance's scope no longer resolves to a presentation",
+			"scope", scope, "interaction_type_required", required)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeServerError,
+			"the prepared issuance cannot be resumed with this server's current configuration", 500)
 	}
 	if !interactionTypeOffered(req.InteractionTypesSupported, required) {
 		return nil, &AuthorizationChallengeError{

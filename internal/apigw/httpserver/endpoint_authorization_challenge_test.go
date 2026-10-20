@@ -19,6 +19,8 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/trace"
 
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -663,4 +665,57 @@ func TestEndpointAuthorizationChallenge_TypedFailuresArePassedThrough(t *testing
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oauthErr))
 	assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
 	assert.Equal(t, "auth_session is not valid", oauthErr.ErrorDescription)
+}
+
+// An anonymous admin session issued before the configuration changed stays
+// valid for its lifetime, and SessionOrAPIAuth accepts it in place of a
+// bearer token. The startup check cannot revoke it; the endpoint must.
+func TestEndpointPrepareIssuance_RefusesAnAnonymousAdminSession(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-anonymous-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-anonymous-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	store := cookie.NewStore([]byte("12345678901234567890123456789012"), []byte("1234567890123456"))
+	engine := gin.New()
+	engine.Use(sessions.Sessions("admin_session", store))
+	engine.GET("/login", func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Set(adminSessionKey, true)
+		session.Set("admin_subject", c.Query("subject"))
+		_ = session.Save()
+	})
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	prepare := func(subject string) *httptest.ResponseRecorder {
+		login := httptest.NewRecorder()
+		engine.ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/login?subject="+subject, nil))
+
+		body := `{"identity_match":{"claims":{"given_name":{"equals":"Alice"}}},"scope":"allowed_scope"}`
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, c := range login.Result().Cookies() {
+			req.AddCookie(c)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	w := prepare(anonymousAdminSubject)
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	assert.Nil(t, api.seen, "an anonymous session must not reach PrepareIssuance")
+
+	w = prepare("alice")
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotNil(t, api.seen, "an authenticated session must still be served")
 }

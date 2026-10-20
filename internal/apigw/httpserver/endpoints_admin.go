@@ -17,6 +17,10 @@ import (
 
 const adminSessionKey = "admin_authenticated"
 
+// anonymousAdminSubject is the admin_subject /ui/login grants when no OIDC
+// is configured.
+const anonymousAdminSubject = "anonymous"
+
 func (s *Service) endpointAdminUI(ctx context.Context, c *gin.Context) (any, error) {
 	c.HTML(http.StatusOK, "admin.html", nil)
 	return nil, nil
@@ -38,7 +42,7 @@ func (s *Service) endpointAdminLogin(ctx context.Context, c *gin.Context) (any, 
 	if reply.AuthURL == "" {
 		session := sessions.Default(c)
 		session.Set(adminSessionKey, true)
-		session.Set("admin_subject", "anonymous")
+		session.Set("admin_subject", anonymousAdminSubject)
 		// CSRFProtection rejects any state-changing request from a session
 		// that has no csrf_token; without this the anonymous admin UI can
 		// GET but never POST/PUT/DELETE.
