@@ -5,8 +5,11 @@
 # which already ships protoc + swag + gRPC codegen and the C++/Rust
 # toolchains — the tool-install steps below no-op when they detect the
 # tools are already present.
-# Keep the golang tag aligned with dockerfiles/gobuild's FROM.
-ARG GOBUILD_IMAGE=golang:1.27.1-bookworm
+# Keep the golang tag aligned with dockerfiles/gobuild's FROM, and both
+# aligned with go.mod's `go` directive: GOTOOLCHAIN=local below forbids the
+# automatic toolchain upgrade, so an image older than go.mod fails the
+# build outright with "go.mod requires go >= ...".
+ARG GOBUILD_IMAGE=golang:1.27.2-bookworm
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
