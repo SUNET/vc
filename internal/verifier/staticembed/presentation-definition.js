@@ -125,6 +125,13 @@ const metadataResponseSchema = v.object({
                 vct_values: v.optional(v.array(v.string())),
                 doctype_value: v.optional(v.string()),
                 type_values: v.optional(v.array(v.array(v.string()))),
+                // source_format is the stored attestation a zkp_req
+                // proof is made over, and is REQUIRED for that format:
+                // the wallet's matcher refuses a meta without one
+                // (invalid_meta). Undeclared here it would be stripped
+                // like doctype_value once was, and the request would
+                // reach the wallet unanswerable.
+                source_format: v.optional(v.string()),
                 // zk_system_type entries are a flat {id, system, ...params}
                 // string-keyed object on the wire (ZKSystemTypeSpec's own
                 // MarshalJSON flattens params to the top level, no nested
@@ -177,6 +184,7 @@ const dcqlQueryCredentialSchema = v.object({
         vct_values: v.optional(v.array(v.string())),
         doctype_value: v.optional(v.string()),
         type_values: v.optional(v.array(v.array(v.string()))),
+        source_format: v.optional(v.string()),
         zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
     }),
     claims: v.optional(v.array(v.object({

@@ -70,6 +70,16 @@ func presetQuery(cfg *model.Cfg, scope string, scopeCfg *model.VerificationPrese
 	if scopeCfg.Format != "" {
 		query.Format = scopeCfg.Format
 	}
+	// Mirrors the derivation in internal/verifier/apiv1: a zkp_req
+	// request carries the scope's own stored format as
+	// meta.source_format, and is unanswerable without it. Judging a
+	// query that lacked it would be judging a request the UI never
+	// publishes.
+	if openid4vp.IsZkpReqFormat(query.Format) && cfg.Common != nil {
+		if meta := cfg.Common.CredentialMetadata[scope]; meta != nil {
+			query.Meta.SourceFormat = meta.Format
+		}
+	}
 	if len(scopeCfg.ZKSystemType) > 0 {
 		query.Meta.ZKSystemType = scopeCfg.ZKSystemType
 	}
@@ -90,4 +100,41 @@ func stringPathToPtrPath(path []string) []*string {
 		out[i] = &path[i]
 	}
 	return out
+}
+
+// checkZkpReqPresetsAskForSomething refuses a zkp_req preset whose `req`
+// is empty, at startup, whether or not the preset opted into a profile.
+//
+// Unconditional because of how the key is spelled. v0.4 renamed the WIRE
+// member from `req` to `_req`; the preset key - this repository's own
+// configuration surface - stayed `req`. An operator reading the rulebook
+// writes `_req`, and configuration is deliberately NOT loaded with
+// UnmarshalStrict, so nothing says a word: the preset simply has no
+// items, the request asks the wallet for nothing, and the wallet answers
+// with nothing. That failure reads as the wallet's.
+//
+// The rule itself is the matcher's (req_missing_or_empty): a zkp_req
+// query with no items is refused there too. This only says it at the
+// point where it is still a configuration mistake.
+func checkZkpReqPresetsAskForSomething(cfg *model.Cfg) error {
+	if cfg == nil || cfg.Verifier == nil {
+		return nil
+	}
+	var problems []string
+	for _, label := range slices.Sorted(maps.Keys(cfg.Verifier.Presets)) {
+		preset := cfg.Verifier.Presets[label]
+		for _, scope := range slices.Sorted(maps.Keys(preset.Credentials)) {
+			scopeCfg := preset.Credentials[scope]
+			if scopeCfg == nil || !openid4vp.IsZkpReqFormat(scopeCfg.Format) || len(scopeCfg.Req) > 0 {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf(
+				"verifier.presets.%q.credentials.%q asks for format %s but its req is empty, so the request would ask the wallet for nothing; the preset key is `req` (the wire member it becomes is `_req`)",
+				label, scope, openid4vp.FormatZkpReq))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("zkp_req preset asks for nothing:\n\t%s", strings.Join(problems, "\n\t"))
+	}
+	return nil
 }

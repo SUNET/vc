@@ -58,6 +58,10 @@ const (
 // agreed width is one this verifier cannot check, so an item naming
 // no known prf is refused rather than measured against a guess.
 const (
+	// PseudonymVer1 is the only pseudonym `ver` v0.4 defines. The
+	// parameter is REQUIRED, so there is no "unversioned" request.
+	PseudonymVer1 = 1
+
 	PrfSHA256           = "sha-256"
 	PrfHashDHBLS12381G1 = "hashdh-bls12381g1"
 )
@@ -79,11 +83,16 @@ const (
 //	        nym_auth:
 //	          format: zkp_req
 //	          validate: nym_auth     # optional
-//	          _req:
-//	            - id: pseudonym
+//	          # `req` is the PRESET key; the wire member it becomes is
+//	          # `_req`. They differ on purpose - the preset is this
+//	          # repository's configuration surface, not the wire.
+//	          req:
+//	            - fn_id: pseudonym
 //	              return: nym-123
 //	              params:
 //	                config: known-offender-matching-ssc
+//	                ver: 1
+//	                prf: sha-256
 //	```
 //
 // Params is an open map and is serialised exactly as given. Nothing here
@@ -95,8 +104,8 @@ const (
 // tool we test wallets WITH: a builder that quietly fixed a bad request
 // could not produce the bad requests a negative test needs.
 type ReqItem struct {
-	// ID is the function identifier, "id" on the wire. Named ID rather
-	// than Function to match the wire member, since the wire is what an
+	// FnID is the function identifier, "fn_id" on the wire. Named for
+	// the wire member rather than Function, since the wire is what an
 	// operator configures and reads back.
 	FnID string `json:"fn_id" yaml:"fn_id"`
 
