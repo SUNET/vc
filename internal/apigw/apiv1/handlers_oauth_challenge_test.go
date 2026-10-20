@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	stdcrypto "crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -17,6 +18,7 @@ import (
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -1173,6 +1175,87 @@ func TestClaimedContextCannotResurrectTheHandle(t *testing.T) {
 	assert.NotEmpty(t, stored.AuthSessionDPoPThumbprint)
 }
 
+// The Authorization Challenge Endpoint now supplies an mdoc session
+// transcript, so an mdoc presentation is no longer refused by name - and
+// the transcript it supplies is the Interactive Authorization one, which
+// is a different structure from either of the browser flow's.
+//
+// Verifying against the wrong transcript fails device-auth with nothing to
+// point at, so this asserts on the BYTES rather than on "mdoc is accepted
+// now": the latter would pass just as well with the direct-post builder
+// wired in by mistake.
+func TestAuthorizationChallenge_SuppliesTheInteractiveAuthorizationTranscript(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	ia := &client.cfg.APIGW.Delivery.InteractiveAuthorization
+	build := client.interactiveAuthorizationSessionTranscript(ia, authCtx, privateEphemeralJWK)
+	require.NotNil(t, build, "the challenge endpoint must supply a transcript, or mdoc is refused")
+
+	got, err := build()
+	require.NoError(t, err)
+
+	// Rebuilt from the exchange's own values rather than compared to a
+	// constant, so the test says which inputs are bound rather than only
+	// that some bytes matched.
+	ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+	require.NoError(t, err)
+	thumbprint, err := ephemeralPublicJWK.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+
+	want, err := mdoc.BuildOID4VCIIAESessionTranscript(
+		"OpenID4VCIIAEHandover",
+		challengeIssuerURL+"/authorize-challenge",
+		authCtx.Nonce,
+		thumbprint,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	// And it is NOT the browser flow's transcript, which is the mistake
+	// that would otherwise go unnoticed.
+	directPost, err := mdoc.BuildOID4VPSessionTranscript(
+		authCtx.ClientID, authCtx.Nonce, challengeIssuerURL+"/verification/direct_post", thumbprint)
+	require.NoError(t, err)
+	assert.NotEqual(t, directPost, got)
+
+	// The endpoint goes in unprefixed: the "ia:" that keeps an SD-JWT VC
+	// audience out of an ordinary Verifier's namespace must not appear in
+	// the handover.
+	assert.NotContains(t, string(got), "ia:https://")
+}
+
+// CS01_07: the handover label is hashed into the transcript, so a
+// deployment has to be able to follow the working group without a release.
+func TestAuthorizationChallenge_TranscriptLabelFollowsConfiguration(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.Delivery.InteractiveAuthorization.MdocHandoverLabel = "OpenID4VCIIAHandover"
+
+	opened := challengeErr(t, client, initialChallenge(t))
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	got, err := client.interactiveAuthorizationSessionTranscript(
+		&client.cfg.APIGW.Delivery.InteractiveAuthorization, authCtx, privateEphemeralJWK)()
+	require.NoError(t, err)
+
+	assert.Contains(t, string(got), "OpenID4VCIIAHandover")
+	assert.NotContains(t, string(got), "OpenID4VCIIAEHandover")
+}
+
 // A proof is for the ENDPOINT, not for one spelling of its URL.
 //
 // A wallet builds htu from the URL it requested; this deployment writes
@@ -1299,4 +1382,117 @@ func TestAuthorizationChallenge_SuccessfulPresentationYieldsTheCode(t *testing.T
 	again := challengeErr(t, client, continueExchange(t, opened.AuthSession, response))
 	assert.Equal(t, errInvalidSession, again.ErrorCode)
 	assert.Equal(t, 1, calls, "a spent auth_session must not reach the pipeline again")
+}
+
+// The transcript test above builds one directly, which says that the
+// builder is right and nothing about whether the ENDPOINT uses it. Wiring
+// the direct-post builder in by mistake - or nil, which refuses mdoc by
+// name - would leave it green, and that substitution is exactly the
+// mistake worth catching: verifying against the wrong transcript fails
+// device-auth with nothing to point at.
+//
+// So this drives a real encrypted response through the endpoint and
+// asserts on the transcript the pipeline is actually handed. The pipeline
+// itself is replaced (Client.issuanceAuth): what it would need to accept a
+// genuine DeviceResponse is an mdoc signed over this transcript by a
+// trusted IACA, which is a fixture about mdoc verification rather than
+// about this endpoint's wiring.
+func TestAuthorizationChallenge_PassesTheInteractiveAuthorizationTranscriptToThePipeline(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	var seen issuanceAuthBinding
+	client.issuanceAuth = func(_ context.Context, ctxArg *cache.AuthorizationContext, _ *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+		seen = binding
+		return &issuanceAuthOutcome{Scope: ctxArg.Scopes[0]}, nil
+	}
+
+	response := encryptedVPResponse(t, client, opened.AuthSession,
+		`{"state":"`+authCtx.State+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+	_, err = client.OAuthAuthorizationChallenge(t.Context(),
+		continueExchange(t, opened.AuthSession, response))
+	require.NoError(t, err)
+
+	// nil is what refused mdoc by name before this PR, so it is the first
+	// thing to rule out.
+	require.NotNil(t, seen.MdocSessionTranscript,
+		"the endpoint must supply a transcript, or every mdoc presentation is refused")
+
+	got, err := seen.MdocSessionTranscript()
+	require.NoError(t, err)
+
+	ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+	require.NoError(t, err)
+	thumbprint, err := ephemeralPublicJWK.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+
+	want, err := mdoc.BuildOID4VCIIAESessionTranscript(
+		"OpenID4VCIIAEHandover",
+		challengeIssuerURL+"/authorize-challenge",
+		authCtx.Nonce,
+		thumbprint,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, got, "the endpoint must pass the Interactive Authorization transcript")
+
+	// And not the browser flow's, which is the substitution the direct
+	// builder test could not see.
+	directPost, err := mdoc.BuildOID4VPSessionTranscript(
+		authCtx.ClientID, authCtx.Nonce, challengeIssuerURL+"/verification/direct_post", thumbprint)
+	require.NoError(t, err)
+	assert.NotEqual(t, directPost, got)
+}
+
+// The Authorization Challenge Endpoint is browserless, so a registered
+// wallet with no callback has to be able to use it.
+//
+// redirect_uri is optional on this request
+// (draft-ietf-oauth-first-party-apps), and there is nowhere to send a user
+// back to - but the client check ran through Clients.Allow, which requires
+// a matching callback, so such a wallet was refused with invalid_client
+// and only a wallet attestation got past it. The fixtures all supply a
+// callback, which is what hid this.
+func TestAuthorizationChallenge_WalletWithoutARedirectURI(t *testing.T) {
+	client := newChallengeClient(t)
+
+	req := initialChallenge(t)
+	req.RedirectURI = ""
+
+	// Past the client gate and on to the presentation, which is the
+	// request this wallet should get.
+	challengeErr := challengeErr(t, client, req)
+	assert.Equal(t, 403, challengeErr.HTTPStatus)
+	assert.Equal(t, "insufficient_authorization", challengeErr.ErrorCode)
+	require.NotEmpty(t, challengeErr.AuthSession)
+	require.NotEmpty(t, challengeErr.OpenID4VPRequest)
+
+	// And the exchange really was opened for this wallet, with a code
+	// waiting at the end of it - the point of the flow, not just a 403.
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: challengeErr.AuthSession,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "wallet-1", authCtx.WalletClientID)
+	assert.Empty(t, authCtx.WalletURI, "there is no callback, and none was invented")
+	assert.NotEmpty(t, authCtx.Code)
+}
+
+// A redirect_uri that IS sent is still checked. Dropping the requirement
+// must not drop the check: a wrong callback is wrong on any endpoint.
+func TestAuthorizationChallenge_AWrongRedirectURIIsStillRefused(t *testing.T) {
+	client := newChallengeClient(t)
+
+	req := initialChallenge(t)
+	req.RedirectURI = "https://attacker.example.com/cb"
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidClient, oauthErr.ErrorCode)
 }

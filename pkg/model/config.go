@@ -2146,6 +2146,20 @@ func (ia *InteractiveAuthorization) ChallengeEndpointOrigin(issuerURL string) (s
 	return origin, nil
 }
 
+// HandoverLabel is the fixed identifier inside the mdoc SessionTranscript
+// handover for this flow.
+//
+// It is hashed into the transcript, so a mismatch fails DeviceAuth with
+// nothing to point at - which is why CS01_07 asks for it to be
+// configurable: the 1.1 draft's normative mdoc section writes IAE where
+// every other normative section writes ia.
+func (ia *InteractiveAuthorization) HandoverLabel() string {
+	if ia != nil && ia.MdocHandoverLabel != "" {
+		return ia.MdocHandoverLabel
+	}
+	return "OpenID4VCIIAEHandover"
+}
+
 // AuthSessionTTL bounds how long one Interactive Authorization exchange may
 // take.
 func (ia *InteractiveAuthorization) AuthSessionTTL() time.Duration {

@@ -796,14 +796,29 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 	// handle it had just consumed.
 	claimed.AuthSession = ""
 
+	// A REPLACEMENT document, not a write into the stored one.
+	//
+	// Get returns the cached pointer and then releases the lock, so a
+	// caller that fetched this context before the claim is still reading
+	// the very struct a write here would touch - `go test -race` names
+	// this line against a reader of AuthSession. Replacing the pointer
+	// leaves that reader with a consistent pre-claim snapshot and makes
+	// the post-claim state reachable only through the cache, which is
+	// where it belongs.
+	//
+	// Separate from `claimed` on purpose: the caller must not be able to
+	// reach the stored document through the value it is handed either.
+	replacement := *stored
+
 	// Only the handle. AuthSessionDPoPThumbprint is the binding the
 	// authorization code inherits, and the Token Endpoint checks it when
 	// the code is redeemed - clearing it here would hand out a code that
 	// any key could spend.
-	stored.AuthSession = ""
+	replacement.AuthSession = ""
+
 	delete(c.indices, indexKey)
 	// Claiming must not extend the code's lifetime; the Mongo $unset does not either.
-	c.cache.Set(sessionID, stored, ttlcache.PreviousOrDefaultTTL)
+	c.cache.Set(sessionID, &replacement, ttlcache.PreviousOrDefaultTTL)
 
 	return &claimed, nil
 }

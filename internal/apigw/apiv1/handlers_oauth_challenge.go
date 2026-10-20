@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	stdcrypto "crypto"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -19,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // AuthorizationChallengeRequest is a request to the Authorization Challenge
@@ -235,6 +238,7 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	oauthClient, err := c.authenticateOAuthClient(ctx, &walletClientAuth{
 		ClientID:             req.ClientID,
 		RedirectURI:          req.RedirectURI,
+		RedirectOptional:     true,
 		Scope:                req.Scope,
 		ClientAttestation:    req.ClientAttestation,
 		ClientAttestationPoP: req.ClientAttestationPoP,
@@ -427,7 +431,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	}
 	authCtx = claimed
 
-	vpResponse, err := c.decodeInteractiveAuthorizationResponse(ctx, authCtx, req.OpenID4VPResponse)
+	vpResponse, privateEphemeralJWK, err := c.decodeInteractiveAuthorizationResponse(ctx, authCtx, req.OpenID4VPResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -440,12 +444,10 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	if _, err := c.issuanceAuthPipeline()(ctx, authCtx, vpResponse, issuanceAuthBinding{
 		Audience:      audience,
 		ExpectedState: authCtx.State,
-		// mdoc needs the OpenID4VCI Interactive Authorization handover,
-		// which this build does not produce. Left nil so that an mdoc
-		// presentation is refused by name rather than verified against the
-		// browser flow's session transcript, which would not be the
-		// transcript this Wallet signed over.
-		MdocSessionTranscript: nil,
+		// mdoc binds to the OpenID4VCI Interactive Authorization handover,
+		// which is a different transcript from either of the browser
+		// flow's - see interactiveAuthorizationSessionTranscript.
+		MdocSessionTranscript: c.interactiveAuthorizationSessionTranscript(ia, authCtx, privateEphemeralJWK),
 
 		// The whole exchange exists to establish WHO is asking for an
 		// issuance, so a check that cannot tell the Holder from someone
@@ -485,6 +487,11 @@ func (c *Client) newChallengeAuthContext(ia *model.InteractiveAuthorization, req
 		RemoteName:          source.RemoteName,
 		AuthenticSource:     source.AuthenticSource,
 		ExpiresAt:           time.Now().Add(ia.AuthSessionTTL()).Unix(),
+
+		// Answerable here and nowhere else. See the field's own comment:
+		// the browser-mediated endpoint resolves a context by the same
+		// ephemeral key id and does not verify holder binding.
+		InteractiveAuthorization: true,
 	}
 
 	// 256 bits, which is what the draft's own security considerations ask
@@ -547,7 +554,7 @@ func (c *Client) interactiveAuthorizationRequest(ctx context.Context, ia *model.
 // decodeInteractiveAuthorizationResponse reads the openid4vp_response
 // parameter: a JSON object holding either an OpenID4VP Authorization
 // Response or an Authorization Error Response.
-func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, authCtx *cache.AuthorizationContext, raw string) (*openid4vp.VPResponse, error) {
+func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, authCtx *cache.AuthorizationContext, raw string) (*openid4vp.VPResponse, jwk.Key, error) {
 	var envelope struct {
 		Response         string          `json:"response"`
 		Error            string          `json:"error"`
@@ -555,7 +562,7 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 		VPToken          json.RawMessage `json:"vp_token"`
 	}
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
 			"openid4vp_response is not a JSON object", 400, err)
 	}
 
@@ -566,12 +573,12 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 			"session_id", authCtx.SessionID, "error", envelope.Error)
 		// Only codes OpenID4VP §8.5 defines are echoed; anything else is a refusal.
 		if !slices.Contains(walletErrorCodes, envelope.Error) {
-			return nil, &AuthorizationChallengeError{
+			return nil, nil, &AuthorizationChallengeError{
 				ErrorCode:  openid4vp.ErrorAccessDenied,
 				HTTPStatus: 400,
 			}
 		}
-		return nil, &AuthorizationChallengeError{
+		return nil, nil, &AuthorizationChallengeError{
 			ErrorCode:        envelope.Error,
 			ErrorDescription: envelope.ErrorDescription,
 			HTTPStatus:       400,
@@ -583,7 +590,7 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 	// would let anything that can reach this endpoint strip the encryption
 	// the Wallet was told to apply.
 	if envelope.Response == "" {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+		return nil, nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 			"openid4vp_response must carry an encrypted response", 400)
 	}
 
@@ -597,25 +604,25 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 		err := fmt.Errorf("ephemeral key %q is not in the cache", authCtx.EphemeralEncryptionKeyID)
 		c.log.Error(err, "CHALLENGE: cannot decrypt the response without the key the request was built with",
 			"session_id", authCtx.SessionID)
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
 			errDescIACouldNotComplete, 500, err)
 	}
 
 	decrypted, err := jwe.Decrypt([]byte(envelope.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
 	if err != nil {
 		c.log.Error(err, "CHALLENGE: failed to decrypt openid4vp_response")
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
 			"openid4vp_response could not be decrypted", 400, err)
 	}
 
 	vpResponse := &openid4vp.VPResponse{}
 	if err := json.Unmarshal(decrypted, vpResponse); err != nil {
 		c.log.Error(err, "CHALLENGE: failed to unmarshal decrypted openid4vp_response")
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
 			"openid4vp_response is not an OpenID4VP Authorization Response", 400, err)
 	}
 
-	return vpResponse, nil
+	return vpResponse, privateEphemeralJWK, nil
 }
 
 // authSessionStoreFailure is the answer to an authorization-context store
@@ -666,11 +673,49 @@ func (c *Client) interactiveAuthorizationFailure(err error) error {
 		"the presentation did not satisfy the authorization request", 400, err)
 }
 
+// interactiveAuthorizationSessionTranscript builds the mdoc
+// SessionTranscript a presentation answering this challenge must have been
+// signed over (OpenID4VCI 1.1, Interactive Authorization Binding for
+// mso_mdoc).
+//
+// It binds to three things, and each is doing work: the Authorization
+// Challenge Endpoint, which is what stops one Authorization Server
+// relaying another's challenge; the request nonce, which stops a
+// presentation from another exchange being replayed into this one; and the
+// thumbprint of the key the response is encrypted to, which does not
+// prevent a third party re-encrypting the response but makes it
+// detectable.
+//
+// The endpoint goes in as the plain URL. The same value wears an "ia:"
+// prefix when it is an SD-JWT VC audience - there to keep that audience
+// out of an ordinary Verifier's namespace - and the draft says explicitly
+// that the handover must NOT carry it.
+//
+// A closure rather than a value because it is only needed when an mdoc
+// actually turns up, and deriving the ephemeral public key to thumbprint
+// it is not free.
+func (c *Client) interactiveAuthorizationSessionTranscript(ia *model.InteractiveAuthorization, authCtx *cache.AuthorizationContext, privateEphemeralJWK jwk.Key) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		endpoint := ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL)
+
+		ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("derive ephemeral public key: %w", err)
+		}
+		thumbprint, err := ephemeralPublicJWK.Thumbprint(stdcrypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("compute ephemeral JWK thumbprint: %w", err)
+		}
+
+		return mdoc.BuildOID4VCIIAESessionTranscript(ia.HandoverLabel(), endpoint, authCtx.Nonce, thumbprint)
+	}
+}
+
 // issuanceAuthDCQL builds the DCQL query the Wallet must satisfy for scope.
 //
 // It is a narrowed copy of the browser flow's query, built fresh so the
-// browser query is unchanged. mdoc alternatives are dropped because this
-// endpoint has no mdoc session transcript, and the credential set is
+// browser query is unchanged. mso_mdoc_zk alternatives are dropped because
+// the presentation pipeline cannot verify them, and the credential set is
 // required so a Wallet cannot answer with nothing - the endpoint consumes
 // the auth_session before it can reject an empty response.
 func (c *Client) issuanceAuthDCQL(scope string) (*openid4vp.DCQL, error) {
@@ -685,7 +730,7 @@ func (c *Client) issuanceAuthDCQL(scope string) (*openid4vp.DCQL, error) {
 
 	supported := make(map[string]bool, len(dcql.Credentials))
 	for _, cq := range dcql.Credentials {
-		if cq.Format == openid4vp.FormatMsoMdoc || cq.Format == openid4vp.FormatMsoMdocZk {
+		if cq.Format == openid4vp.FormatMsoMdocZk {
 			continue
 		}
 		supported[cq.ID] = true
