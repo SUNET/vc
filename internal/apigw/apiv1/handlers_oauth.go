@@ -154,6 +154,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 	}
 
+	requestURIExpiresAt := time.Now().Add(requestURITTL).Unix()
 	azt := cache.AuthorizationContext{
 		SessionID:            uuid.NewString(),
 		Code:                 uuid.NewString(),
@@ -167,7 +168,8 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		ClientID:             fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
-		ExpiresAt:            time.Now().Add(requestURITTL).Unix(),
+		ExpiresAt:            requestURIExpiresAt,
+		RequestURIExpiresAt:  requestURIExpiresAt,
 		DynamicParams:        req.DynamicParams,
 	}
 
@@ -234,6 +236,12 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 		return nil, oauth2.ErrExpiredRequest
 	}
 
+	// ExpiresAt is moved to the code's deadline below, so the request_uri is held to its own.
+	if authorizationContext.RequestURIExpiresAt > 0 && time.Now().Unix() > authorizationContext.RequestURIExpiresAt {
+		c.log.Debug("request_uri expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
+
 	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
@@ -256,7 +264,8 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	// job. It only ever extends (see ExtendExpiry), so re-entering
 	// /authorize cannot shorten a deadline, and authorizationCodeTTL is
 	// bounded so the extended deadline stays inside the store's own
-	// lifetime - see the constant.
+	// lifetime - see the constant. Re-entry itself is bounded by
+	// RequestURIExpiresAt, checked above, which this does not move.
 	codeExpiresAt := codeDeadlineWithin(authorizationContext.CreatedAt)
 	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
 		&cache.AuthorizationContext{RequestURI: req.RequestURI}, codeExpiresAt); err != nil {

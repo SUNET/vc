@@ -187,14 +187,16 @@ type AuthorizationContext struct {
 	// Issuer-specific fields (credential issuance)
 	AuthorizationDetails []openid4vci.AuthorizationDetailsParameter `json:"authorization_details,omitempty" bson:"authorization_details,omitempty"`
 	RequestURI           string                                     `json:"request_uri,omitempty" bson:"request_uri,omitempty" validate:"omitempty,max=2048,printascii"`
-	WalletURI            string                                     `json:"redirect_url,omitempty" bson:"redirect_url,omitempty" validate:"omitempty,max=2048,printascii"`
-	Consent              bool                                       `json:"consent,omitempty" bson:"consent,omitempty"`
-	AuthenticSource      string                                     `json:"authentic_source,omitempty" bson:"authentic_source,omitempty" validate:"omitempty,max=128,printascii"`
-	Scope                string                                     `json:"scope,omitempty" bson:"scope,omitempty" validate:"omitempty,max=128,printascii"`
-	Identifier           string                                     `json:"identifier,omitempty" bson:"identifier,omitempty" validate:"omitempty,max=256,printascii"`
-	AuthProvider         string                                     `json:"auth_provider,omitempty" bson:"auth_provider,omitempty" validate:"omitempty,max=32,printascii"`
-	DataSource           string                                     `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
-	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
+	// RequestURIExpiresAt is the request_uri's own deadline; ExpiresAt is extended to the code's at /authorize.
+	RequestURIExpiresAt int64  `json:"request_uri_expires_at,omitempty" bson:"request_uri_expires_at,omitempty"`
+	WalletURI           string `json:"redirect_url,omitempty" bson:"redirect_url,omitempty" validate:"omitempty,max=2048,printascii"`
+	Consent             bool   `json:"consent,omitempty" bson:"consent,omitempty"`
+	AuthenticSource     string `json:"authentic_source,omitempty" bson:"authentic_source,omitempty" validate:"omitempty,max=128,printascii"`
+	Scope               string `json:"scope,omitempty" bson:"scope,omitempty" validate:"omitempty,max=128,printascii"`
+	Identifier          string `json:"identifier,omitempty" bson:"identifier,omitempty" validate:"omitempty,max=256,printascii"`
+	AuthProvider        string `json:"auth_provider,omitempty" bson:"auth_provider,omitempty" validate:"omitempty,max=32,printascii"`
+	DataSource          string `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
+	RemoteName          string `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// DynamicParams holds key-value parameters bound directly from the PAR
 	// caller's request body at flow initiation time (see PARRequest.DynamicParams

@@ -19,6 +19,25 @@ func TestMemoryStoreImplementsInterface(t *testing.T) {
 	require.NotNil(t, store)
 }
 
+// TestMemoryStoreSaveAnchorsCreatedAt: the retention cap in codeDeadlineWithin
+// is a no-op on a zero CreatedAt, so Save must set it and a re-save keep it.
+func TestMemoryStoreSaveAnchorsCreatedAt(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{SessionID: "anchor-1"}))
+	first, err := store.GetByID(ctx, "anchor-1")
+	require.NoError(t, err)
+	require.False(t, first.CreatedAt.IsZero(), "Save must set CreatedAt")
+	anchor := first.CreatedAt
+
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{SessionID: "anchor-1", Code: "c"}))
+	second, err := store.GetByID(ctx, "anchor-1")
+	require.NoError(t, err)
+	assert.Equal(t, anchor, second.CreatedAt, "a re-save must keep the original anchor")
+}
+
 // TestInterfaceContract_Memory runs the shared contract tests against the MemoryStore.
 func TestInterfaceContract_Memory(t *testing.T) {
 	store := NewMemoryStore(5 * time.Minute)

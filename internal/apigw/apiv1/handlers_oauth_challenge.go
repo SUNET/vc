@@ -946,6 +946,7 @@ func (c *Client) requireWebInteraction(ctx context.Context, ia *model.Interactiv
 	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
 	authCtx.RequestURI = fmt.Sprintf("urn:ietf:params:oauth:request_uri:%s", uuid.NewString())
 	authCtx.ExpiresAt = time.Now().Add(requestURITTL).Unix()
+	authCtx.RequestURIExpiresAt = authCtx.ExpiresAt
 
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return err

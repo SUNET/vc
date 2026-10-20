@@ -80,6 +80,15 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Same anchor MongoStore.Save sets; a re-save keeps the original so the retention cap cannot be reset.
+	if doc.CreatedAt.IsZero() {
+		if item := c.cache.Get(doc.SessionID); item != nil && !item.Value().CreatedAt.IsZero() {
+			doc.CreatedAt = item.Value().CreatedAt
+		} else {
+			doc.CreatedAt = time.Now()
+		}
+	}
+
 	// Store by primary key (sessionID)
 	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
 
