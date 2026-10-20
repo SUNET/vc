@@ -252,14 +252,9 @@ func validateCircuitZkPresentation(raw json.RawMessage, request CircuitZkRequest
 	// Into RawMessage and not []string: an element that is not a
 	// string has its own refusal, reported in the contents pass, and
 	// decoding into []string here would report it as a bad array.
+	// null included: strictDecode refuses it, so a null chain is a
+	// type error here and not an empty one further down.
 	var rawChain []json.RawMessage
-	if !isJSONArray(members["x5chain"]) {
-		// The shape BEFORE the decode, because Go's decoder accepts
-		// JSON null into a slice without error and leaves it nil -
-		// which would arrive below as an empty chain and be reported
-		// as the wrong refusal. null is not an array.
-		return CircuitZkPresentation{}, refuse(ReasonX5ChainNotArray, "\"x5chain\" is not an array")
-	}
 	if err := strictDecode(members["x5chain"], &rawChain); err != nil {
 		return CircuitZkPresentation{}, refuse(ReasonX5ChainNotArray, "\"x5chain\" is not an array: %v", err)
 	}
@@ -416,12 +411,9 @@ var circuitZkResultMembers = map[string]string{
 	CircuitZkFunctionAgeCheck:  "satisfied",
 }
 
-// isJSONArray reports whether raw is a JSON array, by its first
-// non-space byte. Shape, not contents: the elements have refusals of
-// their own.
-func isJSONArray(raw json.RawMessage) bool {
-	trimmed := bytes.TrimLeft(raw, " \t\r\n")
-	return len(trimmed) > 0 && trimmed[0] == '['
+// isJSONNull reports whether raw is the JSON literal null.
+func isJSONNull(raw []byte) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
 // decodeX5Chain checks the chain's contents: the count, then each
@@ -508,6 +500,24 @@ func decodeCanonicalBase64URL(encoded string) ([]byte, error) {
 // garbage` decodes happily - which is strictly weaker than what a
 // response has to be.
 func strictDecode(raw []byte, into any) error {
+	// JSON null is a TYPE ERROR here, never an absent or empty value.
+	//
+	// Go's decoder treats null as "leave the target alone": into a
+	// string it is a no-op, into a slice or map it leaves nil, and
+	// NEITHER returns an error. So without this, "circuit_id": null
+	// would read as the empty string and be reported as a circuit id
+	// that was not offered, and an x5chain element of null would read
+	// as the empty string and be reported as an empty certificate -
+	// each one a type error reported as something else, and each one
+	// a different wrong answer for the same mistake.
+	//
+	// Here rather than at each call site because every member of a
+	// circuit_zk presentation has a type and none of them may be
+	// null; one place to be right is better than eleven.
+	if isJSONNull(raw) {
+		return errors.New("the value is null")
+	}
+
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(into); err != nil {
