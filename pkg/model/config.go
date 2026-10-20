@@ -850,7 +850,7 @@ type PresetDefinition struct {
 type VerificationPresetScope struct {
 	// Claims lists specific claims to request. If empty, all VCTM claims are used.
 	//
-	// Ignored entirely when the effective format is "circuit_zk". Such a
+	// Ignored entirely when the effective format is "zkp_req". Such a
 	// query discloses no issuer-signed attribute at all - every value it
 	// yields is the output of a function named in Req - so neither these
 	// claims nor the VCTM fall-back are attached to it. Listing claims on

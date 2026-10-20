@@ -60,7 +60,7 @@ func (c *Client) verifyCircuitZkScope(
 
 	channel := circuitZkChannelFor(dcAPI)
 	if err := checkCircuitZkResponseMode(channel, authCtx); err != nil {
-		c.log.Error(err, "circuit_zk response mode refused", "scope", scope, "channel", channel)
+		c.log.Error(err, "zkp_req response mode refused", "scope", scope, "channel", channel)
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
 
@@ -174,10 +174,10 @@ func checkCircuitZkResponseMode(channel circuitZkChannel, authCtx *cache.Authori
 		return nil
 	}
 	if authCtx == nil {
-		return errors.New("circuit_zk: no session for this presentation, so its response mode cannot be established")
+		return errors.New("zkp_req: no session for this presentation, so its response mode cannot be established")
 	}
 	if authCtx.ResponseMode != openid4vp.ResponseModeDirectPostJWT {
-		return fmt.Errorf("circuit_zk: this presentation arrived by redirect with response_mode %q; nym_auth requires %q there, "+
+		return fmt.Errorf("zkp_req: this presentation arrived by redirect with response_mode %q; nym_auth requires %q there, "+
 			"because a pseudonym sent to response_uri in the clear is readable by anything on the path",
 			authCtx.ResponseMode, openid4vp.ResponseModeDirectPostJWT)
 	}
