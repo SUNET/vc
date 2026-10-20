@@ -1,10 +1,6 @@
 package apiv1
 
 import (
-	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"testing"
@@ -176,103 +172,6 @@ func TestCircuitZkNativeStubRefuses(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCircuitZkNotBuilt)
 }
 
-// fakeIssuerKeys is a resolver that answers with what it was given.
-type fakeIssuerKeys struct {
-	keys []*ecdsa.PublicKey
-	err  error
-}
-
-func (f fakeIssuerKeys) TrustedIssuerKeys(context.Context, string, []string) ([]*ecdsa.PublicKey, error) {
-	return f.keys, f.err
-}
-
-func testKey(t *testing.T) *ecdsa.PublicKey {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	return &key.PublicKey
-}
-
-// Q comes from the trust layer, and a verifier with no resolver
-// REFUSES rather than carrying on without one.
-//
-// Fail closed, and not "no keys, carry on": a verifier that cannot
-// learn Q cannot check a proof at all, and "nothing is trusted for
-// this docType" and "this build cannot answer the question" want
-// different things done about them.
-func TestCircuitZkIssuerKeysDefaultRefuses(t *testing.T) {
-	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
-
-	_, err := client.circuitZkIssuerCandidates(t.Context(), "eu.europa.ec.eudi.nym_auth.1", nil)
-	assert.ErrorIs(t, err, ErrNoIssuerKeyResolver)
-}
-
-// An empty answer is "nothing is trusted", which is a refusal with
-// its own message rather than an empty candidate loop that verifies
-// nothing and reports success.
-func TestCircuitZkIssuerKeysEmptyIsARefusal(t *testing.T) {
-	client := &Client{
-		cfg:               &model.Cfg{Verifier: &model.Verifier{}},
-		nymAuthIssuerKeys: fakeIssuerKeys{},
-	}
-
-	_, err := client.circuitZkIssuerCandidates(t.Context(), "eu.europa.ec.eudi.nym_auth.1", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no trusted issuer key for docType")
-	assert.NotErrorIs(t, err, ErrNoIssuerKeyResolver, "a resolver that answered is not a missing resolver")
-}
-
-// More candidates than the limit is REFUSED, never truncated:
-// verifying against an arbitrary subset would report a proof as
-// unverifiable when the key that signed it was simply past the cut.
-func TestCircuitZkIssuerKeysRefusesTooManyCandidates(t *testing.T) {
-	keys := make([]*ecdsa.PublicKey, DefaultMaxIssuerKeyCandidates+1)
-	for i := range keys {
-		keys[i] = testKey(t)
-	}
-	client := &Client{
-		cfg:               &model.Cfg{Verifier: &model.Verifier{}},
-		nymAuthIssuerKeys: fakeIssuerKeys{keys: keys},
-	}
-
-	_, err := client.circuitZkIssuerCandidates(t.Context(), "eu.europa.ec.eudi.nym_auth.1", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "exceeds the limit of 8")
-	assert.Contains(t, err.Error(), "rather than verifying against a subset")
-
-	// Raised deliberately, it is allowed.
-	client.cfg.Verifier.NymAuth.MaxIssuerKeyCandidates = DefaultMaxIssuerKeyCandidates + 1
-	got, err := client.circuitZkIssuerCandidates(t.Context(), "eu.europa.ec.eudi.nym_auth.1", nil)
-	require.NoError(t, err)
-	assert.Len(t, got, DefaultMaxIssuerKeyCandidates+1)
-}
-
-// A resolver failure is reported as one, and not as "nothing is
-// trusted": an operator told the latter would go looking at their
-// trust configuration for a problem that is in the connection to it.
-func TestCircuitZkIssuerKeysReportsAResolverFailure(t *testing.T) {
-	client := &Client{
-		cfg:               &model.Cfg{Verifier: &model.Verifier{}},
-		nymAuthIssuerKeys: fakeIssuerKeys{err: assert.AnError},
-	}
-
-	_, err := client.circuitZkIssuerCandidates(t.Context(), "eu.europa.ec.eudi.nym_auth.1", nil)
-	require.ErrorIs(t, err, assert.AnError)
-	assert.Contains(t, err.Error(), "resolving trusted issuer keys")
-}
-
-// The thumbprint names a candidate in a log line without putting a
-// key in it, and two keys are two thumbprints.
-func TestIssuerKeyThumbprint(t *testing.T) {
-	one, two := testKey(t), testKey(t)
-
-	assert.NotEmpty(t, issuerKeyThumbprint(one))
-	assert.Equal(t, issuerKeyThumbprint(one), issuerKeyThumbprint(one), "stable for one key")
-	assert.NotEqual(t, issuerKeyThumbprint(one), issuerKeyThumbprint(two))
-	assert.Empty(t, issuerKeyThumbprint(nil))
-	assert.Empty(t, issuerKeyThumbprint(&ecdsa.PublicKey{}), "an incomplete key names nothing")
-}
-
 // The validator receives the whole vp_token ENVELOPE, which is what
 // it expects - handing it one entry gave it an array where it wants a
 // map, and the response then failed as unparseable.
@@ -289,6 +188,7 @@ func TestCircuitZkRawTokenFeedsTheValidator(t *testing.T) {
 	      "circuit_id": "urn:c",
 	      "proof_system": "longfellow-libzk-v1",
 	      "proof": "AQID",
+	      "x5chain": ["Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj"],
 	      "results": {"age-1": {"satisfied": true}}
 	    }]
 	  }

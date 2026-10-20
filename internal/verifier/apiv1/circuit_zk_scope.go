@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -75,41 +76,38 @@ func (c *Client) verifyCircuitZkScope(
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
 
-	candidates, err := c.circuitZkIssuerCandidates(ctx, session.DocType, nil)
-	if err != nil {
-		c.log.Error(err, "cannot resolve a trusted issuer key for circuit_zk", "scope", scope, "doc_type", session.DocType)
-		return nil, fmt.Errorf("scope %s: %w", scope, err)
-	}
-
 	credentials := make([]sdjwtvc.CredentialCache, 0, len(presentations))
 	for _, presentation := range presentations {
-		// Each candidate in turn, accepting the FIRST that verifies.
+		// Q comes from the presentation's own issuer chain, and the
+		// chain is evaluated by the trust layer before the key is
+		// looked at. The circuit proves the credential was signed by
+		// Q; the PDP vouches that Q belongs to a trusted issuer.
+		// See circuitZkIssuerKey for why neither half is enough.
 		//
-		// A proof is checked against one key; the verifier does not
-		// know which of its trusted issuers signed the credential,
-		// because the presentation carries nothing that says so. The
-		// pseudonym published is the one returned by the verification
-		// that succeeded, and never one from an attempt that did not.
-		var verified map[string][]byte
-		var lastErr error
-		for _, candidate := range candidates {
-			verified, lastErr = c.verifyCircuitZkPresentation(ctx, presentation, session, query.Req, candidate)
-			if lastErr == nil {
-				c.log.Info("circuit_zk proof verified", "scope", scope,
-					"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(candidate))
-				break
-			}
+		// Per presentation, not once per response: a response may
+		// carry presentations from different issuers, and verifying
+		// the second against the first's key would be verifying it
+		// against a key its issuer never held.
+		//
+		// session.DocType is the REQUEST's docType - the response
+		// does not get to choose the trust policy it is judged under.
+		issuerKey, err := c.circuitZkIssuerKey(ctx, presentation, session.DocType, time.Now())
+		if err != nil {
+			c.log.Error(err, "no trusted issuer key for the circuit_zk presentation",
+				"scope", scope, "doc_type", session.DocType, "circuit_id", presentation.CircuitID)
+			return nil, fmt.Errorf("scope %s: %w", scope, err)
 		}
-		if lastErr != nil {
-			// Reported against the whole candidate set, not against
-			// the last one tried: "it did not verify against any key
-			// we trust" is the true statement, and naming one key
-			// would invite chasing the wrong issuer.
-			c.log.Error(lastErr, "circuit_zk proof verified against no trusted issuer key", "scope", scope,
-				"circuit_id", presentation.CircuitID, "candidates", len(candidates))
-			return nil, fmt.Errorf("scope %s: the proof verified against none of the %d trusted issuer keys for %q: %w",
-				scope, len(candidates), session.DocType, lastErr)
+
+		verified, err := c.verifyCircuitZkPresentation(ctx, presentation, session, query.Req, issuerKey)
+		if err != nil {
+			c.log.Error(err, "circuit_zk proof did not verify", "scope", scope,
+				"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey))
+			return nil, fmt.Errorf("scope %s: the proof did not verify against the issuer key the chain established: %w",
+				scope, err)
 		}
+		c.log.Info("circuit_zk proof verified", "scope", scope,
+			"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey))
+
 		credentials = append(credentials, circuitZkCredential(scope, presentation, verified))
 	}
 

@@ -59,11 +59,6 @@ type Client struct {
 	// the allowlist is ever loaded.
 	nymAuthCircuits *circuits.Allowlist
 
-	// nymAuthIssuerKeys resolves the issuer keys a circuit_zk proof
-	// may be verified against. Nil until one is wired, and the
-	// default then refuses - see CircuitZkIssuerKeys.
-	nymAuthIssuerKeys CircuitZkIssuerKeys
-
 	// nymAuthVerifiers caches one loaded circuit handle per pseudonym
 	// configuration. Loading is the expensive step - about 0.15 s and
 	// a megabyte of artifact - and the handle holds no interior

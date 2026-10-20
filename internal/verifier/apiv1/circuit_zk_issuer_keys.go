@@ -3,102 +3,133 @@ package apiv1
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
-// CircuitZkIssuerKeys resolves the issuer public keys a circuit_zk
-// proof may be verified against.
-//
 // Q - the key the credential was signed with - is a PUBLIC INPUT to
 // the circuit, so the verifier has to know it before it can check
-// anything. Every other format carries the issuer's chain in the
-// presentation; a circuit_zk presentation carries no credential at
-// all, so there is nothing in it to resolve.
+// anything.
 //
-// It therefore comes from the trust layer and never from the
-// response, and the response has no member for it. A key the holder
-// named would let the holder choose which issuer it is measured
-// against, which is the whole property a pseudonym scheme rests on.
+// WHY THE HOLDER MAY SEND IT. At first reading, taking the key from
+// the response looks like letting the holder choose what it is
+// measured against. It is not, because the two things are checked
+// separately:
 //
-// An interface because the resolution itself belongs in go-trust, not
-// here, and because what go-trust can answer today is not this
-// question - see the default below.
-type CircuitZkIssuerKeys interface {
-	// TrustedIssuerKeys returns the keys this verifier trusts to have
-	// signed a credential of this docType, for this request.
+//   - The CIRCUIT proves "this credential was signed by Q", for the
+//     Q given to it. A holder who substitutes a key it controls gets
+//     a proof about a credential that key signed - which is a
+//     credential it issued to itself.
+//   - The TRUST LAYER then says whether Q belongs to an issuer this
+//     verifier accepts. That is what the holder cannot forge: the
+//     chain is evaluated by the same go-trust PDP, under the same
+//     mdoc-issuer-auth role, as a plain mdoc presentation's DS
+//     certificate. A self-signed key does not get a decision.
+//
+// So the holder supplies a candidate and the PDP vouches for it.
+// Neither half is sufficient alone, and refusing either one refuses
+// the presentation.
+//
+// It is also the only design that works. A circuit_zk presentation
+// carries no credential, and go-trust cannot answer "which keys may
+// sign this docType" - its question is "is THIS name bound to THIS
+// key". The IACA root cannot stand in for Q either: one IACA signs
+// many DS certificates, and the circuit needs the exact signing key.
+//
+// The wire shape is normative in the matcher repository's
+// docs/circuit_zk_response.md rule 5a; pkg/openid4vp checks the
+// encoding and the limits, and this is where the X.509 is parsed.
+//
+// PRIVACY. The chain is issuer-level, not holder-level: a DS
+// certificate identifies the issuer and says nothing about which
+// credential or which subject. It carries no more than the issuer
+// identity a plain mdoc presentation already reveals.
+//
+// The docType the chain is evaluated for comes from the REQUEST, not
+// from the response. A holder choosing the docType would be choosing
+// which trust policy it is judged under.
+
+// ErrNoTrustEvaluator is the refusal a verifier with no PDP gives.
+//
+// Fail closed, and deliberately not "nothing is trusted, carry on": a
+// verifier that cannot ask whether an issuer is trusted must not read
+// its own silence as a yes.
+var ErrNoTrustEvaluator = errors.New("circuit_zk: no trust evaluator is configured, so no issuer key can be trusted")
+
+// circuitZkIssuerKey validates the presentation's issuer chain and
+// returns the leaf's public key as Q.
+//
+// docType is the REQUEST's. now is passed in so a test can state the
+// moment a certificate is judged at.
+func (c *Client) circuitZkIssuerKey(
+	ctx context.Context,
+	presentation openid4vp.CircuitZkPresentation,
+	docType string,
+	now time.Time,
+) (*ecdsa.PublicKey, error) {
+	if c.trustEvaluator == nil {
+		return nil, ErrNoTrustEvaluator
+	}
+	if len(presentation.X5Chain) == 0 {
+		// Unreachable through ValidateCircuitZkResponse, which makes
+		// x5chain a required non-empty member. Kept because the
+		// consequence of being wrong about that is verifying a proof
+		// against no key, which is not verifying it - a belief worth
+		// one comparison.
+		return nil, errors.New("circuit_zk: the presentation carries no issuer certificate chain")
+	}
+
+	chain := make([]*x509.Certificate, 0, len(presentation.X5Chain))
+	for i, der := range presentation.X5Chain {
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Errorf("circuit_zk: certificate %d in the issuer chain does not parse: %w", i, err)
+		}
+		chain = append(chain, cert)
+	}
+
+	// Exactly the plain-mdoc issuer check, through the same function:
+	// one implementation, so a policy change reaches both paths and
+	// the two cannot drift into trusting different things.
 	//
-	// issuers, when non-empty, is the issuer set the request named,
-	// and narrows the answer. An empty result is not an error: it
-	// means nothing is trusted, and the caller refuses.
-	TrustedIssuerKeys(ctx context.Context, docType string, issuers []string) ([]*ecdsa.PublicKey, error)
+	// The issuer URL is left empty on purpose - it is taken from the
+	// leaf's SAN, as the SDKs and the deployed PDP request shape
+	// expect - and the docType is the request's.
+	if err := mdoc.VerifyIssuerChain(ctx, c.trustEvaluator, chain, docType, "", now); err != nil {
+		return nil, fmt.Errorf("circuit_zk: the issuer chain is not trusted for docType %q: %w", docType, err)
+	}
+
+	// Only after the chain is trusted: an untrusted chain's key is
+	// not a key this verifier has any business looking at.
+	key, isECDSA := chain[0].PublicKey.(*ecdsa.PublicKey)
+	if !isECDSA {
+		return nil, fmt.Errorf("circuit_zk: the issuer certificate holds a %T, and the circuit takes a P-256 key",
+			chain[0].PublicKey)
+	}
+	if key.Curve != elliptic.P256() {
+		// Not a limitation to be lifted quietly: the circuit's field
+		// arithmetic is over P-256. A key on another curve cannot be
+		// a public input to it, so accepting one would mean verifying
+		// against something the circuit never saw.
+		return nil, fmt.Errorf("circuit_zk: the issuer key is on %s, and the circuit takes P-256",
+			key.Curve.Params().Name)
+	}
+	return key, nil
 }
 
-// ErrNoIssuerKeyResolver is the default answer: refuse.
-var ErrNoIssuerKeyResolver = errors.New("circuit_zk: no trusted issuer key resolver is configured")
-
-// refusingIssuerKeys is the resolver a verifier has until one is
-// wired, and it refuses.
-//
-// Fail closed, and deliberately not "no keys, carry on": a verifier
-// with no way to learn Q cannot check a proof, and the two failures
-// an empty answer could be confused with - "nothing is trusted for
-// this docType" and "this build cannot answer the question" - want
-// different things done about them.
-type refusingIssuerKeys struct{}
-
-func (refusingIssuerKeys) TrustedIssuerKeys(context.Context, string, []string) ([]*ecdsa.PublicKey, error) {
-	return nil, ErrNoIssuerKeyResolver
-}
-
-// DefaultMaxIssuerKeyCandidates bounds how many keys a proof may be
-// tried against.
-//
-// Verification is the expensive step, and the candidate set comes
-// from outside this process, so an unbounded one is an unbounded
-// amount of work per presentation. Eight is far beyond any real
-// issuer's key set including rotation overlap.
-const DefaultMaxIssuerKeyCandidates = 8
-
-// circuitZkIssuerCandidates resolves the bounded candidate set.
-//
-// Over the limit is REFUSED rather than truncated. Truncating would
-// mean verifying against an arbitrary subset chosen by whatever order
-// the trust layer happened to return, and reporting a proof as
-// unverifiable when the key that signed it was simply past the cut.
-func (c *Client) circuitZkIssuerCandidates(ctx context.Context, docType string, issuers []string) ([]*ecdsa.PublicKey, error) {
-	resolver := c.nymAuthIssuerKeys
-	if resolver == nil {
-		resolver = refusingIssuerKeys{}
-	}
-
-	keys, err := resolver.TrustedIssuerKeys(ctx, docType, issuers)
-	if err != nil {
-		return nil, fmt.Errorf("circuit_zk: resolving trusted issuer keys for %q: %w", docType, err)
-	}
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("circuit_zk: no trusted issuer key for docType %q", docType)
-	}
-
-	limit := c.cfg.Verifier.NymAuth.MaxIssuerKeyCandidates
-	if limit <= 0 {
-		limit = DefaultMaxIssuerKeyCandidates
-	}
-	if len(keys) > limit {
-		return nil, fmt.Errorf("circuit_zk: %d trusted issuer keys for docType %q exceeds the limit of %d; "+
-			"raise verifier.nym_auth.max_issuer_key_candidates deliberately rather than verifying against a subset",
-			len(keys), docType, limit)
-	}
-	return keys, nil
-}
-
-// issuerKeyThumbprint identifies a candidate in a log line without
-// putting a key in it.
+// issuerKeyThumbprint identifies a key in a log line without putting
+// one in it.
 //
 // SHA-256 over the uncompressed point, base64url. A thumbprint is
-// enough to say WHICH candidate verified, which is the only thing an
+// enough to say WHICH issuer key verified, which is the only thing an
 // operator needs from the line.
 func issuerKeyThumbprint(key *ecdsa.PublicKey) string {
 	if key == nil || key.X == nil || key.Y == nil {
