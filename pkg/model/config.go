@@ -850,7 +850,7 @@ type PresetDefinition struct {
 type VerificationPresetScope struct {
 	// Claims lists specific claims to request. If empty, all VCTM claims are used.
 	//
-	// Ignored entirely when the effective format is "circuit_zk". Such a
+	// Ignored entirely when the effective format is "zkp_req". Such a
 	// query discloses no issuer-signed attribute at all - every value it
 	// yields is the output of a function named in Req - so neither these
 	// claims nor the VCTM fall-back are attached to it. Listing claims on
@@ -859,7 +859,7 @@ type VerificationPresetScope struct {
 	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
 	// ExcludeClaims lists claims to exclude from the DCQL query.
 	//
-	// Also ignored for "circuit_zk", which carries no claims to exclude.
+	// Also ignored for "zkp_req", which carries no claims to exclude.
 	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
 	// Validations are optional rules applied server-side after claims extraction
 	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
@@ -874,8 +874,8 @@ type VerificationPresetScope struct {
 	// verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `yaml:"zk_system_type,omitempty" validate:"omitempty,dive"`
 
-	// Req is the circuit_zk format's list of requested calculations -
-	// required whenever Format is "circuit_zk", since such a query
+	// Req is the zkp_req format's list of requested calculations -
+	// required whenever Format is "zkp_req", since such a query
 	// discloses nothing and every value comes from a function named here.
 	//
 	// A circuit_zk preset needs TWO things to be published: a non-empty
@@ -961,7 +961,7 @@ type Verifier struct {
 	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets.
 	//
-	// Required for a circuit_zk preset. The circuit filter - which proof
+	// Required for a zkp_req preset. The circuit filter - which proof
 	// systems and circuits this Verifier will accept a proof from - lives
 	// at preferred_vp_formats.circuit_zk and nowhere else, so a preset
 	// using that format is NOT PUBLISHED unless it is set. An empty
@@ -1004,7 +1004,7 @@ type Verifier struct {
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 
 	// NymAuth configures verification of nym_auth pseudonym proofs
-	// (the "circuit_zk" presentation format). Off unless enable is
+	// (the "zkp_req" presentation format). Off unless enable is
 	// set, and only consulted by builds with the "zknative" Go build
 	// tag - the default build cannot check a proof at all.
 	NymAuth NymAuthVerifier `yaml:"nym_auth,omitempty"`

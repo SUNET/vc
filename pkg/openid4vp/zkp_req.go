@@ -66,20 +66,20 @@ const (
 // query: a function, a handle its result is returned under, and the
 // function's parameters.
 //
-// A circuit_zk preset needs two things to be published - a non-empty req,
-// and verifier.preferred_vp_formats.circuit_zk advertising the format:
+// A zkp_req preset needs two things to be published - a non-empty _req,
+// and verifier.preferred_vp_formats.zkp_req advertising the format:
 //
 //	```yaml
 //	verifier:
 //	  preferred_vp_formats:
-//	    circuit_zk: {}              # or a circuit filter
+//	    zkp_req: {}              # or a circuit filter
 //	  presets:
 //	    "Pseudonym":
 //	      credentials:
 //	        nym_auth:
-//	          format: circuit_zk
+//	          format: zkp_req
 //	          validate: nym_auth     # optional
-//	          req:
+//	          _req:
 //	            - id: pseudonym
 //	              return: nym-123
 //	              params:
