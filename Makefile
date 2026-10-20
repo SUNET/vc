@@ -368,12 +368,20 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	@# one rather than letting `cp` report a path: a REF without the
 	@# nym_auth header is the likely cause, and that is not something a
 	@# "No such file or directory" tells the operator.
+	@# `exit 1` here is NOT inside a subshell, and the cp carries its own
+	@# `|| exit 1`, because neither failure stops a `for` loop on its own:
+	@# make takes the recipe line's status from the LAST command, which is
+	@# the loop's final iteration. Written with `|| ( ...; exit 1)` the
+	@# subshell exits, the loop runs on, and a stage missing its first
+	@# header reports success - which is the guard reporting that the
+	@# guard passed.
 	@for h in zk_cred_longfellow_go.h zk_cred_longfellow_nymauth.h; do \
-		test -f "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" || ( \
+		if [ ! -f "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" ]; then \
 			echo "zk-cred-longfellow@$(ZK_CRED_LONGFELLOW_REF) staged no $$h." >&2; \
 			echo "Both headers are required. Check that ZK_CRED_LONGFELLOW_REF points at a commit carrying include/$$h." >&2; \
-			exit 1); \
-		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/"; \
+			exit 1; \
+		fi; \
+		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/" || exit 1; \
 	done
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
 	@# The nym_auth vectors ship with the crate (the circuit artifact, a
