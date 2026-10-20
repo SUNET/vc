@@ -58,6 +58,10 @@ const (
 // agreed width is one this verifier cannot check, so an item naming
 // no known prf is refused rather than measured against a guess.
 const (
+	// PseudonymVer1 is the only pseudonym `ver` v0.4 defines. The
+	// parameter is REQUIRED, so there is no "unversioned" request.
+	PseudonymVer1 = 1
+
 	PrfSHA256           = "sha-256"
 	PrfHashDHBLS12381G1 = "hashdh-bls12381g1"
 )
