@@ -27,7 +27,7 @@ import (
 // way.
 func (c *Client) verifyCircuitZkPresentation(
 	ctx context.Context,
-	presentation openid4vp.CircuitZkPresentation,
+	presentation openid4vp.ZkpPresentation,
 	session circuitZkSession,
 	items []openid4vp.ReqItem,
 	issuerKey any,
@@ -61,7 +61,7 @@ func (c *Client) verifyCircuitZkPresentation(
 	checked := 0
 	verified := map[string][]byte{}
 	for _, item := range items {
-		if item.ID != openid4vp.CircuitZkFunctionPseudonym {
+		if item.ID != openid4vp.FunctionPseudonym {
 			continue
 		}
 		claimed, present := presentation.Pseudonyms[item.Return]

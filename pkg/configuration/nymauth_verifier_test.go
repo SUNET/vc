@@ -50,12 +50,21 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 	require.NoError(t, checkNymAuthVerifier(nymAuthCfg(t)), "the fixture must be valid")
 
-	t.Run("a prefixed Client Identifier as the verifier_id", func(t *testing.T) {
-		// Hashing it yields a pseudonym no other implementation
-		// reports, so a comparison never matches and the subject
-		// looks innocent.
+	t.Run("a prefixed Client Identifier is the verifier_id", func(t *testing.T) {
+		// Accepted under v0.4: the verifier_id is hashed exactly as
+		// published, prefix included, and the archive's reference
+		// pseudonyms are computed from that form. This was refused
+		// until 2026-10-20, when the rule reversed.
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.VerifierID = "x509_san_dns:verifier.example"
+		assert.NoError(t, checkNymAuthVerifier(cfg))
+	})
+
+	t.Run("a prefix with no identifier after it", func(t *testing.T) {
+		// Names no Verifier, so it is refused - the one thing the
+		// reversal did not change.
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.VerifierID = "x509_san_dns:"
 		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "verifier_id")
 	})
 

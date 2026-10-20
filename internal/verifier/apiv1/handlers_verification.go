@@ -249,7 +249,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		//
 		// A scope no credential query names belongs in the loop
 		// below, where it fails.
-		if query, known := c.requestedQueryExact(authCtx, scopeQueryIDs, scope); known && openid4vp.IsCircuitZkFormat(query.Format) {
+		if query, known := c.requestedQueryExact(authCtx, scopeQueryIDs, scope); known && openid4vp.IsZkpReqFormat(query.Format) {
 			responseURI, err := c.zkResponseURI(scope)
 			if err != nil {
 				return nil, err

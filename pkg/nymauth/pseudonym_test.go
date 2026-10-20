@@ -160,20 +160,22 @@ func TestSeedLengthIsFixedByTheRulebook(t *testing.T) {
 // correct pseudonym that no Verifier will ever report, so a remapping
 // loop would simply never match and an operator would conclude the
 // subject is innocent.
-func TestVerifierInputIsTheBareVerifierID(t *testing.T) {
+func TestVerifierInputIsThePrefixedVerifierID(t *testing.T) {
 	// The rulebook's worked digests, recomputed here rather than
 	// copied as opaque constants: if either moves, this says which.
 	bare := sha256.Sum256([]byte("verifier.example"))
 	prefixed := sha256.Sum256([]byte("x509_san_dns:verifier.example"))
-	require.Equal(t, "be6a6400", hex.EncodeToString(bare[:])[:8],
-		"the rulebook's MUST digest for the bare verifier_id")
 	require.Equal(t, "6eae85a0", hex.EncodeToString(prefixed[:])[:8],
-		"and its MUST NOT digest for the prefixed Client Identifier")
+		"rulebook v0.4's MUST digest for the prefixed verifier_id, and the archive's own verifier_input")
+	require.Equal(t, "be6a6400", hex.EncodeToString(bare[:])[:8],
+		"and the bare DNS name, which v0.4 says is NOT a verifier_id")
 
 	for _, bad := range []string{
-		"x509_san_dns:rp.example", // the form the rulebook marks MUST NOT
+		// Values that name no Verifier at all. The prefixed form is
+		// no longer among them: v0.4 hashes it, and the archive's
+		// reference pseudonyms are computed from it.
 		"x509_san_dns:",
-		"semantic_id:", // the semantic form naming nobody
+		"semantic_id:",
 		"",
 	} {
 		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, bad)
@@ -187,16 +189,14 @@ func TestVerifierInputIsTheBareVerifierID(t *testing.T) {
 	// the guard is about the Client Identifier Prefix, not about
 	// punctuation.
 	//
-	// "semantic_id:rp.example" is in this list on purpose. The rulebook
-	// says that string is part of the `semantic` verifier_id VALUE and
-	// not a Client Identifier Prefix, so it is hashed whole. Refusing it
-	// would leave every semantic deployment unable to derive
-	// verifier_input, and the failure would look like a bad pseudonym
-	// rather than a rejected identifier.
+	// Every published form, prefix included: v0.4 hashes the
+	// verifier_id exactly as published, so the only thing refused is a
+	// value that names nobody.
 	for _, good := range []string{
 		"rp.example",
 		"verifier.example",
 		"semantic_id:rp.example",
+		"x509_san_dns:rp.example",
 		"https://rp.example/path",
 		"x509_hash:abcd",
 	} {
@@ -215,9 +215,8 @@ func TestVerifierInputIsTheBareVerifierID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantSemantic, gotSemantic)
 
-	// And the pseudonym really is computed over the bare form: the same
-	// Relying Party written the prefixed way is refused, so there is no
-	// pair of inputs that both succeed and disagree.
+	// The two spellings are different verifier_ids, and both now
+	// derive - which is the point of hashing exactly as published.
 	fromBare, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "verifier.example")
 	require.NoError(t, err)
 	want, err := Pseudonym(ConfigKnownOffenderMatchingSSC, testSeed, nullInput, bare[:])

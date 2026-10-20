@@ -34,6 +34,28 @@ type NymAuthVerifier struct {
 	// Circuits is where the circuit builds this Verifier will load
 	// come from.
 	Circuits NymAuthCircuits `yaml:"circuits,omitempty"`
+
+	// ProofTimeSkewSeconds and ProofTimeMaxAgeSeconds bound how far a
+	// presentation's proof_time may be from this verifier's clock.
+	//
+	// T is the PROVER'S: the circuit binds all 20 bytes of it into
+	// its public inputs, so only the prover knows which second it
+	// proved at. This window is what makes accepting its value safe -
+	// without one a holder could replay a proof made long ago,
+	// against a credential since revoked, or one made with a clock
+	// set forward.
+	//
+	// Outside the window is REFUSED, never clamped: verifying against
+	// a T the prover did not use cannot succeed, and would report the
+	// wrong reason when it failed.
+	//
+	// Zero means the shared recommendation - 60 seconds of skew into
+	// the future, 600 seconds of age. They are recommendations and
+	// not protocol constants: the tolerance is this verifier's to
+	// set, and a deployment that has not thought about it should
+	// behave the way other implementations assume.
+	ProofTimeSkewSeconds   int `yaml:"proof_time_skew_seconds,omitempty" doc_example:"60"`
+	ProofTimeMaxAgeSeconds int `yaml:"proof_time_max_age_seconds,omitempty" doc_example:"600"`
 }
 
 // NymAuthCircuits configures which circuit builds may be loaded, and

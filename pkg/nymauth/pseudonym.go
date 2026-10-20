@@ -16,7 +16,6 @@ package nymauth
 import (
 	"crypto/sha256"
 	"fmt"
-	"strings"
 )
 
 // Pseudonym configurations from the rulebook's function catalogue. Each
@@ -100,47 +99,32 @@ const (
 // checkVerifierID refuses an identifier no conforming Verifier could have
 // reported.
 //
-// The hashed input is the BARE verifier_id - "verifier.example" for an
-// x509_san_dns Verifier, "semantic_id:<identifier>" for a semantic one -
-// never the prefixed Client Identifier and never client_id as it appears
-// in the request. verifier_id_type is agreed out of band and is not
-// hashed.
+// The hashed input is the verifier_id EXACTLY AS PUBLISHED, prefix and
+// all: "x509_san_dns:verifier.example" for an x509_san_dns Verifier,
+// "semantic_id:<identifier>" for a semantic one. Nothing is stripped
+// and nothing is normalised - not case, not a trailing dot.
 //
-// "Bare" is about the Client Identifier Prefix, not about colons. A
-// semantic verifier_id carries "semantic_id:" as part of its own value
-// and is hashed whole; refusing it would leave semantic deployments
-// unable to derive verifier_input at all.
+// WHICH RULEBOOK: v0.4, and the archive circuits agree with it. This is
+// the REVERSE of what this function did until 2026-10-20, when it
+// hashed the bare DNS name and refused the prefixed form. Both readings
+// have been written down at different times, so the worked digests are
+// here to settle which one this code implements:
 //
-// WHICH RULEBOOK: nym_auth_rulebook PR #7, "verifier_input: SHA-256 over
-// the bare verifier_id, never the prefixed client_id" (stacked on #5).
-// Pinned explicitly because the published v0.3 on that repo's main says
-// the opposite - its matching and account-recovery formulas hash the
-// full prefixed identifier - so a reader comparing this against main
-// will find a contradiction rather than a bug. #7 supersedes it, states
-// the rule with worked digests, and marks the prefixed form MUST NOT:
+//	SHA256("x509_san_dns:verifier.example") = 6eae85a0...6bab   (MUST)
+//	SHA256("verifier.example")              = be6a6400...4a41   (MUST NOT)
 //
-//	SHA256("verifier.example")              = be6a6400...4a41   (MUST)
-//	SHA256("x509_san_dns:verifier.example") = 6eae85a0...6bab   (MUST NOT)
+// The archive's own reference values are the tie-breaker: its
+// pseudonym.json carries client_id "x509_san_dns:verifier.example" with
+// verifier_input 6eae85a0..., which is the prefixed digest.
 //
-// #7 also records that the nym_auth circuits SPEC section 3 still shows
-// the prefixed form and that its reference values need regenerating; the
-// prefix is not bound inside the circuit, which takes verifier_input as
-// a 32-byte digest public input, so a conforming verifier passing the
-// bare digest verifies against current circuit builds.
-//
-// So a PREFIXED value is refused here, which is the opposite of what this
-// function did when it was written against the earlier reading. The
-// reason for refusing rather than stripping is unchanged: hashing
-// whatever it is given succeeds and returns a 32-byte pseudonym
+// What is refused is a value that names no Verifier: an empty one, or a
+// marker with nothing after it. Those hash cleanly - every wrong value
+// here does - and a 32-byte digest from a meaningless input is
 // indistinguishable from a correct one, so a remapping loop comparing
-// against a Verifier's real pseudonym would simply never match, and the
+// against a Verifier's real pseudonym would simply never match and the
 // operator would conclude the subject is not the one they are looking
 // for. A wrong answer, not an error.
 //
-// Stripping the prefix would be the tempting repair and is worse: it
-// would accept a caller that is confused about which value it holds, and
-// a caller confused about that is one whose OTHER inputs deserve a second
-// look.
 // CheckVerifierID is checkVerifierID for callers outside this package -
 // the verifier side, which derives verifier_input from the same value
 // and must refuse the same inputs. One rule, one implementation: a
@@ -152,10 +136,10 @@ func checkVerifierID(verifierID string) error {
 	if verifierID == "" {
 		return fmt.Errorf("nymauth: no verifier_id")
 	}
-	if strings.HasPrefix(verifierID, VerifierIDX509SANDNS) {
-		return fmt.Errorf("nymauth: verifier_id %q carries the Client Identifier prefix %q; "+
-			"the hashed input is the bare verifier_id, and hashing the prefixed form yields a pseudonym no Verifier reports",
-			verifierID, VerifierIDX509SANDNS)
+	if verifierID == VerifierIDX509SANDNS {
+		// The prefix with nothing after it names no Verifier, the
+		// same way the bare semantic marker does.
+		return fmt.Errorf("nymauth: verifier_id %q is the x509_san_dns prefix with no identifier after it", verifierID)
 	}
 	if verifierID == VerifierIDSemantic {
 		// The semantic form with nothing after the colon names no

@@ -25,7 +25,7 @@ import (
 // verifyCircuitZkPresentation always fails in this build.
 func (c *Client) verifyCircuitZkPresentation(
 	_ context.Context,
-	_ openid4vp.CircuitZkPresentation,
+	_ openid4vp.ZkpPresentation,
 	_ circuitZkSession,
 	_ []openid4vp.ReqItem,
 	_ any,
