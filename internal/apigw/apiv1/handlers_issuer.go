@@ -439,6 +439,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	// proofs resolve and verify their own signing key internally (see
 	// ProofDIVP.Verify / ProofAttestation.Verify), so they don't need
 	// per-key pairing and go through the existing aggregate verifier.
+	// holderPSC is read ONLY from a proof whose signature has just been
+	// checked, and only through VerifyWithClaims, so it cannot come
+	// from a second parse of something else. See pscFromProofClaims.
+	var holderPSC string
 	if req.Proof != nil {
 		if req.Proof.ProofType == "jwt" {
 			pubKey, err := c.proofJWKToPublicKey(jwks[0])
@@ -446,9 +450,13 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				return nil, err
 			}
 			proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
-			if verifyErr := proofJWT.Verify(pubKey, verifyOpts); verifyErr != nil {
+			claims, verifyErr := proofJWT.VerifyWithClaims(pubKey, verifyOpts)
+			if verifyErr != nil {
 				c.log.Error(verifyErr, "proof JWT verification failed")
 				return nil, verifyErr
+			}
+			if holderPSC, err = pscFromProofClaims(claims); err != nil {
+				return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 			}
 		}
 	} else if req.Proofs != nil {
@@ -462,10 +470,29 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				if err != nil {
 					return nil, err
 				}
-				if verifyErr := jwtProof.Verify(pubKey, verifyOpts); verifyErr != nil {
+				claims, verifyErr := jwtProof.VerifyWithClaims(pubKey, verifyOpts)
+				if verifyErr != nil {
 					c.log.Error(verifyErr, "proof JWT verification failed", "proof_index", i)
 					return nil, verifyErr
 				}
+				proofPSC, pscErr := pscFromProofClaims(claims)
+				if pscErr != nil {
+					return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: pscErr.Error()}
+				}
+				// A batch binds one credential per key, and the
+				// commitment is per SUBJECT, not per key. Two proofs
+				// carrying different commitments would mean one
+				// request claiming to be two people; refused rather
+				// than resolved by taking the first, which would issue
+				// the whole batch against a commitment only one of
+				// them named.
+				if i > 0 && proofPSC != holderPSC {
+					return nil, &openid4vci.Error{
+						Err:              openid4vci.ErrInvalidProof,
+						ErrorDescription: "the proofs carry different " + model.PSCProofClaim + " claims; a commitment is per subject, not per key",
+					}
+				}
+				holderPSC = proofPSC
 			}
 		default:
 			// publicKey is unused by VerifyProofWithOptions for DIVP/attestation.
@@ -504,7 +531,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	//
 	// A no-op for a scope with no commitments configured, which is every
 	// scope in a deployment that does not use the feature.
-	documentData, deliveredSeeds, err := c.injectCommitments(ctx, scope, format, documentData)
+	documentData, deliveredSeeds, err := c.injectCommitments(ctx, scope, format, documentData, holderPSC)
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", scope)
 		return nil, err

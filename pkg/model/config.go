@@ -2727,6 +2727,48 @@ const DefaultSeedNamespace = "org.siros.nym_auth"
 // configurable: a wallet looks for exactly this name.
 const SeedMetadataMember = "org.siros.secret_seed"
 
+// CommitmentSourceHolder is the only value CommitmentClaim.Source
+// takes: the commitment arrives from the wallet rather than being
+// derived here, and the issuer never sees the secret behind it.
+const CommitmentSourceHolder = "holder"
+
+// HolderCommitmentsMember is the issuer-metadata member naming which
+// commitments a credential expects the HOLDER to supply.
+//
+// Names only, never values - the same rule as the seed advertisement
+// and for the same reason: a wallet that cannot see the expectation in
+// advance has no reason to put the claim in its proof, and would be
+// refused at issuance with nothing to tell it why.
+const HolderCommitmentsMember = "org.siros.holder_commitments"
+
+// HolderCommitmentsListMember is the member inside it carrying the
+// list of names.
+const HolderCommitmentsListMember = "commitments"
+
+// CommitmentPSC is the name a holder-generated nym_auth commitment is
+// advertised and carried under.
+const CommitmentPSC = "psc"
+
+// PSCProofClaim is the OpenID4VCI proof JWT claim the wallet puts the
+// commitment in: unpadded base64url of SHA-256(private_seed).
+//
+// In the PROOF rather than in the request body, so the proof of
+// possession's signature covers it. That does not make the commitment
+// verifiable - nothing can check it against a seed the issuer never
+// sees - but it makes the request attributable to the wallet that
+// made it, which is what gives the rate limit and the audit trail on
+// a reset anything to stand on. A value an attacker can place forces
+// the subject it names through re-identification to recover.
+const PSCProofClaim = "org.siros.psc"
+
+// PSCConflictPrefix opens the error_description of the conflict,
+// before the text a person reads.
+//
+// A marked prefix because the SDK has to tell this refusal from every
+// other invalid_credential_request: "you need an operator-approved
+// reset" is a message a user must see, not a failed issuance.
+const PSCConflictPrefix = "org.siros.psc_conflict:"
+
 // SeedNamespacesMember is the member the issuer-metadata advertisement
 // uses to list namespace NAMES. Reserved: a namespace may not be called
 // this, or an advertisement and a delivery would be indistinguishable.

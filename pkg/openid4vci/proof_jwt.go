@@ -250,9 +250,25 @@ func (p ProofJWTToken) ExtractNonce() string {
 // Verify verifies a JWT proof according to OpenID4VCI 1.0 Appendix F.1
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-jwt-proof-type
 func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptions) error {
+	_, err := p.VerifyWithClaims(publicKey, opts)
+	return err
+}
+
+// VerifyWithClaims is Verify, returning the claims it verified.
+//
+// One function, so the claims a caller reads are by construction the
+// ones whose signature was checked. The alternative - verify, then
+// parse again to read a claim - is a second decode of a value that was
+// only ever trustworthy because of the first, and nothing in the type
+// system stops the second parse being given a different token.
+//
+// The returned map is only as trustworthy as the key passed in. A
+// caller reading a security-relevant claim from it has to have handed
+// this the key it actually means to bind to.
+func (p ProofJWTToken) VerifyWithClaims(publicKey crypto.PublicKey, opts *VerifyProofOptions) (map[string]any, error) {
 	// First validate the JWT structure using validator tags
 	if err := p.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 
 	claims := jwtv5.MapClaims{}
@@ -330,15 +346,15 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 	if err != nil {
 		// If the error is already an OpenID4VCI error (from keyFunc), return it as-is
 		if vciErr, ok := errors.AsType[*Error](err); ok {
-			return vciErr
+			return nil, vciErr
 		}
 		// Wrap JWT library errors (signature verification failures, etc.) as invalid_proof
-		return &Error{Err: ErrInvalidProof, ErrorDescription: err.Error()}
+		return nil, &Error{Err: ErrInvalidProof, ErrorDescription: err.Error()}
 	}
 
 	if !token.Valid {
-		return &Error{Err: ErrInvalidProof, ErrorDescription: "JWT signature is invalid"}
+		return nil, &Error{Err: ErrInvalidProof, ErrorDescription: "JWT signature is invalid"}
 	}
 
-	return nil
+	return claims, nil
 }

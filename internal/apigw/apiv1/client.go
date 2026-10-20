@@ -48,6 +48,13 @@ type Client struct {
 	datastoreStore       db.DatastoreStore
 	identityMappingStore db.IdentityMappingStore
 
+	// pscStore records which holder-generated nym_auth commitment a
+	// subject has already supplied. Nil unless the database service
+	// provided one; a scope configuring source: holder without it is
+	// refused at startup, because one commitment per subject is
+	// unenforceable without somewhere to remember them.
+	pscStore db.NymAuthPSCStore
+
 	// gRPC clients
 	issuerClient   apiv1_issuer.IssuerServiceClient
 	registryClient apiv1_registry.RegistryServiceClient
@@ -131,6 +138,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		credentialOfferStore:          db.CredentialOfferColl,
 		datastoreStore:                db.DatastoreColl,
 		identityMappingStore:          db.IdentityMappingsColl,
+		pscStore:                      db.NymAuthPSCColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
 		vciMetrics:                    vciMetrics,
@@ -155,6 +163,10 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	// specification only encrypts a response the wallet requested
 	// encryption for - so without it a wallet has no reason to ask, and
 	// would be refused at issuance with no way to know why.
+	if err := c.advertiseHolderCommitments(); err != nil {
+		return nil, err
+	}
+
 	if err := c.advertiseSeedNamespaces(); err != nil {
 		return nil, err
 	}

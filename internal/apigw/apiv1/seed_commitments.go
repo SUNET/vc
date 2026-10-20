@@ -10,11 +10,14 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
@@ -82,14 +85,10 @@ func (c *Client) checkCommitmentClaims() error {
 			}
 
 			if claim.Source != "" {
-				// A holder-supplied commitment has to be remembered: the
-				// nym_auth rulebook requires an issuer to allow only one
-				// per subject, and enforcing that needs a record this
-				// issuer has nowhere to keep. Accepting one without the
-				// record would look like support for the configuration
-				// that rule exists for, and would not be.
-				return fmt.Errorf("%s: source %q needs a record of what a subject already supplied, which this issuer has no store for; not implemented yet",
-					where, claim.Source)
+				if err := c.checkHolderCommitment(scope, where, claim); err != nil {
+					return err
+				}
+				continue
 			}
 
 			if claim.Seed == "" {
@@ -124,6 +123,67 @@ func (c *Client) checkCommitmentClaims() error {
 		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{}); err != nil {
 			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
 		}
+	}
+	return nil
+}
+
+// checkHolderCommitment refuses a holder-supplied commitment this
+// deployment cannot honour.
+//
+// Every one of these is knowable at startup, and none of them can be
+// discovered usefully later: a wallet that cannot see the
+// advertisement never sends the claim, and an issuer that cannot
+// remember what a subject supplied cannot enforce the rulebook's one
+// commitment per subject - it would simply accept whatever arrived,
+// which looks like support for the configuration that rule exists for
+// and is not.
+func (c *Client) checkHolderCommitment(scope, where string, claim *model.CommitmentClaim) error {
+	if claim.Source != model.CommitmentSourceHolder {
+		return fmt.Errorf("%s: unknown commitment source %q", where, claim.Source)
+	}
+	if claim.Seed != "" {
+		// Two sources for one value. Refused rather than resolved by
+		// precedence: an operator who set both cannot tell which one
+		// is live, and the wrong answer here is a commitment nobody
+		// can open rather than an error.
+		return fmt.Errorf("%s: names both a seed source and source %q; a holder-supplied commitment is not derived here",
+			where, claim.Source)
+	}
+	if claim.Deliver {
+		return fmt.Errorf("%s: sets deliver with source %q; there is no seed to deliver - the holder has it", where, claim.Source)
+	}
+	if len(claim.Subjects) == 0 {
+		// The record is keyed by them. Without them there is nothing
+		// to key "the same person" on, and one commitment per subject
+		// is unenforceable.
+		return fmt.Errorf("%s: no subject paths named; the record of what a subject already supplied is keyed by them", where)
+	}
+	for i, path := range claim.Subjects {
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("%s: subject path %d of %d is empty", where, i+1, len(claim.Subjects))
+		}
+	}
+	if c.pscStore == nil {
+		return fmt.Errorf("%s: source %q needs the nym_auth commitment store, which is not configured", where, claim.Source)
+	}
+
+	config, offered := c.issuerMetadata.CredentialConfigurationsSupported[scope]
+	if !offered {
+		return fmt.Errorf("%s: expects a holder-supplied commitment but scope %q is not an offered credential configuration", where, scope)
+	}
+	if len(config.ProofTypesSupported) == 0 {
+		// The commitment travels in the proof JWT, so a configuration
+		// advertising no proof type is asking for a value through a
+		// channel it has told wallets not to use. The engine treats
+		// this combination as an error too.
+		return fmt.Errorf("%s: expects the commitment in the proof JWT, but scope %q declares no proof_types_supported", where, scope)
+	}
+	if config.Doctype == "" && config.VCT == "" {
+		// The engine passes the configuration's vct - or doctype for
+		// mdoc - to the wallet as the credential type, and fails the
+		// issuance without one. Refused here, where the configuration
+		// is in front of the operator.
+		return fmt.Errorf("%s: scope %q declares neither doctype nor vct, which the wallet needs to derive its seed for this credential type", where, scope)
 	}
 	return nil
 }
@@ -267,7 +327,11 @@ const signingFormatJWP = "jwp"
 // A no-op for a scope with no commitments configured, which is every scope
 // in a deployment that does not use the feature - including the encoding
 // round trip, so nothing changes for anybody else.
-func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte) ([]byte, map[string]string, error) {
+// holderPSC is the commitment the wallet supplied, hex, read from its
+// VALIDATED proof JWT - empty when it sent none. Passed in rather than
+// read here, because the only place that can tell a validated proof
+// from a parsed one is the handler that validated it.
+func (c *Client) injectCommitments(ctx context.Context, scope string, signingFormat string, documentData []byte, holderPSC string) ([]byte, map[string]string, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	if meta == nil || len(meta.Commitments) == 0 {
 		return documentData, nil, nil
@@ -350,6 +414,13 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 	var delivered map[string]string
 
 	for _, p := range pending {
+		if p.target.Claim.Source == model.CommitmentSourceHolder {
+			if err := c.writeHolderCommitment(ctx, scope, p, doc, flat, holderPSC); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+
 		seedValue, err := c.writeCommitment(ctx, scope, p, doc, flat)
 		if err != nil {
 			return nil, nil, err
@@ -381,6 +452,67 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, signingFor
 		return nil, nil, fmt.Errorf("commitment claims for scope %q: %w", scope, err)
 	}
 	return injected, delivered, nil
+}
+
+// writeHolderCommitment records the holder's commitment against this
+// subject and writes it into the document.
+//
+// The RECORD comes first, and a conflict stops the issuance here -
+// before the format dispatch, so nothing is signed and no status-list
+// index is burned for a request that cannot succeed.
+//
+// Issuing with the RECORDED commitment instead of refusing would be
+// worse than refusing: the holder would get a credential committing to
+// a seed its current wallet cannot open, and would find out at
+// presentation, with nothing in the failure to suggest why.
+func (c *Client) writeHolderCommitment(ctx context.Context, scope string, p resolvedCommitment, doc map[string]any, flat bool, holderPSC string) error {
+	where := fmt.Sprintf("commitment claim %q for scope %q", p.target.Path, scope)
+
+	if holderPSC == "" {
+		return &openid4vci.Error{
+			Err: openid4vci.ErrInvalidProof,
+			ErrorDescription: fmt.Sprintf("this credential requires the %s claim in the proof JWT; "+
+				"it is advertised under %s in the issuer metadata", model.PSCProofClaim, model.HolderCommitmentsMember),
+		}
+	}
+	if c.pscStore == nil {
+		// Unreachable if startup ran, which is the point of checking
+		// here too: this must not fall back to accepting whatever
+		// arrived, which is the configuration without the rule.
+		return fmt.Errorf("%s: the nym_auth commitment store is not available", where)
+	}
+
+	subjectKey, err := seed.SubjectKeyHex(p.subjectIDs)
+	if err != nil {
+		// The identifiers are NOT in this error: they are what names
+		// the person, and this error reaches a log.
+		return fmt.Errorf("%s: %w", where, err)
+	}
+
+	switch err := c.pscStore.Accept(ctx, subjectKey, holderPSC, time.Now()); {
+	case errors.Is(err, db.ErrPSCConflict):
+		c.log.Warn("Refused a second nym_auth commitment for a subject", "scope", scope, "claim", p.target.Path)
+		return pscConflictError()
+	case err != nil:
+		return fmt.Errorf("%s: %w", where, err)
+	}
+
+	raw, err := hex.DecodeString(holderPSC)
+	if err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
+
+	var encoded string
+	switch p.target.Encoding {
+	case model.CommitmentEncodingHex:
+		encoded = holderPSC
+	case model.CommitmentEncodingBase64:
+		encoded = base64.StdEncoding.EncodeToString(raw)
+	default:
+		return fmt.Errorf("%s: unknown encoding %q", where, p.target.Encoding)
+	}
+
+	return setPath(doc, p.target.Element, encoded, flat)
 }
 
 // commitmentSchemas is the type metadata a commitment target must be

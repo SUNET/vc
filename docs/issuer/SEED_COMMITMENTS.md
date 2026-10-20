@@ -501,14 +501,89 @@ publishes a vector for the seed/commitment pair and none for a pseudonym,
 so the pseudonym construction is implemented from the specification text
 and has not been checked against a reference output.
 
+## A commitment the HOLDER computes: `source: holder`
+
+The other direction. The wallet derives `private_seed` — per issuer,
+from its account key, the credential type and this issuer's
+`credential_issuer` identifier — and sends only
+`psc = SHA-256(private_seed)`. The issuer writes that into the
+credential and never sees the seed.
+
+```yaml
+common:
+  credential_metadata:
+    nym_auth:
+      commitments:
+        psc:
+          source: holder
+          subjects: [issuing_country, personal_administrative_number]
+```
+
+No `seed`, because nothing is derived here, and no `deliver`, because
+there is no seed to deliver. `subjects` is still required, and is what
+the record is keyed by.
+
+**The wire.** The commitment travels as the claim `org.siros.psc` in
+the OpenID4VCI **proof JWT**, unpadded base64url of 32 bytes, so the
+proof of possession's signature covers it. That does not make the
+commitment verifiable — nothing can check it against a seed the issuer
+never sees — but it makes the request attributable to the wallet that
+made it, which is what gives the rate limit and the audit trail on a
+reset something to stand on. A value an attacker could place forces
+the subject it names through re-identification to recover.
+
+The issuer advertises the expectation by name:
+
+```json
+"credential_metadata": {
+  "org.siros.holder_commitments": {"commitments": ["psc"]}
+}
+```
+
+Names only, as for the seed advertisement, and for the same reason: a
+wallet that cannot see the expectation has no reason to put the claim
+in its proof.
+
+**One per subject.** The rulebook allows one holder-supplied commitment
+per subject per issuer, and this issuer keeps a record of the one it
+accepted — keyed by the ordered `subjects`, hashed, never the
+identifiers themselves. The same commitment presented again is accepted
+(re-issuance, batch issuance and a retried request all reach that
+path). A **different** one is refused:
+
+```
+HTTP 400  invalid_credential_request
+error_description: org.siros.psc_conflict: this subject already has a
+  nym_auth commitment on record; a wallet that has lost its account key
+  needs an operator-approved reset
+```
+
+Refused **before anything is issued** — no credential is signed and no
+status-list index is burned. The `org.siros.psc_conflict:` prefix is
+there so a wallet SDK can surface this distinguishably: "you need an
+operator-approved reset" is a message a user has to see, not a failed
+issuance.
+
+Issuing with the recorded commitment instead of refusing would be worse
+than refusing. The holder would get a credential committing to a seed
+its current wallet cannot open, and would find out at presentation,
+with nothing in the failure to suggest why.
+
+**Startup requires**, and refuses without: the commitment store; a
+non-empty `subjects`; the claim declared in the credential's type
+metadata, as for an issuer-derived one; `proof_types_supported` on the
+credential configuration, since the commitment arrives in a proof; and
+`doctype` or `vct`, which is the credential type the wallet derives its
+seed for.
+
+**Account loss** is a reset, not a new person — see
+https://github.com/SUNET/vc/issues/823 for the operator-approved reset
+and its audit trail.
+
 ## Not implemented yet
 
-Both need a per-subject store, which the issuer does not have. A
-configuration asking for either is refused at startup rather than ignored:
-
-- **`model: stored`** — a random seed drawn on first sight of a subject and
-  kept, as an alternative to a permanent secret.
-- **`source: holder`** — a commitment the wallet computes over a seed the
-  issuer never sees (`psc`). The `nym_auth` rulebook requires an issuer to
-  allow only one such commitment per subject, and enforcing that needs a
-  record of the one it accepted.
+- **`model: stored`** — a random seed drawn on first sight of a subject
+  and kept, as an alternative to a permanent secret. It needs a
+  per-subject store of seeds, which is a different store from the
+  commitment record above: that one holds commitments, which are public
+  values, and this one would hold secrets.
