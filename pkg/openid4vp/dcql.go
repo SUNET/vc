@@ -64,7 +64,7 @@ type CredentialQuery struct {
 	// value a Verifier wants is the output of a function named here. A
 	// query carrying both is one the planner rejects - which this does
 	// not prevent, because sending it is how a wallet gets tested.
-	Req []ReqItem `json:"req,omitempty" yaml:"req,omitempty"`
+	Req []ReqItem `json:"_req,omitempty" yaml:"_req,omitempty"`
 
 	// Extra carries members this build does not know about, flattened
 	// alongside the known ones.
@@ -91,7 +91,7 @@ type CredentialQuery struct {
 	// Extra covers a shape that ADDS members. This covers one that changes
 	// the type of a member already modelled - the rulebook's WIP example
 	// makes "claims" an object where DCQL has an array, and a future
-	// generation could do the same to "req" or "meta". A per-member
+	// generation could do the same to "_req" or "meta". A per-member
 	// override for each of those is a field this struct grows every time a
 	// specification moves; one raw escape hatch covers all of them and
 	// needs no release here.
@@ -194,7 +194,7 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 
 	extra, err := yamlExtra(unmarshal, "credential query",
 		"id", "format", "multiple", "meta", "trusted_authorities",
-		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "_req")
 	if err != nil {
 		return err
 	}
@@ -356,7 +356,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	// wrong kind does, or the fallback stops being total.
 	knownObject, extra, err := splitMembers(data, "credential query",
 		"id", "format", "multiple", "meta", "trusted_authorities",
-		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "_req")
 	type plain CredentialQuery
 	var known plain
 	if err == nil {
@@ -400,7 +400,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	q.Extra = extra
 
 	// A decode that SUCCEEDED is not necessarily one that kept
-	// everything. `"req": []` decodes to an empty slice and is then
+	// everything. `"_req": []` decodes to an empty slice and is then
 	// dropped by omitempty; an item missing "id" decodes to "" and comes
 	// back as a member that was not there. Those shapes are exactly the
 	// ones a Verifier sends on purpose to see what a wallet does with
@@ -523,7 +523,7 @@ func aliasedConstraintMembers(data []byte) []string {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(data, &envelope); err == nil {
 		if nested, present := envelope["meta"]; present {
-			check("meta.", nested, "vct_values", "doctype_value", "type_values")
+			check("meta.", nested, "vct_values", "doctype_value", "type_values", "schema_id_value", "source_format")
 		}
 	}
 
@@ -712,7 +712,7 @@ func jsonEquivalent(a, b []byte) bool {
 //
 // Shared by the constructor and by both decode fallbacks. The decode
 // paths used to skip it, and that was the hole: an unmodelled member -
-// `"req": {}` - made the typed decode fail, the query went raw, and the
+// `"_req": {}` - made the typed decode fail, the query went raw, and the
 // duplicate-meta check never ran. The shadow still reported the last
 // meta's constraint, so validation passed while the request was emitted
 // with BOTH, which a first-wins wallet reads as unconstrained. One
@@ -859,7 +859,7 @@ func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 // what the SD-JWT and mdoc validation reads, and laundering a decode
 // error there into Raw would turn an unreadable constraint into a query
 // that validates because there is nothing left to judge.
-var openItemMembers = map[string]bool{"req": true}
+var openItemMembers = map[string]bool{"_req": true}
 
 func (q *CredentialQuery) adoptRawShadowReporting() (unreadable, invalid []string) {
 	var members map[string]json.RawMessage
@@ -1017,6 +1017,17 @@ type MetaQuery struct {
 	// String that specifies an allowed value for the doctype of the requested Verifiable Credential.
 	DoctypeValue string `json:"doctype_value,omitempty" yaml:"doctype_value,omitempty"`
 
+	// SchemaIDValue is the type value for a bbs_cd source format, the
+	// way DoctypeValue is for mso_mdoc. Exactly one of the two
+	// belongs in a zkp_req query's meta, decided by source_format.
+	SchemaIDValue string `json:"schema_id_value,omitempty" yaml:"schema_id_value,omitempty"`
+
+	// SourceFormat is the stored attestation a zkp_req proof is made
+	// over: "mso_mdoc" or "bbs_cd". It decides whether proof_time is
+	// required in the response - every approved mso_mdoc circuit checks
+	// the MSO validity period, so it is required there.
+	SourceFormat string `json:"source_format,omitempty" yaml:"source_format,omitempty"`
+
 	// ZKSystemType for ZK-mdoc format (mso_mdoc_zk) only.
 	// A non-empty array of ZK proof system/circuit variants the Verifier is
 	// willing to accept (e.g. Longfellow circuits for different attribute
@@ -1045,10 +1056,10 @@ type VPFormatsSupported struct {
 	// MsoMdoc is the configuration for ISO mdoc format (mso_mdoc)
 	MsoMdoc *MsoMdocFormat `json:"mso_mdoc,omitempty" yaml:"mso_mdoc,omitempty"`
 
-	// CircuitZk is the configuration for zero-knowledge circuit
+	// ZkpReq is the configuration for zero-knowledge circuit
 	// presentations (circuit_zk): which proof systems and circuits a proof
 	// may come from.
-	CircuitZk *CircuitZkFormat `json:"circuit_zk,omitempty" yaml:"circuit_zk,omitempty"`
+	ZkpReq *ZkpReqFormat `json:"zkp_req,omitempty" yaml:"zkp_req,omitempty"`
 
 	// Extra carries format entries this build does not know about,
 	// flattened alongside the known ones - so a Verifier can offer a
@@ -1064,7 +1075,7 @@ func (v VPFormatsSupported) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON collects unknown format entries into Extra.
 func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
-	knownObject, extra, err := splitMembers(data, "vp_formats_supported", "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
+	knownObject, extra, err := splitMembers(data, "vp_formats_supported", "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "zkp_req")
 	if err != nil {
 		return err
 	}
@@ -1112,7 +1123,7 @@ func (v *VPFormatsSupported) UnmarshalYAML(unmarshal func(any) error) error {
 	*v = VPFormatsSupported(known)
 
 	extra, err := yamlExtra(unmarshal, "vp_formats_supported",
-		"ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
+		"ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "zkp_req")
 	if err != nil {
 		return err
 	}
