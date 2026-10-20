@@ -1636,7 +1636,7 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 | `jwt_vc_json` | `object` | Configuration for JWT-based W3C VC format (jwt_vc_json)                                                                      | -       | -       | No       |
 | `dc+sd-jwt`   | `object` | Configuration for SD-JWT VC format (dc+sd-jwt)                                                                               | -       | -       | No       |
 | `mso_mdoc`    | `object` | Configuration for ISO mdoc format (mso_mdoc)                                                                                 | -       | -       | No       |
-| `circuit_zk`  | `object` | Configuration for zero-knowledge circuit presentations (circuit_zk): which proof systems and circuits a proof may come from. | -       | -       | No       |
+| `zkp_req`     | `object` | Configuration for zero-knowledge circuit presentations (circuit_zk): which proof systems and circuits a proof may come from. | -       | -       | No       |
 
 ### `ldp_vc`
 
@@ -1673,9 +1673,9 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 | `issuerauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for IssuerAuth COSE signatures.         | -       | -       | No       |
 | `deviceauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for DeviceAuth COSE signatures or MACs. | -       | -       | No       |
 
-### `circuit_zk`
+### `zkp_req`
 
-> **Path:** `.verifier.preferred_vp_formats.circuit_zk`
+> **Path:** `.verifier.preferred_vp_formats.zkp_req`
 
 vp_formats_supported: which proof systems and circuits the Verifier will
 accept a proof from.
@@ -1686,10 +1686,10 @@ rulebook's own example wraps the same information in a
 both - so an operator talking to a wallet generation that wants the
 envelope has to be able to send it without waiting for a release here.
 
-| Field                         | Type       | Description                                               | Example                                   | Default | Required |
-| ----------------------------- | ---------- | --------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
-| `circuit_proof_system_values` | `[]string` | Acceptable proof systems.                                 | `["longfellow-libzk-v1"]`                 | -       | No       |
-| `circuit_id_values`           | `[]string` | Acceptable circuit identifiers, from the circuit catalog. | `["urn:circuits:longfellow:nym_auth:v1"]` | -       | No       |
+| Field                 | Type       | Description                                               | Example                                   | Default | Required |
+| --------------------- | ---------- | --------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `proof_system_values` | `[]string` | Acceptable proof systems.                                 | `["longfellow-libzk-v1"]`                 | -       | No       |
+| `system_id_values`    | `[]string` | Acceptable circuit identifiers, from the circuit catalog. | `["urn:circuits:longfellow:nym_auth:v1"]` | -       | No       |
 
 ### `inbound`
 
@@ -1923,7 +1923,7 @@ verifier:
           format: circuit_zk
           validate: nym_auth     # optional
           req:
-            - id: pseudonym-v1-sha256
+            - id: pseudonym
               return: nym-123
               params:
                 config: known-offender-matching-ssc
@@ -1940,7 +1940,7 @@ could not produce the bad requests a negative test needs.
 
 | Field    | Type     | Description                                                                                                                                                                                                                   | Example | Default | Required |
 | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `id`     | `string` | Function identifier, "id" on the wire. Named ID rather than Function to match the wire member, since the wire is what an operator configures and reads back.                                                                  | -       | -       | No       |
+| `fn_id`  | `string` | ID is the function identifier, "id" on the wire. Named ID rather than Function to match the wire member, since the wire is what an operator configures and reads back.                                                        | -       | -       | No       |
 | `return` | `string` | Handle the result is keyed by in the response's results map. The rulebook requires it to be unique within the credential query; nothing here enforces that, because a duplicate is a thing a wallet should be tested against. | -       | -       | No       |
 | `params` | `object` | Function's parameters, passed through unchanged.                                                                                                                                                                              | -       | -       | No       |
 
