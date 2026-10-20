@@ -1,0 +1,59 @@
+{
+  "description": "The first presentation is fine, the second is not: every element is checked.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "multiple": true,
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "pseudonym-v1-sha256",
+        "return": "nym-123",
+        "params": {
+          "config": "known-offender-matching-ssc"
+        }
+      }
+    ]
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "circuit_zk": {
+        "circuit_proof_system_values": [
+          "longfellow-libzk-v1"
+        ],
+        "circuit_id_values": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      }
+    }
+  },
+  "vp_token": {
+    "nym_attestation": [
+      {
+        "circuit_id": "urn:circuits:longfellow:nym_auth:v1",
+        "proof_system": "longfellow-libzk-v1",
+        "proof": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaHiImKi4yNjo-QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr_AwcLDxMXGxw",
+        "results": {
+          "nym-123": {
+            "pseudonym": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+          }
+        }
+      },
+      {
+        "circuit_id": "urn:circuits:other:v1",
+        "proof_system": "longfellow-libzk-v1",
+        "proof": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaHiImKi4yNjo-QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr_AwcLDxMXGxw",
+        "results": {
+          "nym-123": {
+            "pseudonym": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "circuit_id_not_offered"
+  }
+}
