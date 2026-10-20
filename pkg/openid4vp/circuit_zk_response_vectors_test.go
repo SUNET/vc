@@ -24,7 +24,12 @@ import (
 // while the implementations disagree.
 //
 // Re-vendor and re-pin; never edit. See testdata/circuit_zk_response/SOURCE.
-const responseVectorsSHA256 = "a8797c4a8ad321fee4492ad0c3495f2ba551070b95cdd33e96e84c66b259ee1c"
+//
+// Over EVERY file in the directory but SOURCE, which is ours. The
+// README is vendored too, and when it was left out of the digest it
+// silently went stale - a vendored file nothing pins is a vendored
+// file that drifts.
+const responseVectorsSHA256 = "9403e76bbabe57731de58510ac5497b94e82b209389e9221c82e0212c9913926"
 
 // responseVectorsManifestSHA256 is the SAME set under the digest the
 // other implementations quote, so the number in a release note or a
@@ -34,7 +39,7 @@ const responseVectorsSHA256 = "a8797c4a8ad321fee4492ad0c3495f2ba551070b95cdd33e9
 // Two digests of one directory because neither form is the obvious
 // one: this file's own digest covers names and contents directly,
 // and the manifest form is what the matcher repository publishes.
-const responseVectorsManifestSHA256 = "421ecfe003fd41559375fe225fbd80432afc65fc83d1232344599dbb3401ee8a"
+const responseVectorsManifestSHA256 = "5c7fd1d3cfc77288737cbb9d198b7a56ce4edb89360de1c49e12d1c752a53e52"
 
 type responseVector struct {
 	Description    string          `json:"description"`
@@ -139,7 +144,9 @@ func TestCircuitZkResponseVectorsAreTheVendoredSet(t *testing.T) {
 
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".json") {
+		// Every vendored file, not just the vectors: SOURCE is the
+		// only one this repository writes.
+		if entry.Name() != "SOURCE" {
 			names = append(names, entry.Name())
 		}
 	}
