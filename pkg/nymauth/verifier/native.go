@@ -30,6 +30,20 @@ type CircuitParams struct {
 // circuits take Q: big-endian, fixed width, never minimally encoded.
 const coordinateBytes = 32
 
+// Bounds on the transcript seed THIS C ABI takes, from
+// zk_cred_longfellow_nymauth.h.
+//
+// Here and not in Request.Check, because they are this backend's and
+// not the rulebook's: the shared digest vector's transcript is 12
+// bytes and derives a correct e2, so a request carrying it is valid
+// and simply cannot be verified by this library. Enforced at the
+// flattening, where the length can be named, rather than at the
+// native boundary, which reports it as a generic invalid input.
+const (
+	MinTranscriptBytes = 32
+	MaxTranscriptBytes = 65536
+)
+
 // NativeRequest is Request flattened to exactly what the nym_auth C ABI
 // takes (NymAuthCRequest in zk_cred_longfellow_nymauth.h).
 //
@@ -68,6 +82,11 @@ func (r Request) Native() (NativeRequest, error) {
 	e2, err := r.E2()
 	if err != nil {
 		return NativeRequest{}, err
+	}
+
+	if n := len(r.SessionTranscript); n < MinTranscriptBytes || n > MaxTranscriptBytes {
+		return NativeRequest{}, fmt.Errorf("nymauth: the transcript seed is %d bytes; this circuit library takes %d to %d",
+			n, MinTranscriptBytes, MaxTranscriptBytes)
 	}
 
 	earliest, cutoff := NoLowerBound, NoUpperBound

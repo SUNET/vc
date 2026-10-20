@@ -89,3 +89,27 @@ func TestNativeRequestChecksTheRequest(t *testing.T) {
 	_, err := r.Native()
 	assert.ErrorContains(t, err, "never from the proof")
 }
+
+// The transcript-seed bound is THIS library's, so it is enforced where
+// the request is flattened for it - not in Request.Check, which must
+// keep accepting a request some other circuit can verify.
+func TestNativeRequestEnforcesTheLibrarysTranscriptBound(t *testing.T) {
+	short := testRequest(t)
+	short.SessionTranscript = []byte{0x83, 0xf6, 0xf6, 0x68, 'h', 'a', 'n', 'd', 'o', 'v', 'e', 'r'}
+	require.NoError(t, short.Check(), "a short transcript is a valid request")
+	_, err := short.Native()
+	assert.ErrorContains(t, err, "this circuit library takes 32 to 65536")
+
+	// A WELL-FORMED transcript that is simply too long: [null, null,
+	// <a long byte string>]. Padding with zero bytes would be refused
+	// by the shape check first and would not exercise this bound at
+	// all.
+	payload := make([]byte, MaxTranscriptBytes)
+	long := testRequest(t)
+	long.SessionTranscript = append([]byte{0x83, 0xf6, 0xf6, 0x5a,
+		byte(len(payload) >> 24), byte(len(payload) >> 16), byte(len(payload) >> 8), byte(len(payload)),
+	}, payload...)
+	require.NoError(t, long.Check(), "it is well-formed, just too long for this library")
+	_, err = long.Native()
+	assert.ErrorContains(t, err, "this circuit library takes 32 to 65536")
+}
