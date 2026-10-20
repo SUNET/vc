@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/pkg/nymauth/verifier"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
@@ -34,9 +35,54 @@ type circuitZkSession struct {
 	DocType string
 	// VerifierInput is SHA-256 of the configured BARE verifier_id.
 	VerifierInput [32]byte
-	// Now is this verifier's clock.
+
+	// Now is T, the timestamp bound into the proof's public inputs.
+	//
+	// NOT a free-running clock reading, despite the name. The circuit
+	// binds all 20 bytes of YYYY-MM-DDThh:mm:ssZ bit by bit
+	// (hash_public_base in zk-cred-longfellow's src/nymauth/mod.rs),
+	// so the prover and this verifier must use the SAME second or the
+	// public inputs differ and the proof cannot verify.
 	Now time.Time
+
+	// NowSource records where Now came from, for the log line and for
+	// the refusal message. See circuitZkProofTime.
+	NowSource string
 }
+
+// circuitZkProofTime decides T and says where it came from.
+//
+// ONE place, because T is the value the prover and this verifier have
+// to agree on exactly, and the agreement is still being settled.
+//
+// TODAY IT IS THE RECEIPT TIME, AND THAT IS KNOWN TO BE WRONG. The
+// wallet proved at some earlier second and cannot predict when its
+// response arrives, so a real presentation's public inputs will not
+// match and the proof will not verify. Every test in this repository
+// derives and verifies inside one process, with one clock, which is
+// why nothing here fails.
+//
+// The fix needs a cross-implementation decision - the verifier has to
+// choose T, communicate it, and reuse it, and the shared circuit_zk
+// request format currently has no member carrying one. That is being
+// routed through the rulebook and the request spec. When it lands,
+// this function reads the value off the session and the rest of the
+// file does not change; that is the whole reason it exists.
+//
+// SUNET/vc#830 carries the trace.
+func circuitZkProofTime(authCtx *cache.AuthorizationContext) (time.Time, string) {
+	_ = authCtx // the session will carry T once the convention is settled
+	return time.Now(), proofTimeReceipt
+}
+
+const (
+	// proofTimeReceipt is the provisional source: this verifier's
+	// clock when the response arrived.
+	proofTimeReceipt = "receipt-time (PROVISIONAL - cannot match the prover)"
+	// proofTimeSession is what it becomes when the request-creation
+	// path supplies T.
+	proofTimeSession = "session"
+)
 
 // circuitZkRequestFor builds the response-side request from the
 // verifier's own DCQL query and its own offered formats.
@@ -141,7 +187,7 @@ func circuitZkChannelFor(dcAPI bool) circuitZkChannel {
 // fail-closed half of the table above: verifying it would mean
 // constructing a transcript nothing signed, and reporting the
 // inevitable mismatch as a bad proof rather than as the wrong channel.
-func (c *Client) circuitZkSessionFor(channel circuitZkChannel, origin, clientID, nonce, responseURI, docType string, readerThumbprint []byte) (circuitZkSession, error) {
+func (c *Client) circuitZkSessionFor(authCtx *cache.AuthorizationContext, channel circuitZkChannel, origin, clientID, nonce, responseURI, docType string, readerThumbprint []byte) (circuitZkSession, error) {
 	build, supported := circuitZkTranscripts[channel]
 	if !supported {
 		return circuitZkSession{}, fmt.Errorf("circuit_zk: this presentation arrived over the %q channel, and the nym_auth "+
@@ -159,11 +205,13 @@ func (c *Client) circuitZkSessionFor(channel circuitZkChannel, origin, clientID,
 		return circuitZkSession{}, fmt.Errorf("circuit_zk: verifier.nym_auth.verifier_id: %w", err)
 	}
 
+	now, nowSource := circuitZkProofTime(authCtx)
 	return circuitZkSession{
 		Transcript:    transcript,
 		DocType:       docType,
 		VerifierInput: verifierInput,
-		Now:           time.Now(),
+		Now:           now,
+		NowSource:     nowSource,
 	}, nil
 }
 

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"sync"
 
@@ -70,6 +71,25 @@ type Allowlist struct {
 // the configuration.
 func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 	list := &Allowlist{byConfig: make(map[string]Entry, len(cfg.Allow))}
+
+	// The sources, here rather than as a struct tag, so a deployment
+	// with nym_auth off is not stopped by a source nothing will read.
+	for i, source := range cfg.Sources {
+		where := fmt.Sprintf("verifier.nym_auth.circuits.sources[%d]", i)
+		parsed, err := url.Parse(source)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %q is not a URL: %w", where, source, err)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			// A catalog is fetched over the network; anything else is
+			// a value that will fail at the first fetch, with nothing
+			// pointing back at the configuration.
+			return nil, fmt.Errorf("%s: %q is not an http(s) URL", where, source)
+		}
+		if parsed.Host == "" {
+			return nil, fmt.Errorf("%s: %q has no host", where, source)
+		}
+	}
 
 	for i, entry := range cfg.Allow {
 		where := fmt.Sprintf("verifier.nym_auth.circuits.allow[%d]", i)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/notify"
@@ -75,7 +76,7 @@ func TestCircuitZkSessionRefusesAnUnsupportedChannel(t *testing.T) {
 		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
 	}}}
 
-	_, err := client.circuitZkSessionFor(circuitZkChannel("ble"), "https://verifier.example",
+	_, err := client.circuitZkSessionFor(nil, circuitZkChannel("ble"), "https://verifier.example",
 		"x509_san_dns:verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ",
 		"https://verifier.example/verification/direct_post", "eu.europa.ec.eudi.nym_auth.1", nil)
 	require.Error(t, err)
@@ -93,7 +94,7 @@ func TestCircuitZkSessionBuildsTheRedirectTranscript(t *testing.T) {
 	}}}
 	thumbprint := bytes.Repeat([]byte{0x11}, 32)
 
-	session, err := client.circuitZkSessionFor(channelOpenID4VP, "", "x509_san_dns:verifier.example",
+	session, err := client.circuitZkSessionFor(nil, channelOpenID4VP, "", "x509_san_dns:verifier.example",
 		"pOA0oqEAhLnqug2r7Ve4tQ", "https://verifier.example/verification/direct_post",
 		"eu.europa.ec.eudi.nym_auth.1", thumbprint)
 	require.NoError(t, err)
@@ -105,7 +106,7 @@ func TestCircuitZkSessionBuildsTheRedirectTranscript(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, want, session.Transcript)
 
-	dcAPI, err := client.circuitZkSessionFor(channelDCAPI, "https://verifier.example", "",
+	dcAPI, err := client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
 		"pOA0oqEAhLnqug2r7Ve4tQ", "", "eu.europa.ec.eudi.nym_auth.1", thumbprint)
 	require.NoError(t, err)
 	assert.NotEqual(t, dcAPI.Transcript, session.Transcript, "two handovers, two transcripts")
@@ -154,7 +155,7 @@ func TestCircuitZkSessionBuildsTheDCAPITranscript(t *testing.T) {
 		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
 	}}}
 
-	session, err := client.circuitZkSessionFor(channelDCAPI, "https://verifier.example", "",
+	session, err := client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
 		"pOA0oqEAhLnqug2r7Ve4tQ", "", "eu.europa.ec.eudi.nym_auth.1", nil)
 	require.NoError(t, err)
 
@@ -177,7 +178,7 @@ func TestCircuitZkSessionRefusesAPrefixedVerifierID(t *testing.T) {
 		NymAuth: model.NymAuthVerifier{VerifierID: "x509_san_dns:verifier.example"},
 	}}}
 
-	_, err := client.circuitZkSessionFor(channelDCAPI, "https://verifier.example", "",
+	_, err := client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
 		"pOA0oqEAhLnqug2r7Ve4tQ", "", "eu.europa.ec.eudi.nym_auth.1", nil)
 	assert.ErrorContains(t, err, "verifier_id")
 }
@@ -507,4 +508,46 @@ func TestUIInteractionSessionRecordsTheResponseMode(t *testing.T) {
 	// checked against, so a real session passes that check.
 	require.NoError(t, checkCircuitZkResponseMode(channelOpenID4VP, session),
 		"a session minted by UIInteraction must satisfy the redirect response-mode rule")
+}
+
+// T is decided in ONE place, and that place says where the value
+// came from.
+//
+// It is the receipt time today, which is known to be wrong: the
+// circuit binds all 20 bytes of T into its public inputs, so a prover
+// that used any other second produces a proof that cannot verify. The
+// fix needs a cross-implementation decision and is tracked on #830.
+// What is asserted here is the structure that makes the fix small -
+// one function, and a recorded source - and the diagnostics that stop
+// the failure reading as a bad proof.
+func TestCircuitZkProofTimeNamesItsSource(t *testing.T) {
+	now, source := circuitZkProofTime(nil)
+
+	assert.False(t, now.IsZero(), "T must be a real timestamp")
+	assert.Equal(t, proofTimeReceipt, source)
+	assert.Contains(t, source, "PROVISIONAL",
+		"the source string is what an operator sees in the log; it has to say this one cannot match")
+}
+
+// A verification failure under the provisional T names the likeliest
+// cause, instead of leaving an operator to suspect the circuit, the
+// artifact or the issuer key.
+func TestCircuitZkTimeBindingHintExplainsTheProvisionalT(t *testing.T) {
+	provisional := circuitZkSession{
+		Now:       time.Date(2026, 10, 20, 9, 30, 0, 0, time.UTC),
+		NowSource: proofTimeReceipt,
+	}
+	hint := circuitZkTimeBindingHint(provisional)
+
+	assert.Contains(t, hint, "2026-10-20T09:30:00Z", "the T actually used")
+	assert.Contains(t, hint, proofTimeReceipt, "and where it came from")
+	assert.Contains(t, hint, "830", "and where the explanation lives")
+
+	// And it EXPIRES. Once T comes from the session the hint is empty,
+	// so a genuine bad proof is not annotated with a cause that no
+	// longer applies - which would be its own wild goose chase.
+	settled := provisional
+	settled.NowSource = proofTimeSession
+	assert.Empty(t, circuitZkTimeBindingHint(settled),
+		"the hint must disappear with the gap it describes")
 }

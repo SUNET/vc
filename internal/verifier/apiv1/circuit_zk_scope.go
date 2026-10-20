@@ -76,12 +76,18 @@ func (c *Client) verifyCircuitZkScope(
 		}
 	}
 
-	session, err := c.circuitZkSessionFor(channel, origin, authCtx.ClientID, authCtx.Nonce,
+	session, err := c.circuitZkSessionFor(authCtx, channel, origin, authCtx.ClientID, authCtx.Nonce,
 		responseURI, query.Meta.DoctypeValue, thumbprint)
 	if err != nil {
 		c.log.Error(err, "cannot build the circuit_zk session transcript", "scope", scope, "dc_api", dcAPI)
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
+
+	// T and where it came from, before any proof is checked. A
+	// time-binding mismatch is otherwise indistinguishable from a bad
+	// proof, and this line is what tells the two apart in a log.
+	c.log.Debug("circuit_zk proof time", "scope", scope,
+		"t", session.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", session.NowSource)
 
 	credentials := make([]sdjwtvc.CredentialCache, 0, len(presentations))
 	for _, presentation := range presentations {
@@ -108,9 +114,10 @@ func (c *Client) verifyCircuitZkScope(
 		verified, err := c.verifyCircuitZkPresentation(ctx, presentation, session, query.Req, issuerKey)
 		if err != nil {
 			c.log.Error(err, "circuit_zk proof did not verify", "scope", scope,
-				"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey))
-			return nil, fmt.Errorf("scope %s: the proof did not verify against the issuer key the chain established: %w",
-				scope, err)
+				"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey),
+				"t", session.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", session.NowSource)
+			return nil, fmt.Errorf("scope %s: the proof did not verify against the issuer key the chain established%s: %w",
+				scope, circuitZkTimeBindingHint(session), err)
 		}
 		c.log.Info("circuit_zk proof verified", "scope", scope,
 			"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey))
@@ -159,6 +166,29 @@ func checkCircuitZkResponseMode(channel circuitZkChannel, authCtx *cache.Authori
 			authCtx.ResponseMode, openid4vp.ResponseModeDirectPostJWT)
 	}
 	return nil
+}
+
+// circuitZkTimeBindingHint names the known cause of a failure that
+// would otherwise read as a bad proof.
+//
+// The circuit binds all 20 bytes of T into its public inputs, so a
+// prover and a verifier that disagree about the second produce
+// different inputs and the proof cannot verify - with nothing
+// distinguishing that from a forged or corrupted one. While T is the
+// receipt time it CANNOT match, so every real presentation fails this
+// way, and an operator reading "the proof did not verify" would go
+// looking at the circuit, the artifact or the issuer key.
+//
+// Empty once T comes from the session, so a genuine bad proof is not
+// annotated with a cause that no longer applies.
+func circuitZkTimeBindingHint(session circuitZkSession) string {
+	if session.NowSource != proofTimeReceipt {
+		return ""
+	}
+	return fmt.Sprintf(" (NOTE: T was %s, from %s. The circuit binds T into its public inputs, so a prover "+
+		"that used any other second produces a proof that cannot verify. This is a known gap pending a "+
+		"cross-implementation decision - see SUNET/vc#830 - and is the likeliest cause of this failure)",
+		session.Now.UTC().Format("2006-01-02T15:04:05Z"), session.NowSource)
 }
 
 // circuitZkCredential renders a verified presentation as claims.
