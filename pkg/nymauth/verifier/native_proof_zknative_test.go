@@ -109,14 +109,16 @@ func loadArchiveFixture(t *testing.T) archiveFixture {
 // request builds the verifier-side Request for one of the archive's
 // verifiers.
 //
-// verifier_input is taken from the fixture rather than derived with
-// VerifierInput, and that is not a shortcut: the archive hashes the
-// PREFIXED Client Identifier ("x509_san_dns:verifier.example"), which
-// nym_auth_rulebook PR #7 marks MUST NOT, and this package refuses to
-// derive. The field is bytes, so a request can still be built against
-// the archive's proofs - but a deployment whose provers follow the
-// archive will produce pseudonyms this verifier never reproduces. See
-// pkg/nymauth.checkVerifierID.
+// verifier_input is read from the fixture AND derived from the
+// fixture's own client_id, and the two must agree.
+//
+// It used to be read only, with a comment saying why: the archive
+// hashes the PREFIXED Client Identifier, this package refused to derive
+// that, and the prediction recorded here was that a deployment whose
+// provers follow the archive would produce pseudonyms this verifier
+// never reproduces. v0.4 settled it the archive's way, so the
+// workaround becomes the cross-check it was standing in for - end to
+// end, from the published identifier to the pseudonym in the proof.
 func (f archiveFixture) request(t *testing.T, v archiveVerifier) Request {
 	t.Helper()
 
@@ -133,6 +135,11 @@ func (f archiveFixture) request(t *testing.T, v archiveVerifier) Request {
 	require.NoError(t, err)
 	require.Len(t, raw, 32)
 	copy(verifierInput[:], raw)
+
+	derived, err := VerifierInput(v.ClientID)
+	require.NoErrorf(t, err, "the archive's client_id %q is not a verifier_id this package will derive from", v.ClientID)
+	require.Equalf(t, hex.EncodeToString(raw), hex.EncodeToString(derived[:]),
+		"this package derives a different verifier_input from client_id %q than the archive published, so its pseudonyms would match nobody's", v.ClientID)
 
 	return Request{
 		IssuerKey: key,
