@@ -73,6 +73,23 @@ func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "no proof could be verified")
 	})
 
+	t.Run("a source that is not an http(s) URL", func(t *testing.T) {
+		// Still refused when the feature is ON. Moving the check out
+		// of the struct tag must not mean losing it.
+		for _, bad := range []string{"", "not-a-url", "ftp://catalog.example", "https://"} {
+			cfg := nymAuthCfg(t)
+			cfg.Verifier.NymAuth.Circuits.Sources = []string{bad}
+			assert.ErrorContains(t, checkNymAuthVerifier(cfg), "sources[0]",
+				"source %q must be refused when nym_auth is enabled", bad)
+		}
+
+		// And a good one is accepted, so this refuses bad values
+		// rather than the field.
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.Circuits.Sources = []string{"https://zk-circuits.fly.dev"}
+		assert.NoError(t, checkNymAuthVerifier(cfg))
+	})
+
 	t.Run("an allowlist that cannot be resolved", func(t *testing.T) {
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.Circuits.Allow[0].Config = "something-else"
@@ -134,6 +151,11 @@ func TestNymAuthVerifierDisabledWithAHalfWrittenEntryStillLoads(t *testing.T) {
 	cfg := nymAuthCfg(t)
 	cfg.Verifier.NymAuth.Enable = false
 	cfg.Verifier.NymAuth.Circuits.Allow = []model.NymAuthCircuit{{Config: nymauth.ConfigKnownOffenderMatchingSSC}}
+	// A half-written SOURCE too, not only a half-written entry: the
+	// sources list carried an `httpurl` struct tag, which recursed
+	// the same way and stopped a disabled deployment over a URL
+	// nothing would fetch.
+	cfg.Verifier.NymAuth.Circuits.Sources = []string{"", "not-a-url"}
 
 	require.NoError(t, checkNymAuthVerifier(cfg))
 
