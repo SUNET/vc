@@ -40,6 +40,15 @@ type NymAuthPSCRecord struct {
 	SubjectKey string `bson:"subject_key"`
 	// PSC is the commitment, hex.
 	PSC string `bson:"psc"`
+	// Acceptance distinguishes ONE acceptance from the next, even when
+	// the next records the same commitment.
+	//
+	// A reset audits an acceptance, and a retry completing an
+	// interrupted reset must remove the acceptance it audited and no
+	// other. Without it, Accept(A) - reset - Accept(A) - replay the
+	// reset removes the second A, because the commitment alone cannot
+	// tell two acceptances of the same value apart.
+	Acceptance string `bson:"acceptance"`
 	// AcceptedAt is when this value was first accepted.
 	AcceptedAt time.Time `bson:"accepted_at"`
 }
@@ -52,8 +61,13 @@ type NymAuthPSCReset struct {
 	// evidence resets a subject once.
 	EvidenceRef string `bson:"evidence_ref"`
 	// ResetOf is SHA-256 of the PREVIOUS commitment, hex - never the
-	// commitment. See the migration for why.
+	// commitment. See the migration for why. It is for the human
+	// reading the trail.
 	ResetOf string `bson:"reset_of"`
+	// ResetAcceptance is the acceptance this reset removed, and is
+	// what a compensating retry matches on. See
+	// NymAuthPSCRecord.Acceptance.
+	ResetAcceptance string `bson:"reset_acceptance"`
 	// ApprovedBy is the operator identity from the admin session.
 	ApprovedBy string    `bson:"approved_by"`
 	ApprovedAt time.Time `bson:"approved_at"`
@@ -111,6 +125,27 @@ type NymAuthPSCStore interface {
 func ResetOf(psc string) string {
 	sum := sha256.Sum256([]byte(psc))
 	return hex.EncodeToString(sum[:])
+}
+
+// completesAnInterruptedReset decides whether a record still present
+// after an audit row was written is the one that reset removed.
+//
+// A pure predicate, and separate from the store, because it is the
+// whole correctness of the compensating retry and it is wrong in ways
+// that no amount of integration testing in one backend would surface.
+// Only the non-transactional backend calls it; the SQL store writes
+// both halves in one transaction and can never reach the state.
+//
+// It matches on the ACCEPTANCE. Matching on the commitment looks
+// equivalent and is not: a subject recovering with the same wallet and
+// the same seed re-presents the SAME commitment, so a replayed reset
+// would delete that new record while believing it was finishing an
+// interrupted one.
+func completesAnInterruptedReset(auditedAcceptance string, record *NymAuthPSCRecord) bool {
+	if record == nil || auditedAcceptance == "" {
+		return false
+	}
+	return record.Acceptance == auditedAcceptance
 }
 
 // checkPSCArgs refuses arguments no caller could legitimately have.

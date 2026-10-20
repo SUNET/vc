@@ -33,6 +33,26 @@ func testNymAuthPSCStoreContract(t *testing.T, store NymAuthPSCStore) {
 	second := pscDigest("private-seed-two")
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 
+	t.Run("re-accepting the same value is a distinguishable acceptance", func(t *testing.T) {
+		// Two acceptances of one commitment must not look alike, or a
+		// reset cannot say which of them it removed.
+		subject := pscDigest("acceptance-identity")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+		one, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+		require.NotEmpty(t, one.Acceptance)
+
+		require.NoError(t, store.Reset(ctx, subject, "operator-a", "evidence-a", now))
+		require.NoError(t, store.Accept(ctx, subject, first, now.Add(time.Hour)))
+		two, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+
+		assert.Equal(t, one.PSC, two.PSC)
+		assert.NotEqual(t, one.Acceptance, two.Acceptance,
+			"the same commitment accepted twice is two acceptances")
+		require.NoError(t, store.Erase(ctx, subject))
+	})
+
 	t.Run("an unknown subject has no record", func(t *testing.T) {
 		got, err := store.Get(ctx, pscDigest("nobody"))
 		require.NoError(t, err)
@@ -98,6 +118,8 @@ func testNymAuthPSCStoreContract(t *testing.T, store NymAuthPSCStore) {
 		assert.Equal(t, ResetOf(first), trail[0].ResetOf)
 		assert.NotEqual(t, first, trail[0].ResetOf,
 			"the trail carries a HASH of the previous commitment, never a working key to the old pseudonyms")
+		assert.NotEmpty(t, trail[0].ResetAcceptance,
+			"and names the acceptance it removed, which is what a compensating retry matches on")
 	})
 
 	t.Run("after a reset a different commitment is accepted", func(t *testing.T) {
@@ -220,6 +242,59 @@ func testNymAuthPSCStoreContract(t *testing.T, store NymAuthPSCStore) {
 		trail, err := store.Resets(ctx, subject)
 		require.NoError(t, err)
 		assert.Empty(t, trail)
+	})
+
+	t.Run("concurrent resets with the SAME evidence both report success", func(t *testing.T) {
+		// One piece of evidence, two calls - a retried request, a
+		// double-clicked operator. Both must see the reset succeed:
+		// reporting "no record" to the loser would send an operator
+		// looking for a failure that did not happen, and the record is
+		// gone either way.
+		subject := pscDigest("same-evidence")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs[i] = store.Reset(ctx, subject, "operator-s", "evidence-s", now)
+			}()
+		}
+		wg.Wait()
+
+		for i, err := range errs {
+			assert.NoErrorf(t, err, "call %d: this evidence's reset succeeded", i)
+		}
+
+		trail, err := store.Resets(ctx, subject)
+		require.NoError(t, err)
+		assert.Len(t, trail, 1, "one piece of evidence writes one audit row")
+		require.NoError(t, store.Erase(ctx, subject))
+	})
+
+	t.Run("a replay does not remove a record that re-accepted the SAME value", func(t *testing.T) {
+		// The case the commitment alone cannot distinguish: the
+		// subject recovers with the very same wallet and seed, so the
+		// new record holds the value the reset audited. Matching on
+		// the commitment would let the replay delete it.
+		subject := pscDigest("same-value-again")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+		require.NoError(t, store.Reset(ctx, subject, "operator-v", "evidence-v", now))
+		require.NoError(t, store.Accept(ctx, subject, first, now.Add(time.Hour)))
+
+		require.NoError(t, store.Reset(ctx, subject, "operator-v", "evidence-v", now.Add(2*time.Hour)))
+
+		got, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+		require.NotNil(t, got, "the re-established record must survive, even holding the same commitment")
+		assert.Equal(t, first, got.PSC)
+
+		trail, err := store.Resets(ctx, subject)
+		require.NoError(t, err)
+		assert.Len(t, trail, 1)
+		require.NoError(t, store.Erase(ctx, subject))
 	})
 
 	t.Run("malformed arguments are refused before they reach the table", func(t *testing.T) {

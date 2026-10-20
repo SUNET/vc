@@ -116,19 +116,20 @@ func TestNymAuthPSCColl_MongoCompletesAnInterruptedReset(t *testing.T) {
 
 	require.NoError(t, store.Accept(ctx, subject, psc, now))
 
-	// The audit row lands; the delete never does.
-	_, err = store.ResetsColl.InsertOne(ctx, NymAuthPSCReset{
-		SubjectKey:  subject,
-		EvidenceRef: "evidence-interrupted",
-		ResetOf:     ResetOf(psc),
-		ApprovedBy:  "operator-i",
-		ApprovedAt:  now,
-	})
-	require.NoError(t, err)
-
 	record, err := store.Get(ctx, subject)
 	require.NoError(t, err)
 	require.NotNil(t, record, "the fixture must leave the record in place")
+
+	// The audit row lands; the delete never does.
+	_, err = store.ResetsColl.InsertOne(ctx, NymAuthPSCReset{
+		SubjectKey:      subject,
+		EvidenceRef:     "evidence-interrupted",
+		ResetOf:         ResetOf(psc),
+		ResetAcceptance: record.Acceptance,
+		ApprovedBy:      "operator-i",
+		ApprovedAt:      now,
+	})
+	require.NoError(t, err)
 
 	// The retry finishes it.
 	require.NoError(t, store.Reset(ctx, subject, "operator-i", "evidence-interrupted", now))
@@ -160,14 +161,20 @@ func TestNymAuthPSCColl_MongoRetryLeavesAReEstablishedRecord(t *testing.T) {
 	newPSC := pscDigest("private-seed-new")
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 
-	require.NoError(t, store.Accept(ctx, subject, oldPSC, now))
-	require.NoError(t, store.Reset(ctx, subject, "operator-r", "evidence-r", now))
-	require.NoError(t, store.Accept(ctx, subject, newPSC, now.Add(time.Hour)))
+	for _, reaccepted := range []string{newPSC, oldPSC} {
+		// oldPSC is the case the commitment alone cannot tell apart:
+		// the subject recovered with the same wallet and the same
+		// seed, so the new record holds the value the reset audited.
+		require.NoError(t, store.Erase(ctx, subject))
+		require.NoError(t, store.Accept(ctx, subject, oldPSC, now))
+		require.NoError(t, store.Reset(ctx, subject, "operator-r", "evidence-r", now))
+		require.NoError(t, store.Accept(ctx, subject, reaccepted, now.Add(time.Hour)))
 
-	require.NoError(t, store.Reset(ctx, subject, "operator-r", "evidence-r", now.Add(2*time.Hour)))
+		require.NoError(t, store.Reset(ctx, subject, "operator-r", "evidence-r", now.Add(2*time.Hour)))
 
-	record, err := store.Get(ctx, subject)
-	require.NoError(t, err)
-	require.NotNil(t, record, "the re-established record must survive the replayed reset")
-	assert.Equal(t, newPSC, record.PSC)
+		record, err := store.Get(ctx, subject)
+		require.NoErrorf(t, err, "re-accepted %s", reaccepted)
+		require.NotNilf(t, record, "the re-established record must survive the replayed reset (re-accepted %s)", reaccepted)
+		assert.Equal(t, reaccepted, record.PSC)
+	}
 }

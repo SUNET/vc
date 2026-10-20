@@ -7,6 +7,8 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 
+	"github.com/google/uuid"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -79,6 +81,7 @@ func (c *NymAuthPSCColl) Accept(ctx context.Context, subjectKey, psc string, now
 		bson.M{"$setOnInsert": bson.M{
 			"subject_key": subjectKey,
 			"psc":         psc,
+			"acceptance":  uuid.NewString(),
 			"accepted_at": now.UTC(),
 		}},
 		options.UpdateOne().SetUpsert(true),
@@ -160,19 +163,19 @@ func (c *NymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, evid
 		// leaves the audited commitment in place. Finishing it is what
 		// makes the retry a retry rather than a no-op reporting success
 		// for a reset that never completed.
-		return c.removeAuditedRecord(ctx, subjectKey, existing.ResetOf, record)
+		return c.removeAuditedRecord(ctx, subjectKey, existing.ResetAcceptance, record)
 	}
 	if record == nil {
 		return ErrPSCNoRecord
 	}
 
-	audited := ResetOf(record.PSC)
 	_, err = c.ResetsColl.InsertOne(ctx, NymAuthPSCReset{
-		SubjectKey:  subjectKey,
-		EvidenceRef: evidenceRef,
-		ResetOf:     audited,
-		ApprovedBy:  approvedBy,
-		ApprovedAt:  now.UTC(),
+		SubjectKey:      subjectKey,
+		EvidenceRef:     evidenceRef,
+		ResetOf:         ResetOf(record.PSC),
+		ResetAcceptance: record.Acceptance,
+		ApprovedBy:      approvedBy,
+		ApprovedAt:      now.UTC(),
 	})
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
@@ -184,7 +187,7 @@ func (c *NymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, evid
 		return err
 	}
 
-	return c.removeAuditedRecord(ctx, subjectKey, audited, record)
+	return c.removeAuditedRecord(ctx, subjectKey, record.Acceptance, record)
 }
 
 // resetByEvidence returns the audit row for this evidence, or nil.
@@ -200,20 +203,22 @@ func (c *NymAuthPSCColl) resetByEvidence(ctx context.Context, subjectKey, eviden
 	return &row, nil
 }
 
-// removeAuditedRecord deletes the record the trail says was reset, and
-// only that one.
+// removeAuditedRecord deletes the ACCEPTANCE the trail says was reset,
+// and only that one.
 //
-// The predicate names the COMMITMENT, not just the subject, so a record
-// the subject legitimately re-established after the reset - a different
-// value, hashing to something else - is left alone. That is the
-// difference between completing an interrupted reset and undoing a
-// subject's recovery, and on a retry those two look identical from the
-// subject key alone.
-func (c *NymAuthPSCColl) removeAuditedRecord(ctx context.Context, subjectKey, audited string, record *NymAuthPSCRecord) error {
-	if record == nil || ResetOf(record.PSC) != audited {
+// The predicate names the acceptance, not the commitment and not just
+// the subject. A subject recovering may well re-present the SAME
+// commitment - the same wallet, the same seed, a reset that turned out
+// to be unnecessary - and matching on the commitment would then let a
+// replayed reset delete that new record while believing it was
+// finishing an interrupted one. From the subject key, and even from
+// the commitment, those two cases are indistinguishable; from the
+// acceptance they are not.
+func (c *NymAuthPSCColl) removeAuditedRecord(ctx context.Context, subjectKey, acceptance string, record *NymAuthPSCRecord) error {
+	if !completesAnInterruptedReset(acceptance, record) {
 		return nil
 	}
-	_, err := c.Coll.DeleteOne(ctx, bson.M{"subject_key": subjectKey, "psc": record.PSC})
+	_, err := c.Coll.DeleteOne(ctx, bson.M{"subject_key": subjectKey, "acceptance": acceptance})
 	return err
 }
 

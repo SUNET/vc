@@ -9,6 +9,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/sqlstore"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -28,15 +29,17 @@ func NewSQLNymAuthPSCColl(service *Service, db *sqlx.DB, dialect sqlstore.Dialec
 type nymAuthPSCRow struct {
 	SubjectKey string    `db:"subject_key"`
 	PSC        string    `db:"psc"`
+	Acceptance string    `db:"acceptance"`
 	AcceptedAt time.Time `db:"accepted_at"`
 }
 
 type nymAuthPSCResetRow struct {
-	SubjectKey  string    `db:"subject_key"`
-	EvidenceRef string    `db:"evidence_ref"`
-	ResetOf     string    `db:"reset_of"`
-	ApprovedBy  string    `db:"approved_by"`
-	ApprovedAt  time.Time `db:"approved_at"`
+	SubjectKey      string    `db:"subject_key"`
+	EvidenceRef     string    `db:"evidence_ref"`
+	ResetOf         string    `db:"reset_of"`
+	ResetAcceptance string    `db:"reset_acceptance"`
+	ApprovedBy      string    `db:"approved_by"`
+	ApprovedAt      time.Time `db:"approved_at"`
 }
 
 // Accept inserts the commitment if the subject has none, then reads
@@ -56,9 +59,9 @@ func (c *SQLNymAuthPSCColl) Accept(ctx context.Context, subjectKey, psc string, 
 		return err
 	}
 
-	query := c.dialect.Rebind(`INSERT INTO nymauth_psc (subject_key, psc, accepted_at)
-		VALUES (?, ?, ?) ` + c.dialect.UpsertClause([]string{"subject_key"}, nil))
-	if _, err := c.db.ExecContext(ctx, query, subjectKey, psc, now.UTC()); err != nil {
+	query := c.dialect.Rebind(`INSERT INTO nymauth_psc (subject_key, psc, acceptance, accepted_at)
+		VALUES (?, ?, ?, ?) ` + c.dialect.UpsertClause([]string{"subject_key"}, nil))
+	if _, err := c.db.ExecContext(ctx, query, subjectKey, psc, uuid.NewString(), now.UTC()); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
@@ -86,7 +89,7 @@ func (c *SQLNymAuthPSCColl) Get(ctx context.Context, subjectKey string) (*NymAut
 	defer span.End()
 
 	var row nymAuthPSCRow
-	query := c.dialect.Rebind(`SELECT subject_key, psc, accepted_at FROM nymauth_psc WHERE subject_key = ?`)
+	query := c.dialect.Rebind(`SELECT subject_key, psc, acceptance, accepted_at FROM nymauth_psc WHERE subject_key = ?`)
 	if err := c.db.GetContext(ctx, &row, query, subjectKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -94,7 +97,7 @@ func (c *SQLNymAuthPSCColl) Get(ctx context.Context, subjectKey string) (*NymAut
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	return &NymAuthPSCRecord{SubjectKey: row.SubjectKey, PSC: row.PSC, AcceptedAt: row.AcceptedAt}, nil
+	return &NymAuthPSCRecord{SubjectKey: row.SubjectKey, PSC: row.PSC, Acceptance: row.Acceptance, AcceptedAt: row.AcceptedAt}, nil
 }
 
 // Reset writes the audit row and removes the record, in one
@@ -114,9 +117,48 @@ func (c *SQLNymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, e
 		return errors.New("nymauth: a reset needs an approving operator and an evidence reference")
 	}
 
+	err := c.resetOnce(ctx, subjectKey, approvedBy, evidenceRef, now)
+	if err == nil {
+		return nil
+	}
+
+	// Two calls with the SAME evidence can both pass the evidence check
+	// inside their transactions. The first commits and removes the
+	// record; the second then finds no row and would report
+	// ErrPSCNoRecord - or, if the subject re-established one meanwhile,
+	// fail on the audit row's primary key. Both are this evidence's
+	// reset having already succeeded, which is the answer to give.
+	//
+	// Checked after the failure rather than prevented, because the
+	// thing that makes it unambiguous - the committed audit row - only
+	// exists once the winner has committed.
+	used, checkErr := c.evidenceUsed(ctx, subjectKey, evidenceRef)
+	if checkErr != nil {
+		span.SetStatus(codes.Error, checkErr.Error())
+		return checkErr
+	}
+	if used {
+		return nil
+	}
+	span.SetStatus(codes.Error, err.Error())
+	return err
+}
+
+// evidenceUsed reports whether this evidence has an audit row, read
+// outside any transaction so it sees what other callers committed.
+func (c *SQLNymAuthPSCColl) evidenceUsed(ctx context.Context, subjectKey, evidenceRef string) (bool, error) {
+	var seen int
+	query := c.dialect.Rebind(`SELECT COUNT(*) FROM nymauth_psc_resets WHERE subject_key = ? AND evidence_ref = ?`)
+	if err := c.db.GetContext(ctx, &seen, query, subjectKey, evidenceRef); err != nil {
+		return false, err
+	}
+	return seen > 0, nil
+}
+
+// resetOnce is the transaction. Its failures are interpreted by Reset.
+func (c *SQLNymAuthPSCColl) resetOnce(ctx context.Context, subjectKey, approvedBy, evidenceRef string, now time.Time) error {
 	tx, err := c.db.BeginTxx(ctx, nil)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -129,7 +171,6 @@ func (c *SQLNymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, e
 	var seen int
 	query := c.dialect.Rebind(`SELECT COUNT(*) FROM nymauth_psc_resets WHERE subject_key = ? AND evidence_ref = ?`)
 	if err := tx.GetContext(ctx, &seen, query, subjectKey, evidenceRef); err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	if seen > 0 {
@@ -145,19 +186,17 @@ func (c *SQLNymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, e
 	// untrue trail, from an operator action that is supposed to be the
 	// careful one.
 	var row nymAuthPSCRow
-	query = c.dialect.Rebind(`SELECT subject_key, psc, accepted_at FROM nymauth_psc WHERE subject_key = ? FOR UPDATE`)
+	query = c.dialect.Rebind(`SELECT subject_key, psc, acceptance, accepted_at FROM nymauth_psc WHERE subject_key = ? FOR UPDATE`)
 	if err := tx.GetContext(ctx, &row, query, subjectKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrPSCNoRecord
 		}
-		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
 	query = c.dialect.Rebind(`INSERT INTO nymauth_psc_resets
-		(subject_key, evidence_ref, reset_of, approved_by, approved_at) VALUES (?, ?, ?, ?, ?)`)
-	if _, err := tx.ExecContext(ctx, query, subjectKey, evidenceRef, ResetOf(row.PSC), approvedBy, now.UTC()); err != nil {
-		span.SetStatus(codes.Error, err.Error())
+		(subject_key, evidence_ref, reset_of, reset_acceptance, approved_by, approved_at) VALUES (?, ?, ?, ?, ?, ?)`)
+	if _, err := tx.ExecContext(ctx, query, subjectKey, evidenceRef, ResetOf(row.PSC), row.Acceptance, approvedBy, now.UTC()); err != nil {
 		return err
 	}
 
@@ -166,15 +205,13 @@ func (c *SQLNymAuthPSCColl) Reset(ctx context.Context, subjectKey, approvedBy, e
 	// trail does not describe. Belt and braces on purpose: the whole
 	// store exists to keep one invariant, and the cheapest place to
 	// keep it is in the predicate.
-	query = c.dialect.Rebind(`DELETE FROM nymauth_psc WHERE subject_key = ? AND psc = ?`)
-	result, err := tx.ExecContext(ctx, query, subjectKey, row.PSC)
+	query = c.dialect.Rebind(`DELETE FROM nymauth_psc WHERE subject_key = ? AND acceptance = ?`)
+	result, err := tx.ExecContext(ctx, query, subjectKey, row.Acceptance)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	if affected == 0 {
@@ -192,7 +229,7 @@ func (c *SQLNymAuthPSCColl) Resets(ctx context.Context, subjectKey string) ([]Ny
 	defer span.End()
 
 	var rows []nymAuthPSCResetRow
-	query := c.dialect.Rebind(`SELECT subject_key, evidence_ref, reset_of, approved_by, approved_at
+	query := c.dialect.Rebind(`SELECT subject_key, evidence_ref, reset_of, reset_acceptance, approved_by, approved_at
 		FROM nymauth_psc_resets WHERE subject_key = ? ORDER BY approved_at ASC, evidence_ref ASC`)
 	if err := c.db.SelectContext(ctx, &rows, query, subjectKey); err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -201,11 +238,12 @@ func (c *SQLNymAuthPSCColl) Resets(ctx context.Context, subjectKey string) ([]Ny
 	out := make([]NymAuthPSCReset, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, NymAuthPSCReset{
-			SubjectKey:  r.SubjectKey,
-			EvidenceRef: r.EvidenceRef,
-			ResetOf:     r.ResetOf,
-			ApprovedBy:  r.ApprovedBy,
-			ApprovedAt:  r.ApprovedAt,
+			SubjectKey:      r.SubjectKey,
+			EvidenceRef:     r.EvidenceRef,
+			ResetOf:         r.ResetOf,
+			ResetAcceptance: r.ResetAcceptance,
+			ApprovedBy:      r.ApprovedBy,
+			ApprovedAt:      r.ApprovedAt,
 		})
 	}
 	return out, nil
@@ -229,7 +267,7 @@ func (c *SQLNymAuthPSCColl) Erase(ctx context.Context, subjectKey string) error 
 	// afterwards and erasure returned success with that row retained -
 	// a retained identifier for a subject who asked to be forgotten.
 	var row nymAuthPSCRow
-	query := c.dialect.Rebind(`SELECT subject_key, psc, accepted_at FROM nymauth_psc WHERE subject_key = ? FOR UPDATE`)
+	query := c.dialect.Rebind(`SELECT subject_key, psc, acceptance, accepted_at FROM nymauth_psc WHERE subject_key = ? FOR UPDATE`)
 	if err := tx.GetContext(ctx, &row, query, subjectKey); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		span.SetStatus(codes.Error, err.Error())
 		return err

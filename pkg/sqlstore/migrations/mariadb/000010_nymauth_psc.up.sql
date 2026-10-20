@@ -11,6 +11,13 @@
 CREATE TABLE nymauth_psc (
     subject_key VARCHAR(64) PRIMARY KEY,
     psc         VARCHAR(64) NOT NULL,
+    -- Distinguishes ONE acceptance from the next, even when the next
+    -- records the same commitment. A reset audits an acceptance, and
+    -- a retry that completes an interrupted reset must remove the
+    -- acceptance it audited and no other: without this, Accept(A),
+    -- reset, Accept(A) again, replay-the-reset removes the second A,
+    -- because the commitment alone cannot tell the two apart.
+    acceptance  VARCHAR(36) NOT NULL,
     accepted_at TIMESTAMP NOT NULL
 ) ENGINE=InnoDB;
 
@@ -29,6 +36,8 @@ CREATE TABLE nymauth_psc_resets (
     subject_key  VARCHAR(64) NOT NULL,
     evidence_ref VARCHAR(255) NOT NULL,
     reset_of     VARCHAR(64) NOT NULL,
+    -- The acceptance this reset removed; see nymauth_psc.acceptance.
+    reset_acceptance VARCHAR(36) NOT NULL,
     approved_by  VARCHAR(255) NOT NULL,
     approved_at  TIMESTAMP NOT NULL,
     PRIMARY KEY (subject_key, evidence_ref)
