@@ -113,6 +113,18 @@ type NymAuthCircuit struct {
 	// Both, not either. The length is not redundant: it is checked
 	// before the bytes are read, so an artifact that is the wrong size
 	// is refused without hashing however much of it was served.
-	ArtifactSHA256 string `yaml:"artifact_sha256" doc_example:"\"92dd42fd00000000000000000000000000000000000000000000000000001b7f\""`
+	// The example values here are the REAL ones for the nym_auth
+	// build, taken from zk-cred-longfellow's src/nymauth/profile.rs.
+	// They are not decoration: gen_config_docs copies them verbatim
+	// into docs/CONFIGURATION.md, and an operator configuring this
+	// reads them there.
+	//
+	// This digest was previously a placeholder made by keeping the
+	// real value's first eight and last four hex characters and
+	// zeroing the middle, which made it survive exactly the check
+	// someone would perform on it. Never write a plausible-looking
+	// fake here; if a real value cannot be published, leave the
+	// example out.
+	ArtifactSHA256 string `yaml:"artifact_sha256" doc_example:"\"92dd42fdf99673249eec33c7d07850bd9da66fbdab01ef26391e04c8341c1b7f\""`
 	ArtifactBytes  int64  `yaml:"artifact_bytes" doc_example:"1062842"`
 }
