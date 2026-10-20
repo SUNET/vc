@@ -874,7 +874,7 @@ type VerificationPresetScope struct {
 	// verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `yaml:"zk_system_type,omitempty" validate:"omitempty,dive"`
 
-	// Req is the circuit_zk format's list of requested calculations -
+	// Req is the zkp_req format's list of requested calculations -
 	// required whenever Format is "zkp_req", since such a query
 	// discloses nothing and every value comes from a function named here.
 	//
@@ -961,7 +961,7 @@ type Verifier struct {
 	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets.
 	//
-	// Required for a circuit_zk preset. The circuit filter - which proof
+	// Required for a zkp_req preset. The circuit filter - which proof
 	// systems and circuits this Verifier will accept a proof from - lives
 	// at preferred_vp_formats.circuit_zk and nowhere else, so a preset
 	// using that format is NOT PUBLISHED unless it is set. An empty
