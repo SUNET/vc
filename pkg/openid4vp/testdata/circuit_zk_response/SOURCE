@@ -3,8 +3,10 @@ These vectors are vendored verbatim from
     https://github.com/sirosfoundation/siros-dc-matcher
     crates/siros-dc-matcher-core/tests/vectors/circuit_zk_response
 
-commit 99fdcaeddedf5c565b686834c7e5cca59404173a (main; the merge of
-https://github.com/sirosfoundation/siros-dc-matcher/pull/48)
+commit fe9020f (the head of
+https://github.com/sirosfoundation/siros-dc-matcher/pull/49, which adds the
+x5chain member). RE-PIN TO THE MERGE COMMIT once that pull request lands: a
+branch head can be rewritten, and a pin to one is a pin to nothing.
 
 The normative text is docs/circuit_zk_response.md in that repository.
 
@@ -13,6 +15,14 @@ circuit_zk presentation - the Rust matcher, the Kotlin and Swift SDKs, and this
 verifier. Vendored rather than fetched so the test suite does not depend on the
 network.
 
-The vendored copy's digest is pinned in circuit_zk_response_vectors_test.go.
+The vendored copy is pinned twice in circuit_zk_response_vectors_test.go: once
+under a digest over names and contents, and once under the manifest digest the
+matcher repository publishes,
+
+    ls *.json | LC_ALL=C sort | xargs sha256sum | sha256sum
+    421ecfe003fd41559375fe225fbd80432afc65fc83d1232344599dbb3401ee8a
+
+so the number quoted upstream can be compared against this copy directly.
+
 Re-vendor rather than edit: a local change turns a cross-implementation check
 into a self-consistency one that passes while the implementations disagree.
