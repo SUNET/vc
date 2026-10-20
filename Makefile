@@ -89,7 +89,7 @@ ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 # cmd/zkvegaverifyworker (subprocess-isolated from the verifier). Shares
 # ZKNATIVE_TAG.
 ZK_CRED_VEGA_REPO ?= https://github.com/sirosfoundation/zk-cred-vega.git
-ZK_CRED_VEGA_REF  ?= main
+ZK_CRED_VEGA_REF  ?= v0.0.7
 ZK_CRED_VEGA_CHECKOUT := third_party/.zk-cred-vega-src
 ZK_CRED_VEGA_STAGE    := third_party/zk-cred-vega
 
