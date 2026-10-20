@@ -80,6 +80,30 @@ type AuthorizationContext struct {
 	CodeChallenge       string   `json:"code_challenge,omitempty" bson:"code_challenge,omitempty" validate:"omitempty,max=128,printascii"`
 	CodeChallengeMethod string   `json:"code_challenge_method,omitempty" bson:"code_challenge_method,omitempty" validate:"omitempty,max=16,printascii"`
 
+	// AuthSession is the opaque handle that carries one Interactive
+	// Authorization exchange across its several requests (OpenID4VCI 1.1,
+	// profiling draft-ietf-oauth-first-party-apps §5.3.1).
+	//
+	// Opaque to the wallet, and REGENERATED on every challenge response -
+	// the specification requires each response to carry a distinct value,
+	// so this is rotated rather than reused. The wallet echoes the most
+	// recent one.
+	//
+	// Looking the context up by this value, rather than by anything the
+	// presentation itself carries, is what defends against session
+	// fixation: a presentation answering some other exchange's nonce
+	// cannot resolve to this context at all.
+	AuthSession string `json:"auth_session,omitempty" bson:"auth_session,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// AuthSessionDPoPThumbprint binds the Interactive Authorization
+	// exchange to the DPoP key that began it, when DPoP is in use.
+	//
+	// Distinct from Token.DPoPThumbprint, which is set when an access
+	// token is issued and so does not exist yet during this exchange.
+	// OpenID4VCI 1.1 requires every request carrying an auth_session to
+	// present the same key, so it has to be recorded at the start.
+	AuthSessionDPoPThumbprint string `json:"auth_session_dpop_thumbprint,omitempty" bson:"auth_session_dpop_thumbprint,omitempty" validate:"omitempty,max=128,printascii"`
+
 	// Authorization code fields
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
@@ -155,6 +179,30 @@ type AuthorizationContext struct {
 	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	// DCQLQueryExact carries the same query as JSON text, which is the
+	// only representation that keeps its numbers.
+	//
+	// BSON does not. The driver's json.Number encoder tries Int64 and
+	// then Float64, so a req param beyond either - a decimal past float64
+	// precision, an integer past int64 - is ROUNDED in the stored
+	// document, and the replica that reads it back sends a different
+	// request than the one that wrote it. A req param is an input to a
+	// proof, so that is two systems computing different pseudonyms from
+	// what reads as one configuration.
+	//
+	// Additive on purpose. Replacing dcql_query's representation would
+	// have broken a rolling upgrade in BOTH directions: a new replica
+	// cannot read an old document-valued query, and an old replica cannot
+	// read a new string-valued one, so a session bouncing between
+	// versions fails intermittently for as long as the rollout lasts.
+	// Written alongside and preferred on read, it is safe either way -
+	// an old replica ignores a field it does not model and keeps the
+	// behaviour it already had, and a new one gets the exact copy
+	// whenever there is one.
+	//
+	// Once every replica writes this, dcql_query can be dropped. That is
+	// a separate change, and it needs the rollout to have finished.
+	DCQLQueryExact string `json:"-" bson:"dcql_query_exact,omitempty"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//

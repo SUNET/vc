@@ -2,51 +2,79 @@ package datasources
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	"github.com/SUNET/vc/internal/apigw/data_sources/eduapi"
+	"github.com/SUNET/vc/internal/apigw/data_sources/externalapi"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
-	pkgeduapi "github.com/SUNET/vc/pkg/eduapi"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 )
 
-// Service manages all external data sources for credential issuance.
-type Service struct {
-	eduapi *eduapi.Service
+// source is the common contract implemented by every external data source.
+type source interface {
+	FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string) error
 }
 
-// New creates a new data sources service, starting all enabled sources.
-func New(ctx context.Context, remotes map[string]model.Remote, docCache pkgcache.Cache[map[string]*model.CompleteDocument], log *logger.Log) (*Service, error) {
-	s := &Service{}
+// Service manages all external data sources for credential issuance, keyed by
+// the remote name they were configured under.
+type Service struct {
+	sources map[string]source
+}
+
+// New creates a new data sources service, starting all enabled sources. Each
+// remote becomes its own source and receives the external_api scopes that
+// reference it, so per-scope attribute mappings are applied.
+func New(ctx context.Context, remotes map[string]model.Remote, externalAPI model.ExternalAPIConfig, docCache pkgcache.Cache[map[string]*model.CompleteDocument], log *logger.Log) (*Service, error) {
+	s := &Service{sources: make(map[string]source, len(remotes))}
 
 	for remoteName, remote := range remotes {
+		scopes := scopesForRemote(externalAPI, remoteName)
+		tokenCache := pkgcache.NewMemoryCache[string](1 * time.Hour)
+
 		switch remote.Type {
 		case model.RemoteTypeEduAPI:
-			cfg := pkgeduapi.Config{
-				Enable:       true,
-				BaseURL:      remote.BaseURL,
-				TokenURL:     remote.TokenURL,
-				ClientID:     remote.ClientID,
-				ClientSecret: remote.ClientSecret,
-				Scopes:       remote.Scopes,
-				Timeout:      remote.Timeout,
-			}
-			var err error
-			tokenCache := pkgcache.NewMemoryCache[string](1 * time.Hour)
-			s.eduapi, err = eduapi.New(ctx, &cfg, docCache, tokenCache, log)
+			svc, err := externalapi.NewEduAPI(ctx, remote, scopes, docCache, tokenCache, log)
 			if err != nil {
 				return nil, err
 			}
+			s.sources[remoteName] = svc
 			log.Info("Edu-API data source initialized", "remote", remoteName, "base_url", remote.BaseURL)
+		case model.RemoteTypeOEAPI:
+			svc, err := externalapi.NewOEAPI(ctx, remote, scopes, docCache, tokenCache, log)
+			if err != nil {
+				return nil, err
+			}
+			s.sources[remoteName] = svc
+			log.Info("OEAPI data source initialized", "remote", remoteName, "base_url", remote.BaseURL)
 		}
 	}
 
 	return s, nil
 }
 
-// EduAPI returns the Edu-API service, or nil if not configured.
-func (s *Service) EduAPI() *eduapi.Service { return s.eduapi }
+// AnyEnabled returns true if at least one external data source is available.
+func (s *Service) AnyEnabled() bool { return len(s.sources) > 0 }
 
-// EduAPIEnabled returns true if the Edu-API data source is available.
-func (s *Service) EduAPIEnabled() bool { return s.eduapi != nil }
+// FetchAndStoreForVCI dispatches the external-API fetch to the data source
+// configured under remoteName and stores the resulting VCI document in the
+// session cache.
+func (s *Service) FetchAndStoreForVCI(ctx context.Context, remoteName, personID, credentialType, vciSessionID string) error {
+	src, ok := s.sources[remoteName]
+	if !ok {
+		return fmt.Errorf("no external API data source enabled for remote %q", remoteName)
+	}
+	return src.FetchAndStoreForVCI(ctx, personID, credentialType, vciSessionID)
+}
+
+// scopesForRemote returns the external_api scopes (keyed by credential type)
+// that reference the given remote.
+func scopesForRemote(cfg model.ExternalAPIConfig, remoteName string) map[string]model.ExternalAPIScope {
+	out := make(map[string]model.ExternalAPIScope)
+	for credType, scope := range cfg.Scopes {
+		if scope.Remote == remoteName {
+			out[credType] = scope
+		}
+	}
+	return out
+}

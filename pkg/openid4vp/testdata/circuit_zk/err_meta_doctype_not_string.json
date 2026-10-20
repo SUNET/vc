@@ -1,0 +1,23 @@
+{
+  "description": "meta.doctype_value is not a string.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": 1
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "invalid_meta"
+  }
+}

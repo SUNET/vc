@@ -1,0 +1,20 @@
+{
+  "description": "No meta.",
+  "query": {
+    "id": "q",
+    "format": "circuit_zk",
+    "req": [
+      {
+        "id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "invalid_meta"
+  }
+}

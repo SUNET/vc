@@ -1,0 +1,22 @@
+{
+  "description": "params is not an object.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "age_check",
+        "return": "h",
+        "params": [
+          "2008-10-10"
+        ]
+      }
+    ]
+  },
+  "expect": {
+    "error": "param_wrong_type"
+  }
+}

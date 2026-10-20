@@ -1,0 +1,71 @@
+{
+  "description": "A request that still carries verifier_id_type (dropped from the rulebook request; now agreed in the trust framework) is accepted and the param passes through as an opaque optional string. Not required, not judged.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "pseudonym-v1-sha256",
+        "return": "nym-123",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "verifier_id_type": "x509_san_dns"
+        }
+      },
+      {
+        "id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "circuit_zk": {
+        "circuit_proof_system_values": [
+          "longfellow-libzk-v1"
+        ],
+        "circuit_id_values": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      }
+    }
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "pseudonym-v1-sha256",
+          "handle": "nym-123",
+          "params": {
+            "config": "known-offender-matching-ssc",
+            "verifier_id_type": "x509_san_dns"
+          }
+        },
+        {
+          "function_id": "age_check",
+          "handle": "age-range-123",
+          "params": {
+            "ge": "2008-10-10",
+            "le": "2013-10-09"
+          }
+        }
+      ],
+      "circuit_filter": {
+        "proof_systems": [
+          "longfellow-libzk-v1"
+        ],
+        "circuit_ids": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      },
+      "meta_doctype": "eu.europa.ec.eudi.nym_auth.1"
+    }
+  }
+}

@@ -11,7 +11,9 @@ The codebase makes outbound HTTP requests driven by untrusted input (credential 
 - `pkg/revocation/status_list.go` — fetches status list tokens from credential-supplied URIs
 - `pkg/trust/jwks_resolver.go` — JWKS discovery from credential `iss` claims
 - `pkg/mdoc/status.go` — status list fetching (mdoc path)
-- `internal/apigw/data_sources/eduapi/` — external API calls
+- `pkg/oauth2client/client.go` — shared OAuth2 client-credentials HTTP client used by the external-API data sources (token endpoint + authenticated GETs); hardening this transport covers both callers below
+- `internal/apigw/data_sources/externalapi/eduapi.go` — 1EdTech Edu-API data source calls via `pkg/eduapi` / `pkg/oauth2client`
+- `internal/apigw/data_sources/externalapi/oeapi.go` — OEAPI (Open Education API v6.0) data source calls via `pkg/oeapi` / `pkg/oauth2client`
 - OIDC/SAML metadata fetching
 
 **Recommended implementation**:

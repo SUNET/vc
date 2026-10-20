@@ -296,9 +296,23 @@ test-pkg: bbs-native-lib-staged ## Test the shared packages under pkg/
 	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
 		$(CGO_ENABLED_DYNAMIC) go test ./pkg/...
 
-test-js: ## Run JS unit tests for staticembed helpers
+test-js: test-js-deps ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
 	@node --test $(APIGW_STATIC)/tests/*.test.js $(VERIFIER_STATIC)/tests/*.test.js
+
+# node_modules is gitignored, so a clean checkout has none - and a test
+# that imports a dependency (req-schema.test.js needs valibot, the
+# library whose behaviour it pins) then fails for a reason that has
+# nothing to do with the code. Installed only when missing, so the common
+# case costs nothing and an offline run of an already-installed tree still
+# works.
+test-js-deps: ## Install the staticembed JS dev dependencies when missing
+	@for dir in $(APIGW_STATIC) $(VERIFIER_STATIC); do \
+		test -f "$$dir/package.json" || continue; \
+		test -d "$$dir/node_modules" && continue; \
+		echo "Installing JS dev dependencies in $$dir"; \
+		(cd "$$dir" && npm install --silent --no-audit --no-fund) || exit 1; \
+	done
 
 # Test targets with build tags
 # The SoftHSM integration tests in pkg/pki and pkg/jose shell out to
@@ -574,6 +588,38 @@ build-wallet: bbs-native-lib-ensure ## Build wallet test tool
 		-tags "$(WORKER_BUILD_TAGS)" \
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
+
+# The circuit_zk planner vectors are the shared conformance set, vendored
+# from siros-dc-matcher so the suite does not depend on the network. A
+# vendored snapshot goes stale silently - if the request shape moves, the
+# tests keep passing against the old one - so refreshing is a command
+# rather than a note in a file somebody has to find.
+#
+# MATCHER=/path/to/siros-dc-matcher to point at a different checkout.
+MATCHER ?= ../siros-dc-matcher
+vendor-circuit-zk-vectors: ## Refresh the vendored circuit_zk conformance vectors
+	$(info Refreshing circuit_zk vectors from $(MATCHER))
+	@test -d "$(MATCHER)/crates/siros-dc-matcher-core/tests/vectors/circuit_zk" || \
+		{ echo "no matcher checkout at $(MATCHER); set MATCHER=<path>"; exit 1; }
+# The SOURCE file names a commit as the provenance of these vectors, so the
+# files copied have to BE that commit. Copying from a dirty or
+# partially-untracked working tree records a commit that cannot reproduce
+# them, which is a provenance claim that is simply false - and the vectors
+# are the authority this package settles wire-shape questions against.
+	@cd "$(MATCHER)" && git diff --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has uncommitted changes under tests/vectors/circuit_zk; commit or stash them first"; exit 1; }
+	@cd "$(MATCHER)" && git diff --cached --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has staged changes under tests/vectors/circuit_zk; commit them first"; exit 1; }
+	@cd "$(MATCHER)" && test -z "$$(git ls-files --others --exclude-standard -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk)" || \
+		{ echo "$(MATCHER) has untracked files under tests/vectors/circuit_zk; commit or remove them first"; exit 1; }
+	@rm -f pkg/openid4vp/testdata/circuit_zk/*.json
+	@cp "$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/*.json \
+		"$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/README.md \
+		pkg/openid4vp/testdata/circuit_zk/
+	@cd "$(MATCHER)" && git rev-parse HEAD > /dev/null
+	@sed -i.bak "s|^commit .*|commit $$(cd "$(MATCHER)" && git rev-parse HEAD) ($$(cd "$(MATCHER)" && git describe --tags --always))|" \
+		pkg/openid4vp/testdata/circuit_zk/SOURCE && rm -f pkg/openid4vp/testdata/circuit_zk/SOURCE.bak
+	@echo "Vendored $$(ls pkg/openid4vp/testdata/circuit_zk/*.json | wc -l) vectors; review the diff before committing"
 
 # Reads the issuer's own config, so it links the same way the issuer does -
 # pkg/model reaches pkg/bbs, which is cgo.
