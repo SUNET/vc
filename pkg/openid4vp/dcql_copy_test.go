@@ -28,7 +28,7 @@ func TestCopyDCQLCarriesEveryCredentialQueryField(t *testing.T) {
 
 	original := CredentialQuery{
 		ID:       "nym_attestation",
-		Format:   FormatCircuitZk,
+		Format:   FormatZkpReq,
 		Multiple: new(true),
 		Meta: MetaQuery{
 			DoctypeValue: "eu.europa.ec.eudi.nym_auth.1",
@@ -42,7 +42,7 @@ func TestCopyDCQLCarriesEveryCredentialQueryField(t *testing.T) {
 		Claims:                            []ClaimQuery{{ID: "c", Path: []*string{&path}, Values: []any{"v"}}},
 		ClaimSet:                          [][]string{{"c"}},
 		Req: []ReqItem{{
-			ID: FunctionPseudonym, Return: "nym-123",
+			FnID: FunctionPseudonym, Return: "nym-123",
 			Params: map[string]any{"config": "known-offender-matching-ssc"},
 			Extra:  map[string]any{"source": map[string]any{"path": []any{"ssc"}}},
 		}},
@@ -79,7 +79,7 @@ func TestCopyDCQLCarriesEveryCredentialQueryField(t *testing.T) {
 }
 
 func TestCopyDCQLCarriesRaw(t *testing.T) {
-	raw := json.RawMessage(`{"id":"q","format":"circuit_zk","claims":{"_req":[]}}`)
+	raw := json.RawMessage(`{"id":"q","format":"zkp_req","claims":{"_req":[]}}`)
 	src := &DCQL{Credentials: []CredentialQuery{{Raw: raw}}}
 	dst := copyDCQL(src)
 
@@ -96,11 +96,11 @@ func TestCopyDCQLCarriesRaw(t *testing.T) {
 func TestTemplateDCQLQueryKeepsCircuitFunctions(t *testing.T) {
 	src := &DCQL{Credentials: []CredentialQuery{{
 		ID:     "nym_attestation",
-		Format: FormatCircuitZk,
+		Format: FormatZkpReq,
 		Meta:   MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
 		Req: []ReqItem{
-			{ID: FunctionPseudonym, Return: "nym-123", Params: map[string]any{"config": "known-offender-matching-ssc"}},
-			{ID: FunctionAgeCheck, Return: "age-123", Params: map[string]any{"ge": "2008-10-10"}},
+			{FnID: FunctionPseudonym, Return: "nym-123", Params: map[string]any{"config": "known-offender-matching-ssc"}},
+			{FnID: FunctionAgeCheck, Return: "age-123", Params: map[string]any{"ge": "2008-10-10"}},
 		},
 	}}}
 

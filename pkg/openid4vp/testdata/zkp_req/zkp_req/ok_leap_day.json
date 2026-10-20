@@ -1,0 +1,37 @@
+{
+  "description": "2024-02-29 is a valid full-date.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "h",
+        "params": {
+          "ge": "2024-02-29"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "age_check",
+          "handle": "h",
+          "params": {
+            "ge": "2024-02-29"
+          }
+        }
+      ],
+      "meta_doctype": "eu.europa.ec.eudi.nym_auth.1",
+      "system_filter": {},
+      "source_format": "mso_mdoc",
+      "meta_schema_id": null
+    }
+  }
+}
