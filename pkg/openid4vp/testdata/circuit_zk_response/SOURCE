@@ -3,7 +3,7 @@ These vectors are vendored verbatim from
     https://github.com/sirosfoundation/siros-dc-matcher
     crates/siros-dc-matcher-core/tests/vectors/circuit_zk_response
 
-commit 7b2ef7133d05a477e23074581c5c26d1c67a1085 (branch circuit-zk-response-vectors,
+commit 99fdcaeddedf5c565b686834c7e5cca59404173a (main; the merge of
 https://github.com/sirosfoundation/siros-dc-matcher/pull/48)
 
 The normative text is docs/circuit_zk_response.md in that repository.
@@ -16,6 +16,3 @@ network.
 The vendored copy's digest is pinned in circuit_zk_response_vectors_test.go.
 Re-vendor rather than edit: a local change turns a cross-implementation check
 into a self-consistency one that passes while the implementations disagree.
-
-The source PR was still in review when these were vendored, so expect a
-re-pin if the vectors move.
