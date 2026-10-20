@@ -55,7 +55,7 @@ type EvaluationRequest struct {
 	Subject  Subject                `json:"subject"`                                       // The name to be bound to the key
 	Resource Resource               `json:"resource"`                                      // The public key to be validated
 	Action   *Action                `json:"action,omitempty"`                              // Optional role constraint
-	Context  map[string]interface{} `json:"context,omitempty" swaggertype:"object,string"` // Optional context (MUST NOT be critical)
+	Context  map[string]interface{} `json:"context,omitempty" swaggertype:"object,string"` // Optional context (MUST NOT be critical). Recognised member: verifier_id_type narrows context.verifier_ids in the response to that one type
 }
 
 // EvaluationResponse represents the authorization decision response in the AuthZEN protocol.
@@ -78,6 +78,89 @@ type EvaluationResponseContext struct {
 	// For OpenID Federation: contains the Entity Configuration
 	// This field is set when trust_metadata is requested or for resolution-only requests.
 	TrustMetadata interface{} `json:"trust_metadata,omitempty" swaggertype:"object"` // DID Document or Entity Configuration
+	// VerifierIDs lists verifier identifiers the PDP derived from authenticated
+	// material, for wallets that need a stable identifier string for the relying
+	// party (for example as input to a pseudonym function). It is present only
+	// when the policy enables it (constraints.return_verifier_ids), the decision
+	// is true, and the identifier was verified. Informational, never critical.
+	VerifierIDs []VerifierID `json:"verifier_ids,omitempty"` // Verified verifier identifiers
+}
+
+// Verifier identifier types a PDP can return in EvaluationResponseContext.VerifierIDs.
+// Clients treat the type string as opaque; the PDP defines the exact form of each
+// value (see VerifierID).
+const (
+	// VerifierIDTypeSemantic is "semantic_id:" followed by the ETSI semantic
+	// identifier (EN 319 412-1 5.1.3) from the access certificate.
+	VerifierIDTypeSemantic = "semantic"
+	// VerifierIDTypeDNS (x509_san_dns) is the dNSName SAN value,
+	// in its ASCII (A-label) form, ASCII lower case, without a trailing dot.
+	// An internationalised name is its A-label (xn--...); a U-label is not converted.
+	VerifierIDTypeDNS = "x509_san_dns"
+	// VerifierIDTypeURI (x509_san_uri) is the uniformResourceIdentifier SAN
+	// value, byte-for-byte as bound.
+	VerifierIDTypeURI = "x509_san_uri"
+	// VerifierIDTypeDID is the full DID (without fragment) of a resolved DID
+	// document whose verification method matched the presented key.
+	VerifierIDTypeDID = "decentralized_identifier"
+	// VerifierIDTypeOIDFEntity is the OpenID Federation Entity ID (https URL),
+	// byte-for-byte as in the validated trust chain.
+	VerifierIDTypeOIDFEntity = "openid_federation"
+)
+
+// Basis values describe how a verifier identifier was verified.
+const (
+	VerifierIDBasisX5CChain        = "x5c-chain"
+	VerifierIDBasisClientIDBinding = "client-id-binding"
+	VerifierIDBasisDIDResolution   = "did-resolution"
+	VerifierIDBasisOIDFTrustChain  = "oidf-trust-chain"
+)
+
+// VerifierIDSemanticPrefix precedes the ETSI semantic identifier in a
+// "semantic" verifier identifier.
+const VerifierIDSemanticPrefix = "semantic_id:"
+
+// Request/context keys of the verifier_ids feature.
+const (
+	// VerifierIDHintContextKey is the optional request context member that
+	// narrows the response to one verifier identifier type.
+	VerifierIDHintContextKey = "verifier_id_type"
+	// VerifierIDsPolicyContextKey carries the policy's enabled types to the
+	// registries. Server-controlled: a client cannot set it.
+	VerifierIDsPolicyContextKey = "return_verifier_ids"
+)
+
+// SupportedVerifierIDTypes lists the verifier identifier types go-trust can derive.
+func SupportedVerifierIDTypes() []string {
+	return []string{
+		VerifierIDTypeSemantic,
+		VerifierIDTypeDNS,
+		VerifierIDTypeURI,
+		VerifierIDTypeDID,
+		VerifierIDTypeOIDFEntity,
+	}
+}
+
+// IsSupportedVerifierIDType reports whether t is a type go-trust can derive.
+func IsSupportedVerifierIDType(t string) bool {
+	for _, s := range SupportedVerifierIDTypes() {
+		if s == t {
+			return true
+		}
+	}
+	return false
+}
+
+// VerifierID is one verifier identifier in the evaluation response context.
+// @Description A verifier identifier derived by the PDP from authenticated material
+type VerifierID struct {
+	// Type is an opaque type string, for example "semantic" or "x509_san_dns".
+	Type string `json:"verifier_id_type" example:"semantic"`
+	// ID is the identifier in the canonical form defined for the type.
+	ID string `json:"verifier_id" example:"semantic_id:VATSE-556000000101"`
+	// Basis states how the value was verified, for example "x5c-chain",
+	// "client-id-binding", "did-resolution" or "oidf-trust-chain".
+	Basis string `json:"basis,omitempty" example:"x5c-chain"`
 }
 
 // Validate checks if the EvaluationRequest is compliant with the AuthZEN Trust Registry Profile.

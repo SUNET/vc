@@ -109,20 +109,22 @@ func VerifyLeafBinding(scheme ClientIDScheme, value string, leaf *x509.Certifica
 }
 
 // DNSSANMatches reports whether clientID matches one of dnsNames, per
-// OpenID4VP's x509_san_dns semantics (exact match) with RFC 6125 single-label
-// wildcard support: "*.example.com" matches "sub.example.com" but not
-// "example.com" or "deep.sub.example.com".
+// OpenID4VP's x509_san_dns semantics with RFC 6125 single-label wildcard
+// support: "*.example.com" matches "sub.example.com" but not "example.com" or
+// "deep.sub.example.com". Comparison is ASCII case-insensitive, as DNS names
+// are; nothing else is folded, so a non-ASCII clientID (a U-label) never
+// matches: an internationalised name must be presented as its A-label.
 func DNSSANMatches(clientID string, dnsNames []string) bool {
 	for _, dnsName := range dnsNames {
-		if dnsName == clientID {
+		if equalASCIIFold(dnsName, clientID) {
 			return true
 		}
 		if strings.HasPrefix(dnsName, "*.") {
 			suffix := dnsName[1:]     // *.example.com -> .example.com
 			baseDomain := dnsName[2:] // *.example.com -> example.com
-			if strings.HasSuffix(clientID, suffix) && clientID != baseDomain {
+			if len(clientID) > len(suffix) && equalASCIIFold(clientID[len(clientID)-len(suffix):], suffix) && !equalASCIIFold(clientID, baseDomain) {
 				// Ensure only a single label before the suffix (no nested subdomains).
-				prefix := strings.TrimSuffix(clientID, suffix)
+				prefix := clientID[:len(clientID)-len(suffix)]
 				if !strings.Contains(prefix, ".") {
 					return true
 				}
@@ -130,6 +132,28 @@ func DNSSANMatches(clientID string, dnsNames []string) bool {
 		}
 	}
 	return false
+}
+
+// equalASCIIFold reports whether a and b are equal when only ASCII letters are
+// case-folded. Unlike strings.EqualFold it never folds non-ASCII characters
+// (U+212A KELVIN SIGN would otherwise equal "k").
+func equalASCIIFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if x >= 'A' && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if y >= 'A' && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
 }
 
 // URISANMatches reports whether clientID matches one of the certificate's
