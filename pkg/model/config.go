@@ -1002,6 +1002,12 @@ type Verifier struct {
 	// verification. Only consulted by builds with the "zknative" Go build
 	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+
+	// NymAuth configures verification of nym_auth pseudonym proofs
+	// (the "circuit_zk" presentation format). Off unless enable is
+	// set, and only consulted by builds with the "zknative" Go build
+	// tag - the default build cannot check a proof at all.
+	NymAuth NymAuthVerifier `yaml:"nym_auth,omitempty"`
 	// ZkKeyCache configures the on-disk Vega verifier-key store. Verifier
 	// only: these keys exist to verify a presented proof, and the issuer
 	// never touches one.

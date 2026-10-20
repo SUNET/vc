@@ -15,6 +15,8 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/nymauth"
+	"github.com/SUNET/vc/pkg/nymauth/circuits"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
@@ -290,6 +292,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkNymAuthVerifier(cfg); err != nil {
+		return nil, err
+	}
+
 	if err := checkCredentialEncryption(cfg); err != nil {
 		return nil, err
 	}
@@ -423,6 +429,36 @@ func checkLegacyCredentialResponseEncryption(cfg *model.Cfg) error {
 			"configure a key instead")
 	}
 
+	return nil
+}
+
+// checkNymAuthVerifier refuses a nym_auth verifier configuration that
+// cannot be honoured.
+//
+// At config load, because every failure it catches would otherwise
+// surface as a REFUSED PROOF: an allowlist with two builds for one
+// configuration, an artifact that is not the one allowed, a
+// verifier_id that is a Client Identifier rather than the bare value.
+// Each of those produces a pseudonym nobody reports or a circuit that
+// will not load, and an operator looking at a failed presentation has
+// no reason to suspect the configuration.
+func checkNymAuthVerifier(cfg *model.Cfg) error {
+	if cfg == nil || cfg.Verifier == nil || !cfg.Verifier.NymAuth.Enable {
+		return nil
+	}
+
+	if err := nymauth.CheckVerifierID(cfg.Verifier.NymAuth.VerifierID); err != nil {
+		return fmt.Errorf("verifier.nym_auth.verifier_id: %w", err)
+	}
+	if len(cfg.Verifier.NymAuth.Circuits.Allow) == 0 {
+		// Enabled with nothing allowed verifies nothing. Refused
+		// rather than started, because "on" and "cannot check a
+		// single proof" is a state nobody means to configure.
+		return fmt.Errorf("verifier.nym_auth is enabled but verifier.nym_auth.circuits.allow is empty, so no proof could be verified")
+	}
+	if _, err := circuits.NewAllowlist(cfg.Verifier.NymAuth.Circuits); err != nil {
+		return err
+	}
 	return nil
 }
 
