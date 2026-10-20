@@ -39,7 +39,7 @@ func conformingScope() *model.VerificationPresetScope {
 		Req: []openid4vp.ReqItem{{
 			FnID:   openid4vp.FunctionPseudonym,
 			Return: "nym-123",
-			Params: map[string]any{"config": "known-offender-matching-ssc"},
+			Params: map[string]any{"config": "known-offender-matching-ssc", "ver": openid4vp.PseudonymVer1, "prf": openid4vp.PrfSHA256},
 		}},
 	}
 }
@@ -108,4 +108,31 @@ func TestPresetProfileToleratesAbsentConfiguration(t *testing.T) {
 	require.NoError(t, checkPresetValidationProfiles(presetCfg(nil)))
 	require.NoError(t, checkPresetValidationProfiles(&model.Cfg{}))
 	require.NoError(t, checkPresetValidationProfiles(nil))
+}
+
+// `_req` is the wire member; `req` is the preset key. An operator
+// reading the rulebook writes the wire name, configuration is not loaded
+// with UnmarshalStrict, and the preset silently ends up with no items -
+// a request that asks the wallet for nothing, answered with nothing.
+func TestZkpReqPresetWithNoItemsIsRefused(t *testing.T) {
+	scope := conformingScope()
+	scope.Req = nil
+
+	err := checkZkpReqPresetsAskForSomething(presetCfg(scope))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "verifier.presets")
+	assert.Contains(t, err.Error(), "`req`",
+		"the message has to name the key that works, or it sends the reader back to the rulebook")
+}
+
+func TestZkpReqPresetCheckLeavesOtherFormatsAlone(t *testing.T) {
+	scope := conformingScope()
+	scope.Format = "mso_mdoc"
+	scope.Req = nil
+
+	assert.NoError(t, checkZkpReqPresetsAskForSomething(presetCfg(scope)))
+}
+
+func TestZkpReqPresetWithItemsPasses(t *testing.T) {
+	assert.NoError(t, checkZkpReqPresetsAskForSomething(presetCfg(conformingScope())))
 }

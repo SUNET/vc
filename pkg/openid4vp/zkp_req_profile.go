@@ -1,8 +1,10 @@
 package openid4vp
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -81,12 +83,8 @@ func validateNymAuth(query CredentialQuery) error {
 	if !IsZkpReqFormat(query.Format) {
 		return fmt.Errorf("format is %q, and the %s profile describes circuit_zk requests", query.Format, ProfileNymAuth)
 	}
-	if query.Meta.DoctypeValue != nymAuthDoctype {
-		if query.Meta.DoctypeValue == "" {
-			return fmt.Errorf("meta.doctype_value is required, and the %s rulebook defines it as %q", ProfileNymAuth, nymAuthDoctype)
-		}
-		return fmt.Errorf("meta.doctype_value is %q; the %s rulebook defines this credential as %q",
-			query.Meta.DoctypeValue, ProfileNymAuth, nymAuthDoctype)
+	if err := validateNymAuthMeta(query.Meta); err != nil {
+		return err
 	}
 	// The shared matcher vectors list an explicit false among the
 	// well-formed-but-rulebook-unsatisfiable requests
@@ -121,7 +119,7 @@ func validateNymAuth(query CredentialQuery) error {
 
 		switch item.FnID {
 		case FunctionPseudonym:
-			if err := validateNymAuthPseudonym(where, item); err != nil {
+			if err := validateNymAuthPseudonym(where, query.Meta.SourceFormat, item); err != nil {
 				return err
 			}
 		case FunctionAgeCheck:
@@ -143,7 +141,63 @@ func validateNymAuth(query CredentialQuery) error {
 	return nil
 }
 
-func validateNymAuthPseudonym(where string, item ReqItem) error {
+// nymAuthBBSSchemaID is the type value of the blind-BBS nym_auth
+// attestation, the way nymAuthDoctype is for the mdoc one.
+const nymAuthBBSSchemaID = "eu.europa.ec.eudi.nym_auth.bbs.1"
+
+// validateNymAuthMeta checks the pair that has to agree: which stored
+// attestation the proof is made over, and the type value naming it.
+//
+// They are one check and not two because each source format has exactly
+// one type value member - doctype_value for mso_mdoc, schema_id_value
+// for bbs_cd - and carrying the other one, or carrying vct_values, which
+// belongs to dc+sd-jwt, is what the matcher refuses as
+// meta_type_value_invalid.
+func validateNymAuthMeta(meta MetaQuery) error {
+	// The planner refuses a zkp_req meta with no string source_format
+	// (invalid_meta) before it reads anything else, so a request that
+	// goes out without one is answered by nobody.
+	switch meta.SourceFormat {
+	case SourceFormatMsoMdoc:
+		if meta.DoctypeValue != nymAuthDoctype {
+			if meta.DoctypeValue == "" {
+				return fmt.Errorf("meta.doctype_value is required for source_format %s, and the %s rulebook defines it as %q",
+					SourceFormatMsoMdoc, ProfileNymAuth, nymAuthDoctype)
+			}
+			return fmt.Errorf("meta.doctype_value is %q; the %s rulebook defines this credential as %q",
+				meta.DoctypeValue, ProfileNymAuth, nymAuthDoctype)
+		}
+		if meta.SchemaIDValue != "" {
+			return fmt.Errorf("meta.schema_id_value belongs to source_format %s; an %s request names its type with doctype_value",
+				SourceFormatBbsCd, SourceFormatMsoMdoc)
+		}
+	case SourceFormatBbsCd:
+		if meta.SchemaIDValue != nymAuthBBSSchemaID {
+			if meta.SchemaIDValue == "" {
+				return fmt.Errorf("meta.schema_id_value is required for source_format %s, and the %s rulebook defines it as %q",
+					SourceFormatBbsCd, ProfileNymAuth, nymAuthBBSSchemaID)
+			}
+			return fmt.Errorf("meta.schema_id_value is %q; the %s rulebook defines this credential as %q",
+				meta.SchemaIDValue, ProfileNymAuth, nymAuthBBSSchemaID)
+		}
+		if meta.DoctypeValue != "" {
+			return fmt.Errorf("meta.doctype_value belongs to source_format %s; a %s request names its type with schema_id_value",
+				SourceFormatMsoMdoc, SourceFormatBbsCd)
+		}
+	case "":
+		return fmt.Errorf("meta.source_format is required for a %s request, and names the stored attestation the proof is made over (%s or %s)",
+			FormatZkpReq, SourceFormatMsoMdoc, SourceFormatBbsCd)
+	default:
+		return fmt.Errorf("meta.source_format is %q; the %s rulebook defines %s and %s (dc+sd-jwt is reserved)",
+			meta.SourceFormat, ProfileNymAuth, SourceFormatMsoMdoc, SourceFormatBbsCd)
+	}
+	if len(meta.VCTValues) > 0 {
+		return fmt.Errorf("meta.vct_values belongs to dc+sd-jwt; a %s request names its type with doctype_value or schema_id_value", FormatZkpReq)
+	}
+	return nil
+}
+
+func validateNymAuthPseudonym(where, sourceFormat string, item ReqItem) error {
 	config, _ := item.Params["config"].(string)
 	if config == "" {
 		return fmt.Errorf("%s: params.config is required", where)
@@ -188,6 +242,41 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 	// It is named here rather than simply left out, because "the profile
 	// says nothing about it" is a decision and not an oversight.
 
+	// ver and prf became REQUIRED parameters of pseudonym in v0.4, and
+	// the matcher refuses a request missing either as unsatisfiable
+	// (pseudonym_ver_missing, pseudonym_prf_missing). An operator who
+	// copies an older example gets a preset that starts cleanly and is
+	// then declined by every wallet.
+	ver, hasVer := item.Params["ver"]
+	if !hasVer {
+		return fmt.Errorf("%s: params.ver is required, and the %s rulebook defines %d", where, ProfileNymAuth, PseudonymVer1)
+	}
+	n, whole := wholeNumber(ver)
+	if !whole {
+		return fmt.Errorf("%s: params.ver must be an integer", where)
+	}
+	if n != PseudonymVer1 {
+		return fmt.Errorf("%s: params.ver is %d; the %s rulebook defines %d", where, n, ProfileNymAuth, PseudonymVer1)
+	}
+
+	prf, hasPRF := item.Params["prf"]
+	if !hasPRF {
+		return fmt.Errorf("%s: params.prf is required", where)
+	}
+	name, isString := prf.(string)
+	if !isString {
+		return fmt.Errorf("%s: params.prf must be a string", where)
+	}
+	// Which prf is defined depends on BOTH the source format and the
+	// configuration: hashdh-bls12381g1 exists for blind-BBS, and only
+	// for the one configuration that uses it.
+	switch {
+	case sourceFormat == SourceFormatMsoMdoc && name == PrfSHA256:
+	case sourceFormat == SourceFormatBbsCd && name == PrfHashDHBLS12381G1 && config == "known-offender-matching-ssc":
+	default:
+		return fmt.Errorf("%s: params.prf %q is not defined for source_format %q with config %q", where, name, sourceFormat, config)
+	}
+
 	context, hasContext := item.Params["verifier_context"]
 	switch {
 	case spec.usesContext && !hasContext:
@@ -205,6 +294,29 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 		}
 	}
 	return nil
+}
+
+// wholeNumber reads a configured or received integer, whatever numeric
+// type it arrived as: YAML gives an int, JSON a float64, and a decoder
+// set to UseNumber a json.Number. A value with a fractional part is not
+// an integer and is reported as such rather than truncated.
+func wholeNumber(value any) (int64, bool) {
+	switch n := value.(type) {
+	case int:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case uint64:
+		return int64(n), n <= math.MaxInt64
+	case float64:
+		return int64(n), n == math.Trunc(n)
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	}
+	return 0, false
 }
 
 // minAgeSpanDays is the rulebook's floor on an age_check range: a

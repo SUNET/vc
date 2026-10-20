@@ -12,13 +12,18 @@ import (
 func nymQuery(items ...ReqItem) CredentialQuery {
 	return CredentialQuery{
 		ID: "nym_attestation", Format: FormatZkpReq,
-		Meta: MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
+		Meta: MetaQuery{SourceFormat: SourceFormatMsoMdoc, DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
 		Req:  items,
 	}
 }
 
+// pseudonymItem fills in the two parameters v0.4 makes REQUIRED, so a
+// case can name only the thing it is about. A case testing ver or prf
+// overwrites them.
 func pseudonymItem(params map[string]any) ReqItem {
-	return ReqItem{FnID: FunctionPseudonym, Return: "nym-1", Params: params}
+	withDefaults := map[string]any{"ver": PseudonymVer1, "prf": PrfSHA256}
+	maps.Copy(withDefaults, params)
+	return ReqItem{FnID: FunctionPseudonym, Return: "nym-1", Params: withDefaults}
 }
 
 // The conformant request from the rulebook passes.
@@ -38,9 +43,13 @@ func TestNymAuthProfileRejectsEachViolation(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "two pseudonym items",
-			query: nymQuery(pseudonymItem(map[string]any{"config": "user-managed-pseudonym-xsite-ssc"}), ReqItem{FnID: FunctionPseudonym, Return: "nym-2", Params: map[string]any{"config": "user-managed-pseudonym-xsite-ssc"}}),
-			want:  "allows one",
+			name: "two pseudonym items",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "user-managed-pseudonym-xsite-ssc"}), func() ReqItem {
+				second := pseudonymItem(map[string]any{"config": "user-managed-pseudonym-xsite-ssc"})
+				second.Return = "nym-2"
+				return second
+			}()),
+			want: "allows one",
 		},
 		{
 			name: "two age_check items",
@@ -106,7 +115,7 @@ func TestNymAuthProfileRejectsEachViolation(t *testing.T) {
 		},
 		{
 			name:  "no doctype",
-			query: CredentialQuery{Format: FormatZkpReq, Req: []ReqItem{{FnID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2000-01-01"}}}},
+			query: CredentialQuery{Format: FormatZkpReq, Meta: MetaQuery{SourceFormat: SourceFormatMsoMdoc}, Req: []ReqItem{{FnID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2000-01-01"}}}},
 			want:  "meta.doctype_value is required",
 		},
 		{
