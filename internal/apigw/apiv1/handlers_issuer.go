@@ -510,6 +510,19 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// Refused here, before the issuer is called: a delivery this
+	// request cannot carry is knowable from the scope's configuration
+	// and the request's own credential_response_encryption, and
+	// discovering it after issuance leaves a credential minted, a
+	// status-list entry burned and a subject record written for a
+	// request that was always going to fail.
+	if err := checkSeedDelivery(deliveredSeeds, req.CredentialResponseEncryption); err != nil {
+		// The seeds are never in the log: the error names a namespace
+		// at most, never a value.
+		c.log.Error(err, "seed delivery refused", "scope", scope)
+		return nil, err
+	}
+
 	var credentials []openid4vci.Credential
 	var issueErr error
 
@@ -557,11 +570,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	response := c.newCredentialResponse(credentials, scope, configurationID)
 
-	// The seed, if this scope delivers one. Last, so that a refusal
-	// here cannot leave a credential issued and unreported: the
-	// response is built but not returned, and the caller sees the
-	// failure rather than a credential whose commitment the wallet can
-	// never open.
+	// The seed itself, attached last. The refusal cases already ran
+	// before issuance (see checkSeedDelivery above); this is the write
+	// onto the wire, which cannot happen until there is a response to
+	// write it to.
 	if err := c.deliverSeeds(response, deliveredSeeds, req.CredentialResponseEncryption); err != nil {
 		// Deliberately not logged with the scope's seeds in scope: the
 		// error names a namespace at most, never a value.
@@ -601,13 +613,19 @@ func (c *Client) credentialMetadataForResponse(scope, configurationID string) *o
 	if c.issuerMetadata == nil {
 		return nil
 	}
+	// Cloned, never the stored pointer. The configurations map holds
+	// the object /.well-known publishes, and the response is written to
+	// per request - a delivered seed goes into Extensions under the
+	// same member name the advertisement uses. Handing out the stored
+	// pointer put a subject's secret into the published document and
+	// let two concurrent issuances overwrite each other's response.
 	if configurationID != "" {
 		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[configurationID]; ok {
-			return config.CredentialMetadata
+			return config.CredentialMetadata.Clone()
 		}
 	}
 	if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[scope]; ok {
-		return config.CredentialMetadata
+		return config.CredentialMetadata.Clone()
 	}
 	return nil
 }
