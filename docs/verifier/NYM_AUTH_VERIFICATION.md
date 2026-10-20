@@ -55,8 +55,8 @@ verifier:
     circuits:
       allow:
         - config: known-offender-matching-ssc
-          hash_circuit_id: 5f8c75ae…
-          sig_circuit_id: 00513797…
+          hash_circuit_id: 5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729
+          sig_circuit_id: 00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb
           block_enc_hash: 6983
           block_enc_sig: 4679
           artifact_path: /etc/vc/circuits/nym_auth-ssc.bin
