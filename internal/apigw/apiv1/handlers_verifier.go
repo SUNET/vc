@@ -207,7 +207,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// enforced here the audience and the mdoc session transcript would be
 	// the browser flow's, not the ones the wallet signed over, so the two
 	// channels are not interchangeable whatever this endpoint checks.
-	if authCtx.InteractiveAuthorization {
+	// The thumbprint check covers IA contexts persisted before the marker existed.
+	if authCtx.InteractiveAuthorization || authCtx.AuthSessionDPoPThumbprint != "" {
 		c.log.Error(nil, "interactive authorization context answered at the browser-mediated endpoint",
 			"session_id", authCtx.SessionID, "kid", kid)
 		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")

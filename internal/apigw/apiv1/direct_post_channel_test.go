@@ -85,6 +85,36 @@ func TestVerificationDirectPost_RefusesAnInteractiveAuthorizationContext(t *test
 		"a presentation refused for being on the wrong channel must not have overwritten the claims")
 }
 
+// An IA context persisted before the marker existed carries only
+// AuthSessionDPoPThumbprint, and must still be refused here.
+func TestVerificationDirectPost_RefusesALegacyInteractiveAuthorizationContext(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint)
+
+	authCtx.InteractiveAuthorization = false
+	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), authCtx))
+
+	response := encryptedToEphemeralKey(t, client, authCtx.EphemeralEncryptionKeyID,
+		map[string]any{"state": authCtx.State, "vp_token": map[string]any{"pid": "forged"}})
+
+	_, err = client.VerificationDirectPost(t.Context(), &VerificationDirectPostRequest{Response: response})
+	require.Error(t, err)
+	assert.Contains(t, strings.ToLower(err.Error()), "authorization challenge endpoint",
+		"a legacy IA context without the marker must still be refused on the channel check")
+
+	after, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		EphemeralEncryptionKeyID: authCtx.EphemeralEncryptionKeyID,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, after.VerifiedClaims)
+}
+
 // The browser-mediated flow is unaffected: its contexts carry no marker
 // and still reach the pipeline. Without this, "refuse everything" would
 // pass the test above.
@@ -101,6 +131,7 @@ func TestVerificationDirectPost_StillAcceptsABrowserContext(t *testing.T) {
 	// every other respect, so the only difference under test is the one
 	// being tested.
 	authCtx.InteractiveAuthorization = false
+	authCtx.AuthSessionDPoPThumbprint = ""
 	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), authCtx))
 
 	response := encryptedToEphemeralKey(t, client, authCtx.EphemeralEncryptionKeyID,
