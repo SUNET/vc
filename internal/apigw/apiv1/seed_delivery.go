@@ -47,7 +47,20 @@ const maxSeedNamespaceBytes = 64
 // Nothing here is persisted, cached, logged or traced. The seeds arrive
 // in a map that lives for this request and the hex strings go straight
 // into the response.
-func (c *Client) deliverSeeds(response *openid4vci.CredentialResponse, seeds map[string]string, encryption *openid4vci.CredentialResponseEncryption) error {
+// checkSeedDelivery refuses a delivery this request cannot carry,
+// BEFORE anything is issued.
+//
+// Split out from the attachment below and called immediately after the
+// seeds are derived, which is before the issuer is reached. Every
+// condition here is knowable then - the scope's configuration and the
+// request's own credential_response_encryption - so checking it later
+// bought nothing and cost a great deal: a request that was always going
+// to be refused had already minted a credential, burned a status-list
+// entry, written the subject's record and counted itself as issued.
+//
+// Those are not free. A status-list index is permanent, and a wallet
+// retrying after the refusal consumes another one.
+func checkSeedDelivery(seeds map[string]string, encryption *openid4vci.CredentialResponseEncryption) error {
 	if len(seeds) == 0 {
 		return nil
 	}
@@ -78,6 +91,24 @@ func (c *Client) deliverSeeds(response *openid4vci.CredentialResponse, seeds map
 			// The VALUE is never in this error. It is the secret.
 			return fmt.Errorf("seed delivery: the seed for namespace %q is not 32 lowercase hexadecimal characters", namespace)
 		}
+	}
+
+	return nil
+}
+
+// deliverSeeds attaches the checked seeds to the response.
+//
+// It re-runs checkSeedDelivery rather than trusting that the caller
+// did: this is the function that writes a secret onto the wire, and the
+// one place where "someone upstream validated it" must not be an
+// assumption. The checks are a handful of comparisons on a map that
+// holds at most eight entries.
+func (c *Client) deliverSeeds(response *openid4vci.CredentialResponse, seeds map[string]string, encryption *openid4vci.CredentialResponseEncryption) error {
+	if len(seeds) == 0 {
+		return nil
+	}
+	if err := checkSeedDelivery(seeds, encryption); err != nil {
+		return err
 	}
 
 	// A notification_id is required with a delivered seed: it is how the

@@ -3,6 +3,7 @@ package openid4vci
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -92,4 +93,30 @@ func (c *CredentialMetadata) UnmarshalJSON(data []byte) error {
 		c.Extensions = members
 	}
 	return nil
+}
+
+// Clone returns a copy that shares no mutable state with the receiver.
+//
+// It exists because the issuer metadata is PUBLISHED state: the
+// configurations map holds one *CredentialMetadata per credential
+// configuration, and anything handing that pointer to per-request code
+// has handed out a writable reference to what /.well-known serves.
+// Writing a per-subject value into it rewrites the published document
+// for everyone, and two concurrent requests overwrite each other.
+//
+// Display and Claims are shared by reference deliberately: they are
+// configuration, read and never written per request, and copying them
+// per response would cost on every issuance to defend against a write
+// nothing makes. Extensions is the one a response writes to, so it is
+// the one that is copied.
+func (c *CredentialMetadata) Clone() *CredentialMetadata {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	if c.Extensions != nil {
+		out.Extensions = make(map[string]json.RawMessage, len(c.Extensions))
+		maps.Copy(out.Extensions, c.Extensions)
+	}
+	return &out
 }

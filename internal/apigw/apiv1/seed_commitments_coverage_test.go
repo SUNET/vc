@@ -90,3 +90,55 @@ func switchDispatchesOnFormat(sw *ast.SwitchStmt) bool {
 	})
 	return found
 }
+
+// The delivery preconditions are checked BEFORE the format dispatch
+// too, for a different reason than the injection above.
+//
+// Whether a seed can be delivered at all depends on the scope's
+// configuration and the request's own credential_response_encryption -
+// both known before anything is issued. Checked afterwards, a request
+// that was always going to be refused has already minted a credential,
+// burned a status-list index (permanent, and a retry burns another),
+// written the subject's record and counted itself as issued.
+//
+// A position guard, like the one above, because the failure is an
+// ordering that nothing observes: the refusal still happens and the
+// caller still sees an error, so every behavioural test stays green
+// while the side effects pile up behind it.
+func TestSeedDeliveryIsCheckedBeforeTheFormatDispatch(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "handlers_issuer.go", nil, parser.SkipObjectResolution)
+	require.NoError(t, err)
+
+	var dispatcher *ast.FuncDecl
+	ast.Inspect(file, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "VCICredential" {
+			dispatcher = fn
+		}
+		return dispatcher == nil
+	})
+	require.NotNil(t, dispatcher, "no VCICredential in handlers_issuer.go; this guard is not looking at anything")
+
+	var checkAt, switchAt token.Pos
+	ast.Inspect(dispatcher, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			// Called as a plain function, not a method, so the callee
+			// is an identifier rather than a selector.
+			if ident, ok := node.Fun.(*ast.Ident); ok && ident.Name == "checkSeedDelivery" && !checkAt.IsValid() {
+				checkAt = node.Pos()
+			}
+		case *ast.SwitchStmt:
+			if !switchAt.IsValid() && switchDispatchesOnFormat(node) {
+				switchAt = node.Pos()
+			}
+		}
+		return true
+	})
+
+	require.True(t, checkAt.IsValid(), "VCICredential does not call checkSeedDelivery at all")
+	require.True(t, switchAt.IsValid(), "no format dispatch found; this guard is not looking at anything")
+	assert.Less(t, int(checkAt), int(switchAt),
+		"checkSeedDelivery must run BEFORE the format dispatch, or a refused delivery still burns a status-list entry")
+}
