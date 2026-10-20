@@ -313,22 +313,30 @@ there is nothing to compare against, and exiting 0 regardless would report
 a match for every candidate. The seed itself is printed only with
 `-show-seed`.
 
-`-verifier-id` is the **bare** verifier_id — `verifier.example` — not the
-prefixed Client Identifier and not `client_id` as it appears in the
-request. `verifier_id_type` is agreed out of band between wallet and
-verifier and is not hashed. The rulebook states this with worked digests
-and marks the prefixed form MUST NOT:
+`-verifier-id` is the verifier_id **exactly as the Verifier publishes it**,
+prefix included — `x509_san_dns:verifier.example` for an x509_san_dns
+Verifier, `semantic_id:<identifier>` for a semantic one. Nothing is
+stripped and nothing is normalised. `verifier_id_type` is agreed out of band
+and is not hashed.
 
 ```
-SHA256("verifier.example")              = be6a6400…4a41   (MUST)
-SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
+SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST)
+SHA256("verifier.example")              = be6a6400…4a41   (the bare DNS name, which is NOT a verifier_id)
 ```
 
-A value carrying `semantic_id:` or `x509_san_dns:` is therefore **refused**
-rather than stripped. Hashing it would succeed and return a pseudonym no
-Verifier could have reported, so the loop would simply never match and the
-operator would conclude the subject is innocent — and stripping it would
-quietly accept a caller that is confused about which value it holds.
+**This reversed on 2026-10-20.** Until rulebook v0.4 the rule was the other
+way round — the bare DNS name was hashed and the prefixed form refused — so
+anything written before that date, including earlier versions of this page,
+says the opposite. The archive circuits settle it: their reference
+`pseudonym.json` carries `client_id` `x509_san_dns:verifier.example` with
+`verifier_input` `6eae85a0…`, which is the prefixed digest.
+
+So the rule is now simply **do not strip anything**. Getting it wrong in
+either direction fails the same silent way: hashing the wrong value returns
+a perfectly well-formed pseudonym that matches nothing, the loop reports no
+match, and the operator concludes the subject is innocent. A wrong answer,
+not an error. The only values refused are ones that name no Verifier at all
+— an empty string, or a marker with nothing after it.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can
