@@ -58,6 +58,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetSparse(true),
 		},
 		{
+			Keys:    bson.D{{Key: "issuer_state", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			Keys:    bson.D{{Key: "request_object_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
@@ -465,6 +469,39 @@ func (s *MongoStore) Consent(ctx context.Context, query *AuthorizationContext) e
 	return nil
 }
 
+// ExtendExpiry moves the expiry of the context request_uri names out to
+// expiresAt. See AuthContextStore.ExtendExpiry.
+//
+// The $max operator is what makes this never shorten, and makes it safe
+// against a concurrent writer: whichever of the two deadlines is later is
+// the one that survives, whatever order the updates arrive in.
+//
+// The TTL index on created_at is untouched by design - it is the physical
+// bound this deadline has to stay inside, not something to push out.
+func (s *MongoStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
+	if query == nil {
+		return errors.New("query cannot be nil")
+	}
+	filter := s.buildFilter(query)
+	if filter == nil {
+		return errors.New("no searchable field set on the query")
+	}
+
+	result, err := s.coll.UpdateOne(
+		ctx,
+		filter,
+		bson.M{"$max": bson.M{"expires_at": expiresAt}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to extend expiry: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
+}
+
 // AddToken adds a token to an authorization context identified by code.
 func (s *MongoStore) AddToken(ctx context.Context, code string, token *Token) error {
 	if code == "" {
@@ -605,6 +642,9 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	if query.RequestObjectID != "" {
 		return bson.M{"request_object_id": query.RequestObjectID}
 	}
+	if query.IssuerState != "" {
+		return bson.M{"issuer_state": query.IssuerState}
+	}
 	if query.AuthSession != "" {
 		return bson.M{"auth_session": query.AuthSession}
 	}
@@ -648,4 +688,72 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	claimed.AuthSession = ""
 
 	return &claimed, nil
+}
+
+// ClaimIssuerState atomically replaces the issuer-initiated handle with the
+// exchange that claims it. See AuthContextStore.ClaimIssuerState.
+//
+// One FindOneAndReplace filtered on the handle. The filter is what makes
+// it one-shot - the second request to arrive matches nothing, because the
+// replacement no longer carries the field it filters on - and replacing
+// rather than unsetting is what makes the claim and the opened exchange a
+// single write, so there is no outcome in which the issuance has lost its
+// issuer_state without having gained an auth_session.
+func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if opened == nil || opened.SessionID == "" {
+		return nil, errors.New("opened document with session_id is required")
+	}
+
+	replacement := *opened
+	replacement.IssuerState = ""
+	if err := replacement.Validate(); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	filter := bson.M{"issuer_state": issuerState, "session_id": opened.SessionID}
+
+	opts := options.FindOneAndReplace().SetReturnDocument(options.After)
+	var claimed AuthorizationContext
+	if err := s.coll.FindOneAndReplace(ctx, filter, replacement, opts).Decode(&claimed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to claim issuer_state: %w", err)
+	}
+
+	return &claimed, nil
+}
+
+// SetAuthProvider records the provider and credential source on a context.
+//
+// A targeted $set, not a ReplaceOne. See AuthContextStore.SetAuthProvider:
+// replacing the document would also write back the expires_at the caller
+// read a moment earlier, which is how a slower /authorize could undo a
+// faster one's ExtendExpiry and shorten a deadline that only ever extends.
+func (s *MongoStore) SetAuthProvider(ctx context.Context, sessionID string, fields AuthProviderFields) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	result, err := s.coll.UpdateOne(
+		ctx,
+		bson.M{"session_id": sessionID},
+		bson.M{"$set": bson.M{
+			"auth_provider":    fields.AuthProvider,
+			"data_source":      fields.DataSource,
+			"remote_name":      fields.RemoteName,
+			"authentic_source": fields.AuthenticSource,
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set auth provider: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
 }

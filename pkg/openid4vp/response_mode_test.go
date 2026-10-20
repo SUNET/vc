@@ -132,6 +132,45 @@ func TestIsInteractiveAuthorization(t *testing.T) {
 	}
 }
 
+// The Interactive Authorization request must advertise exactly what the
+// Authorization Challenge Endpoint will accept.
+//
+// The Digital Credentials API request this is derived from offers A256GCM
+// and A128GCM, and a wallet is entitled to pick either. The challenge
+// endpoint accepts only A256GCM, so a wallet that chose the second
+// advertised option was refused AFTER its auth_session had been claimed -
+// losing the whole exchange for doing exactly what the request permitted,
+// with no way to know in advance and nothing to retry.
+func TestInteractiveAuthorizationAdvertisesOnlyWhatItAccepts(t *testing.T) {
+	base := &RequestObject{
+		ClientID:     "x509_san_dns:issuer.example",
+		ResponseMode: ResponseModeDirectPostJWT,
+		ResponseURI:  "https://issuer.example/verification/direct_post",
+		ClientMetadata: &ClientMetadata{
+			EncryptedResponseEncValuesSupported: []string{"A256GCM", "A128GCM"},
+			AuthorizationEncryptedResponseENC:   "A256GCM",
+		},
+	}
+
+	variant := base.WithInteractiveAuthorization(ResponseModeIAPostJWT, "https://issuer.example")
+	require.NotNil(t, variant)
+	require.NotNil(t, variant.ClientMetadata)
+
+	assert.Equal(t, InteractiveAuthorizationEncValues, variant.ClientMetadata.EncryptedResponseEncValuesSupported)
+	assert.NotContains(t, variant.ClientMetadata.EncryptedResponseEncValuesSupported, "A128GCM")
+
+	// The base request is untouched: the browser flow still offers both,
+	// and the copy is shallow, so narrowing in place would have changed
+	// the channel this was derived from.
+	assert.Equal(t, []string{"A256GCM", "A128GCM"}, base.ClientMetadata.EncryptedResponseEncValuesSupported)
+	assert.NotSame(t, base.ClientMetadata, variant.ClientMetadata)
+
+	// And the returned slice is a copy, so a caller cannot edit the
+	// package-level list through it.
+	variant.ClientMetadata.EncryptedResponseEncValuesSupported[0] = "A128GCM"
+	assert.Equal(t, []string{"A256GCM"}, InteractiveAuthorizationEncValues)
+}
+
 // The Authorization Challenge Endpoint verifies holder binding, so its
 // request has to say so. The query it is built from is shared with the
 // browser channel, which sets require_cryptographic_holder_binding to
@@ -191,7 +230,17 @@ func TestWithInteractiveAuthorizationRequiresHolderBinding(t *testing.T) {
 
 // Everything else about the IA request still matches the DC API one, so a
 // field added to either path cannot quietly differ between the channels.
-func TestWithInteractiveAuthorizationDiffersOnlyInModeAndBinding(t *testing.T) {
+//
+// The count of exceptions is load-bearing, which is why they are listed
+// here rather than normalised away in a loop: this comment is where the
+// differences between the two channels are written down, and the
+// equivalent comment on WithDCAPIRequest claiming one exception too few
+// is what made two bugs mandatory.
+//
+// Three, all of them this endpoint narrowing the request to what it will
+// actually accept: the response mode, one encryption algorithm instead of
+// two, and a query that requires cryptographic holder binding.
+func TestWithInteractiveAuthorizationDiffersOnlyInModeAndWhatItNarrows(t *testing.T) {
 	base := &RequestObject{
 		ResponseURI:  "https://issuer.example.com/verification/direct_post",
 		ClientID:     "x509_san_dns:issuer.example.com",
@@ -200,6 +249,9 @@ func TestWithInteractiveAuthorizationDiffersOnlyInModeAndBinding(t *testing.T) {
 		State:        "state-1",
 		Nonce:        "nonce-1",
 		DCQLQuery:    &DCQL{Credentials: []CredentialQuery{{ID: "pid", Format: "dc+sd-jwt"}}},
+		ClientMetadata: &ClientMetadata{
+			EncryptedResponseEncValuesSupported: []string{"A256GCM", "A128GCM"},
+		},
 	}
 
 	origin := "https://issuer.example.com"
@@ -211,11 +263,20 @@ func TestWithInteractiveAuthorizationDiffersOnlyInModeAndBinding(t *testing.T) {
 	assert.Equal(t, ResponseModeIAPostJWT, ia.ResponseMode)
 	assert.Equal(t, ResponseModeDCAPIJWT, dcapi.ResponseMode)
 
+	// Each exception is asserted before being normalised, so a change that
+	// stopped making one would fail here rather than pass by being
+	// normalised out of the comparison below.
+	assert.Equal(t, InteractiveAuthorizationEncValues, ia.ClientMetadata.EncryptedResponseEncValuesSupported)
+	assert.Equal(t, []string{"A256GCM", "A128GCM"}, dcapi.ClientMetadata.EncryptedResponseEncValuesSupported)
+	require.NotEmpty(t, ia.DCQLQuery.Credentials)
+	assert.True(t, ia.DCQLQuery.Credentials[0].RequiresCryptographicHolderBinding())
+
 	normalised := *ia
 	normalised.ResponseMode = dcapi.ResponseMode
 	normalised.DCQLQuery = dcapi.DCQLQuery
+	normalised.ClientMetadata = dcapi.ClientMetadata
 	assert.True(t, reflect.DeepEqual(*dcapi, normalised),
-		"the IA request must differ from the DC API one only in the response mode and the holder-binding requirement")
+		"the IA request must differ from the DC API one only in the response mode and the two narrowings")
 }
 
 func TestWithInteractiveAuthorizationNilIsNil(t *testing.T) {

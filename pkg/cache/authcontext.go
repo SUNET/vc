@@ -80,6 +80,15 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Same anchor MongoStore.Save sets; a re-save keeps the original so the retention cap cannot be reset.
+	if doc.CreatedAt.IsZero() {
+		if item := c.cache.Get(doc.SessionID); item != nil && !item.Value().CreatedAt.IsZero() {
+			doc.CreatedAt = item.Value().CreatedAt
+		} else {
+			doc.CreatedAt = time.Now()
+		}
+	}
+
 	// Store by primary key (sessionID)
 	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
 
@@ -105,6 +114,9 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.AuthSession != "" {
 		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
 	}
+	if doc.IssuerState != "" {
+		c.indices[fmt.Sprintf("issuer_state:%s", doc.IssuerState)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -127,38 +139,11 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var sessionID string
-
-	// If sessionID is provided directly, use it
-	if query.SessionID != "" {
-		sessionID = query.SessionID
-	} else {
-		// Otherwise, look up sessionID via secondary indices
-		var indexKey string
-
-		if query.RequestURI != "" {
-			indexKey = fmt.Sprintf("request_uri:%s", query.RequestURI)
-		} else if query.Code != "" {
-			indexKey = fmt.Sprintf("code:%s", query.Code)
-		} else if query.State != "" {
-			indexKey = fmt.Sprintf("state:%s", query.State)
-		} else if query.VerifierResponseCode != "" {
-			indexKey = fmt.Sprintf("verifier_response_code:%s", query.VerifierResponseCode)
-		} else if query.EphemeralEncryptionKeyID != "" {
-			indexKey = fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
-		} else if query.RequestObjectID != "" {
-			indexKey = fmt.Sprintf("request_object_id:%s", query.RequestObjectID)
-		} else if query.AuthSession != "" {
-			indexKey = fmt.Sprintf("auth_session:%s", query.AuthSession)
-		} else {
-			return nil, errors.New("query must have at least one search field")
-		}
-
-		var ok bool
-		sessionID, ok = c.indices[indexKey]
-		if !ok {
-			return nil, ErrNoDocuments
-		}
+	// The same resolver ExtendExpiry uses, so the two cannot drift: the
+	// list of fields a context can be found by belongs in one place.
+	sessionID, err := c.resolveSessionIDLocked(query)
+	if err != nil {
+		return nil, err
 	}
 
 	// Retrieve from primary cache using sessionID
@@ -372,6 +357,50 @@ func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) 
 	return nil
 }
 
+// ExtendExpiry moves the expiry of the context request_uri names out to
+// expiresAt. See AuthContextStore.ExtendExpiry.
+func (c *MemoryStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
+	if query == nil {
+		return errors.New("query cannot be nil")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	sessionID, err := c.resolveSessionIDLocked(query)
+	if err != nil {
+		return err
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	stored := item.Value()
+	if stored.ExpiresAt >= expiresAt {
+		return nil
+	}
+
+	// A COPY, replacing the cached pointer, rather than a write through
+	// it.
+	//
+	// Get hands out the pointer this cache holds and returns before the
+	// caller is done with it, so a reader can be looking at the document
+	// while this runs - /authorize reads ExpiresAt on a context it fetched
+	// a moment earlier, and two overlapping authorization requests put a
+	// read and this write on the same field. The lock here does not help:
+	// the reader never takes it, because it is not calling this store at
+	// all any more, it is holding a pointer it was given.
+	updated := *stored
+	updated.ExpiresAt = expiresAt
+
+	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.updateIndices(&updated)
+
+	return nil
+}
+
 // AddToken adds a token to an authorization context
 func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) error {
 	if code == "" {
@@ -551,6 +580,9 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.AuthSession != "" {
 		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
 	}
+	if doc.IssuerState != "" {
+		c.indices[fmt.Sprintf("issuer_state:%s", doc.IssuerState)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -707,6 +739,9 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	if doc.AuthSession != "" {
 		delete(c.indices, fmt.Sprintf("auth_session:%s", doc.AuthSession))
 	}
+	if doc.IssuerState != "" {
+		delete(c.indices, fmt.Sprintf("issuer_state:%s", doc.IssuerState))
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.Token.AccessToken))
 	}
@@ -749,23 +784,113 @@ func (c *MemoryStore) Create(ctx context.Context, doc *AuthorizationContext) err
 	return c.Save(ctx, doc)
 }
 
-// ClaimAuthSession atomically takes the Interactive Authorization handle off
-// the context it names. See AuthContextStore.ClaimAuthSession.
-//
-// The returned document is a COPY, deliberately. Get hands out the pointer
-// the cache holds, so a caller that cleared a field on it would be mutating
-// the stored document - which is exactly how this was broken before: the
-// clear reached the stored copy first, deleteIndices then saw an empty
-// AuthSession and left the index behind, and the handle stayed resolvable.
+// ClaimAuthSession atomically takes the Interactive Authorization handle
+// off the context it names. See AuthContextStore.ClaimAuthSession.
 func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
 	if authSession == "" {
 		return nil, errors.New("authSession cannot be empty")
+	}
+	return c.claimIndexedHandle("auth_session", authSession,
+		func(doc *AuthorizationContext) string { return doc.AuthSession },
+		func(doc *AuthorizationContext) {
+			// Only the handle. AuthSessionDPoPThumbprint is the binding
+			// the authorization code inherits, and the Token Endpoint
+			// checks it when the code is redeemed - clearing it here would
+			// hand out a code that any key could spend.
+			doc.AuthSession = ""
+		})
+}
+
+// ClaimIssuerState atomically replaces the issuer-initiated handle with the
+// exchange that claims it. See AuthContextStore.ClaimIssuerState.
+//
+// One mutation under the lock: the handle is read, checked and replaced
+// without releasing it, so a second caller finds nothing to claim and
+// there is no moment at which the document has neither handle.
+func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if opened == nil || opened.SessionID == "" {
+		return nil, errors.New("opened document with session_id is required")
+	}
+
+	// Validated before anything is touched, as MongoStore does, so a
+	// malformed replacement leaves the issuer_state claimable.
+	stored := *opened
+	stored.IssuerState = ""
+	if err := stored.Validate(); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	indexKey := fmt.Sprintf("auth_session:%s", authSession)
+	indexKey := "issuer_state:" + issuerState
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+	if sessionID != opened.SessionID {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if item.Value().IssuerState != issuerState {
+		return nil, ErrNoDocuments
+	}
+
+	// The claimant's document wins wholesale, with the handle gone from
+	// it (cleared on stored above): anything that persisted a document
+	// still carrying the handle would re-create its index and make the
+	// issuance claimable again.
+
+	// The OLD document's indices go first, exactly as Update does it.
+	//
+	// A resume replaces the whole document, and it rotates fields that
+	// are indexed - EphemeralEncryptionKeyID above all, which is minted
+	// afresh so the key's life matches the exchange's. Deleting only the
+	// issuer_state index left the prepared key id pointing at the
+	// replacement, so the old kid went on resolving the live exchange
+	// after the rotation that exists to retire it, and nothing ever
+	// removed the entry: eviction cleans up the indices of the document
+	// it evicts, which by then names only the current kid.
+	//
+	// updateIndices below rebuilds the ones the new document actually
+	// has, so this removes stale entries rather than needed ones.
+	c.deleteIndices(item.Value())
+
+	delete(c.indices, indexKey)
+	c.cache.Set(sessionID, &stored, ttlcache.DefaultTTL)
+	c.updateIndices(&stored)
+
+	claimed := stored
+	return &claimed, nil
+}
+
+// claimIndexedHandle is the shared body of the two claims: resolve a
+// one-shot handle through its index, take it off the stored document AND
+// off the returned copy, and let exactly one caller have it.
+//
+// The handle is cleared on the returned copy too, not just the stored
+// one. The caller already has it - it is what they asked with - and
+// anything downstream that persists this document would otherwise write
+// it straight back and make the handle resolvable again. That is not
+// hypothetical: finalisePresentationVerification updates the context it
+// is handed, so a presentation-sourced scope resurrected the handle it
+// had just consumed.
+func (c *MemoryStore) claimIndexedHandle(indexPrefix, handle string, read func(*AuthorizationContext) string, clear func(*AuthorizationContext)) (*AuthorizationContext, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("%s:%s", indexPrefix, handle)
 	sessionID, ok := c.indices[indexKey]
 	if !ok {
 		return nil, ErrNoDocuments
@@ -781,44 +906,101 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 
 	// The index could name a session whose handle has already been
 	// replaced; treat that as unclaimed rather than trusting the index.
-	if stored.AuthSession != authSession {
+	if read(stored) != handle {
 		return nil, ErrNoDocuments
 	}
 
 	claimed := *stored
-
-	// The handle is cleared on the RETURNED copy too, not just the stored
-	// one. The caller already has the handle - it is what they asked with -
-	// and anything downstream that persists this document would otherwise
-	// write it straight back and make the exchange claimable again. That is
-	// not hypothetical: finalisePresentationVerification updates the
-	// context it is handed, so a presentation-sourced scope resurrected the
-	// handle it had just consumed.
-	claimed.AuthSession = ""
+	clear(&claimed)
 
 	// A REPLACEMENT document, not a write into the stored one.
 	//
 	// Get returns the cached pointer and then releases the lock, so a
 	// caller that fetched this context before the claim is still reading
 	// the very struct a write here would touch - `go test -race` names
-	// this line against a reader of AuthSession. Replacing the pointer
-	// leaves that reader with a consistent pre-claim snapshot and makes
-	// the post-claim state reachable only through the cache, which is
-	// where it belongs.
+	// this line against a reader of the handle field. Replacing the
+	// pointer leaves that reader with a consistent pre-claim snapshot and
+	// makes the post-claim state reachable only through the cache, which
+	// is where it belongs.
 	//
 	// Separate from `claimed` on purpose: the caller must not be able to
 	// reach the stored document through the value it is handed either.
+	//
+	// Only the handle is cleared, by the caller's own clear func. The
+	// bindings the authorization code inherits - AuthSessionDPoPThumbprint
+	// among them - are checked when the code is redeemed, and clearing one
+	// here would hand out a code that any key could spend.
 	replacement := *stored
-
-	// Only the handle. AuthSessionDPoPThumbprint is the binding the
-	// authorization code inherits, and the Token Endpoint checks it when
-	// the code is redeemed - clearing it here would hand out a code that
-	// any key could spend.
-	replacement.AuthSession = ""
-
+	clear(&replacement)
 	delete(c.indices, indexKey)
 	// Claiming must not extend the code's lifetime; the Mongo $unset does not either.
 	c.cache.Set(sessionID, &replacement, ttlcache.PreviousOrDefaultTTL)
 
 	return &claimed, nil
+}
+
+// resolveSessionIDLocked turns a query into the session it names, by the
+// same fields Get accepts. The caller must hold the lock.
+func (c *MemoryStore) resolveSessionIDLocked(query *AuthorizationContext) (string, error) {
+	if query.SessionID != "" {
+		return query.SessionID, nil
+	}
+	// Every field Get resolves by, in the order Get tries them. The two
+	// must agree: ExtendExpiry's contract promises the same query fields,
+	// and three were missing here - VerifierResponseCode,
+	// EphemeralEncryptionKeyID and RequestObjectID - so a query that Get
+	// and Mongo's ExtendExpiry both answered failed in memory with "no
+	// searchable field set". A backend difference that only shows up for
+	// some callers is worse than either behaviour on its own.
+	for _, index := range []struct{ name, value string }{
+		{"request_uri", query.RequestURI},
+		{"code", query.Code},
+		{"state", query.State},
+		{"verifier_response_code", query.VerifierResponseCode},
+		{"ephemeral_key_id", query.EphemeralEncryptionKeyID},
+		{"request_object_id", query.RequestObjectID},
+		{"auth_session", query.AuthSession},
+		{"issuer_state", query.IssuerState},
+	} {
+		if index.value == "" {
+			continue
+		}
+		sessionID, ok := c.indices[index.name+":"+index.value]
+		if !ok {
+			return "", ErrNoDocuments
+		}
+		return sessionID, nil
+	}
+	return "", errors.New("no searchable field set on the query")
+}
+
+// SetAuthProvider records the provider and credential source on a context.
+// See AuthContextStore.SetAuthProvider for why it is not an Update.
+func (c *MemoryStore) SetAuthProvider(ctx context.Context, sessionID string, fields AuthProviderFields) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	// Copied for the same reason ExtendExpiry copies: a caller holding a
+	// pointer Get handed out would otherwise see these four fields change
+	// underneath it, and /authorize is exactly such a caller - it reads
+	// the context, then this runs against the same session.
+	updated := *item.Value()
+	updated.AuthProvider = fields.AuthProvider
+	updated.DataSource = fields.DataSource
+	updated.RemoteName = fields.RemoteName
+	updated.AuthenticSource = fields.AuthenticSource
+
+	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.updateIndices(&updated)
+
+	return nil
 }

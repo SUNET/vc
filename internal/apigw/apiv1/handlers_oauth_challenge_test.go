@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
@@ -128,11 +130,20 @@ func newChallengeClient(t *testing.T) *Client {
 			DPopJTI:                apigwcache.NewTestMemoryCache[bool](10 * time.Minute),
 		},
 		pkiSigner: signer,
+		// Both browser-mediated providers running, which is what makes the
+		// Selector's choice between them and openid4vp the thing under
+		// test rather than a property of what happened to be initialised.
+		authProviderSelector: authproviders.NewSelector(true, true),
 	}
 }
 
 // initialChallenge is the request a conformant wallet opens an exchange
 // with, so that each test below can vary exactly one thing about it.
+//
+// It carries PKCE because it offers auth_via_web: a wallet that says it
+// can be sent into a browser must send a code_challenge, whichever
+// interaction this server then picks. A fixture without one would not be
+// a request a conformant wallet makes.
 func initialChallenge(t *testing.T) *AuthorizationChallengeRequest {
 	t.Helper()
 	return &AuthorizationChallengeRequest{
@@ -141,6 +152,8 @@ func initialChallenge(t *testing.T) *AuthorizationChallengeRequest {
 		Scope:                     challengeScope,
 		RedirectURI:               "https://wallet.example.com/cb",
 		InteractionTypesSupported: "urn:openid:dcp:ia:openid4vp_presentation,urn:openid:dcp:ia:auth_via_web",
+		CodeChallenge:             strings.Repeat("c", 43),
+		CodeChallengeMethod:       "S256",
 		DPOP:                      walletProof(t),
 	}
 }
@@ -320,9 +333,13 @@ func TestAuthorizationChallenge_WalletWithoutThePresentationInteraction(t *testi
 	assert.Contains(t, challengeErr.ErrorDescription, "urn:openid:dcp:ia:openid4vp_presentation")
 }
 
-// And a scope this server cannot serve through a presentation is refused
-// by naming the interaction it WOULD need, which this build does not
-// implement - rather than by a message about the scope.
+// A scope whose Holder is established in a browser is answered with the
+// web interaction rather than a presentation request.
+//
+// The Wallet is handed a request_uri and builds an authorization request
+// from it, which is the Pushed Authorization Request this server already
+// implements reached through the challenge endpoint - so the browser leg,
+// the consent screen and the redirect back are unchanged.
 func TestAuthorizationChallenge_ScopeThatNeedsAWebInteraction(t *testing.T) {
 	client := newChallengeClient(t)
 	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
@@ -330,11 +347,114 @@ func TestAuthorizationChallenge_ScopeThatNeedsAWebInteraction(t *testing.T) {
 		AuthenticSource: "authentic-source",
 	}
 
-	challengeErr := challengeErr(t, client, initialChallenge(t))
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
 
-	assert.Equal(t, 400, challengeErr.HTTPStatus)
-	assert.Equal(t, "missing_interaction_type", challengeErr.ErrorCode)
-	assert.Contains(t, challengeErr.ErrorDescription, "urn:openid:dcp:ia:auth_via_web")
+	challengeErr := challengeErr(t, client, req)
+
+	assert.Equal(t, 403, challengeErr.HTTPStatus)
+	assert.Equal(t, "insufficient_authorization", challengeErr.ErrorCode)
+	assert.Equal(t, "urn:openid:dcp:ia:auth_via_web", challengeErr.InteractionTypeRequired)
+	assert.Contains(t, challengeErr.RequestURI, "urn:ietf:params:oauth:request_uri:")
+	assert.Equal(t, webInteractionTTLSeconds, challengeErr.ExpiresIn)
+
+	// The draft requires auth_session to be ABSENT when request_uri is
+	// present: the request_uri is itself what associates the browser leg
+	// with this exchange, and two handles for one association is one more
+	// than can be kept consistent.
+	assert.Empty(t, challengeErr.AuthSession)
+	assert.Empty(t, challengeErr.OpenID4VPRequest, "this interaction asks for no presentation")
+
+	// And the exchange is resolvable by the handle it DID hand out, which
+	// is what /authorize will look it up by.
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		RequestURI: challengeErr.RequestURI,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{challengeScope}, authCtx.Scopes)
+	assert.Empty(t, authCtx.AuthSession, "no auth_session was issued, so none is stored")
+	assert.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint,
+		"the code this produces is still bound to the key the exchange was opened under")
+}
+
+// The draft says a Wallet listing auth_via_web includes code_challenge in
+// the initial request, and it is not optional here for the same reason it
+// is not at PAR: the code this produces is redeemed over a channel this
+// endpoint cannot see, with a browser leg in between that an attacker can
+// reach.
+func TestAuthorizationChallenge_WebInteractionRequiresPKCE(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = ""
+	req.CodeChallengeMethod = ""
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.OAuthErrPKCERequired.ErrorCode, oauthErr.ErrorCode)
+}
+
+// The rule is about what the WALLET OFFERED, not about which interaction
+// the server went on to select - which is where it had a hole.
+//
+// A confidential client listing auth_via_web and asking for a
+// presentation-backed scope never reaches requireWebInteraction, so the
+// check there never ran: the exchange was opened with no code_challenge at
+// all, and the code it ends with is redeemed over a channel this endpoint
+// cannot see. The draft asks for the challenge on the initial request of
+// any wallet that says it can be sent into a browser, and that is where it
+// is now enforced.
+func TestAuthorizationChallenge_OfferingAuthViaWebRequiresPKCE(t *testing.T) {
+	t.Run("even when the server selects the presentation interaction", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		// A CONFIDENTIAL client, so the public-client PKCE rule above
+		// does not apply and this is the only thing that can refuse it.
+		require.Equal(t, oauth2.ClientTypeConfidential,
+			client.cfg.APIGW.Delivery.OpenID4VCI.Clients["wallet-1"].Type)
+
+		req := initialChallenge(t)
+		req.CodeChallenge = ""
+		req.CodeChallengeMethod = ""
+
+		oauthErr := oauthErrFromChallenge(t, client, req)
+		assert.Equal(t, oauth2.OAuthErrPKCERequired.ErrorCode, oauthErr.ErrorCode)
+	})
+
+	t.Run("a wallet that does not offer it is unaffected", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		req := initialChallenge(t)
+		req.InteractionTypesSupported = "urn:openid:dcp:ia:openid4vp_presentation"
+		req.CodeChallenge = ""
+		req.CodeChallengeMethod = ""
+
+		// Answered with the interaction, not refused for PKCE.
+		challengeErr := challengeErr(t, client, req)
+		assert.Equal(t, errInsufficientAuthorization, challengeErr.ErrorCode)
+	})
+}
+
+// A pre-authorised scope is not a browser scope: a Wallet cannot initiate
+// that flow at all, which /op/par also refuses.
+func TestAuthorizationChallenge_PreAuthorizedScopeIsRefused(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderPreAuth,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidScope, oauthErr.ErrorCode)
+	assert.Contains(t, oauthErr.Error(), "pre-authorized")
 }
 
 // A deployment that has narrowed interaction_types_supported refuses the
@@ -1256,6 +1376,47 @@ func TestAuthorizationChallenge_TranscriptLabelFollowsConfiguration(t *testing.T
 	assert.NotContains(t, string(got), "OpenID4VCIIAEHandover")
 }
 
+// The request_uri has to be usable at /authorize, which is the entire
+// point of this interaction: the Wallet opens a browser at an
+// authorization request built from it, and from there the existing flow
+// runs unchanged.
+//
+// Asserted by actually calling OAuthAuthorize rather than by inspecting
+// the stored context, because what matters is that the endpoint can read
+// what the challenge wrote - the scope it reports, the wallet it names,
+// and the consent redirect the browser leg starts at.
+//
+// It does NOT establish that the context's own client_id is right: the
+// store resolves this query by its request_uri index alone and never
+// compares the client_id OAuthAuthorize puts in it. That is pre-existing
+// and not this change's to fix, but it means a test asserting "the
+// handoff works" proves less than it looks like it does, so the limit is
+// written down rather than assumed away.
+func TestAuthorizationChallenge_WebInteractionHandsOffToAuthorize(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
+	opened := challengeErr(t, client, req)
+	require.NotEmpty(t, opened.RequestURI)
+
+	reply, err := client.OAuthAuthorize(t.Context(), &openid4vci.AuthorizeRequest{
+		RequestURI: opened.RequestURI,
+	})
+	require.NoError(t, err, "the request_uri the challenge handed out must resolve at /authorize")
+	require.NotNil(t, reply)
+
+	assert.Equal(t, challengeScope, reply.Scope)
+	assert.Equal(t, "wallet-1", reply.WalletClientID)
+	assert.Equal(t, "/authorization/consent", reply.RedirectURL,
+		"the browser leg starts at consent, exactly as it does from /op/par")
+}
+
 // A proof is for the ENDPOINT, not for one spelling of its URL.
 //
 // A wallet builds htu from the URL it requested; this deployment writes
@@ -1451,6 +1612,394 @@ func TestAuthorizationChallenge_PassesTheInteractiveAuthorizationTranscriptToThe
 	assert.NotEqual(t, directPost, got)
 }
 
+// The request advertises ECDH-ES with A256GCM and the compact form, and
+// anything else is refused BEFORE it reaches the decrypter.
+//
+// jwe.Decrypt on its own is considerably more accommodating than the
+// request was: other content-encryption algorithms, the JSON
+// serialization, a compressed payload, critical header parameters it
+// ignores. None of that is what a conformant wallet sends, so accepting it
+// only widens what an attacker may hand the decrypter.
+func TestAuthorizationChallenge_ResponseMustUseTheAdvertisedEncryption(t *testing.T) {
+	encryptWith := func(t *testing.T, client *Client, authSession string, opts ...jwe.EncryptOption) string {
+		t.Helper()
+		authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+			AuthSession: authSession,
+		})
+		require.NoError(t, err)
+		_, publicJWK, err := client.EphemeralEncryptionKey(t.Context(), authCtx.EphemeralEncryptionKeyID)
+		require.NoError(t, err)
+
+		opts = append([]jwe.EncryptOption{jwe.WithKey(jwa.ECDH_ES(), publicJWK)}, opts...)
+		encrypted, err := jwe.Encrypt(
+			[]byte(`{"state":"`+authCtx.State+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`), opts...)
+		require.NoError(t, err)
+
+		envelope, err := json.Marshal(map[string]string{"response": string(encrypted)})
+		require.NoError(t, err)
+		return string(envelope)
+	}
+
+	for _, tc := range []struct {
+		name string
+		opts []jwe.EncryptOption
+	}{
+		{
+			name: "another content encryption algorithm",
+			opts: []jwe.EncryptOption{jwe.WithContentEncryption(jwa.A128GCM())},
+		},
+		{
+			name: "a compressed payload",
+			opts: []jwe.EncryptOption{
+				jwe.WithContentEncryption(jwa.A256GCM()),
+				jwe.WithCompress(jwa.Deflate()),
+			},
+		},
+		{
+			name: "the JSON serialization",
+			opts: []jwe.EncryptOption{
+				jwe.WithContentEncryption(jwa.A256GCM()),
+				jwe.WithJSON(),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newChallengeClient(t)
+			opened := challengeErr(t, client, initialChallenge(t))
+
+			// The pipeline must never be reached: the point is that the
+			// refusal happens before anything is decrypted.
+			reached := false
+			client.issuanceAuth = func(context.Context, *cache.AuthorizationContext, *openid4vp.VPResponse, issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+				reached = true
+				return &issuanceAuthOutcome{Scope: challengeScope}, nil
+			}
+
+			response := encryptWith(t, client, opened.AuthSession, tc.opts...)
+			oauthErr := oauthErrFromChallenge(t, client,
+				continueExchange(t, opened.AuthSession, response))
+
+			assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+			assert.False(t, reached, "a response that is not the advertised JWE must not be decrypted")
+		})
+	}
+
+	t.Run("the advertised encryption gets through", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		reached := false
+		client.issuanceAuth = func(context.Context, *cache.AuthorizationContext, *openid4vp.VPResponse, issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+			reached = true
+			return &issuanceAuthOutcome{Scope: challengeScope}, nil
+		}
+
+		response := encryptWith(t, client, opened.AuthSession, jwe.WithContentEncryption(jwa.A256GCM()))
+		_, err := client.OAuthAuthorizationChallenge(t.Context(),
+			continueExchange(t, opened.AuthSession, response))
+		require.NoError(t, err)
+		assert.True(t, reached, "the encryption the request asked for must be accepted")
+	})
+}
+
+// The auth_session's deadline is not the authorization code's.
+//
+// Both are kept in one ExpiresAt and the Token Endpoint checks that same
+// field, so without a handover the code a wallet receives expires whenever
+// the EXCHANGE was going to - however long the holder actually took to
+// answer. At the configured maximum the code and its context expire
+// together, which is a code that was never redeemable.
+func TestAuthorizationChallenge_SuccessfulPresentationStartsTheCodesLifetime(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	stored, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	// Age the exchange to a second before its deadline, which is what a
+	// holder who took their time looks like from here.
+	almostOver := time.Now().Add(time.Second).Unix()
+	stored.ExpiresAt = almostOver
+	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), stored))
+
+	client.issuanceAuth = func(_ context.Context, authCtx *cache.AuthorizationContext, _ *openid4vp.VPResponse, _ issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+		return &issuanceAuthOutcome{Scope: authCtx.Scopes[0]}, nil
+	}
+
+	response := encryptedVPResponse(t, client, opened.AuthSession,
+		`{"state":"`+stored.State+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+	reply, err := client.OAuthAuthorizationChallenge(t.Context(),
+		continueExchange(t, opened.AuthSession, response))
+	require.NoError(t, err)
+
+	byCode, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		Code: reply.AuthorizationCode,
+	})
+	require.NoError(t, err)
+	assert.Greater(t, byCode.ExpiresAt, almostOver,
+		"the code must get its own window, not inherit the exchange's remaining seconds")
+	assert.GreaterOrEqual(t, byCode.ExpiresAt, time.Now().Add(authorizationCodeTTL-time.Minute).Unix(),
+		"and that window is the authorization code's lifetime")
+}
+
+// The presentation state must not survive into an auth_via_web exchange.
+//
+// newChallengeAuthContext mints one so an OpenID4VP response has something
+// to echo, and this interaction has no OpenID4VP response: the Wallet is
+// never told the value and nothing ever checks it. Left on the context it
+// comes back as `state` in the Token Response - a random value the Wallet
+// never sent, which a Wallet correlating its own OAuth state is entitled
+// to reject.
+func TestAuthorizationChallenge_WebInteractionCarriesNoPresentationState(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	opened := challengeErr(t, client, initialChallenge(t))
+	require.NotEmpty(t, opened.RequestURI)
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		RequestURI: opened.RequestURI,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, authCtx.State,
+		"a browser leg the wallet gave no state for must not invent one")
+
+	// The presentation interaction still mints one, so this is about the
+	// web path rather than about the field being unused everywhere.
+	presentation := newChallengeClient(t)
+	presentationOpened := challengeErr(t, presentation, initialChallenge(t))
+	presentationCtx, err := presentation.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: presentationOpened.AuthSession,
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, presentationCtx.State)
+}
+
+// One ephemeral key per kid, whoever asks and however many at once.
+//
+// The private half decrypts the wallet's response; the public half goes
+// into a request the server SIGNS. Two callers that each generated their
+// own would produce two signed requests, and whichever private key ended
+// up in the cache could not decrypt a response to the other - a flow that
+// fails with a correct presentation, a valid signature and an
+// undecryptable ciphertext, which is about as hard to diagnose as this
+// gets.
+//
+// Get-then-Set could not promise that. SetNX can.
+func TestEphemeralEncryptionKeyIsOneKeyPerKid(t *testing.T) {
+	client := newChallengeClient(t)
+
+	const kid = "contended-kid"
+	const contenders = 8
+
+	var (
+		start    sync.WaitGroup
+		finished sync.WaitGroup
+		mu       sync.Mutex
+		publics  []string
+		privates []string
+	)
+	start.Add(1)
+	finished.Add(contenders)
+
+	for range contenders {
+		go func() {
+			defer finished.Done()
+			start.Wait()
+			private, public, err := client.EphemeralEncryptionKey(t.Context(), kid)
+			if err != nil {
+				return
+			}
+			privateThumb, err := private.Thumbprint(stdcrypto.SHA256)
+			if err != nil {
+				return
+			}
+			publicThumb, err := public.Thumbprint(stdcrypto.SHA256)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			privates = append(privates, string(privateThumb))
+			publics = append(publics, string(publicThumb))
+			mu.Unlock()
+		}()
+	}
+	start.Done()
+	finished.Wait()
+
+	require.Len(t, privates, contenders, "every caller must get a key")
+
+	// Every caller got the SAME key, and it is the one the cache holds -
+	// which is the only one that can decrypt anything.
+	for i := range privates {
+		assert.Equal(t, privates[0], privates[i],
+			"two callers were given different private keys for one kid")
+		assert.Equal(t, publics[0], publics[i],
+			"two callers would have signed requests carrying different public keys")
+	}
+
+	stored, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), kid)
+	require.True(t, ok)
+	storedThumb, err := stored.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, privates[0], string(storedThumb),
+		"the key callers were given must be the one that was persisted")
+}
+
+// A cache that will not hold the key is a request whose answer this server
+// cannot decrypt, so signing one anyway produces a failure much later with
+// nothing to point at.
+func TestEphemeralEncryptionKeyPropagatesStoreFailures(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cacheService.EphemeralEncryptionKey = &failingKeyCache{
+		Cache: client.cacheService.EphemeralEncryptionKey,
+		err:   errors.New("connection refused"),
+	}
+
+	_, _, err := client.EphemeralEncryptionKey(t.Context(), "some-kid")
+	require.Error(t, err, "a cache that refused the key must not yield a key to sign with")
+}
+
+// failingKeyCache fails SetNX the way an unreachable cache does and leaves
+// every other call to the real one.
+type failingKeyCache struct {
+	cache.Cache[jwk.Key]
+	err error
+}
+
+func (c *failingKeyCache) SetNX(ctx context.Context, key string, value jwk.Key) (bool, error) {
+	if c.err != nil {
+		return false, c.err
+	}
+	return c.Cache.SetNX(ctx, key, value)
+}
+
+// auth_session and issuer_state are documented as mutually exclusive, and
+// the dispatch has to enforce that rather than resolve it by precedence.
+//
+// Silently preferring auth_session accepted an ambiguous request AND left
+// the supplied issuer_state live: a prepared issuance still waiting to be
+// claimed, named by a caller that believed it had just used it. The
+// wallet has a bug either way; the useful answer says so while it can
+// still be found.
+func TestAuthorizationChallenge_BothHandlesIsInvalidRequest(t *testing.T) {
+	client := newChallengeClient(t)
+
+	req := continueExchange(t, "some-auth-session", `{"response":"x"}`)
+	req.IssuerState = "some-issuer-state"
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+	assert.Equal(t, 400, oauthErr.HTTPStatus)
+	// On the message, not just the code: the intermediate path answers
+	// invalid_request for other reasons too, so a test stopping at the
+	// code would keep passing with this check deleted.
+	assert.Contains(t, oauthErr.Error(), "mutually exclusive")
+
+	// Each on its own still reaches its flow, so the assertion above is
+	// about the combination rather than about either handle.
+	authSessionOnly := challengeErr(t, client,
+		continueExchange(t, "some-auth-session", `{"response":"x"}`))
+	assert.Equal(t, errInvalidSession, authSessionOnly.ErrorCode,
+		"an auth_session on its own still reaches the intermediate flow")
+
+	issuerStateOnly := initialChallenge(t)
+	issuerStateOnly.IssuerState = "some-issuer-state"
+	_, err := client.OAuthAuthorizationChallenge(t.Context(), issuerStateOnly)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "mutually exclusive")
+}
+
+// A dangerous redirect_uri scheme must be refused here, as it is at
+// /op/par, and for a reason that only bites on this endpoint.
+//
+// A wallet authenticated by attestation has no redirect_uri allowlist to
+// be checked against, so whatever it sends is recorded as WalletURI. The
+// auth_via_web interaction then carries that context into the browser
+// leg, and the consent page renders it as a template.URL - which
+// deliberately turns off html/template's scheme sanitisation so custom
+// wallet schemes survive. "javascript:" therefore becomes script
+// execution in the APIGW's own origin once the user consents.
+func TestAuthorizationChallenge_RefusesADangerousRedirectURI(t *testing.T) {
+	for _, redirectURI := range []string{
+		"javascript:alert(document.domain)//",
+		"JavaScript:alert(1)",
+		"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+	} {
+		t.Run(redirectURI, func(t *testing.T) {
+			client := newChallengeClient(t)
+
+			req := initialChallenge(t)
+			req.RedirectURI = redirectURI
+
+			oauthErr := oauthErrFromChallenge(t, client, req)
+			assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+			assert.Contains(t, oauthErr.Error(), "invalid redirect_uri")
+		})
+	}
+
+	// Refused before anything is stored, so there is no context carrying
+	// the value for a later leg to render.
+	t.Run("nothing is stored for a refused request", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		req := initialChallenge(t)
+		req.RedirectURI = "javascript:alert(1)//"
+		_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
+		require.Error(t, err)
+
+		stored, err := client.cacheService.AuthContext.Get(t.Context(),
+			&cache.AuthorizationContext{Code: ""})
+		assert.Error(t, err)
+		assert.Nil(t, stored)
+	})
+}
+
+// A request_uri stays resolvable, so /authorize can be entered more than
+// once - and each visit extended the deadline another authorizationCodeTTL
+// from now. Visits at minutes 0, 4, 8 and 12 all pass the expiry check and
+// the last pushes expiry to minute 17, past the retention MongoDB anchors
+// to created_at. Beyond that the server advertises a code against a
+// document already scheduled for deletion, and only in HA, where nothing
+// else would notice.
+func TestCodeDeadlineNeverOutlivesTheDocument(t *testing.T) {
+	t.Run("a fresh context gets the full code lifetime", func(t *testing.T) {
+		deadline := codeDeadlineWithin(time.Now())
+		assert.InDelta(t, time.Now().Add(authorizationCodeTTL).Unix(), deadline, 2)
+	})
+
+	t.Run("a context near the end of its retention gets what is left", func(t *testing.T) {
+		// Twelve minutes into a fifteen-minute retention: three minutes
+		// left, not five.
+		createdAt := time.Now().Add(-12 * time.Minute)
+		deadline := codeDeadlineWithin(createdAt)
+
+		assert.InDelta(t, createdAt.Add(apigwcache.AuthContextTTL).Unix(), deadline, 2)
+		assert.Less(t, deadline, time.Now().Add(authorizationCodeTTL).Unix(),
+			"the deadline must be cut short rather than run past the document")
+	})
+
+	t.Run("however many times it is extended", func(t *testing.T) {
+		createdAt := time.Now().Add(-14 * time.Minute)
+		retention := createdAt.Add(apigwcache.AuthContextTTL).Unix()
+		for range 5 {
+			assert.LessOrEqual(t, codeDeadlineWithin(createdAt), retention)
+		}
+	})
+
+	// A context with no creation time recorded is left alone rather than
+	// given a deadline in the past.
+	t.Run("an unknown creation time is not a zero deadline", func(t *testing.T) {
+		deadline := codeDeadlineWithin(time.Time{})
+		assert.InDelta(t, time.Now().Add(authorizationCodeTTL).Unix(), deadline, 2)
+	})
+}
+
 // The Authorization Challenge Endpoint is browserless, so a registered
 // wallet with no callback has to be able to use it.
 //
@@ -1495,4 +2044,52 @@ func TestAuthorizationChallenge_AWrongRedirectURIIsStillRefused(t *testing.T) {
 
 	oauthErr := oauthErrFromChallenge(t, client, req)
 	assert.Equal(t, oauth2.ErrCodeInvalidClient, oauthErr.ErrorCode)
+}
+
+// redirect_uri is optional on this endpoint, but not for the interaction
+// that ends by sending the user through a browser.
+//
+// The optional-redirect rule is about the endpoint being browserless: a
+// presentation comes back to the endpoint itself. A web interaction is
+// the opposite - it ends with the browser being sent to WalletURI - and
+// with none, buildAuthorizationRedirectURL produces
+// "?code=...&iss=...&state=...", a query string with no scheme and no
+// host, which the consent page's new URL() throws on. The user
+// authenticates, consents, and arrives nowhere with the code stranded.
+//
+// Refused at the request, which the wallet can still fix, rather than
+// after it has sent its user into a browser.
+func TestAuthorizationChallenge_WebInteractionNeedsACallback(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
+	req.RedirectURI = ""
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+	assert.Contains(t, oauthErr.ErrorDescription, "redirect_uri")
+
+	// Nothing was created either, but that is not asserted here: the
+	// refusal carries no request_uri and the store has no enumeration
+	// API, so every check available would pass whether or not a context
+	// had been saved. It is the refusal ORDER that guarantees it - the
+	// guard sits above newChallengeAuthContext - and the positive control
+	// below is what makes this test specific rather than a blanket
+	// refusal of web interactions.
+
+	// And the SAME request with a callback still works, so this refuses
+	// the missing redirect_uri rather than the web interaction itself.
+	withCallback := initialChallenge(t)
+	withCallback.CodeChallenge = strings.Repeat("c", 43)
+	withCallback.CodeChallengeMethod = "S256"
+
+	challengeErr := challengeErr(t, client, withCallback)
+	assert.Equal(t, "urn:openid:dcp:ia:auth_via_web", challengeErr.InteractionTypeRequired)
+	assert.Contains(t, challengeErr.RequestURI, "urn:ietf:params:oauth:request_uri:")
 }
