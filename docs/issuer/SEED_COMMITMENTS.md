@@ -17,32 +17,35 @@ seed length are all configuration.
 
 It **generates** the commitment and writes it. That is the whole of it.
 
-- **It does not deliver the seed — yet.** What this change puts in a
-  credential is the commitment, as a claim. Delivery is a FOLLOW-UP, and
-  the shape is settled: the seed travels in the response-level
-  `credential_metadata` object of the OpenID4VCI 1.1 Credential Response,
-  under `org.siros.secret_seed`, keyed by namespace (privatedata-spec
-  §5A). It comes with safeguards that are part of the same follow-up —
-  the issuer advertises the seed NAMESPACES in its metadata so a wallet
-  knows to ask for an encrypted response, refuses the issuance outright
-  when the request did not ask, and never puts the seed in display or
-  claims metadata. Until that lands, a credential is not usable in a
-  proof that needs the seed.
+- **It delivers the seed only when the claim asks it to.** By default a
+  credential carries the commitment and nothing else, which is the
+  original capability and is unchanged. Setting `deliver: true` on a
+  commitment claim opts that claim in, and then the seed travels in the
+  response-level `credential_metadata` object of the OpenID4VCI 1.1
+  Credential Response, under `org.siros.secret_seed`, keyed by namespace
+  (privatedata-spec §5A).
+
+  Delivery brings requirements with it, all refused rather than
+  degraded. The response MUST be JWE-encrypted, which means the wallet
+  must have ASKED — so the issuer advertises the seed NAMESPACES in its
+  metadata, names only and never values, and a request that did not ask
+  is refused before anything is issued. It MUST carry a
+  `notification_id`, which is how a wallet reports a failed commitment
+  check. And the seed is never persisted, logged, traced, or put in
+  display or claims metadata.
+
+  **This issuer must itself support response encryption**, which means
+  `apigw.issuer_metadata.credential_encryption.keys` must hold at least
+  one key. Without it a delivering scope is a deadlock — a wallet asking
+  for encryption is refused for lack of support, and one not asking is
+  refused for the seed — so startup refuses that configuration rather
+  than advertising a credential nobody can obtain. See step 5 below.
 
   (An earlier version of this document said there would never be a
   response member for the seed, on the reasoning that a derived seed is
   recomputable and so need never be handed over. That decision was
-  reversed in #791: the WALLET cannot recompute it, and it is the wallet
-  that has to prove with it.)
-- **It does not keep the commitment from being disclosed.** A commitment
-  claim is an ordinary selectively-disclosable element, and a Verifier is
-  free to ask for it. Whether it is ever answered is enforced by the
-  wallet, against whatever rulebook governs the credential. A control here
-  could not stop a Verifier that asks; it could only create the belief
-  that something was stopping it.
-- **It does not check a consumer's issuance profile.** Whether the result
-  satisfies some circuit's byte-level expectations is between that
-  consumer's specification and its rulebook.
+  reversed: a holder has to be able to check the commitment it was given,
+  and a psc-style configuration has no issuer-side seed to recompute.)
 
 ## Configuration
 
@@ -68,8 +71,11 @@ on first sight of a subject and kept — was described here once and never
 implemented, because it needs a per-subject store that nothing on this
 path has.
 
-The secret itself is never written in `config.yaml`. Either mount it and
-point `secret_path` at it, as above, or put it in the **secrets file**:
+The secret itself is never written in `config.yaml` — setting
+`apigw.seeds.<name>.secret` there has no effect and startup still
+refuses, because that key is read from the **secrets file** and nowhere
+else. Either mount the secret and point `secret_path` at it, as above,
+or put it in the secrets file:
 
 ```yaml
 apigw:
@@ -273,6 +279,7 @@ inject cleanly and issue a credential with no commitment in it:
 
 ```json
 {
+  "format": "mso_mdoc",
   "docType": "eu.europa.ec.eudi.nym_auth.1",
   "claims": {
     "eu.europa.ec.eudi.nym_auth.1": {
@@ -281,6 +288,10 @@ inject cleanly and issue a credential with no commitment in it:
   }
 }
 ```
+
+`format` is required: `LoadMDDLSchema` refuses a schema without it, and
+a file copied from here without that member fails startup with
+`unsupported MDDL format: ""`.
 
 For SD-JWT VC the VCTM must declare the claim **`sd: always`** instead:
 a commitment the holder cannot withhold is not a pseudonym.
@@ -339,6 +350,23 @@ that survives the host, and rotating it repseudonymises everyone.
 **Wallet requirement.** The wallet MUST request
 `credential_response_encryption`, or issuance fails. The namespace
 advertisement in issuer metadata is what tells it to.
+
+**Issuer requirement.** Asking is not enough on its own: this issuer
+must support response encryption too, which means at least one key in
+`apigw.issuer_metadata.credential_encryption.keys`. Without it a
+delivering scope cannot be issued at all — a wallet that asks is
+refused for lack of support, one that does not is refused for the
+seed — so a delivering scope on an issuer with no keys is refused at
+startup rather than advertised. If you are enabling `deliver: true` on
+an issuer that has never done JWE, that key is the prerequisite:
+
+```yaml
+apigw:
+  issuer_metadata:
+    credential_encryption:
+      keys:
+        - private_key_path: /etc/vc/enc/issuer-enc.pem   # P-256
+```
 
 **Ports, URLs, env vars.** Unchanged by this feature.
 
@@ -449,11 +477,18 @@ SHA256("verifier.example")              = be6a6400…4a41   (MUST)
 SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
 ```
 
-A value carrying `semantic_id:` or `x509_san_dns:` is therefore **refused**
-rather than stripped. Hashing it would succeed and return a pseudonym no
-Verifier could have reported, so the loop would simply never match and the
+A value carrying `x509_san_dns:` is therefore **refused** rather than
+stripped. Hashing it would succeed and return a pseudonym no Verifier
+could have reported, so the loop would simply never match and the
 operator would conclude the subject is innocent — and stripping it would
 quietly accept a caller that is confused about which value it holds.
+
+`semantic_id:` is **not** one of those, and must be passed WHOLE. The
+rulebook says in those words that it is part of the `semantic`
+verifier_id value and not a Client Identifier Prefix, so a semantic
+Verifier's verifier_id is the entire string `semantic_id:<identifier>`
+and that entire string is what is hashed. Removing the prefix produces a
+different pseudonym and the same silent non-match.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can

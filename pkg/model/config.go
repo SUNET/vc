@@ -2392,10 +2392,15 @@ const SeedNamespacesMember = "namespaces"
 
 // CommitmentClaim configures one seed-backed claim.
 //
-// What is written into the credential is commit(seed) - never the seed.
-// The seed is not delivered to the Wallet by this server at all: a derived
-// seed is recomputable whenever it is wanted, so there is no moment at
-// which it has to be handed over to avoid losing it.
+// What is written into the CREDENTIAL is commit(seed) - never the seed.
+// That is the default and the original capability: a derived seed is
+// recomputable whenever it is wanted, so there is no moment at which it
+// has to be handed over to avoid losing it.
+//
+// Deliver opts one claim out of that. The seed is then sent to the
+// Wallet alongside the credential, in the response-level
+// credential_metadata object rather than in the credential, and only in
+// a JWE-encrypted response the wallet asked for. See Deliver.
 type CommitmentClaim struct {
 	// Seed names the entry in apigw.seeds that backs this claim.
 	//
