@@ -1,0 +1,341 @@
+{
+  "description": "proof_time: the exact 20-byte rendering of epoch seconds (UTC), refusals, and the verifier tolerance check. Recommended tolerance: skew 60, max_age 600; both are the verifier's to configure. Expected texts were computed with an independent implementation (Python datetime).",
+  "render": [
+    {
+      "secs": 0,
+      "text": "1970-01-01T00:00:00Z"
+    },
+    {
+      "secs": 1,
+      "text": "1970-01-01T00:00:01Z"
+    },
+    {
+      "secs": 59,
+      "text": "1970-01-01T00:00:59Z"
+    },
+    {
+      "secs": 60,
+      "text": "1970-01-01T00:01:00Z"
+    },
+    {
+      "secs": 3599,
+      "text": "1970-01-01T00:59:59Z"
+    },
+    {
+      "secs": 3600,
+      "text": "1970-01-01T01:00:00Z"
+    },
+    {
+      "secs": 86399,
+      "text": "1970-01-01T23:59:59Z"
+    },
+    {
+      "secs": 86400,
+      "text": "1970-01-02T00:00:00Z"
+    },
+    {
+      "secs": 951782399,
+      "text": "2000-02-28T23:59:59Z"
+    },
+    {
+      "secs": 951782400,
+      "text": "2000-02-29T00:00:00Z"
+    },
+    {
+      "secs": 951868799,
+      "text": "2000-02-29T23:59:59Z"
+    },
+    {
+      "secs": 951868800,
+      "text": "2000-03-01T00:00:00Z"
+    },
+    {
+      "secs": 1709164799,
+      "text": "2024-02-28T23:59:59Z"
+    },
+    {
+      "secs": 1709164800,
+      "text": "2024-02-29T00:00:00Z"
+    },
+    {
+      "secs": 1709251199,
+      "text": "2024-02-29T23:59:59Z"
+    },
+    {
+      "secs": 1709251200,
+      "text": "2024-03-01T00:00:00Z"
+    },
+    {
+      "secs": 1760961600,
+      "text": "2025-10-20T12:00:00Z"
+    },
+    {
+      "secs": 1767225599,
+      "text": "2025-12-31T23:59:59Z"
+    },
+    {
+      "secs": 1767225600,
+      "text": "2026-01-01T00:00:00Z"
+    },
+    {
+      "secs": 1798761599,
+      "text": "2026-12-31T23:59:59Z"
+    },
+    {
+      "secs": 1798761600,
+      "text": "2027-01-01T00:00:00Z"
+    },
+    {
+      "secs": 2147483647,
+      "text": "2038-01-19T03:14:07Z"
+    },
+    {
+      "secs": 2147483648,
+      "text": "2038-01-19T03:14:08Z"
+    },
+    {
+      "secs": 4107542399,
+      "text": "2100-02-28T23:59:59Z"
+    },
+    {
+      "secs": 4107628799,
+      "text": "2100-03-01T23:59:59Z"
+    },
+    {
+      "secs": 4294967295,
+      "text": "2106-02-07T06:28:15Z"
+    },
+    {
+      "secs": 4294967296,
+      "text": "2106-02-07T06:28:16Z"
+    },
+    {
+      "secs": 253402214400,
+      "text": "9999-12-31T00:00:00Z"
+    },
+    {
+      "secs": 253402300799,
+      "text": "9999-12-31T23:59:59Z"
+    }
+  ],
+  "render_errors": [
+    {
+      "secs": -1,
+      "error": "proof_time_out_of_range"
+    },
+    {
+      "secs": 253402300800,
+      "error": "proof_time_out_of_range"
+    },
+    {
+      "secs": -86400,
+      "error": "proof_time_out_of_range"
+    }
+  ],
+  "parse_ok": [
+    {
+      "text": "2000-02-29T00:00:00Z",
+      "secs": 951782400
+    },
+    {
+      "text": "2024-02-29T23:59:59Z",
+      "secs": 1709251199
+    },
+    {
+      "text": "1970-01-01T00:00:00Z",
+      "secs": 0
+    },
+    {
+      "text": "9999-12-31T23:59:59Z",
+      "secs": 253402300799
+    }
+  ],
+  "parse_errors": [
+    {
+      "text": "2026-10-20T12:00:00.000Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20T12:00:00+00:00",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20T12:00:00z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20t12:00:00Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20 12:00:00Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20T12:00Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20T12:00:00Z ",
+      "error": "proof_time_form"
+    },
+    {
+      "text": " 2026-10-20T12:00:00Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-10-20T12:00:0٠Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "+026-10-20T12:00:00Z",
+      "error": "proof_time_form"
+    },
+    {
+      "text": "2026-13-20T12:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-00-20T12:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-10-00T12:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-10-32T12:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-04-31T12:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-02-29T12:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2100-02-29T00:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-10-20T24:00:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-10-20T12:60:00Z",
+      "error": "proof_time_not_an_instant"
+    },
+    {
+      "text": "2026-10-20T23:59:60Z",
+      "error": "proof_time_not_an_instant"
+    }
+  ],
+  "tolerance": [
+    {
+      "name": "equal_now",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T12:00:00Z",
+      "expect": "ok"
+    },
+    {
+      "name": "skew_edge_inclusive",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T12:01:00Z",
+      "expect": "ok"
+    },
+    {
+      "name": "one_past_skew",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T12:01:01Z",
+      "expect": "proof_time_in_future"
+    },
+    {
+      "name": "age_edge_inclusive",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T11:50:00Z",
+      "expect": "ok"
+    },
+    {
+      "name": "one_past_age",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T11:49:59Z",
+      "expect": "proof_time_too_old"
+    },
+    {
+      "name": "custom_zero_skew_edge",
+      "now_secs": 1760961600,
+      "skew_secs": 0,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T12:00:00Z",
+      "expect": "ok"
+    },
+    {
+      "name": "custom_zero_skew_one_ahead",
+      "now_secs": 1760961600,
+      "skew_secs": 0,
+      "max_age_secs": 600,
+      "proof_time": "2025-10-20T12:00:01Z",
+      "expect": "proof_time_in_future"
+    },
+    {
+      "name": "custom_wide_age",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 86400,
+      "proof_time": "2025-10-19T12:00:00Z",
+      "expect": "ok"
+    },
+    {
+      "name": "custom_wide_age_past",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 86400,
+      "proof_time": "2025-10-19T11:59:59Z",
+      "expect": "proof_time_too_old"
+    },
+    {
+      "name": "not_the_exact_form",
+      "now_secs": 1760961600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2026-10-20T12:00:00.5Z",
+      "expect": "proof_time_form"
+    },
+    {
+      "name": "across_year_boundary",
+      "now_secs": 1767225600,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2025-12-31T23:55:00Z",
+      "expect": "ok"
+    },
+    {
+      "name": "across_leap_day",
+      "now_secs": 1709251260,
+      "skew_secs": 60,
+      "max_age_secs": 600,
+      "proof_time": "2024-02-29T23:59:59Z",
+      "expect": "ok"
+    }
+  ]
+}

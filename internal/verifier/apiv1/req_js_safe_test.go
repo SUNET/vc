@@ -62,7 +62,7 @@ func TestReqParamsMustSurviveTheBrowsersNumbers(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := reqSurvivesTheBrowser([]openid4vp.ReqItem{{
-				ID: openid4vp.FunctionPseudonym, Return: "h",
+				FnID: openid4vp.FunctionPseudonym, Return: "h",
 				Params: map[string]any{"p": tc.value},
 			}})
 			if tc.ok {
@@ -78,9 +78,9 @@ func TestReqParamsMustSurviveTheBrowsersNumbers(t *testing.T) {
 // And the refusal has to reach the publishing path, not just exist.
 func TestCircuitZkPresetWithAnUnsafeParamIsOmitted(t *testing.T) {
 	cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{
-		Format: openid4vp.FormatCircuitZk,
+		Format: openid4vp.FormatZkpReq,
 		Req: []openid4vp.ReqItem{{
-			ID: openid4vp.FunctionPseudonym, Return: "nym-123",
+			FnID: openid4vp.FunctionPseudonym, Return: "nym-123",
 			Params: map[string]any{
 				"config":  "known-offender-matching-ssc",
 				"counter": int64(9007199254740993),

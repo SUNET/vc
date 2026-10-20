@@ -76,7 +76,7 @@ func presetQuery(cfg *model.Cfg, scope string, scopeCfg *model.VerificationPrese
 	// The UI drops a circuit_zk scope's claims entirely, so judging them
 	// here would report a conflict the wire never carries. Everything
 	// else keeps them, because for those formats the claims ARE the query.
-	if !openid4vp.IsCircuitZkFormat(query.Format) {
+	if !openid4vp.IsZkpReqFormat(query.Format) {
 		for _, claim := range scopeCfg.Claims {
 			query.Claims = append(query.Claims, openid4vp.ClaimQuery{Path: stringPathToPtrPath(claim.Path)})
 		}

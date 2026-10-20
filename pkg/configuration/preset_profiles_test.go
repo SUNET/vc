@@ -34,10 +34,10 @@ func presetCfg(scopeCfg *model.VerificationPresetScope) *model.Cfg {
 
 func conformingScope() *model.VerificationPresetScope {
 	return &model.VerificationPresetScope{
-		Format:   openid4vp.FormatCircuitZk,
+		Format:   openid4vp.FormatZkpReq,
 		Validate: openid4vp.ProfileNymAuth,
 		Req: []openid4vp.ReqItem{{
-			ID:     openid4vp.FunctionPseudonym,
+			FnID:   openid4vp.FunctionPseudonym,
 			Return: "nym-123",
 			Params: map[string]any{"config": "known-offender-matching-ssc"},
 		}},
@@ -88,7 +88,7 @@ func TestPresetProfileIsOptIn(t *testing.T) {
 
 	// Including the case with no req at all, which the profile requires.
 	require.NoError(t, checkPresetValidationProfiles(presetCfg(&model.VerificationPresetScope{
-		Format: openid4vp.FormatCircuitZk,
+		Format: openid4vp.FormatZkpReq,
 	})))
 }
 

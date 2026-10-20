@@ -17,9 +17,9 @@ import (
 // up as "it works on one replica".
 func TestRawSurvivesAJSONRoundTrip(t *testing.T) {
 	for _, tc := range []struct{ name, query string }{
-		{"the WIP shape, claims as an object", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[{"fn_id":"age_check","id":"h"}]}}`},
-		{"req as an object, as a later generation might", `{"id":"q","format":"circuit_zk","req":{"not":"an array"}}`},
-		{"a member whose type the model does not expect", `{"id":"q","format":"circuit_zk","meta":"not an object"}`},
+		{"the WIP shape, claims as an object", `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"claims":{"_req":[{"fn_id":"age_check","id":"h"}]}}`},
+		{"req as an object, as a later generation might", `{"id":"q","format":"zkp_req","_req":{"not":"an array"}}`},
+		{"a member whose type the model does not expect", `{"id":"q","format":"zkp_req","meta":"not an object"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// As the verifier built it.
@@ -46,13 +46,13 @@ func TestRawSurvivesAJSONRoundTrip(t *testing.T) {
 // A query the model DOES understand still decodes typed, so the fallback
 // does not quietly swallow everything.
 func TestTypedQueriesStillDecodeTyped(t *testing.T) {
-	const in = `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"age_check","return":"h"}]}`
+	const in = `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"_req":[{"fn_id":"age_check","return":"h"}]}`
 	var query CredentialQuery
 	require.NoError(t, json.Unmarshal([]byte(in), &query))
 
 	assert.Nil(t, query.Raw, "this shape is modelled, so it must not fall back to raw")
 	require.Len(t, query.Req, 1)
-	assert.Equal(t, FunctionAgeCheck, query.Req[0].ID)
+	assert.Equal(t, FunctionAgeCheck, query.Req[0].FnID)
 }
 
 // Invalid JSON is still an error. The fallback keeps shapes, not rubbish:
@@ -76,7 +76,7 @@ func TestValidateJudgesARawQueryByItsOwnBytes(t *testing.T) {
 	}{
 		{
 			name:  "circuit_zk, which this build does not constrain either way",
-			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+			query: `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
 		},
 		{
 			name:  "an mdoc query whose doctype survived the member that did not",
@@ -108,7 +108,7 @@ func TestValidateJudgesARawQueryByItsOwnBytes(t *testing.T) {
 		},
 		{
 			name:  "meta unreadable, on a format that has none",
-			query: `{"id":"q","format":"circuit_zk","meta":"not an object"}`,
+			query: `{"id":"q","format":"zkp_req","meta":"not an object"}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,13 +133,13 @@ func TestValidateJudgesARawQueryByItsOwnBytes(t *testing.T) {
 // it - so a raw query that kept an empty id would be sent correctly and
 // then match nothing that came back.
 func TestRawRetainsTheMembersTheStackRoutesBy(t *testing.T) {
-	const in = `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`
+	const in = `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`
 	var query CredentialQuery
 	require.NoError(t, json.Unmarshal([]byte(in), &query))
 
 	require.NotNil(t, query.Raw)
 	assert.Equal(t, "q", query.ID, "the response path looks a presentation up by this")
-	assert.Equal(t, FormatCircuitZk, query.Format, "every format decision after this reads it")
+	assert.Equal(t, FormatZkpReq, query.Format, "every format decision after this reads it")
 
 	// And the wire is still the bytes that arrived, not a re-encoding of
 	// the two members just adopted.
@@ -152,10 +152,10 @@ func TestRawRetainsTheMembersTheStackRoutesBy(t *testing.T) {
 // expect is left alone rather than coerced, and does not stop the rest.
 func TestRawRoutingIgnoresMembersItCannotRead(t *testing.T) {
 	var query CredentialQuery
-	require.NoError(t, json.Unmarshal([]byte(`{"id":7,"format":"circuit_zk","claims":{"_req":[]}}`), &query))
+	require.NoError(t, json.Unmarshal([]byte(`{"id":7,"format":"zkp_req","claims":{"_req":[]}}`), &query))
 	require.NotNil(t, query.Raw)
 	assert.Empty(t, query.ID)
-	assert.Equal(t, FormatCircuitZk, query.Format)
+	assert.Equal(t, FormatZkpReq, query.Format)
 }
 
 // Not judging is not the same as not looking. Raw is emitted verbatim, so
@@ -182,7 +182,7 @@ func TestValidateReadsTheFormatFromRawNotFromTheStruct(t *testing.T) {
 	}{
 		{
 			name:  "circuit_zk, built in code with no decode in sight",
-			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+			query: `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
 		},
 		{
 			name:  "mso_mdoc with its doctype, likewise",
@@ -273,7 +273,7 @@ func TestEveryModelledMemberIsShadowed(t *testing.T) {
 		"trusted_authorities":                  []any{map[string]any{"type": "aki", "values": []string{"x"}}},
 		"require_cryptographic_holder_binding": false,
 		"claim_sets":                           [][]string{{"a"}},
-		"req":                                  []any{map[string]any{"id": "f", "return": "h"}},
+		"_req":                                 []any{map[string]any{"id": "f", "return": "h"}},
 		// claims is the member that forces the raw path.
 		"claims": map[string]any{"_req": []any{}},
 	}
@@ -328,7 +328,7 @@ func TestNewRawCredentialQueryRefusesNonJSON(t *testing.T) {
 // The copy is independent: mutating the caller's slice afterwards must
 // not change what the query sends.
 func TestNewRawCredentialQueryCopiesItsInput(t *testing.T) {
-	raw := []byte(`{"id":"q","format":"circuit_zk","claims":{"_req":[]}}`)
+	raw := []byte(`{"id":"q","format":"zkp_req","claims":{"_req":[]}}`)
 	query, err := NewRawCredentialQuery(raw)
 	require.NoError(t, err)
 
@@ -357,7 +357,7 @@ func TestRawPreservesTheValueAndNotTheBytes(t *testing.T) {
 	// character encoding/json escapes inside a string value.
 	const configured = `{
 		"id": "q",
-		"format": "circuit_zk",
+		"format": "zkp_req",
 		"meta": { "doctype_value": "a&b" },
 		"claims": { "_req": [] }
 	}`
@@ -416,14 +416,14 @@ func TestDuplicateMembersGoRawAndSurvive(t *testing.T) {
 		name, query string
 		wantRaw     bool
 	}{
-		{"a duplicate at the top level", `{"id":"first","id":"last","format":"circuit_zk","meta":{"doctype_value":"d"}}`, true},
-		{"a duplicate nested inside a req param", `{"id":"q","format":"circuit_zk","meta":{},"req":[{"id":"f","return":"h","params":{"p":1,"p":2}}]}`, true},
+		{"a duplicate at the top level", `{"id":"first","id":"last","format":"zkp_req","meta":{"doctype_value":"d"}}`, true},
+		{"a duplicate nested inside a req param", `{"id":"q","format":"zkp_req","meta":{},"_req":[{"fn_id":"f","return":"h","params":{"p":1,"p":2}}]}`, true},
 
 		// The same NAME in two different objects is not a duplicate. A
 		// scanner that missed this would push every ordinary req down the
 		// raw path.
-		{"the same name in sibling objects", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"a","return":"h"},{"id":"b","return":"h2"}]}`, false},
-		{"and the same name at different depths", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"a","return":"h","params":{"id":"inner"}}]}`, false},
+		{"the same name in sibling objects", `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"_req":[{"fn_id":"a","return":"h"},{"fn_id":"b","return":"h2"}]}`, false},
+		{"and the same name at different depths", `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"_req":[{"fn_id":"a","return":"h","params":{"fn_id":"inner"}}]}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var query CredentialQuery
@@ -484,11 +484,11 @@ func TestInvalidModelledMembersAreNotLaunderedIntoRaw(t *testing.T) {
 			// array. This is the rulebook's WIP shape and the reason Raw
 			// exists at all.
 			name:  "claims as an object, which the model does not have",
-			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+			query: `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
 		},
 		{
 			name:  "req as an object, likewise",
-			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":{"not":"an array"}}`,
+			query: `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"_req":{"not":"an array"}}`,
 		},
 		{
 			name:  "an ordinary valid query",
@@ -535,7 +535,7 @@ func TestAmbiguousConstraintMembersAreRefused(t *testing.T) {
 		},
 		{
 			name:  "two formats",
-			query: `{"id":"q","format":"circuit_zk","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]}}`,
+			query: `{"id":"q","format":"zkp_req","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]}}`,
 			want:  "format",
 		},
 		{
@@ -566,9 +566,9 @@ func TestAmbiguousConstraintMembersAreRefused(t *testing.T) {
 // handles, are exactly there.
 func TestDuplicatesThatDoNotDecideTheConstraintStillPass(t *testing.T) {
 	for _, in := range []string{
-		`{"id":"first","id":"last","format":"circuit_zk","meta":{"doctype_value":"d"}}`,
-		`{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"f","return":"h","params":{"p":1,"p":2}}]}`,
-		`{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"a","return":"h","id":"b"}]}`,
+		`{"id":"first","id":"last","format":"zkp_req","meta":{"doctype_value":"d"}}`,
+		`{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"_req":[{"fn_id":"f","return":"h","params":{"p":1,"p":2}}]}`,
+		`{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"_req":[{"fn_id":"a","return":"h","fn_id":"b"}]}`,
 	} {
 		var query CredentialQuery
 		require.NoErrorf(t, json.Unmarshal([]byte(in), &query), "%s", in)

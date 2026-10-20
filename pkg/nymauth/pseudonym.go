@@ -41,7 +41,7 @@ const SeedBytes = 16
 // after it and produce a different pseudonym.
 var nullInput = make([]byte, 32)
 
-// Pseudonym computes pseudonym-v1-sha256:
+// Pseudonym computes pseudonym:
 //
 //	pseudonym = SHA256(DST || seed || prover_input || verifier_input)
 //	DST       = "nym_auth/v1/<config>", UTF-8

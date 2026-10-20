@@ -34,8 +34,8 @@ func circuitZkPresetConfig(t *testing.T, scopeCfg *model.VerificationPresetScope
 			// it the preset is not published at all, which is the subject
 			// of TestCircuitZkPresetNeedsTheFormatAdvertised.
 			PreferredVPFormats: &openid4vp.VPFormatsSupported{
-				MsoMdoc:   &openid4vp.MsoMdocFormat{},
-				CircuitZk: &openid4vp.CircuitZkFormat{},
+				MsoMdoc: &openid4vp.MsoMdocFormat{},
+				ZkpReq:  &openid4vp.ZkpReqFormat{},
 			},
 			Presets: map[string]model.PresetDefinition{
 				"Nym": {Credentials: model.VerificationPreset{"nym": scopeCfg}},
@@ -47,7 +47,7 @@ func circuitZkPresetConfig(t *testing.T, scopeCfg *model.VerificationPresetScope
 var nymNamespace = func() *string { s := "eu.europa.ec.eudi.nym_auth.1"; return &s }()
 
 var nymReq = []openid4vp.ReqItem{{
-	ID:     openid4vp.FunctionPseudonym,
+	FnID:   openid4vp.FunctionPseudonym,
 	Return: "nym-123",
 	Params: map[string]any{"config": "known-offender-matching-ssc"},
 }}
@@ -60,7 +60,7 @@ var nymReq = []openid4vp.ReqItem{{
 // wallet's.
 func TestCircuitZkPresetPublishesReq(t *testing.T) {
 	cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{
-		Format: openid4vp.FormatCircuitZk,
+		Format: openid4vp.FormatZkpReq,
 		Req:    nymReq,
 	}, nil)
 	client, _ := CreateTestClientWithMock(t, cfg)
@@ -73,7 +73,7 @@ func TestCircuitZkPresetPublishesReq(t *testing.T) {
 	require.Len(t, preset.Credentials, 1)
 
 	credential := preset.Credentials[0]
-	assert.Equal(t, openid4vp.FormatCircuitZk, credential.Format)
+	assert.Equal(t, openid4vp.FormatZkpReq, credential.Format)
 	assert.Equal(t, "eu.europa.ec.eudi.nym_auth.1", credential.Meta.DoctypeValue,
 		"circuit_zk is matched on doctype_value, like the mdoc it proves over")
 	require.Equal(t, nymReq, credential.Req)
@@ -106,7 +106,7 @@ func TestCircuitZkPresetCarriesNoClaims(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{
-				Format: openid4vp.FormatCircuitZk,
+				Format: openid4vp.FormatZkpReq,
 				Req:    nymReq,
 				Claims: tc.claims,
 			}, tc.vctm)
@@ -127,7 +127,7 @@ func TestCircuitZkPresetCarriesNoClaims(t *testing.T) {
 // preset the format cannot satisfy and the operator sees a button that
 // returns nothing, with no error anywhere.
 func TestCircuitZkPresetWithoutReqIsOmitted(t *testing.T) {
-	cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk}, nil)
+	cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{Format: openid4vp.FormatZkpReq}, nil)
 	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
@@ -144,8 +144,8 @@ func TestCircuitZkPresetWithoutReqIsOmitted(t *testing.T) {
 // scope and not of an SD-JWT one - pairing it with vct_values would send
 // a query no wallet can satisfy.
 func TestCircuitZkOverrideKeepsTheConstraintFamily(t *testing.T) {
-	assert.True(t, sameConstraintFamily(openid4vp.FormatMsoMdoc, openid4vp.FormatCircuitZk))
-	assert.False(t, sameConstraintFamily(openid4vp.FormatSDJWTVC, openid4vp.FormatCircuitZk))
+	assert.True(t, sameConstraintFamily(openid4vp.FormatMsoMdoc, openid4vp.FormatZkpReq))
+	assert.False(t, sameConstraintFamily(openid4vp.FormatSDJWTVC, openid4vp.FormatZkpReq))
 }
 
 // The circuit filter - which proof systems and circuits this verifier
@@ -172,17 +172,17 @@ func TestCircuitZkPresetNeedsTheFormatAdvertised(t *testing.T) {
 			MsoMdoc: &openid4vp.MsoMdocFormat{},
 		}, false},
 		{"an empty circuit_zk, which means any circuit", &openid4vp.VPFormatsSupported{
-			CircuitZk: &openid4vp.CircuitZkFormat{},
+			ZkpReq: &openid4vp.ZkpReqFormat{},
 		}, true},
 		{"and one naming a filter", &openid4vp.VPFormatsSupported{
-			CircuitZk: &openid4vp.CircuitZkFormat{
-				CircuitProofSystemValues: []string{"longfellow-libzk-v1"},
+			ZkpReq: &openid4vp.ZkpReqFormat{
+				ProofSystemValues: []string{"longfellow-libzk-v1"},
 			},
 		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{
-				Format: openid4vp.FormatCircuitZk,
+				Format: openid4vp.FormatZkpReq,
 				Req:    nymReq,
 			}, nil)
 			cfg.Verifier.PreferredVPFormats = tc.formats
@@ -272,8 +272,8 @@ func TestAMixedPresetIsNotPublishedWithoutItsCircuitCredential(t *testing.T) {
 	}
 
 	advertised := &openid4vp.VPFormatsSupported{
-		MsoMdoc:   &openid4vp.MsoMdocFormat{},
-		CircuitZk: &openid4vp.CircuitZkFormat{},
+		MsoMdoc: &openid4vp.MsoMdocFormat{},
+		ZkpReq:  &openid4vp.ZkpReqFormat{},
 	}
 
 	for _, tc := range []struct {
@@ -283,20 +283,20 @@ func TestAMixedPresetIsNotPublishedWithoutItsCircuitCredential(t *testing.T) {
 	}{
 		{
 			name:     "with no req",
-			scopeCfg: &model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk},
+			scopeCfg: &model.VerificationPresetScope{Format: openid4vp.FormatZkpReq},
 			formats:  advertised,
 		},
 		{
 			name:     "with circuit_zk unadvertised",
-			scopeCfg: &model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk, Req: nymReq},
+			scopeCfg: &model.VerificationPresetScope{Format: openid4vp.FormatZkpReq, Req: nymReq},
 			formats:  &openid4vp.VPFormatsSupported{MsoMdoc: &openid4vp.MsoMdocFormat{}},
 		},
 		{
 			name: "with a param the browser would change",
 			scopeCfg: &model.VerificationPresetScope{
-				Format: openid4vp.FormatCircuitZk,
+				Format: openid4vp.FormatZkpReq,
 				Req: []openid4vp.ReqItem{{
-					ID: openid4vp.FunctionPseudonym, Return: "nym-1",
+					FnID: openid4vp.FunctionPseudonym, Return: "nym-1",
 					Params: map[string]any{"counter": int64(9007199254740993)},
 				}},
 			},
@@ -320,7 +320,7 @@ func TestAMixedPresetIsNotPublishedWithoutItsCircuitCredential(t *testing.T) {
 	}
 
 	t.Run("and it IS published when the circuit credential is usable", func(t *testing.T) {
-		cfg := build(&model.VerificationPresetScope{Format: openid4vp.FormatCircuitZk, Req: nymReq}, advertised)
+		cfg := build(&model.VerificationPresetScope{Format: openid4vp.FormatZkpReq, Req: nymReq}, advertised)
 		client, _ := CreateTestClientWithMock(t, cfg)
 		client.cfg = cfg
 
