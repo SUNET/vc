@@ -57,6 +57,22 @@ type Function struct {
 	// is a request that means something other than it appears to.
 	Inputs []string
 
+	// Check, when set, validates this function's VALUES - the shapes
+	// only it knows.
+	//
+	// The generic layer checks that a contribution fills exactly the
+	// declared inputs and nothing more; it cannot check that
+	// "earliest" is a date, because it does not know that any input
+	// is. Without this, a CircuitInput built by hand rather than
+	// through AgeCheck.Bounds() carried whatever it liked into the
+	// circuit request, and the first thing to notice was the native
+	// boundary, reporting it as a generic invalid input.
+	//
+	// Per function and optional, for the same reason
+	// MinimumSelectivity is: a rule invented for every predicate would
+	// be a rule nobody specified.
+	Check func(values map[string][]byte) error
+
 	// MinimumSelectivity, when non-empty, describes a privacy floor
 	// this function imposes on its own parameters - the age check's
 	// 365-day minimum range, for instance.
@@ -75,6 +91,7 @@ var (
 		FunctionAgeCheck: {
 			ID:                 FunctionAgeCheck,
 			Inputs:             []string{InputEarliest, InputCutoff},
+			Check:              checkAgeCheckValues,
 			MinimumSelectivity: "the range between a set earliest and cutoff birth date is at least 365 days",
 		},
 	}
@@ -92,7 +109,12 @@ func Register(f Function) error {
 	}
 	functionsMu.Lock()
 	defer functionsMu.Unlock()
-	functions[f.ID] = Function{ID: f.ID, Inputs: slices.Clone(f.Inputs), MinimumSelectivity: f.MinimumSelectivity}
+	functions[f.ID] = Function{
+		ID:                 f.ID,
+		Inputs:             slices.Clone(f.Inputs),
+		Check:              f.Check,
+		MinimumSelectivity: f.MinimumSelectivity,
+	}
 	return nil
 }
 
@@ -132,6 +154,11 @@ func (i CircuitInput) check() error {
 	for _, name := range f.Inputs {
 		if len(i.Values[name]) == 0 {
 			return fmt.Errorf("nymauth: function %q leaves circuit input %q unset", i.FunctionID, name)
+		}
+	}
+	if f.Check != nil {
+		if err := f.Check(i.Values); err != nil {
+			return fmt.Errorf("nymauth: function %q: %w", i.FunctionID, err)
 		}
 	}
 	for name := range i.Values {

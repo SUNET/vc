@@ -127,3 +127,46 @@ func TestLookupFunctionDoesNotShareTheRegistrysInputs(t *testing.T) {
 	assert.Equal(t, []string{"value"}, again.Inputs,
 		"a caller writing to the returned slice must not change the registry")
 }
+
+// A contribution built by hand must be checked as thoroughly as one
+// built through the predicate's own mapping.
+//
+// The generic layer checks only that the declared inputs are filled -
+// it cannot know that "earliest" is a date. A CircuitInput is a plain
+// map, so a request assembled directly carried whatever it liked into
+// the circuit, and the first thing to notice was the native boundary,
+// reporting it as a generic invalid input.
+func TestCircuitInputChecksTheFunctionsOwnValues(t *testing.T) {
+	ageInput := func(earliest, cutoff string) CircuitInput {
+		return CircuitInput{FunctionID: FunctionAgeCheck, Values: map[string][]byte{
+			InputEarliest: []byte(earliest),
+			InputCutoff:   []byte(cutoff),
+		}}
+	}
+
+	t.Run("a non-date paired with a sentinel", func(t *testing.T) {
+		// checkRange returns early when either bound is a sentinel, so
+		// nothing looked at the other one.
+		assert.Error(t, ageInput("not-a-date", NoUpperBound).check())
+		assert.Error(t, ageInput(NoLowerBound, "2008-13-01").check())
+	})
+
+	t.Run("a window narrower than the rulebook allows", func(t *testing.T) {
+		assert.ErrorContains(t, ageInput("2001-01-01", "2001-06-01").check(), "at least 365")
+	})
+
+	t.Run("the sentinels themselves are not dates and are fine", func(t *testing.T) {
+		assert.NoError(t, ageInput(NoLowerBound, NoUpperBound).check())
+	})
+
+	t.Run("a real window is accepted", func(t *testing.T) {
+		assert.NoError(t, ageInput(NoLowerBound, "2008-10-07").check())
+		assert.NoError(t, ageInput("2001-01-01", "2001-12-31").check())
+	})
+
+	t.Run("a function with no Check is unaffected", func(t *testing.T) {
+		const id = "test.no_value_check"
+		require.NoError(t, Register(Function{ID: id, Inputs: []string{"value"}}))
+		assert.NoError(t, CircuitInput{FunctionID: id, Values: map[string][]byte{"value": []byte("anything")}}.check())
+	})
+}
