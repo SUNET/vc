@@ -63,3 +63,45 @@ func TestVPResponseStillRefusesAMalformedEntry(t *testing.T) {
 		})
 	}
 }
+
+// A response carrying ONLY object presentations is a perfectly good
+// response, and the emptiness check must not refuse it.
+//
+// Counting the string map here refused a circuit_zk-only response
+// before anything could dispatch it - and a test whose fixture also
+// carried a string presentation would never have noticed, because
+// the string map was then non-empty for the wrong reason.
+func TestVPResponseAcceptsAnObjectOnlyResponse(t *testing.T) {
+	const body = `{
+	  "state": "s",
+	  "vp_token": {
+	    "nym_attestation": [{"circuit_id": "urn:c"}]
+	  }
+	}`
+
+	var response VPResponse
+	require.NoError(t, json.Unmarshal([]byte(body), &response))
+
+	assert.Empty(t, response.VPToken, "there are no string presentations in it")
+	assert.Contains(t, response.VPTokenRaw, "nym_attestation")
+	assert.NotEmpty(t, response.VPTokenEnvelope, "the whole envelope is kept, not only the entry")
+
+	// And the envelope is the OBJECT, not one entry's array: a
+	// validator handed the entry would be given an array where it
+	// expects a map.
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(response.VPTokenEnvelope, &envelope))
+	assert.Contains(t, envelope, "nym_attestation")
+}
+
+// A response that presented nothing is still refused, however it is
+// spelled.
+func TestVPResponseStillRefusesAnEmptyEnvelope(t *testing.T) {
+	for _, body := range []string{
+		`{"state":"s","vp_token":{}}`,
+		`{"state":"s","vp_token":null}`,
+	} {
+		var response VPResponse
+		assert.Errorf(t, json.Unmarshal([]byte(body), &response), "body %s", body)
+	}
+}

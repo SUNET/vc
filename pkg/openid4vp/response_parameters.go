@@ -25,6 +25,20 @@ type VPResponse struct {
 	// through storage would re-encode them, and re-encoded bytes are
 	// exactly the ones a duplicate check can no longer see.
 	VPTokenRaw map[string]json.RawMessage `json:"-" bson:"-"`
+
+	// VPTokenEnvelope is the whole vp_token object as it arrived.
+	//
+	// The ENVELOPE and not only its entries, because a validator that
+	// checks the envelope - a repeated query id, the shape of the
+	// object itself - has to see the object. Handing it one entry
+	// would silently drop those checks and, worse, hand it an array
+	// where it expects a map.
+	//
+	// Same lifetime and same reason as VPTokenRaw: input bytes, kept
+	// for one verification, never persisted. A round trip through
+	// storage would re-encode them, and re-encoded bytes are the ones
+	// a duplicate check can no longer see.
+	VPTokenEnvelope json.RawMessage `json:"-" bson:"-"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for VPResponse.
@@ -58,6 +72,7 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 
 	v.VPToken = make(map[string][]string)
 	v.VPTokenRaw = make(map[string]json.RawMessage)
+	v.VPTokenEnvelope = raw.VPToken
 
 	// Try as object (DCQL format): {"id": "token"} or {"id": ["token1","token2"]}
 	var obj map[string]json.RawMessage
@@ -110,7 +125,14 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 		// above, which tests the raw bytes and sees four of them. An empty
 		// object arrives the same way. Either is a response that presented
 		// nothing while claiming the shape of one.
-		if len(v.VPToken) == 0 {
+		//
+		// Counted over the RAW entries, not the string map: a
+		// response carrying only object presentations - a circuit_zk
+		// one, where every entry is an array of objects - leaves the
+		// string map empty and is a perfectly good response. Counting
+		// the string map here refused it before anything could
+		// dispatch it.
+		if len(v.VPTokenRaw) == 0 {
 			return fmt.Errorf("vp_token: missing or empty")
 		}
 		return nil

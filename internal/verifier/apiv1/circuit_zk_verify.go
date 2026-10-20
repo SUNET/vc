@@ -61,19 +61,26 @@ func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.
 	return request
 }
 
-// circuitZkRawToken returns the vp_token entry for this query, as it
-// arrived.
+// circuitZkRawToken returns the whole vp_token ENVELOPE, as it
+// arrived, having checked that it carries an entry for this query.
+//
+// The envelope and not the entry, because the validator checks the
+// envelope too - its shape, and a repeated query id - and handing it
+// one entry would drop those checks and give it an array where it
+// expects a map.
 //
 // Raw, because the validation has to run on the text: a repeated
 // member or a repeated result handle cannot be seen after decoding,
 // since Go keeps the last of a repeated key and discards the other
 // without a word.
 func circuitZkRawToken(vpResponse openid4vp.VPResponse, queryID string) (json.RawMessage, error) {
-	raw, found := vpResponse.VPTokenRaw[queryID]
-	if !found || len(raw) == 0 {
+	if entry, found := vpResponse.VPTokenRaw[queryID]; !found || len(entry) == 0 {
 		return nil, fmt.Errorf("circuit_zk: the response carries no presentation for credential query %q", queryID)
 	}
-	return raw, nil
+	if len(vpResponse.VPTokenEnvelope) == 0 {
+		return nil, fmt.Errorf("circuit_zk: the response carries no vp_token to validate")
+	}
+	return vpResponse.VPTokenEnvelope, nil
 }
 
 // circuitZkChannel names how a presentation reached this verifier.

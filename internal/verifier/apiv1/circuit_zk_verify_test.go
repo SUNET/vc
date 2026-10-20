@@ -272,3 +272,51 @@ func TestIssuerKeyThumbprint(t *testing.T) {
 	assert.Empty(t, issuerKeyThumbprint(nil))
 	assert.Empty(t, issuerKeyThumbprint(&ecdsa.PublicKey{}), "an incomplete key names nothing")
 }
+
+// The validator receives the whole vp_token ENVELOPE, which is what
+// it expects - handing it one entry gave it an array where it wants a
+// map, and the response then failed as unparseable.
+//
+// This runs the two halves together, through a circuit_zk-ONLY
+// response, because that is the combination neither half's own tests
+// exercised: the validator's vectors are whole envelopes, and the
+// dispatch's tests never called the validator.
+func TestCircuitZkRawTokenFeedsTheValidator(t *testing.T) {
+	const body = `{
+	  "state": "s",
+	  "vp_token": {
+	    "nym_attestation": [{
+	      "circuit_id": "urn:c",
+	      "proof_system": "longfellow-libzk-v1",
+	      "proof": "AQID",
+	      "results": {"age-1": {"satisfied": true}}
+	    }]
+	  }
+	}`
+
+	var response openid4vp.VPResponse
+	require.NoError(t, json.Unmarshal([]byte(body), &response))
+
+	raw, err := circuitZkRawToken(response, "nym_attestation")
+	require.NoError(t, err)
+
+	got, err := openid4vp.ValidateCircuitZkResponse(raw, openid4vp.CircuitZkRequest{
+		QueryID:             "nym_attestation",
+		Items:               []openid4vp.ReqItem{{ID: openid4vp.CircuitZkFunctionAgeCheck, Return: "age-1"}},
+		OfferedCircuitIDs:   []string{"urn:c"},
+		OfferedProofSystems: []string{"longfellow-libzk-v1"},
+	})
+	require.NoError(t, err, "the dispatch must hand the validator what the validator expects")
+	require.Len(t, got, 1)
+	assert.Equal(t, []string{"age-1"}, got[0].Satisfied)
+}
+
+// A query the response does not answer is named as such, rather than
+// reaching the validator as an envelope with a missing key.
+func TestCircuitZkRawTokenRefusesAMissingQuery(t *testing.T) {
+	var response openid4vp.VPResponse
+	require.NoError(t, json.Unmarshal([]byte(`{"state":"s","vp_token":{"other":[{"a":1}]}}`), &response))
+
+	_, err := circuitZkRawToken(response, "nym_attestation")
+	assert.ErrorContains(t, err, "no presentation for credential query")
+}
