@@ -43,6 +43,13 @@ const (
 	ReasonResultNotSatisfied            = "result_not_satisfied"
 	ReasonPseudonymNotBase64URL         = "pseudonym_not_base64url"
 	ReasonPseudonymWrongLength          = "pseudonym_wrong_length"
+	ReasonX5ChainNotArray               = "x5chain_not_array"
+	ReasonX5ChainEmpty                  = "x5chain_empty"
+	ReasonX5ChainTooMany                = "x5chain_too_many"
+	ReasonX5ChainElementNotString       = "x5chain_element_not_string"
+	ReasonX5ChainElementEmpty           = "x5chain_element_empty"
+	ReasonX5ChainElementNotBase64       = "x5chain_element_not_base64"
+	ReasonX5ChainElementTooLarge        = "x5chain_element_too_large"
 )
 
 // CircuitZkResponseError is a refusal, carrying the reason code the
@@ -84,6 +91,16 @@ type CircuitZkPresentation struct {
 	Pseudonyms map[string][]byte
 	// Satisfied names the handles whose predicate the proof asserts.
 	Satisfied []string
+
+	// X5Chain is the issuer's certificate chain, leaf first, DER.
+	//
+	// Not a verified fact: these are bytes the holder sent, bounded
+	// and base64-decoded and nothing more - this package does not
+	// parse X.509. Whether the leaf's key may be used is a trust
+	// decision taken elsewhere: the circuit proves the credential was
+	// signed by that key, and the trust layer is what says the key
+	// belongs to an issuer this verifier accepts.
+	X5Chain [][]byte
 }
 
 // CircuitZkRequest is what a response is checked against: the
@@ -167,7 +184,25 @@ func ValidateCircuitZkResponse(vpToken []byte, request CircuitZkRequest) ([]Circ
 }
 
 // presentationMembers are the only members a presentation may carry.
-var presentationMembers = []string{"circuit_id", "proof_system", "proof", "results"}
+//
+// All five are REQUIRED. "x5chain" is required because a circuit_zk
+// presentation carries no credential: the circuit proves "this was
+// signed by Q", and without the issuer's certificate the verifier
+// never learns which Q to check against.
+var presentationMembers = []string{"circuit_id", "proof_system", "proof", "x5chain", "results"}
+
+// MaxX5ChainCertificates bounds how many certificates a chain may
+// carry, and MaxX5ChainCertificateBytes bounds each one. Both are
+// normative (circuit_zk_response.md rule 5a) and inclusive.
+//
+// They bound attacker-controlled input on its way into an X.509
+// parser: the chain arrives from the holder and is parsed before
+// anything about it has been judged. Eight certificates is past any
+// real issuer chain and 4096 bytes past any real certificate.
+const (
+	MaxX5ChainCertificates     = 8
+	MaxX5ChainCertificateBytes = 4096
+)
 
 func validateCircuitZkPresentation(raw json.RawMessage, request CircuitZkRequest) (CircuitZkPresentation, error) {
 	var members map[string]json.RawMessage
@@ -209,6 +244,26 @@ func validateCircuitZkPresentation(raw json.RawMessage, request CircuitZkRequest
 		}
 	}
 
+	// The ARRAY SHAPE here, with the other member types, and the
+	// contents further down. The shared order puts a member-type
+	// refusal before offer binding and the chain's contents after
+	// proof encoding, so the two halves cannot be one check.
+	//
+	// Into RawMessage and not []string: an element that is not a
+	// string has its own refusal, reported in the contents pass, and
+	// decoding into []string here would report it as a bad array.
+	var rawChain []json.RawMessage
+	if !isJSONArray(members["x5chain"]) {
+		// The shape BEFORE the decode, because Go's decoder accepts
+		// JSON null into a slice without error and leaves it nil -
+		// which would arrive below as an empty chain and be reported
+		// as the wrong refusal. null is not an array.
+		return CircuitZkPresentation{}, refuse(ReasonX5ChainNotArray, "\"x5chain\" is not an array")
+	}
+	if err := strictDecode(members["x5chain"], &rawChain); err != nil {
+		return CircuitZkPresentation{}, refuse(ReasonX5ChainNotArray, "\"x5chain\" is not an array: %v", err)
+	}
+
 	var results map[string]json.RawMessage
 	if err := strictDecode(members["results"], &results); err != nil {
 		return CircuitZkPresentation{}, refuse(ReasonPresentationMemberWrongType, "\"results\" is not an object")
@@ -239,6 +294,12 @@ func validateCircuitZkPresentation(raw json.RawMessage, request CircuitZkRequest
 		return CircuitZkPresentation{}, refuse(ReasonProofNotBase64URL, "%v", err)
 	}
 	presentation.Proof = decodedProof
+
+	chain, chainErr := decodeX5Chain(rawChain)
+	if chainErr != nil {
+		return CircuitZkPresentation{}, chainErr
+	}
+	presentation.X5Chain = chain
 
 	if err := refuseDuplicateHandles(members["results"]); err != nil {
 		return CircuitZkPresentation{}, err
@@ -353,6 +414,73 @@ const (
 var circuitZkResultMembers = map[string]string{
 	CircuitZkFunctionPseudonym: "pseudonym",
 	CircuitZkFunctionAgeCheck:  "satisfied",
+}
+
+// isJSONArray reports whether raw is a JSON array, by its first
+// non-space byte. Shape, not contents: the elements have refusals of
+// their own.
+func isJSONArray(raw json.RawMessage) bool {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '['
+}
+
+// decodeX5Chain checks the chain's contents: the count, then each
+// element in array order.
+//
+// STANDARD base64 WITH padding, not base64url, because that is how a
+// certificate chain is spelled everywhere else it travels - the JOSE
+// "x5c" header (RFC 7515 section 4.1.6) and the COSE x5chain header
+// both use it. A circuit_zk presentation spelling it differently
+// would be the odd one out for no reason.
+func decodeX5Chain(rawChain []json.RawMessage) ([][]byte, *CircuitZkResponseError) {
+	if len(rawChain) == 0 {
+		return nil, refuse(ReasonX5ChainEmpty, "the issuer chain is empty")
+	}
+	if len(rawChain) > MaxX5ChainCertificates {
+		return nil, refuse(ReasonX5ChainTooMany, "the issuer chain has %d certificates; at most %d",
+			len(rawChain), MaxX5ChainCertificates)
+	}
+
+	chain := make([][]byte, 0, len(rawChain))
+	for i, raw := range rawChain {
+		var encoded string
+		if err := strictDecode(raw, &encoded); err != nil {
+			return nil, refuse(ReasonX5ChainElementNotString, "certificate %d is not a string", i)
+		}
+		if encoded == "" {
+			return nil, refuse(ReasonX5ChainElementEmpty, "certificate %d is the empty string", i)
+		}
+		der, err := decodeCanonicalBase64Std(encoded)
+		if err != nil {
+			return nil, refuse(ReasonX5ChainElementNotBase64, "certificate %d: %v", i, err)
+		}
+		if len(der) > MaxX5ChainCertificateBytes {
+			return nil, refuse(ReasonX5ChainElementTooLarge,
+				"certificate %d is %d bytes; at most %d", i, len(der), MaxX5ChainCertificateBytes)
+		}
+		chain = append(chain, der)
+	}
+	return chain, nil
+}
+
+// decodeCanonicalBase64Std decodes PADDED standard base64 and refuses
+// anything that is not the canonical spelling of those bytes.
+//
+// The same reasoning as decodeCanonicalBase64URL below, and the same
+// two traps: Go's decoder skips CR and LF, and accepts a final
+// character whose unused low bits are set. Re-encoding and comparing
+// catches both, and catches the base64url alphabet and a missing pad
+// along with them - every non-canonical spelling at once, rather than
+// a list of rules that has to stay complete.
+func decodeCanonicalBase64Std(encoded string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("not padded standard base64: %w", err)
+	}
+	if base64.StdEncoding.EncodeToString(raw) != encoded {
+		return nil, errors.New("not canonical padded standard base64")
+	}
+	return raw, nil
 }
 
 // decodeCanonicalBase64URL decodes unpadded base64url and refuses

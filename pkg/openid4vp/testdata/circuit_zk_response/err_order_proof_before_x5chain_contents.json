@@ -1,0 +1,49 @@
+{
+  "description": "proof is empty AND x5chain is empty: proof encoding comes before x5chain contents.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "pseudonym-v1-sha256",
+        "return": "nym-123",
+        "params": {
+          "config": "known-offender-matching-ssc"
+        }
+      }
+    ]
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "circuit_zk": {
+        "circuit_proof_system_values": [
+          "longfellow-libzk-v1"
+        ],
+        "circuit_id_values": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      }
+    }
+  },
+  "vp_token": {
+    "nym_attestation": [
+      {
+        "circuit_id": "urn:circuits:longfellow:nym_auth:v1",
+        "proof_system": "longfellow-libzk-v1",
+        "proof": "",
+        "x5chain": [],
+        "results": {
+          "nym-123": {
+            "pseudonym": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "proof_empty"
+  }
+}

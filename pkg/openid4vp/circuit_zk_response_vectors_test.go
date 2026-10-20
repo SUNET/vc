@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,7 +24,17 @@ import (
 // while the implementations disagree.
 //
 // Re-vendor and re-pin; never edit. See testdata/circuit_zk_response/SOURCE.
-const responseVectorsSHA256 = "25222766bc0aa0bb0f1308c54d1da2558ba14cf77a062c92f5b46e9edfe5296b"
+const responseVectorsSHA256 = "a8797c4a8ad321fee4492ad0c3495f2ba551070b95cdd33e96e84c66b259ee1c"
+
+// responseVectorsManifestSHA256 is the SAME set under the digest the
+// other implementations quote, so the number in a release note or a
+// pull request can be compared against this one without recomputing
+// it: sha256 of `ls *.json | LC_ALL=C sort | xargs sha256sum`.
+//
+// Two digests of one directory because neither form is the obvious
+// one: this file's own digest covers names and contents directly,
+// and the manifest form is what the matcher repository publishes.
+const responseVectorsManifestSHA256 = "421ecfe003fd41559375fe225fbd80432afc65fc83d1232344599dbb3401ee8a"
 
 type responseVector struct {
 	Description    string          `json:"description"`
@@ -146,4 +157,37 @@ func TestCircuitZkResponseVectorsAreTheVendoredSet(t *testing.T) {
 	assert.Equal(t, responseVectorsSHA256, hex.EncodeToString(digest.Sum(nil)),
 		"the vendored vectors differ from the pinned set; re-vendor and re-pin rather than edit, "+
 			"or this stops checking agreement with the other implementations")
+}
+
+// The same directory under the digest the matcher repository
+// publishes, so the two numbers can be compared directly.
+func TestCircuitZkResponseVectorsMatchTheUpstreamManifest(t *testing.T) {
+	dir := filepath.Join("testdata", "circuit_zk_response")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	require.NotEmpty(t, names)
+
+	// `sha256sum` output, byte for byte: "<hex>  <name>\n".
+	manifest := strings.Builder{}
+	for _, name := range names {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		require.NoError(t, err)
+		fmt.Fprintf(&manifest, "%x  %s\n", sha256.Sum256(raw), name)
+	}
+	assert.Equal(t, responseVectorsManifestSHA256,
+		hex.EncodeToString(hashOf(manifest.String())),
+		"the vendored set is not the one the matcher repository published")
+}
+
+func hashOf(s string) []byte {
+	sum := sha256.Sum256([]byte(s))
+	return sum[:]
 }

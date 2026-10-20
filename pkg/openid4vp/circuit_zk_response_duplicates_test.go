@@ -30,7 +30,7 @@ func TestDuplicateScopingByPosition(t *testing.T) {
 
 	presentation := func(queryID, results string) string {
 		return `{"` + queryID + `":[{"circuit_id":"urn:c","proof_system":"longfellow-libzk-v1",` +
-			`"proof":"AQID","results":` + results + `}]}`
+			`"proof":"AQID","x5chain":["Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj"],"results":` + results + `}]}`
 	}
 
 	t.Run("a repeat inside a result VALUE is a duplicate member", func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestDuplicateScopingByPosition(t *testing.T) {
 		resultsRequest.QueryID = "results"
 
 		raw := `{"results":[{"circuit_id":"urn:c","proof_system":"longfellow-libzk-v1",` +
-			`"proof":"AQID","proof":"BAUG","results":{"age-1":{"satisfied":true}}}]}`
+			`"proof":"AQID","proof":"BAUG","x5chain":["Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj"],"results":{"age-1":{"satisfied":true}}}]}`
 
 		_, err := ValidateCircuitZkResponse([]byte(raw), resultsRequest)
 		require.Error(t, err)
