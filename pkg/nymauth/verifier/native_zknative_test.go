@@ -69,10 +69,17 @@ func TestGoChallengeDigestMatchesTheLibrary(t *testing.T) {
 	}
 }
 
-// verifier_input is SHA-256 of the BARE verifier_id. The library hashes
-// whatever it is given, so this checks the agreed value and leaves the
-// refusal of a prefixed Client Identifier - which is this package's
+// verifier_input is SHA-256 of the verifier_id with its prefix, which is
+// what rulebook v0.4 and the circuits archive agree on. The library
+// hashes whatever it is given, so this pins the agreed value and leaves
+// the refusal of anything that is neither defined form - this package's
 // rule, not the library's - to request_test.go.
+//
+// Pinned in full rather than by prefix. The two candidate digests differ only
+// after the first byte in no particular way, but the value they stand
+// for is a pseudonym: hashing the wrong one produces pseudonyms no other
+// implementation reports, which reads as an innocent subject rather than
+// as an error.
 func TestGoVerifierInputMatchesTheLibrary(t *testing.T) {
 	const verifierID = "x509_san_dns:verifier.example"
 
@@ -82,8 +89,9 @@ func TestGoVerifierInputMatchesTheLibrary(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, hex.EncodeToString(cInput[:]), hex.EncodeToString(goInput[:]))
-	assert.Equal(t, "be6a6400", hex.EncodeToString(goInput[:])[:8],
-		"nym_auth_rulebook PR #7's MUST digest for the bare verifier_id")
+	assert.Equal(t, "6eae85a0b2dfcd7d8b716291e54a004da798f93a26a248c265becd33a04a6bab",
+		hex.EncodeToString(goInput[:]),
+		"the circuits archive's verifier_input for client_id %q", verifierID)
 }
 
 // Both bindings refuse the same malformed challenge inputs. A verifier
