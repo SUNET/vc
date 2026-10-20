@@ -97,11 +97,21 @@ func Register(f Function) error {
 }
 
 // LookupFunction returns a registered predicate function.
+//
+// Inputs is CLONED, as Register clones it on the way in. Returning the
+// stored slice let a caller rewrite the registry by assigning to
+// f.Inputs[0] - without calling Register, without the mutex, and
+// racing every concurrent check - which would change what later
+// requests are validated against.
 func LookupFunction(id string) (Function, bool) {
 	functionsMu.RLock()
 	defer functionsMu.RUnlock()
 	f, ok := functions[id]
-	return f, ok
+	if !ok {
+		return Function{}, false
+	}
+	f.Inputs = slices.Clone(f.Inputs)
+	return f, true
 }
 
 // RegisteredFunctions names every registered function, sorted.

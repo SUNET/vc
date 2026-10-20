@@ -106,3 +106,24 @@ func TestRegisterRefusesAnUnusableFunction(t *testing.T) {
 	assert.Error(t, Register(Function{Inputs: []string{"x"}}), "a function needs an id")
 	assert.Error(t, Register(Function{ID: "test.no_inputs"}), "a function that fills nothing cannot contribute")
 }
+
+// A looked-up function must not be a handle on the registry.
+//
+// Inputs was the stored slice, so assigning to f.Inputs[0] rewrote
+// what every later request is validated against - without calling
+// Register, without the mutex, and racing concurrent checks.
+func TestLookupFunctionDoesNotShareTheRegistrysInputs(t *testing.T) {
+	const id = "test.lookup_aliasing"
+	require.NoError(t, Register(Function{ID: id, Inputs: []string{"value"}}))
+
+	f, ok := LookupFunction(id)
+	require.True(t, ok)
+	require.Equal(t, []string{"value"}, f.Inputs)
+
+	f.Inputs[0] = "something-else"
+
+	again, ok := LookupFunction(id)
+	require.True(t, ok)
+	assert.Equal(t, []string{"value"}, again.Inputs,
+		"a caller writing to the returned slice must not change the registry")
+}
