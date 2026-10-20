@@ -21,7 +21,7 @@ func testRequest(t *testing.T) Request {
 	bounds, err := AgeCheck{GE: "2000-01-01"}.Bounds()
 	require.NoError(t, err)
 
-	input, err := VerifierInput("verifier.example")
+	input, err := VerifierInput("x509_san_dns:verifier.example")
 	require.NoError(t, err)
 
 	transcript, err := MdocSessionTranscript("https://verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ", nil)
@@ -80,13 +80,14 @@ func TestRequestDerivesThePinnedChallengeDigest(t *testing.T) {
 		"challenge-vectors.json, verifier 1")
 }
 
-// verifier_input is SHA-256 of the BARE verifier_id, and the rulebook's
-// worked digest is what proves it - not our own output.
+// verifier_input is SHA-256 of the verifier_id exactly as published,
+// prefix included. The archive's own reference value is what proves
+// it - not our own output.
 func TestVerifierInputIsThePublishedIDsDigest(t *testing.T) {
-	got, err := VerifierInput("verifier.example")
+	got, err := VerifierInput("x509_san_dns:verifier.example")
 	require.NoError(t, err)
-	assert.Equal(t, "be6a6400", hex.EncodeToString(got[:])[:8],
-		"nym_auth_rulebook PR #7's MUST digest for the bare verifier_id")
+	assert.Equal(t, "6eae85a0", hex.EncodeToString(got[:])[:8],
+		"rulebook v0.4's MUST digest, and the archive's verifier_input for this client_id")
 
 	// The PREFIXED form is what v0.4 hashes, and it is what the
 	// archive's own reference pseudonyms are computed from. The bare

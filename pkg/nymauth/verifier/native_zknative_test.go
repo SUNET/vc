@@ -74,7 +74,7 @@ func TestGoChallengeDigestMatchesTheLibrary(t *testing.T) {
 // refusal of a prefixed Client Identifier - which is this package's
 // rule, not the library's - to request_test.go.
 func TestGoVerifierInputMatchesTheLibrary(t *testing.T) {
-	const verifierID = "verifier.example"
+	const verifierID = "x509_san_dns:verifier.example"
 
 	goInput, err := VerifierInput(verifierID)
 	require.NoError(t, err)

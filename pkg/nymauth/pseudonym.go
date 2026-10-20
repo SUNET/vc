@@ -16,6 +16,7 @@ package nymauth
 import (
 	"crypto/sha256"
 	"fmt"
+	"strings"
 )
 
 // Pseudonym configurations from the rulebook's function catalogue. Each
@@ -136,19 +137,71 @@ func checkVerifierID(verifierID string) error {
 	if verifierID == "" {
 		return fmt.Errorf("nymauth: no verifier_id")
 	}
-	if verifierID == VerifierIDX509SANDNS {
-		// The prefix with nothing after it names no Verifier, the
-		// same way the bare semantic marker does.
-		return fmt.Errorf("nymauth: verifier_id %q is the x509_san_dns prefix with no identifier after it", verifierID)
+
+	// Rulebook v0.4 defines exactly TWO forms. Anything else is
+	// refused rather than hashed.
+	//
+	// This is the half that went missing when the rule reversed on
+	// 2026-10-20. Before, a bare DNS name was the correct value and
+	// the prefixed form was refused; after, the prefixed form is
+	// correct - and nothing was left checking the shape at all, so a
+	// configuration still carrying the old bare value started
+	// cleanly and produced pseudonyms no Verifier reports. Found by
+	// sirosid-dev starting a gdc image with
+	// "sirosid-gdc-vc-verifier.fly.dev" configured.
+	//
+	// Fail closed, and no normalisation: the rulebook names two
+	// forms, so a third is a value nobody agreed the meaning of.
+	for _, prefix := range []string{VerifierIDX509SANDNS, VerifierIDSemantic} {
+		if verifierID == prefix {
+			// The marker with nothing after it names no Verifier. It
+			// hashes cleanly, like every other wrong value here, so
+			// it is refused rather than turned into a pseudonym
+			// nobody reports.
+			return fmt.Errorf("nymauth: verifier_id %q is the %s prefix with no identifier after it",
+				verifierID, strings.TrimSuffix(prefix, ":"))
+		}
+		if strings.HasPrefix(verifierID, prefix) {
+			return nil
+		}
 	}
-	if verifierID == VerifierIDSemantic {
-		// The semantic form with nothing after the colon names no
-		// Verifier. It hashes cleanly, like every other wrong value
-		// here, so it is refused rather than turned into a pseudonym
-		// nobody reports.
-		return fmt.Errorf("nymauth: verifier_id %q is the semantic form with no identifier after it", verifierID)
+
+	// A value that looks like a host is the likely mistake, and the
+	// likely fix is one prefix - so say it, rather than leaving the
+	// operator to infer it from the list of forms.
+	hint := ""
+	if looksLikeDNSName(verifierID) {
+		hint = fmt.Sprintf("; it looks like a DNS name, so the verifier_id is probably %q",
+			VerifierIDX509SANDNS+verifierID)
 	}
-	return nil
+	return fmt.Errorf("nymauth: verifier_id %q starts with neither %q nor %q, and rulebook v0.4 defines no other form%s",
+		verifierID, VerifierIDX509SANDNS, VerifierIDSemantic, hint)
+}
+
+// looksLikeDNSName reports whether a value is plausibly a hostname
+// someone forgot to prefix: dot-separated labels of letters, digits
+// and hyphens, and nothing else.
+//
+// Only used to add a hint to a refusal, so a false negative costs a
+// sentence and a false positive costs nothing - it is never a reason
+// to accept a value.
+func looksLikeDNSName(value string) bool {
+	if value == "" || strings.ContainsAny(value, ":/ ") || !strings.Contains(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // KnownOffenderMatching computes the pseudonym a Verifier identified by
@@ -158,7 +211,7 @@ func checkVerifierID(verifierID string) error {
 //
 // prover_input is null; verifier_input is SHA256(verifier_id).
 //
-// verifierID is the BARE identifier - "verifier.example" - without the
+// verifierID is the published identifier - "x509_san_dns:verifier.example" - including the
 // Client Identifier prefix and without verifier_id_type, which is agreed
 // out of band and not hashed. See checkVerifierID.
 func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byte, error) {

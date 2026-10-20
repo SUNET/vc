@@ -32,7 +32,7 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 		Trust: model.TrustConfig{PDPURL: "https://pdp.example/access/v1/evaluation"},
 		NymAuth: model.NymAuthVerifier{
 			Enable:     true,
-			VerifierID: "verifier.example",
+			VerifierID: "x509_san_dns:verifier.example",
 			Circuits: model.NymAuthCircuits{Allow: []model.NymAuthCircuit{{
 				Config:         nymauth.ConfigKnownOffenderMatchingSSC,
 				HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
@@ -272,4 +272,54 @@ func TestLegacyZkpReqConfigurationNamesAreRefused(t *testing.T) {
 		ProofSystemValues: []string{"longfellow-libzk-v1"},
 	}}
 	assert.NoError(t, checkNymAuthVerifier(cfg))
+}
+
+// A bare DNS name as verifier_id must stop startup.
+//
+// It was the CORRECT value until 2026-10-20, so every configuration
+// written before the reversal still carries one - and after the
+// reversal nothing was left checking the shape, so such a deployment
+// started cleanly and produced pseudonyms no Verifier reports. A
+// wrong answer about a person, with no error anywhere.
+//
+// Found by sirosid-dev starting a gdc image with exactly the value
+// below. Rulebook v0.4 defines two forms and no others, so anything
+// starting with neither is refused rather than hashed.
+func TestBareVerifierIDIsRefusedAtStartup(t *testing.T) {
+	for _, bare := range []string{
+		"sirosid-gdc-vc-verifier.fly.dev", // the value that started cleanly
+		"verifier.example",
+		"https://verifier.example",
+		"x509_hash:abcd",                // a real Client Identifier Prefix, but not one of the two
+		"X509_SAN_DNS:verifier.example", // v0.4 normalises nothing, case included
+	} {
+		t.Run(bare, func(t *testing.T) {
+			cfg := nymAuthCfg(t)
+			cfg.Verifier.NymAuth.VerifierID = bare
+
+			err := checkNymAuthVerifier(cfg)
+			require.Error(t, err, "a value that is neither defined form must not start")
+			assert.Contains(t, err.Error(), "x509_san_dns:", "the message names the accepted forms")
+			assert.Contains(t, err.Error(), "semantic_id:")
+		})
+	}
+
+	// A value that looks like a host gets the fix spelled out, since
+	// that is the mistake and the operator should not have to infer
+	// it from the list of forms.
+	cfg := nymAuthCfg(t)
+	cfg.Verifier.NymAuth.VerifierID = "sirosid-gdc-vc-verifier.fly.dev"
+	assert.ErrorContains(t, checkNymAuthVerifier(cfg),
+		`"x509_san_dns:sirosid-gdc-vc-verifier.fly.dev"`,
+		"a DNS-shaped value should be told what it probably meant")
+
+	// Both defined forms start.
+	for _, good := range []string{
+		"x509_san_dns:sirosid-gdc-vc-verifier.fly.dev",
+		"semantic_id:age-over-18-check",
+	} {
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.VerifierID = good
+		assert.NoErrorf(t, checkNymAuthVerifier(cfg), "%q is a defined form", good)
+	}
 }
