@@ -167,3 +167,32 @@ func TestChallengeRefusesWhatTheProversRefuse(t *testing.T) {
 		})
 	}
 }
+
+// A transcript whose CONTENTS are ill-formed is refused, not only one
+// whose shape is.
+//
+// cbor.RawMessage is bytes - the shape decode never looks inside an
+// item - so a text string holding invalid UTF-8 passed every check
+// and hashed cleanly into a challenge no prover reproduces. The
+// mismatch then surfaces as a bad proof rather than as the malformed
+// input it is, which is the failure this whole function exists to
+// prevent.
+func TestChallengeRefusesAnIllFormedTranscript(t *testing.T) {
+	for name, encoded := range map[string]string{
+		// [null, null, "<three invalid UTF-8 bytes>"]
+		"invalid UTF-8 in a text string": "83f6f663fffefd",
+		// [null, null, true] with true spelled as the two-byte simple
+		// value 0xf8 0x15 rather than the canonical 0xf5.
+		"a non-canonical simple value": "83f6f6f815",
+		// [null, null, simple(0)] spelled with two bytes.
+		"a two-byte simple value under 24": "83f6f6f800",
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := hex.DecodeString(encoded)
+			require.NoError(t, err)
+
+			_, err = MdocChallengeDigest(raw, "eu.europa.ec.eudi.nym_auth.1")
+			assert.Error(t, err, "an ill-formed transcript must be refused, not hashed")
+		})
+	}
+}
