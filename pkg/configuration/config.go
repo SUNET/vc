@@ -456,7 +456,15 @@ func checkNymAuthVerifier(cfg *model.Cfg) error {
 		// single proof" is a state nobody means to configure.
 		return fmt.Errorf("verifier.nym_auth is enabled but verifier.nym_auth.circuits.allow is empty, so no proof could be verified")
 	}
-	if _, err := circuits.NewAllowlist(cfg.Verifier.NymAuth.Circuits); err != nil {
+	allowlist, err := circuits.NewAllowlist(cfg.Verifier.NymAuth.Circuits)
+	if err != nil {
+		return err
+	}
+	// And the ARTIFACTS, not only the entries describing them. An
+	// entry can be perfectly well-formed and name a file that is not
+	// there, or one whose digest moved when it was rebuilt - and both
+	// of those would otherwise surface as a refused proof.
+	if err := allowlist.Preload(context.Background()); err != nil {
 		return err
 	}
 	return nil

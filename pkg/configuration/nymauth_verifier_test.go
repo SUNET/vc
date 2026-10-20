@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/nymauth"
 
@@ -76,6 +78,53 @@ func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 		cfg.Verifier.NymAuth.Circuits.Allow[0].Config = "something-else"
 		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "known-offender-matching")
 	})
+
+	// The ARTIFACTS too, not only the entries describing them. An
+	// entry can be well-formed and name a file that is not there, or
+	// one whose digest moved when it was rebuilt, and both would
+	// otherwise surface as a refused proof.
+	t.Run("an artifact that is not there", func(t *testing.T) {
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.Circuits.Allow[0].ArtifactPath = filepath.Join(t.TempDir(), "absent.bin")
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "circuit artifact")
+	})
+
+	t.Run("an artifact whose digest moved", func(t *testing.T) {
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.Circuits.Allow[0].ArtifactSHA256 = hex.EncodeToString(make([]byte, sha256.Size))
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "hashes to")
+	})
+
+	t.Run("an artifact of the wrong length", func(t *testing.T) {
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.Circuits.Allow[0].ArtifactBytes++
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "the allowlist says")
+	})
+}
+
+// A deployment with nym_auth OFF must start, whatever is left in the
+// block - including a half-written allowlist entry.
+//
+// Struct-tag validation recurses into the subtree whether or not
+// Enable is set, so a `required` tag on an entry field would stop a
+// deployment that has the feature switched off. The entries are
+// validated in NewAllowlist instead, which runs only when enabled.
+func TestNymAuthVerifierDisabledWithAHalfWrittenEntryStillLoads(t *testing.T) {
+	cfg := nymAuthCfg(t)
+	cfg.Verifier.NymAuth.Enable = false
+	cfg.Verifier.NymAuth.Circuits.Allow = []model.NymAuthCircuit{{Config: nymauth.ConfigKnownOffenderMatchingSSC}}
+
+	require.NoError(t, checkNymAuthVerifier(cfg))
+
+	// And through the ordinary validator, which is the path that
+	// recursed into the subtree. The fixture is a bare Verifier so it
+	// fails on its own required fields; what matters is that NONE of
+	// the complaints is about nym_auth.
+	err := helpers.Check(t.Context(), cfg, cfg, logger.NewSimple("test"))
+	if err != nil {
+		assert.NotContains(t, err.Error(), "nym_auth",
+			"a disabled feature must not hold up startup over an entry nothing will read")
+	}
 }
 
 // A deployment that does not verify pseudonym proofs is unaffected by

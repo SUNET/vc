@@ -51,7 +51,14 @@ type NymAuthCircuits struct {
 	// configuration accessor, the entry below is that statement, and
 	// an entry naming the wrong configuration would verify proofs
 	// against a pseudonym function nobody asked for.
-	Allow []NymAuthCircuit `yaml:"allow,omitempty" validate:"omitempty,dive"`
+	// No struct-tag validation on the entries: the validator recurses
+	// into this subtree whether or not Enable is set, so a `required`
+	// here would stop a deployment that has nym_auth switched OFF and
+	// a half-written entry left behind. Every field is checked in
+	// circuits.NewAllowlist instead, which runs only when enabled -
+	// and checking in one place rather than two is what stops the two
+	// from disagreeing.
+	Allow []NymAuthCircuit `yaml:"allow,omitempty"`
 
 	// Sources are zk-circuits catalog mirrors, used only by an
 	// allowlist entry that names a catalog id instead of a local file.
@@ -79,26 +86,26 @@ type NymAuthCircuit struct {
 	// domain separator is "nym_auth/v1/" + config), so verifying
 	// against the wrong one yields a value that matches nothing and
 	// reads as an innocent subject.
-	Config string `yaml:"config" validate:"required" doc_example:"\"known-offender-matching-ssc\""`
+	Config string `yaml:"config" doc_example:"\"known-offender-matching-ssc\""`
 
 	// HashCircuitID and SigCircuitID are the descriptor's circuit ids,
 	// hex as the catalog writes them.
-	HashCircuitID string `yaml:"hash_circuit_id" validate:"required,hexadecimal" doc_example:"\"5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729\""`
-	SigCircuitID  string `yaml:"sig_circuit_id" validate:"required,hexadecimal" doc_example:"\"00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb\""`
+	HashCircuitID string `yaml:"hash_circuit_id" doc_example:"\"5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729\""`
+	SigCircuitID  string `yaml:"sig_circuit_id" doc_example:"\"00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb\""`
 
 	// BlockEncHash and BlockEncSig are the Ligero block_enc parameters
 	// of the two circuits.
-	BlockEncHash uint32 `yaml:"block_enc_hash" validate:"required" doc_example:"6983"`
-	BlockEncSig  uint32 `yaml:"block_enc_sig" validate:"required" doc_example:"4679"`
+	BlockEncHash uint32 `yaml:"block_enc_hash" doc_example:"6983"`
+	BlockEncSig  uint32 `yaml:"block_enc_sig" doc_example:"4679"`
 
 	// ArtifactPath is a local file holding the DECOMPRESSED circuit
 	// artifact. Mutually exclusive with ArtifactID.
-	ArtifactPath string `yaml:"artifact_path,omitempty" validate:"required_without=ArtifactID,excluded_with=ArtifactID" doc_example:"\"/etc/vc/circuits/nym_auth-ssc.bin\""`
+	ArtifactPath string `yaml:"artifact_path,omitempty" doc_example:"\"/etc/vc/circuits/nym_auth-ssc.bin\""`
 
 	// ArtifactID names a circuit in the configured catalog sources,
 	// for a deployment whose catalog publishes nym_auth descriptors.
 	// Mutually exclusive with ArtifactPath.
-	ArtifactID string `yaml:"artifact_id,omitempty" validate:"required_without=ArtifactPath,excluded_with=ArtifactPath"`
+	ArtifactID string `yaml:"artifact_id,omitempty"`
 
 	// ArtifactSHA256 and ArtifactBytes are over the DECOMPRESSED
 	// artifact, which is what the native loader hashes.
@@ -106,6 +113,6 @@ type NymAuthCircuit struct {
 	// Both, not either. The length is not redundant: it is checked
 	// before the bytes are read, so an artifact that is the wrong size
 	// is refused without hashing however much of it was served.
-	ArtifactSHA256 string `yaml:"artifact_sha256" validate:"required,len=64,hexadecimal" doc_example:"\"92dd42fd00000000000000000000000000000000000000000000000000001b7f\""`
-	ArtifactBytes  int64  `yaml:"artifact_bytes" validate:"required,gt=0" doc_example:"1062842"`
+	ArtifactSHA256 string `yaml:"artifact_sha256" doc_example:"\"92dd42fd00000000000000000000000000000000000000000000000000001b7f\""`
+	ArtifactBytes  int64  `yaml:"artifact_bytes" doc_example:"1062842"`
 }

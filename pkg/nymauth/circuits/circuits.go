@@ -145,6 +145,29 @@ func checkCircuitID(value, where, what string) error {
 	return nil
 }
 
+// Preload reads and checks every LOCAL artifact.
+//
+// At startup, so a missing file, a wrong length or a wrong digest is a
+// refusal to start rather than a refused proof later - which is what
+// the configuration check promises and what NewAllowlist alone does
+// not do, since it only sees the entry and never the bytes.
+//
+// Catalog ids are skipped deliberately: nothing resolves one yet, and
+// refusing to start over an unresolvable id would be refusing over a
+// feature that has not arrived. They are refused at load instead, with
+// a message saying so.
+func (a *Allowlist) Preload(ctx context.Context) error {
+	for config, entry := range a.byConfig {
+		if entry.Path == "" {
+			continue
+		}
+		if _, err := a.Artifact(ctx, config); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Entry returns the allowed build for a configuration.
 func (a *Allowlist) Entry(config string) (Entry, error) {
 	entry, ok := a.byConfig[config]
