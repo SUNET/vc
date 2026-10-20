@@ -130,3 +130,31 @@ func TestAgeCheckRefusesAMalformedDate(t *testing.T) {
 		assert.Errorf(t, err, "%+v carries a date no circuit can use", check)
 	}
 }
+
+// gt and lt shift the bound by a day, and the shift can leave the
+// format the circuits read.
+//
+// Both of these returned successfully before: "10000-01-01" and
+// "-0001-12-31", eleven bytes where exactly ten are read. checkRange
+// only examines a PAIR of set bounds, so a lone shifted bound was never
+// looked at again and the policy failed at the native boundary instead,
+// as a malformed input rather than as the unsatisfiable request it is.
+func TestAgeCheckRefusesAShiftOutOfTheDateFormat(t *testing.T) {
+	_, err := AgeCheck{GT: "9999-12-31"}.Bounds()
+	require.Error(t, err, "there is no day after the last representable one")
+	assert.Contains(t, err.Error(), "10000")
+
+	_, err = AgeCheck{LT: "0000-01-01"}.Bounds()
+	require.Error(t, err, "there is no day before the first representable one")
+	assert.Contains(t, err.Error(), "cannot express")
+
+	// The days either side of those edges still work, so the guard
+	// refuses the shift that leaves the format and nothing more.
+	bounds, err := AgeCheck{GT: "9999-12-30"}.Bounds()
+	require.NoError(t, err)
+	assert.Equal(t, "9999-12-31", bounds.Earliest)
+
+	bounds, err = AgeCheck{LT: "0000-01-02"}.Bounds()
+	require.NoError(t, err)
+	assert.Equal(t, "0000-01-01", bounds.Cutoff)
+}

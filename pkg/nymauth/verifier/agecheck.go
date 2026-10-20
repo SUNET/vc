@@ -160,5 +160,21 @@ func shiftDate(value string, days int, what string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return parsed.UTC().AddDate(0, 0, days).Format(time.DateOnly), nil
+	shifted := parsed.UTC().AddDate(0, 0, days)
+
+	// The shift can leave the format. gt 9999-12-31 becomes
+	// "10000-01-01" and lt 0000-01-01 becomes "-0001-12-31", both 11
+	// bytes where the circuits read exactly 10, and both were returned
+	// without error: checkRange only looks at a PAIR of set bounds, so
+	// a single shifted bound was never examined again.
+	//
+	// Refused here rather than clamped to the sentinel. Clamping would
+	// turn "born strictly after the last representable day" - a request
+	// nobody can satisfy - into "no lower bound", which everybody
+	// satisfies. That is the opposite answer, written silently.
+	if year := shifted.Year(); year < 0 || year > 9999 {
+		return "", fmt.Errorf("nymauth: %s %s shifts to year %d, which the circuits' 10-byte date cannot express",
+			what, value, year)
+	}
+	return shifted.Format(time.DateOnly), nil
 }
