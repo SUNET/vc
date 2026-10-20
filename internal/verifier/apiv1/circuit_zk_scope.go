@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,6 +58,12 @@ func (c *Client) verifyCircuitZkScope(
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
 
+	channel := circuitZkChannelFor(dcAPI)
+	if err := checkCircuitZkResponseMode(channel, authCtx); err != nil {
+		c.log.Error(err, "circuit_zk response mode refused", "scope", scope, "channel", channel)
+		return nil, fmt.Errorf("scope %s: %w", scope, err)
+	}
+
 	thumbprint, err := c.readerKeyThumbprint(ctx, authCtx, scope)
 	if err != nil {
 		return nil, err
@@ -69,7 +76,7 @@ func (c *Client) verifyCircuitZkScope(
 		}
 	}
 
-	session, err := c.circuitZkSessionFor(circuitZkChannelFor(dcAPI), origin, authCtx.ClientID, authCtx.Nonce,
+	session, err := c.circuitZkSessionFor(channel, origin, authCtx.ClientID, authCtx.Nonce,
 		responseURI, query.Meta.DoctypeValue, thumbprint)
 	if err != nil {
 		c.log.Error(err, "cannot build the circuit_zk session transcript", "scope", scope, "dc_api", dcAPI)
@@ -114,6 +121,44 @@ func (c *Client) verifyCircuitZkScope(
 	c.log.Info("circuit_zk presentation verified", "scope", scope,
 		"presentations", len(presentations), "doc_type", session.DocType)
 	return credentials, nil
+}
+
+// checkCircuitZkResponseMode refuses a redirect presentation whose
+// response was not encrypted.
+//
+// Over a redirect the response travels to response_uri through
+// whatever the holder's browser and network are, so nym_auth requires
+// direct_post.jwt: the pseudonym is a stable identifier for a person
+// across that verifier's sessions, and sending one in the clear hands
+// it to anything on the path.
+//
+// The transcript builder refuses this too - its thumbprint is
+// required, and an unencrypted response has none - but it refuses it
+// as "the reader key thumbprint is 0 bytes", which reads as a
+// plumbing failure rather than as the configuration mistake it is.
+// Checked here so the message names the actual problem.
+//
+// The DC API channel is deliberately not checked: a response returned
+// inside navigator.credentials.get never crosses the network, and its
+// handover takes a null thumbprint for exactly that case.
+//
+// Drafted against nym_auth_rulebook#9, which is an UNMERGED draft -
+// cited for where the reasoning is written down, not as text that
+// must exist. The enforceable part of it is in the shared vectors: a
+// null thumbprint is in rejects_redirect.
+func checkCircuitZkResponseMode(channel circuitZkChannel, authCtx *cache.AuthorizationContext) error {
+	if channel != channelOpenID4VP {
+		return nil
+	}
+	if authCtx == nil {
+		return errors.New("circuit_zk: no session for this presentation, so its response mode cannot be established")
+	}
+	if authCtx.ResponseMode != openid4vp.ResponseModeDirectPostJWT {
+		return fmt.Errorf("circuit_zk: this presentation arrived by redirect with response_mode %q; nym_auth requires %q there, "+
+			"because a pseudonym sent to response_uri in the clear is readable by anything on the path",
+			authCtx.ResponseMode, openid4vp.ResponseModeDirectPostJWT)
+	}
+	return nil
 }
 
 // circuitZkCredential renders a verified presentation as claims.

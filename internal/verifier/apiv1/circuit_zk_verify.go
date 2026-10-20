@@ -105,22 +105,25 @@ const (
 // channel.
 type circuitZkTranscriptBuilder func(origin, clientID, nonce, responseURI string, readerThumbprint []byte) ([]byte, error)
 
-// circuitZkTranscripts is the per-channel transcript builder, and a
-// deliberately extensible one.
+// circuitZkTranscripts is the per-channel transcript builder.
 //
-// Only the DC API handover is here TODAY, because the nym_auth
-// circuits define only that one: SPEC section 3, and the shared
-// challenge vectors cover it alone. Link-delivered (QR) presentations
-// are wanted and are coming - the OpenID4VPHandover variant is pending
-// a SPEC patch and shared vectors for it, which is circuit-authoring
-// work rather than something this verifier can settle by building a
-// transcript of its own and hoping a prover agrees.
+// Both handovers the nym_auth circuits define: the DC API one (SPEC
+// section 3) and the redirect one (OpenID4VP 1.0 appendix B.2.6.1),
+// each with its own arm of the shared challenge vectors - derive and
+// derive_redirect. Neither is built here from a reading of the
+// specification; both are checked byte-for-byte against those
+// vectors, because a transcript this verifier invented and a prover
+// did not would surface as a failed proof rather than as a wiring
+// error.
 //
-// When those vectors exist, adding the channel is adding an entry
-// here. Nothing else in this file knows which channels exist.
+// A channel with no entry is refused, which is the point of the
+// table: nothing else in this file knows which channels exist.
 var circuitZkTranscripts = map[circuitZkChannel]circuitZkTranscriptBuilder{
 	channelDCAPI: func(origin, _, nonce, _ string, readerThumbprint []byte) ([]byte, error) {
 		return verifier.MdocSessionTranscript(origin, nonce, readerThumbprint)
+	},
+	channelOpenID4VP: func(_, clientID, nonce, responseURI string, readerThumbprint []byte) ([]byte, error) {
+		return verifier.MdocSessionTranscriptRedirect(clientID, nonce, responseURI, readerThumbprint)
 	},
 }
 
@@ -142,8 +145,8 @@ func (c *Client) circuitZkSessionFor(channel circuitZkChannel, origin, clientID,
 	build, supported := circuitZkTranscripts[channel]
 	if !supported {
 		return circuitZkSession{}, fmt.Errorf("circuit_zk: this presentation arrived over the %q channel, and the nym_auth "+
-			"circuits define a session transcript only for %q; the handover for this channel is pending shared vectors",
-			channel, channelDCAPI)
+			"circuits define a session transcript only for %q and %q; the handover for this channel is pending shared vectors",
+			channel, channelDCAPI, channelOpenID4VP)
 	}
 
 	transcript, err := build(origin, clientID, nonce, responseURI, readerThumbprint)

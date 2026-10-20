@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/notify"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/nymauth/circuits"
 	"github.com/SUNET/vc/pkg/nymauth/verifier"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -65,17 +67,84 @@ func TestCircuitZkRequestWithNoOfferIsEmpty(t *testing.T) {
 // The channel decides the SessionTranscript, and a channel with no
 // transcript builder is refused rather than given one of this
 // verifier's invention.
+//
+// Both defined channels now have one; this is about the third that
+// does not exist yet.
 func TestCircuitZkSessionRefusesAnUnsupportedChannel(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
 		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
 	}}}
 
-	_, err := client.circuitZkSessionFor(channelOpenID4VP, "https://verifier.example",
+	_, err := client.circuitZkSessionFor(circuitZkChannel("ble"), "https://verifier.example",
 		"x509_san_dns:verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ",
 		"https://verifier.example/verification/direct_post", "eu.europa.ec.eudi.nym_auth.1", nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), string(channelOpenID4VP))
+	assert.Contains(t, err.Error(), "ble")
 	assert.Contains(t, err.Error(), "pending shared vectors")
+}
+
+// The redirect channel builds the OpenID4VPHandover transcript, and
+// it is NOT the DC API one. A wallet built one of the two; verifying
+// against the other is an opaque proof failure, which is what the
+// channel selection exists to prevent.
+func TestCircuitZkSessionBuildsTheRedirectTranscript(t *testing.T) {
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
+		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
+	}}}
+	thumbprint := bytes.Repeat([]byte{0x11}, 32)
+
+	session, err := client.circuitZkSessionFor(channelOpenID4VP, "", "x509_san_dns:verifier.example",
+		"pOA0oqEAhLnqug2r7Ve4tQ", "https://verifier.example/verification/direct_post",
+		"eu.europa.ec.eudi.nym_auth.1", thumbprint)
+	require.NoError(t, err)
+
+	// The bytes the shared derive_redirect vectors fix, through the
+	// package that is checked against them.
+	want, err := verifier.MdocSessionTranscriptRedirect("x509_san_dns:verifier.example",
+		"pOA0oqEAhLnqug2r7Ve4tQ", "https://verifier.example/verification/direct_post", thumbprint)
+	require.NoError(t, err)
+	assert.Equal(t, want, session.Transcript)
+
+	dcAPI, err := client.circuitZkSessionFor(channelDCAPI, "https://verifier.example", "",
+		"pOA0oqEAhLnqug2r7Ve4tQ", "", "eu.europa.ec.eudi.nym_auth.1", thumbprint)
+	require.NoError(t, err)
+	assert.NotEqual(t, dcAPI.Transcript, session.Transcript, "two handovers, two transcripts")
+}
+
+// A redirect presentation whose response was not encrypted is refused
+// here, where the message names the problem - not three calls later
+// as a zero-length thumbprint.
+func TestCircuitZkRedirectRequiresDirectPostJWT(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    string
+		refused bool
+	}{
+		{name: "encrypted", mode: openid4vp.ResponseModeDirectPostJWT},
+		{name: "plain direct_post", mode: openid4vp.ResponseModeDirectPost, refused: true},
+		{name: "form_post", mode: openid4vp.ResponseModeFormPost, refused: true},
+		{name: "unset", mode: "", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkCircuitZkResponseMode(channelOpenID4VP, &cache.AuthorizationContext{ResponseMode: tc.mode})
+			if !tc.refused {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), openid4vp.ResponseModeDirectPostJWT)
+			assert.Contains(t, err.Error(), "in the clear")
+		})
+	}
+
+	// The DC API channel never crosses the network, and its handover
+	// takes a null thumbprint for exactly that case.
+	require.NoError(t, checkCircuitZkResponseMode(channelDCAPI,
+		&cache.AuthorizationContext{ResponseMode: openid4vp.ResponseModeDirectPost}))
+
+	// No session at all is a refusal, not a pass: "cannot establish
+	// the response mode" must not read as "the response mode is fine".
+	require.Error(t, checkCircuitZkResponseMode(channelOpenID4VP, nil))
 }
 
 // The DC API channel builds the transcript the circuits define, and
@@ -309,4 +378,103 @@ func TestCircuitZkRoutingIgnoresTheSingleQueryFallback(t *testing.T) {
 		"the unclaimed scope must be refused by the attribution check")
 	assert.NotContains(t, err.Error(), "circuit_zk",
 		"it must never have reached the circuit_zk path: that path has no attribution check")
+}
+
+// The response-mode rule has to be ENFORCED, not merely implemented.
+//
+// Driven through VerificationDirectPost, because a test on
+// checkCircuitZkResponseMode alone passes whether or not
+// verifyCircuitZkScope calls it - which is the mistake that would
+// actually ship: the function exists, reads correctly, and nothing
+// invokes it.
+func TestCircuitZkRedirectResponseModeIsEnforcedByTheHandler(t *testing.T) {
+	ctx := t.Context()
+
+	post := func(t *testing.T, responseMode string) error {
+		t.Helper()
+		client, _ := CreateTestClientWithMock(t, nil)
+
+		openid4vpClient, err := openid4vp.New(ctx, &openid4vp.Config{})
+		require.NoError(t, err)
+		client.openid4vp = openid4vpClient
+
+		notifyService, err := notify.New(ctx, client.cfg, logger.NewSimple("test"))
+		require.NoError(t, err)
+		client.notify = notifyService
+
+		// An empty allowlist is enough: the response-mode check runs
+		// before any circuit is loaded, and this is about reaching it.
+		client.nymAuthCircuits, err = circuits.NewAllowlist(model.NymAuthCircuits{})
+		require.NoError(t, err)
+		client.cfg.Verifier.NymAuth.VerifierID = "verifier.example"
+		client.cfg.Verifier.PreferredVPFormats = &openid4vp.VPFormatsSupported{
+			CircuitZk: &openid4vp.CircuitZkFormat{
+				CircuitIDValues:          []string{"urn:circuits:longfellow:nym_auth:v1"},
+				CircuitProofSystemValues: []string{"longfellow-libzk-v1"},
+			},
+		}
+
+		const kid = "czk-mode-kid"
+		state := "czk-mode-state-" + responseMode
+		_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
+		require.NoError(t, err)
+
+		require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
+			SessionID:                "czk-mode-session",
+			State:                    state,
+			Nonce:                    "pOA0oqEAhLnqug2r7Ve4tQ",
+			ClientID:                 "x509_san_dns:verifier.example",
+			ResponseMode:             responseMode,
+			EphemeralEncryptionKeyID: kid,
+			Scopes:                   []string{"nym_attestation"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+				ID:     "nym_attestation",
+				Format: openid4vp.FormatCircuitZk,
+				Meta:   openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
+				Req: []openid4vp.ReqItem{{
+					ID:     openid4vp.CircuitZkFunctionAgeCheck,
+					Return: "age-1",
+					Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"},
+				}},
+			}}},
+		}))
+
+		leaf := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("c", 48)))
+		plaintext, err := json.Marshal(map[string]any{
+			"state": state,
+			"vp_token": map[string]any{
+				"nym_attestation": []any{map[string]any{
+					"circuit_id":   "urn:circuits:longfellow:nym_auth:v1",
+					"proof_system": "longfellow-libzk-v1",
+					"proof":        base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("p", 48))),
+					"x5chain":      []string{leaf},
+					"results":      map[string]any{"age-1": map[string]any{"satisfied": true}},
+				}},
+			},
+		})
+		require.NoError(t, err)
+		body, err := jwe.Encrypt(plaintext,
+			jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+			jwe.WithContentEncryption(jwa.A256GCM()),
+		)
+		require.NoError(t, err)
+
+		// DCAPI false: this is the redirect channel.
+		_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(body)})
+		return err
+	}
+
+	err := post(t, openid4vp.ResponseModeDirectPost)
+	require.Error(t, err, "an unencrypted redirect response must be refused")
+	assert.Contains(t, err.Error(), openid4vp.ResponseModeDirectPostJWT)
+	assert.Contains(t, err.Error(), "in the clear")
+
+	// With direct_post.jwt the response mode is accepted, and the
+	// request fails LATER - on the circuit, which this build cannot
+	// load. That is the point: a different failure means the mode
+	// check passed rather than that everything works.
+	err = post(t, openid4vp.ResponseModeDirectPostJWT)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "in the clear",
+		"direct_post.jwt must get past the response-mode check")
 }

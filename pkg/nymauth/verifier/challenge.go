@@ -75,6 +75,65 @@ func MdocSessionTranscript(origin, nonce string, jwkThumbprint []byte) ([]byte, 
 	return transcript, nil
 }
 
+// MdocSessionTranscriptRedirect builds the SessionTranscript the
+// circuits bind to, for a presentation delivered by REDIRECT - a
+// scanned QR or a link, where the wallet POSTs to response_uri.
+//
+//	SessionTranscript = cbor([null, null,
+//	    ["OpenID4VPHandover", bstr(SHA-256(cbor([clientID, nonce, thumbprint, responseURI])))]])
+//
+// OpenID4VP 1.0 appendix B.2.6.1, and the shared derive_redirect
+// vectors. A separate entry point from MdocSessionTranscript rather
+// than a flag on it, because the two handovers are different
+// structures and a verifier that picked the wrong one would get an
+// opaque proof failure instead of a legible wiring error.
+//
+// From the verifier's OWN session - the client_id it published, the
+// nonce it issued, the response_uri it is listening on - never from
+// anything the response carries.
+//
+// THE THUMBPRINT IS REQUIRED HERE, and 32 bytes. Over a redirect the
+// response must be encrypted (direct_post.jwt), so there is always a
+// reader key and always a thumbprint of it; a nil one would mean an
+// unencrypted response, which this flow does not allow. That is the
+// one place this is stricter than mdoc.BuildOID4VPSessionTranscript,
+// which takes nil for the general OpenID4VP case - and it is why the
+// nil case is in the shared rejects_redirect vectors rather than
+// being left to each implementation to decide.
+//
+// The rules for the response mode itself are not enforced here; this
+// function sees only the values. See the caller in
+// internal/verifier/apiv1, which refuses a redirect response that did
+// not use direct_post.jwt before it ever gets here.
+func MdocSessionTranscriptRedirect(clientID, nonce, responseURI string, jwkThumbprint []byte) ([]byte, error) {
+	if clientID == "" {
+		return nil, fmt.Errorf("nymauth: the challenge needs the request's client_id, which is what binds the proof to the verifier that asked for it")
+	}
+	if nonce == "" {
+		return nil, fmt.Errorf("nymauth: the challenge needs the request nonce, which is what makes it this session's proof")
+	}
+	if len([]rune(nonce)) < MinNonceChars {
+		return nil, fmt.Errorf("nymauth: the request nonce is %d characters; the shared vectors require at least %d, and a shorter one weakens the only thing binding this proof to this session",
+			len([]rune(nonce)), MinNonceChars)
+	}
+	if responseURI == "" {
+		return nil, fmt.Errorf("nymauth: the challenge needs the response_uri, which is what binds the proof to where this verifier is listening")
+	}
+	if len(jwkThumbprint) != jwkThumbprintBytes {
+		// Nil included, and deliberately not "nil means unencrypted".
+		// Over a redirect an unencrypted response is not allowed, so
+		// a missing thumbprint is a request that should never have
+		// been sent rather than a variant to accommodate.
+		return nil, fmt.Errorf("nymauth: the reader key thumbprint is %d bytes; a redirect presentation is always encrypted, so it is a %d-byte SHA-256 thumbprint, and anything else would produce a transcript no wallet reproduces",
+			len(jwkThumbprint), jwkThumbprintBytes)
+	}
+	transcript, err := mdoc.BuildOID4VPSessionTranscript(clientID, nonce, responseURI, jwkThumbprint)
+	if err != nil {
+		return nil, fmt.Errorf("nymauth: session transcript: %w", err)
+	}
+	return transcript, nil
+}
+
 // MdocChallenge returns the bytes an mdoc device signature is computed
 // over, for a SessionTranscript the caller already holds.
 //
@@ -136,6 +195,20 @@ func MdocChallengeDigest(sessionTranscript []byte, docType string) ([32]byte, er
 // nymauth_derive_challenge and nymauth_challenge_digest.
 func MdocE2(origin, nonce, docType string, jwkThumbprint []byte) ([32]byte, error) {
 	transcript, err := MdocSessionTranscript(origin, nonce, jwkThumbprint)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return MdocChallengeDigest(transcript, docType)
+}
+
+// MdocE2Redirect derives the redirect handover's transcript from this
+// session and returns its challenge digest.
+//
+// The digest step is the same for either handover - only the
+// transcript differs - so this is MdocSessionTranscriptRedirect
+// followed by the same MdocChallengeDigest the DC API path uses.
+func MdocE2Redirect(clientID, nonce, responseURI, docType string, jwkThumbprint []byte) ([32]byte, error) {
+	transcript, err := MdocSessionTranscriptRedirect(clientID, nonce, responseURI, jwkThumbprint)
 	if err != nil {
 		return [32]byte{}, err
 	}
