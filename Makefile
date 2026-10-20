@@ -67,12 +67,21 @@ RESERVED_TAGS           := latest testing demo dev
 # netgo,osusergo ride along under CGO to bypass glibc NSS.
 ZKNATIVE_TAG            := zknative
 ZK_CRED_LONGFELLOW_REPO ?= https://github.com/sirosfoundation/zk-cred-longfellow.git
-# Pinned; bump deliberately. This is main plus the four nym_auth commits
-# of that crate's `feat/nymauth-prove` branch, which is what carries
+# Pinned; bump deliberately. This is main plus the nym_auth commits of
+# that crate's `feat/nymauth-prove` branch, which is what carries
 # include/zk_cred_longfellow_nymauth.h (pkg/nymauth/verifier/zknative
 # needs it, and the staging below requires it). Move this back to a
 # main SHA once that branch lands upstream.
-ZK_CRED_LONGFELLOW_REF  ?= cf2eba996ba1fac247539d515d8bab502da48f94
+#
+# This SHA and the vendored challenge vectors move TOGETHER. The
+# vectors are the shared conformance set, and the zknative tests
+# assert that this library refuses exactly what pkg/nymauth/verifier
+# refuses - so a library older than the vectors fails those tests, by
+# design. e09fdcd is the commit that refuses invalid UTF-8 and
+# non-canonical simple values, which is what the current vectors
+# (sha256 697d016b) require; its copy of challenge-vectors.json is
+# byte-identical to the vendored one.
+ZK_CRED_LONGFELLOW_REF  ?= e09fdcd16252c9043e50032c3ae1cc4259ed7d08
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
