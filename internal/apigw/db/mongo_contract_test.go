@@ -79,3 +79,14 @@ func startMongoContainerForTest(t *testing.T) (*mongo.Client, func()) {
 	_, client, cleanup := testsupport.StartMongoContainer(t)
 	return client, cleanup
 }
+
+func TestNymAuthPSCColl_Mongo(t *testing.T) {
+	client, cleanup := startMongoContainerForTest(t)
+	defer cleanup()
+
+	svc := newTestServiceWithMongo(t, client)
+	store, err := NewNymAuthPSCColl(t.Context(), "nymauth_psc", svc, testsupport.TestLogger(t))
+	require.NoError(t, err)
+
+	testNymAuthPSCStoreContract(t, store)
+}

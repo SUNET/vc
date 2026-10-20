@@ -231,8 +231,19 @@ func (d Deriver) Format(f fmt.State, _ rune) {
 // "a" and a subject of "b.c" would produce the same info as "a.b" and "c",
 // and two different people would share a seed.
 func derivationInfo(fields ...string) (string, error) {
+	return encodeFields(derivationLabel, fields...)
+}
+
+// encodeFields is the length-prefixed encoding both derivationInfo and
+// subjectKeyInfo use.
+//
+// One body, two labels. The encoding is the part that must not differ
+// between them: it is what makes two different identifier lists two
+// different values, and a second copy of it is a second place for that
+// property to be lost.
+func encodeFields(label string, fields ...string) (string, error) {
 	var out []byte
-	for _, f := range append([]string{derivationLabel}, fields...) {
+	for _, f := range append([]string{label}, fields...) {
 		if len(f) > maxDerivationField {
 			// The prefix is what separates the fields, so a length it
 			// cannot hold stops separating them. uint16(90465) is 24929,

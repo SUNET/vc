@@ -83,4 +83,7 @@ var (
 	_ DatastoreStore           = (*DatastoreColl)(nil)
 	_ IdentityMappingStore     = (*IdentityMappingsColl)(nil)
 	_ DynamicRegistrationStore = (*DynamicRegistrationColl)(nil)
+
+	_ NymAuthPSCStore = (*NymAuthPSCColl)(nil)
+	_ NymAuthPSCStore = (*SQLNymAuthPSCColl)(nil)
 )
