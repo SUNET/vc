@@ -19,7 +19,7 @@ import (
 // checks, the response's shape, its binding to the offer - is real and
 // has already run by the time this is reached, so returning nil would
 // hand all of that back as a verified proof that nothing looked at.
-var ErrCircuitZkNotBuilt = errors.New("circuit_zk: this verifier was built without the zknative tag, so no nym_auth proof can be checked")
+var ErrCircuitZkNotBuilt = errors.New("zkp_req: this verifier was built without the zknative tag, so no nym_auth proof can be checked")
 
 // circuitZkSession is everything the verification needs that comes
 // from THIS VERIFIER's own session, resolved before any part of the
@@ -141,10 +141,10 @@ func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.
 // without a word.
 func circuitZkRawToken(vpResponse openid4vp.VPResponse, queryID string) (json.RawMessage, error) {
 	if entry, found := vpResponse.VPTokenRaw[queryID]; !found || len(entry) == 0 {
-		return nil, fmt.Errorf("circuit_zk: the response carries no presentation for credential query %q", queryID)
+		return nil, fmt.Errorf("zkp_req: the response carries no presentation for credential query %q", queryID)
 	}
 	if len(vpResponse.VPTokenEnvelope) == 0 {
-		return nil, fmt.Errorf("circuit_zk: the response carries no vp_token to validate")
+		return nil, fmt.Errorf("zkp_req: the response carries no vp_token to validate")
 	}
 	return vpResponse.VPTokenEnvelope, nil
 }
@@ -210,19 +210,19 @@ func circuitZkChannelFor(dcAPI bool) circuitZkChannel {
 func (c *Client) circuitZkSessionFor(authCtx *cache.AuthorizationContext, channel circuitZkChannel, origin, clientID, nonce, responseURI, docType string, readerThumbprint []byte) (circuitZkSession, error) {
 	build, supported := circuitZkTranscripts[channel]
 	if !supported {
-		return circuitZkSession{}, fmt.Errorf("circuit_zk: this presentation arrived over the %q channel, and the nym_auth "+
-			"circuits define a session transcript only for %q and %q; the handover for this channel is pending shared vectors",
-			channel, channelDCAPI, channelOpenID4VP)
+		return circuitZkSession{}, fmt.Errorf("zkp_req: this presentation arrived over the %q channel, and the nym_auth "+
+			"circuits define a session transcript only for %q; the handover for this channel is pending shared vectors",
+			channel, channelDCAPI)
 	}
 
 	transcript, err := build(origin, clientID, nonce, responseURI, readerThumbprint)
 	if err != nil {
-		return circuitZkSession{}, fmt.Errorf("circuit_zk: %w", err)
+		return circuitZkSession{}, fmt.Errorf("zkp_req: %w", err)
 	}
 
 	verifierInput, err := verifier.VerifierInput(c.cfg.Verifier.NymAuth.VerifierID)
 	if err != nil {
-		return circuitZkSession{}, fmt.Errorf("circuit_zk: verifier.nym_auth.verifier_id: %w", err)
+		return circuitZkSession{}, fmt.Errorf("zkp_req: verifier.nym_auth.verifier_id: %w", err)
 	}
 
 	// Now is deliberately NOT set here. T is the prover's, carried in
@@ -245,7 +245,7 @@ func (c *Client) circuitZkSessionFor(authCtx *cache.AuthorizationContext, channe
 // from the response, which is most of why it exists.
 func circuitZkVerifierRequest(session circuitZkSession, issuerKey *ecdsa.PublicKey, items []openid4vp.ReqItem) (verifier.Request, error) {
 	if issuerKey == nil {
-		return verifier.Request{}, errors.New("circuit_zk: no issuer key resolved for this presentation")
+		return verifier.Request{}, errors.New("zkp_req: no issuer key resolved for this presentation")
 	}
 
 	inputs := make([]verifier.CircuitInput, 0, len(items))
@@ -294,7 +294,7 @@ func circuitZkAgeBounds(item openid4vp.ReqItem) (verifier.AgeBounds, error) {
 		}
 		text, ok := value.(string)
 		if !ok {
-			return verifier.AgeBounds{}, fmt.Errorf("circuit_zk: the %q parameter of %q is not a string", name, item.Return)
+			return verifier.AgeBounds{}, fmt.Errorf("zkp_req: the %q parameter of %q is not a string", name, item.Return)
 		}
 		*target = text
 	}

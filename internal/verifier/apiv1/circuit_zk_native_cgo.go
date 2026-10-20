@@ -34,7 +34,7 @@ func (c *Client) verifyCircuitZkPresentation(
 ) (map[string][]byte, error) {
 	key, ok := issuerKey.(*ecdsa.PublicKey)
 	if !ok || key == nil {
-		return nil, fmt.Errorf("circuit_zk: no issuer key resolved for this presentation")
+		return nil, fmt.Errorf("zkp_req: no issuer key resolved for this presentation")
 	}
 
 	request, err := circuitZkVerifierRequest(session, key, items)
@@ -69,7 +69,7 @@ func (c *Client) verifyCircuitZkPresentation(
 			// Unreachable after validation, which requires exactly
 			// the request's handles - and checked anyway, because
 			// the alternative is verifying against a zero pseudonym.
-			return nil, fmt.Errorf("circuit_zk: no pseudonym for handle %q", item.Return)
+			return nil, fmt.Errorf("zkp_req: no pseudonym for handle %q", item.Return)
 		}
 
 		config, err := circuitZkConfigOf(item)
@@ -85,7 +85,7 @@ func (c *Client) verifyCircuitZkPresentation(
 		copy(claimedArray[:], claimed)
 		pseudonym, err := native.Verify(request, claimedArray, presentation.Proof)
 		if err != nil {
-			return nil, fmt.Errorf("circuit_zk: handle %q: %w", item.Return, err)
+			return nil, fmt.Errorf("zkp_req: handle %q: %w", item.Return, err)
 		}
 		// The RETURNED value, never the claimed one.
 		verified[item.Return] = pseudonym[:]
@@ -102,7 +102,7 @@ func (c *Client) verifyCircuitZkPresentation(
 		// must not send; refused here rather than only where requests
 		// are built, because this is the point that cannot be
 		// bypassed.
-		return nil, fmt.Errorf("circuit_zk: this request asks only for predicates, and the proof is checked by verifying a pseudonym; "+
+		return nil, fmt.Errorf("zkp_req: this request asks only for predicates, and the proof is checked by verifying a pseudonym; "+
 			"a predicate-only request has no verification path in this build, so its %d result(s) cannot be accepted", len(items))
 	}
 	return verified, nil
@@ -118,11 +118,11 @@ func (c *Client) verifyCircuitZkPresentation(
 func circuitZkConfigOf(item openid4vp.ReqItem) (string, error) {
 	value, present := item.Params["config"]
 	if !present {
-		return "", fmt.Errorf("circuit_zk: the %q request item names no pseudonym configuration", item.Return)
+		return "", fmt.Errorf("zkp_req: the %q request item names no pseudonym configuration", item.Return)
 	}
 	config, ok := value.(string)
 	if !ok || config == "" {
-		return "", fmt.Errorf("circuit_zk: the %q request item's configuration is not a string", item.Return)
+		return "", fmt.Errorf("zkp_req: the %q request item's configuration is not a string", item.Return)
 	}
 	return config, nil
 }
@@ -141,7 +141,7 @@ func (c *Client) circuitZkVerifier(ctx context.Context, config string) (*verifie
 		return loaded, nil
 	}
 	if c.nymAuthCircuits == nil {
-		return nil, fmt.Errorf("circuit_zk: verifier.nym_auth is not enabled")
+		return nil, fmt.Errorf("zkp_req: verifier.nym_auth is not enabled")
 	}
 
 	entry, err := c.nymAuthCircuits.Entry(config)
@@ -160,7 +160,7 @@ func (c *Client) circuitZkVerifier(ctx context.Context, config string) (*verifie
 		SigCircuitID:  entry.SigCircuitID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("circuit_zk: loading the %q circuit: %w", config, err)
+		return nil, fmt.Errorf("zkp_req: loading the %q circuit: %w", config, err)
 	}
 
 	if c.nymAuthVerifiers == nil {

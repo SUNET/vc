@@ -41,12 +41,12 @@ func (c *Client) verifyCircuitZkScope(
 		// unable to check one. Refused rather than passed, because
 		// everything upstream is real and returning no error would
 		// hand it back as a verified presentation.
-		return nil, fmt.Errorf("scope %s was requested as circuit_zk but verifier.nym_auth is not enabled", scope)
+		return nil, fmt.Errorf("scope %s was requested as zkp_req but verifier.nym_auth is not enabled", scope)
 	}
 
 	raw, err := circuitZkRawToken(vpResponse, query.ID)
 	if err != nil {
-		c.log.Error(err, "no circuit_zk presentation for scope", "scope", scope, "query_id", query.ID)
+		c.log.Error(err, "no zkp_req presentation for scope", "scope", scope, "query_id", query.ID)
 		return nil, err
 	}
 
@@ -54,7 +54,7 @@ func (c *Client) verifyCircuitZkScope(
 	// is a verified fact yet; a pseudonym is the holder's claim.
 	presentations, err := openid4vp.ValidateZkpReqResponse(raw, c.circuitZkRequestFor(query))
 	if err != nil {
-		c.log.Error(err, "circuit_zk presentation refused", "scope", scope, "query_id", query.ID)
+		c.log.Error(err, "zkp_req presentation refused", "scope", scope, "query_id", query.ID)
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
 
@@ -71,7 +71,7 @@ func (c *Client) verifyCircuitZkScope(
 	origin := ""
 	if dcAPI {
 		if origin, err = c.dcAPIOrigin(); err != nil {
-			c.log.Error(err, "cannot determine the DC API origin for the circuit_zk session transcript", "scope", scope)
+			c.log.Error(err, "cannot determine the DC API origin for the zkp_req session transcript", "scope", scope)
 			return nil, err
 		}
 	}
@@ -79,15 +79,9 @@ func (c *Client) verifyCircuitZkScope(
 	session, err := c.circuitZkSessionFor(authCtx, channel, origin, authCtx.ClientID, authCtx.Nonce,
 		responseURI, query.Meta.DoctypeValue, thumbprint)
 	if err != nil {
-		c.log.Error(err, "cannot build the circuit_zk session transcript", "scope", scope, "dc_api", dcAPI)
+		c.log.Error(err, "cannot build the zkp_req session transcript", "scope", scope, "dc_api", dcAPI)
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
-
-	// T and where it came from, before any proof is checked. A
-	// time-binding mismatch is otherwise indistinguishable from a bad
-	// proof, and this line is what tells the two apart in a log.
-	c.log.Debug("circuit_zk proof time", "scope", scope,
-		"t", session.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", session.NowSource)
 
 	credentials := make([]sdjwtvc.CredentialCache, 0, len(presentations))
 	for _, presentation := range presentations {
@@ -117,28 +111,37 @@ func (c *Client) verifyCircuitZkScope(
 		presentationSession.Now = proofTime
 		presentationSession.NowSource = proofTimeSource
 
+		// T and where it came from, before the proof is checked. A
+		// time-binding mismatch is otherwise indistinguishable from a
+		// bad proof, and this line is what tells the two apart in a
+		// log. Per presentation, because T is.
+		c.log.Debug("zkp_req proof time", "scope", scope, "system_id", presentation.SystemID,
+			"t", presentationSession.Now.UTC().Format(openid4vp.ProofTimeLayout),
+			"t_source", presentationSession.NowSource)
+
 		issuerKey, err := c.circuitZkIssuerKey(ctx, presentation, presentationSession.DocType, time.Now())
 		if err != nil {
-			c.log.Error(err, "no trusted issuer key for the circuit_zk presentation",
+			c.log.Error(err, "no trusted issuer key for the zkp_req presentation",
 				"scope", scope, "doc_type", session.DocType, "system_id", presentation.SystemID)
 			return nil, fmt.Errorf("scope %s: %w", scope, err)
 		}
 
 		verified, err := c.verifyCircuitZkPresentation(ctx, presentation, presentationSession, query.Req, issuerKey)
 		if err != nil {
-			c.log.Error(err, "circuit_zk proof did not verify", "scope", scope,
+			c.log.Error(err, "zkp_req proof did not verify", "scope", scope,
 				"system_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey),
-				"t", session.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", session.NowSource)
+				"t", presentationSession.Now.UTC().Format(openid4vp.ProofTimeLayout),
+				"t_source", presentationSession.NowSource)
 			return nil, fmt.Errorf("scope %s: the proof did not verify against the issuer key the key set established: %w",
 				scope, err)
 		}
-		c.log.Info("circuit_zk proof verified", "scope", scope,
+		c.log.Info("zkp_req proof verified", "scope", scope,
 			"system_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey))
 
 		credentials = append(credentials, circuitZkCredential(scope, presentation, verified))
 	}
 
-	c.log.Info("circuit_zk presentation verified", "scope", scope,
+	c.log.Info("zkp_req presentation verified", "scope", scope,
 		"presentations", len(presentations), "doc_type", session.DocType)
 	return credentials, nil
 }
