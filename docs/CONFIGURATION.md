@@ -1922,11 +1922,16 @@ verifier:
         nym_auth:
           format: zkp_req
           validate: nym_auth     # optional
-          _req:
-            - id: pseudonym
+          # `req` is the PRESET key; the wire member it becomes is
+          # `_req`. They differ on purpose - the preset is this
+          # repository's configuration surface, not the wire.
+          req:
+            - fn_id: pseudonym
               return: nym-123
               params:
                 config: known-offender-matching-ssc
+                ver: 1
+                prf: sha-256
 ```
 
 Params is an open map and is serialised exactly as given. Nothing here
@@ -1940,7 +1945,7 @@ could not produce the bad requests a negative test needs.
 
 | Field    | Type     | Description                                                                                                                                                                                                                   | Example | Default | Required |
 | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `fn_id`  | `string` | ID is the function identifier, "id" on the wire. Named ID rather than Function to match the wire member, since the wire is what an operator configures and reads back.                                                        | -       | -       | No       |
+| `fn_id`  | `string` | Function identifier, "fn_id" on the wire. Named for the wire member rather than Function, since the wire is what an operator configures and reads back.                                                                       | -       | -       | No       |
 | `return` | `string` | Handle the result is keyed by in the response's results map. The rulebook requires it to be unique within the credential query; nothing here enforces that, because a duplicate is a thing a wallet should be tested against. | -       | -       | No       |
 | `params` | `object` | Function's parameters, passed through unchanged.                                                                                                                                                                              | -       | -       | No       |
 
