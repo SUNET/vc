@@ -448,3 +448,48 @@ func TestIssuerInitiated_ConcurrentResumesDoNotCrossTheirKeys(t *testing.T) {
 		require.True(t, ok, "and that key must be in the cache to decrypt with")
 	}
 }
+
+// The offer names the scope as its credential_configuration_id; without
+// metadata for it the exchange is spent before matchScope refuses.
+func TestPrepareIssuance_RefusesAScopeWithNoCredentialMetadata(t *testing.T) {
+	client := newChallengeClient(t)
+	delete(client.cfg.Common.CredentialMetadata, challengeScope)
+
+	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+		Scope:         challengeScope,
+		IdentityMatch: portalMatch(),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown_credential_configuration")
+}
+
+// For an mdoc auth scope, auth_claims "family_name" and the qualified
+// "org.iso.18013.5.1.family_name" are the same DCQL path.
+func TestPrepareIssuance_NormalisesMDocClaimPaths(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.Common.CredentialMetadata[challengeAuthScope] = &model.CredentialMetadata{
+		Format:  openid4vp.FormatMsoMdoc,
+		Doctype: "org.iso.18013.5.1.mDL",
+	}
+	scopes := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
+	scopes.AuthScopes = map[string]model.AuthScopeEntry{
+		challengeAuthScope: {AuthClaims: []string{"family_name"}},
+	}
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
+
+	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+		Scope: challengeScope,
+		IdentityMatch: &openid4vci.IdentityMatch{Claims: map[string]openid4vci.ClaimTest{
+			"org.iso.18013.5.1.family_name": {Equals: "Andersson"},
+		}},
+	})
+	require.NoError(t, err)
+
+	_, err = client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+		Scope: challengeScope,
+		IdentityMatch: &openid4vci.IdentityMatch{Claims: map[string]openid4vci.ClaimTest{
+			"org.example.ns.family_name": {Equals: "Andersson"},
+		}},
+	})
+	require.Error(t, err, "another namespace is a different path")
+}

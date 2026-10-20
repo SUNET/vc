@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // errIdentityMismatch is returned when a presented credential does not
@@ -50,6 +53,9 @@ func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[strin
 			c.log.Info("identity match failed: claim absent from the presented credential", "claim", path)
 			return fmt.Errorf("%w: claim %q is not present", errIdentityMismatch, path)
 		}
+		if isMDocLikeFormat(sourceFormat) {
+			value = unwrapMDocFullDate(value)
+		}
 
 		if !claimValueMatches(value, []string{test.Equals}) {
 			c.log.Info("identity match failed: claim value differs",
@@ -59,4 +65,18 @@ func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[strin
 	}
 
 	return nil
+}
+
+// unwrapMDocFullDate returns the string inside an mdoc full-date (CBOR tag
+// 1004), which decodes into an `any` as a cbor.Tag and never equals a string.
+func unwrapMDocFullDate(v any) any {
+	switch d := v.(type) {
+	case cbor.Tag:
+		if s, ok := d.Content.(string); ok && d.Number == mdoc.TagDate {
+			return s
+		}
+	case mdoc.FullDate:
+		return string(d)
+	}
+	return v
 }

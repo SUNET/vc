@@ -151,6 +151,13 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 				req.Scope, required), 400)
 	}
 
+	// The offer names req.Scope as its credential_configuration_id, and
+	// issuance resolves it through matchScope only after the exchange is spent.
+	if c.cfg.GetCredentialMetadata(req.Scope) == nil {
+		return nil, helpers.NewErrorDetailsWithStatus("unknown_credential_configuration",
+			fmt.Sprintf("scope %q has no credential metadata, so the offer would name a credential this issuer does not advertise", req.Scope), 400)
+	}
+
 	// The source the caller named, if it named one, has to be the source
 	// this scope resolves to.
 	//
@@ -297,7 +304,7 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		claims := vpAuth.AuthScopes[authScope].AuthClaims
 		offered[authScope] = claims
-		if coversAll(claims, paths) {
+		if coversAll(c.cfg.GetFormatForScope(authScope), claims, paths) {
 			return nil
 		}
 	}
@@ -308,10 +315,15 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 			scope, strings.Join(paths, ", "), offered), 400)
 }
 
-// coversAll reports whether every path appears in claims.
-func coversAll(claims, paths []string) bool {
+// coversAll reports whether every path appears in claims, compared as the
+// DCQL path segments buildIssuanceAuthDCQL sends for that format.
+func coversAll(format string, claims, paths []string) bool {
+	asked := make(map[string]struct{}, len(claims))
+	for _, claim := range claims {
+		asked[strings.Join(authClaimPathSegments(format, claim), "\x00")] = struct{}{}
+	}
 	for _, path := range paths {
-		if !slices.Contains(claims, path) {
+		if _, ok := asked[strings.Join(authClaimPathSegments(format, path), "\x00")]; !ok {
 			return false
 		}
 	}

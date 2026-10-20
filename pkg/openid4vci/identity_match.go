@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // IdentityMatch decides whether the Holder who presented a credential is
@@ -88,6 +90,51 @@ func (m *IdentityMatch) ClaimPaths() []string {
 		return nil
 	}
 	return sortedClaimPaths(m.Claims)
+}
+
+// identityMatchBSON is the stored shape. Claim paths are values, not field
+// names: MongoDB before 5.0 refuses "." in field names, and mdoc paths have it.
+type identityMatchBSON struct {
+	Claims []claimEntryBSON `bson:"claims"`
+}
+
+type claimEntryBSON struct {
+	Path string    `bson:"path"`
+	Test ClaimTest `bson:"test"`
+}
+
+// MarshalBSON stores Claims as a list of {path, test} entries.
+func (m IdentityMatch) MarshalBSON() ([]byte, error) {
+	stored := identityMatchBSON{Claims: make([]claimEntryBSON, 0, len(m.Claims))}
+	for _, path := range sortedClaimPaths(m.Claims) {
+		stored.Claims = append(stored.Claims, claimEntryBSON{Path: path, Test: m.Claims[path]})
+	}
+	return bson.Marshal(stored)
+}
+
+// UnmarshalBSON reads the entry list, and the earlier map shape.
+func (m *IdentityMatch) UnmarshalBSON(data []byte) error {
+	var raw struct {
+		Claims bson.RawValue `bson:"claims"`
+	}
+	if err := bson.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	switch raw.Claims.Type {
+	case bson.TypeArray:
+		var entries []claimEntryBSON
+		if err := raw.Claims.Unmarshal(&entries); err != nil {
+			return err
+		}
+		m.Claims = make(map[string]ClaimTest, len(entries))
+		for _, e := range entries {
+			m.Claims[e.Path] = e.Test
+		}
+	case bson.TypeEmbeddedDocument:
+		return raw.Claims.Unmarshal(&m.Claims)
+	}
+	return nil
 }
 
 func sortedClaimPaths(claims map[string]ClaimTest) []string {

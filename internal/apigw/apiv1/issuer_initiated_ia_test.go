@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -439,4 +441,23 @@ func TestIssuerInitiated_RefusesANonPresentationInteractionBeforeClaiming(t *tes
 	})
 	require.NoError(t, err, "the issuer_state must still be claimable")
 	assert.Empty(t, resolved.AuthSession)
+}
+
+// An mdoc full-date decodes as CBOR tag 1004 and must compare as its string.
+func TestIdentityMatch_UnwrapsMDocFullDate(t *testing.T) {
+	client := newChallengeClient(t)
+
+	encoded, err := cbor.Marshal(mdoc.FullDate("1980-01-01"))
+	require.NoError(t, err)
+	var decoded any
+	require.NoError(t, cbor.Unmarshal(encoded, &decoded))
+	require.IsType(t, cbor.Tag{}, decoded)
+
+	match := &openid4vci.IdentityMatch{Claims: map[string]openid4vci.ClaimTest{
+		"birth_date": {Equals: "1980-01-01"},
+	}}
+	require.NoError(t, client.matchPresentedIdentity("mso_mdoc", map[string]any{"birth_date": decoded}, match))
+
+	match.Claims["birth_date"] = openid4vci.ClaimTest{Equals: "1980-01-02"}
+	require.ErrorIs(t, client.matchPresentedIdentity("mso_mdoc", map[string]any{"birth_date": decoded}, match), errIdentityMismatch)
 }
