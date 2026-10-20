@@ -24,6 +24,12 @@ const (
 // it answers for. A one-day window answers "were you born on this exact
 // day", which is not an age check at all - it is a birth-date oracle the
 // Verifier can walk. The rulebook sets the floor at a year.
+//
+// Counted INCLUSIVELY, as the rulebook counts it and as the startup
+// profile check already did (pkg/openid4vp: le - ge + 1). Both ends are
+// satisfying birth dates, so 2001-01-01..2001-12-31 is 365 days and not
+// 364. The two counts disagreeing meant a preset could pass startup
+// validation and then be refused here.
 const MinimumRangeDays = 365
 
 // AgeBounds are the circuits' E and C: the earliest and cutoff birth
@@ -128,7 +134,7 @@ func (b AgeBounds) checkRange() error {
 		return fmt.Errorf("nymauth: the cutoff birth date %s is not after the earliest %s, so no birth date satisfies the request",
 			b.Cutoff, b.Earliest)
 	}
-	if days := int(cutoff.Sub(earliest).Hours() / 24); days < MinimumRangeDays {
+	if days := int(cutoff.Sub(earliest).Hours()/24) + 1; days < MinimumRangeDays {
 		return fmt.Errorf("nymauth: the age range %s..%s spans %d days; the rulebook requires at least %d, because a narrower window identifies a birth date rather than checking an age",
 			b.Earliest, b.Cutoff, days, MinimumRangeDays)
 	}

@@ -80,13 +80,16 @@ func TestAgeCheckRefusesANarrowRange(t *testing.T) {
 	assert.Contains(t, err.Error(), "at least 365")
 
 	// One day short, to pin the boundary rather than the order of
-	// magnitude.
-	_, err = AgeCheck{GE: "2001-01-01", LE: "2001-12-31"}.Bounds()
+	// magnitude. Inclusive: 2001 is not a leap year, so this window
+	// holds 364 satisfying birth dates.
+	_, err = AgeCheck{GE: "2001-01-01", LE: "2001-12-30"}.Bounds()
 	require.Error(t, err, "364 days is still short")
 
-	// And exactly the floor passes.
-	_, err = AgeCheck{GE: "2001-01-01", LE: "2002-01-01"}.Bounds()
-	require.NoError(t, err, "365 days is the documented minimum, so it must be allowed")
+	// And exactly the floor passes. The same window the startup
+	// profile check accepts (le - ge + 1 = 365) has to be accepted
+	// here, or a preset passes startup and is refused at use.
+	_, err = AgeCheck{GE: "2001-01-01", LE: "2001-12-31"}.Bounds()
+	require.NoError(t, err, "365 inclusive days is the documented minimum, so it must be allowed")
 
 	// A single bound is never a range, however it is written.
 	for _, check := range []AgeCheck{{GE: "2008-01-01"}, {LE: "2008-01-01"}, {GT: "2008-01-01"}, {LT: "2008-01-01"}} {
