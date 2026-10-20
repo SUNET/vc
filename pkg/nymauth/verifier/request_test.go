@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -67,10 +68,17 @@ func TestVerifierInputIsTheBareIDsDigest(t *testing.T) {
 	// MUST NOT, and it is refused rather than stripped: hashing it
 	// yields a pseudonym no Verifier reports, so a comparison never
 	// matches and the subject looks innocent.
-	for _, prefixed := range []string{"x509_san_dns:verifier.example", "semantic_id:verifier.example"} {
-		_, err := VerifierInput(prefixed)
-		assert.Errorf(t, err, "%q is a Client Identifier, not a verifier_id", prefixed)
-	}
+	_, err = VerifierInput("x509_san_dns:verifier.example")
+	assert.Error(t, err, "a Client Identifier is not a verifier_id")
+
+	// "semantic_id:" is NOT one of those. The rulebook says it is part
+	// of the `semantic` verifier_id value and not a Client Identifier
+	// Prefix, so the whole string is the identifier and the whole
+	// string is hashed.
+	semantic, err := VerifierInput("semantic_id:verifier.example")
+	require.NoError(t, err, "a semantic verifier_id must be usable")
+	want := sha256.Sum256([]byte("semantic_id:verifier.example"))
+	assert.Equal(t, hex.EncodeToString(want[:]), hex.EncodeToString(semantic[:]))
 
 	_, err = VerifierInput("")
 	assert.Error(t, err)
