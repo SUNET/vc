@@ -321,6 +321,29 @@ func testNymAuthPSCStoreContract(t *testing.T, store NymAuthPSCStore) {
 		require.NoError(t, store.Erase(ctx, subject))
 	})
 
+	t.Run("evidence references differing only in trailing space are different evidence", func(t *testing.T) {
+		// A PAD SPACE collation - which utf8mb4_bin is - compares
+		// "evidence" and "evidence " equal. The reference is opaque
+		// and operator-supplied, so the two are different pieces of
+		// evidence, and treating the second as a replay reports a
+		// reset that did not happen.
+		subject := pscDigest("evidence-padding")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+		require.NoError(t, store.Reset(ctx, subject, "operator-p", "evidence-p", now))
+		require.NoError(t, store.Accept(ctx, subject, second, now.Add(time.Hour)))
+
+		require.NoError(t, store.Reset(ctx, subject, "operator-p", "evidence-p ", now.Add(2*time.Hour)))
+
+		got, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+		assert.Nil(t, got, "the second reset is a real reset, not a replay of the first")
+
+		trail, err := store.Resets(ctx, subject)
+		require.NoError(t, err)
+		assert.Len(t, trail, 2, "two distinct references are two audit rows")
+		require.NoError(t, store.Erase(ctx, subject))
+	})
+
 	t.Run("malformed arguments are refused before they reach the table", func(t *testing.T) {
 		assert.ErrorContains(t, store.Accept(ctx, "not-hex", first, now), "not hex")
 		assert.ErrorContains(t, store.Accept(ctx, subject, strings.ToUpper(first), now), "not lowercase hex")
