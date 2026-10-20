@@ -34,6 +34,25 @@ type NymAuthVerifier struct {
 	// Circuits is where the circuit builds this Verifier will load
 	// come from.
 	Circuits NymAuthCircuits `yaml:"circuits,omitempty"`
+
+	// MaxIssuerKeyCandidates bounds how many trusted issuer keys one
+	// proof may be verified against.
+	//
+	// The circuit takes the issuer key as a public input, and a
+	// circuit_zk presentation carries no credential to resolve a
+	// chain from - so the keys come from the trust layer and the
+	// proof is tried against each in turn. Verification is the
+	// expensive step, so an unbounded candidate set is an unbounded
+	// amount of work per presentation.
+	//
+	// Over the limit is REFUSED, never truncated: verifying against
+	// an arbitrary subset would report a proof as unverifiable when
+	// the key that signed it was simply past the cut. Raise this
+	// deliberately if an issuer really does have more.
+	//
+	// Zero means DefaultMaxIssuerKeyCandidates (8), which is far
+	// beyond any real issuer's key set including rotation overlap.
+	MaxIssuerKeyCandidates int `yaml:"max_issuer_key_candidates,omitempty" doc_example:"8"`
 }
 
 // NymAuthCircuits configures which circuit builds may be loaded, and

@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/base64"
 	"fmt"
 
@@ -34,7 +33,6 @@ func (c *Client) verifyCircuitZkScope(
 	query openid4vp.CredentialQuery,
 	dcAPI bool,
 	responseURI string,
-	issuerKey *ecdsa.PublicKey,
 ) ([]sdjwtvc.CredentialCache, error) {
 	if c.nymAuthCircuits == nil {
 		// Advertised as a circuit_zk verifier by its own request and
@@ -77,37 +75,40 @@ func (c *Client) verifyCircuitZkScope(
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
 
-	if issuerKey == nil {
-		// NOT YET RESOLVED, and refused rather than attempted.
-		//
-		// Q - the key the credential was signed with - is a public
-		// input to the circuit, and it has to come from the issuer
-		// chain this verifier resolved and trusted. For every other
-		// format the presentation carries the chain; a circuit_zk
-		// presentation carries no credential at all, so there is
-		// nothing in it to resolve, and taking a key named by the
-		// response would let the holder choose which issuer it is
-		// measured against.
-		//
-		// Resolving it by docType through the trust evaluator is the
-		// shape that fits - trust and resolution live in go-trust,
-		// not here - but which keys a docType resolves to, and what
-		// happens when it resolves to several, is a decision that has
-		// not been taken. Until it is, this refuses: a verifier that
-		// guessed would be reporting a proof as checked against an
-		// issuer nobody chose.
-		return nil, fmt.Errorf("scope %s: no trusted issuer key is resolved for circuit_zk presentations yet; "+
-			"the circuit takes the issuer key as a public input and this verifier has no way to obtain it for %q",
-			scope, session.DocType)
+	candidates, err := c.circuitZkIssuerCandidates(ctx, session.DocType, nil)
+	if err != nil {
+		c.log.Error(err, "cannot resolve a trusted issuer key for circuit_zk", "scope", scope, "doc_type", session.DocType)
+		return nil, fmt.Errorf("scope %s: %w", scope, err)
 	}
 
 	credentials := make([]sdjwtvc.CredentialCache, 0, len(presentations))
 	for _, presentation := range presentations {
-		verified, err := c.verifyCircuitZkPresentation(ctx, presentation, session, query.Req, issuerKey)
-		if err != nil {
-			c.log.Error(err, "circuit_zk proof verification failed", "scope", scope,
-				"circuit_id", presentation.CircuitID, "proof_system", presentation.ProofSystem)
-			return nil, fmt.Errorf("scope %s: %w", scope, err)
+		// Each candidate in turn, accepting the FIRST that verifies.
+		//
+		// A proof is checked against one key; the verifier does not
+		// know which of its trusted issuers signed the credential,
+		// because the presentation carries nothing that says so. The
+		// pseudonym published is the one returned by the verification
+		// that succeeded, and never one from an attempt that did not.
+		var verified map[string][]byte
+		var lastErr error
+		for _, candidate := range candidates {
+			verified, lastErr = c.verifyCircuitZkPresentation(ctx, presentation, session, query.Req, candidate)
+			if lastErr == nil {
+				c.log.Info("circuit_zk proof verified", "scope", scope,
+					"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(candidate))
+				break
+			}
+		}
+		if lastErr != nil {
+			// Reported against the whole candidate set, not against
+			// the last one tried: "it did not verify against any key
+			// we trust" is the true statement, and naming one key
+			// would invite chasing the wrong issuer.
+			c.log.Error(lastErr, "circuit_zk proof verified against no trusted issuer key", "scope", scope,
+				"circuit_id", presentation.CircuitID, "candidates", len(candidates))
+			return nil, fmt.Errorf("scope %s: the proof verified against none of the %d trusted issuer keys for %q: %w",
+				scope, len(candidates), session.DocType, lastErr)
 		}
 		credentials = append(credentials, circuitZkCredential(scope, presentation, verified))
 	}

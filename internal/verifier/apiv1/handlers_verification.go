@@ -242,7 +242,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			if err != nil {
 				return nil, err
 			}
-			credentials, err := c.verifyCircuitZkScope(ctx, authCtx, vpResponse, scope, query, req.DCAPI, responseURI, nil)
+			credentials, err := c.verifyCircuitZkScope(ctx, authCtx, vpResponse, scope, query, req.DCAPI, responseURI)
 			if err != nil {
 				return nil, err
 			}
