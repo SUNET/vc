@@ -658,7 +658,7 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 		{
 			name:   "no derivation secret",
 			mutate: func(c *Client) { c.cfg.APIGW.Seeds["primary"].Secret = "" },
-			want:   "set secret_path, or apigw.seeds.primary.secret in the secrets file",
+			want:   "in the SECRETS file (the same key in config.yaml is not read)",
 		},
 		{
 			name: "two sources of truth for the derivation secret",
