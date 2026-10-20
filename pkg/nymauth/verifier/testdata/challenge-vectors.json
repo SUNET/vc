@@ -114,6 +114,24 @@
       "doc_type": "eu.europa.ec.eudi.nym_auth.1"
     },
     {
+      "name": "transcript whose third item is a text string with invalid UTF-8",
+      "op": "digest",
+      "session_transcript_hex": "83f6f661ff",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript whose third item is the simple value 0 in the non-canonical long form",
+      "op": "digest",
+      "session_transcript_hex": "83f6f6f800",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript whose third item is the simple value 24 in the non-canonical long form",
+      "op": "digest",
+      "session_transcript_hex": "83f6f6f818",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
       "name": "empty docType for a transcript",
       "op": "digest",
       "session_transcript_hex": "83f6f66868616e646f766572",
