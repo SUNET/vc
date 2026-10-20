@@ -451,6 +451,30 @@ func TestSameHTU(t *testing.T) {
 		assert.True(t, SameHTU("https://münchen.example/token", "https://xn--mnchen-3ya.example/token"))
 	})
 
+	// Unicode lowercasing is not the IDNA mapping: İ lowercases to i but
+	// maps to xn--i-9bb, so the host must reach IDNA as written.
+	t.Run("IDNA maps the host as written, not its Unicode lowercase", func(t *testing.T) {
+		assert.True(t, SameHTU("https://İ.example/token", "https://xn--i-9bb.example/token"))
+		assert.True(t, SameHTU("https://xn--i-9bb.example/token", "https://İ.example/token"))
+		assert.False(t, SameHTU("https://İ.example/token", "https://i.example/token"))
+		assert.False(t, SameHTU("https://i.example/token", "https://İ.example/token"))
+	})
+
+	// A resolver IDNA profile rejects "_", and the old lowercase fallback
+	// then turned İ.my_host.example into i.my_host.example.
+	t.Run("a host with an underscore is mapped, not lowercased", func(t *testing.T) {
+		assert.True(t, SameHTU("https://İ.my_host.example/token", "https://xn--i-9bb.my_host.example/token"))
+		assert.True(t, SameHTU("https://xn--i-9bb.my_host.example/token", "https://İ.my_host.example/token"))
+		assert.True(t, SameHTU("https://MY_HOST.Example/token", "https://my_host.example/token"))
+		assert.False(t, SameHTU("https://İ.my_host.example/token", "https://i.my_host.example/token"))
+		assert.False(t, SameHTU("https://i.my_host.example/token", "https://İ.my_host.example/token"))
+	})
+
+	t.Run("a host IDNA rejects is compared as written", func(t *testing.T) {
+		assert.False(t, SameHTU("https://A\u200dB.example/token", "https://a\u200db.example/token"))
+		assert.True(t, SameHTU("https://a\u200db.example/token", "https://a\u200db.example/token"))
+	})
+
 	t.Run("a non-default port with a leading zero is the same port", func(t *testing.T) {
 		assert.True(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com:8443/token"))
 		assert.False(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com/token"))
@@ -663,26 +687,5 @@ func TestSameHTU_UnderscoreHostsMapLikeABrowser(t *testing.T) {
 		if SameHTU(pair[0], pair[1]) {
 			t.Fatalf("%q and %q are different authorities", pair[0], pair[1])
 		}
-	}
-}
-
-// The fold that remains is a last resort, and it is ASCII-only so that it
-// cannot merge "İ…" with "i…" the way strings.ToLower would. The browser
-// profile above maps both of those now, so nothing ordinary reaches here -
-// which is exactly why the property is worth pinning rather than assuming.
-func TestAsciiLowerFoldsOnlyASCII(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"MY_HOST.EXAMPLE", "my_host.example"},
-		{"\u0130.Example", "\u0130.example"},
-		{"\u00dcBER.example", "\u00dcber.example"},
-		{"already.lower", "already.lower"},
-		{"", ""},
-	} {
-		if got := asciiLower(tc.in); got != tc.want {
-			t.Fatalf("asciiLower(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-	if asciiLower("\u0130") == "i" {
-		t.Fatal("asciiLower must not fold U+0130 to i; that is the merge this helper exists to avoid")
 	}
 }

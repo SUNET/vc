@@ -355,7 +355,7 @@ func (p PresentationScope) ResolveDefaults(now time.Time) (map[string]any, error
 // Remote defines an external API connection.
 type Remote struct {
 	// Type is the API protocol type
-	Type RemoteType `yaml:"type" validate:"required,oneof=eduapi ooapi"`
+	Type RemoteType `yaml:"type" validate:"required,oneof=eduapi ooapi oeapi"`
 
 	// BaseURL is the base URL of the API endpoint
 	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://api.ladok.se/eduapi\""`
@@ -392,6 +392,7 @@ type RemoteType string
 const (
 	RemoteTypeEduAPI RemoteType = "eduapi"
 	RemoteTypeOOAPI  RemoteType = "ooapi"
+	RemoteTypeOEAPI  RemoteType = "oeapi"
 )
 
 // CredentialSource describes where a credential's data comes from and how the user authenticates.

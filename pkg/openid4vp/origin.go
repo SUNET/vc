@@ -14,10 +14,6 @@ import (
 // does: UTS #46 ToASCII with the flags the WHATWG URL Standard specifies
 // for a non-strict parse.
 //
-// Exported because pkg/oauth2 compares DPoP htu values against configured
-// endpoints and has to reach the same spelling a browser would. Two
-// profiles for one question are two answers waiting to disagree.
-//
 // MapForLookup turns on StrictDomainName and ValidateLabels (and with them
 // CheckHyphens), which is right for a resolver and wrong here - a browser
 // accepts an underscore in a host and accepts labels like
@@ -74,7 +70,8 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		return "", fmt.Errorf("%q has no host, so it yields no origin", rawURL)
 	}
 
-	if strings.Contains(host, ":") {
+	switch {
+	case strings.Contains(host, ":"):
 		// An IPv6 literal, which is not a domain name and must not be put
 		// through IDNA - the colons alone would fail it.
 		//
@@ -87,36 +84,25 @@ func CanonicalOrigin(rawURL string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-	} else {
-		// The mapping first, then the numeric check, and in that order
-		// for a reason.
-		//
+	default:
 		// ToASCII does the case folding too, as part of the UTS #46
-		// mapping, so there is no ToLower here to disagree with it - and
-		// it passes a numeric host through unchanged, so nothing is lost
-		// by mapping one.
-		//
-		// What IS lost by checking first is consistency. The check asks
-		// whether the LAST label is a number, and fullwidth digits are
-		// not ASCII digits, so the order of the two steps used to be
-		// decided by the width of the final character alone:
-		// "１２７.0.0.1" was refused while "１２７.0.0.１" and "１２７.０.０.１"
-		// were accepted as "https://127.0.0.1". Those are one host, and a
-		// browser reports the same origin for all three.
+		// mapping, so there is no ToLower here to disagree with it.
 		host, err = BrowserHost.ToASCII(host)
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-		// On the MAPPED host, which is the only spelling that can be
-		// compared to what a browser reports. The mapping both produces
-		// numeric hosts ("１２７.１" becomes "127.1") and leaves written
-		// ones alone, so one check here covers what two used to.
+		// The numeric check runs on the MAPPED host, because the mapping
+		// is what a browser parses. Fullwidth digits and ideographic full
+		// stops (U+3002) are not ASCII digits or dots as written, but UTS
+		// #46 maps them to "127.1"-style hosts that a browser rewrites
+		// to 127.0.0.1. Checking the host as written let those through.
 		if endsInANumber(host) {
 			if err := refuseRewritableNumericHost(host, rawURL); err != nil {
 				return "", err
 			}
 		}
 	}
+
 	origin := scheme + "://" + host
 	port, err := normalizePort(u.Port())
 	if err != nil {

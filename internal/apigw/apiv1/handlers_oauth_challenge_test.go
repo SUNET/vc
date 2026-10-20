@@ -691,6 +691,19 @@ func TestAuthorizationChallenge_WalletErrorIsPassedThrough(t *testing.T) {
 	assert.Equal(t, 400, challengeErr.HTTPStatus)
 }
 
+// A code OpenID4VP does not define is not echoed back as if it were ours.
+func TestAuthorizationChallenge_UnknownWalletErrorIsNotEchoed(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	challengeErr := challengeErr(t, client, continueExchange(t, opened.AuthSession,
+		`{"error":"insufficient_authorization","error_description":"<script>"}`))
+
+	assert.Equal(t, "access_denied", challengeErr.ErrorCode)
+	assert.Empty(t, challengeErr.ErrorDescription)
+	assert.Equal(t, 400, challengeErr.HTTPStatus)
+}
+
 // The request asked for an encrypted response, so an unencrypted one is
 // refused. Accepting a bare vp_token here would let anything that can
 // reach the endpoint strip the encryption the wallet was told to apply.

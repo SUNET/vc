@@ -272,8 +272,8 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		challengeRPM = s.cfg.APIGW.RateLimit.AuthorizationChallengeRequestsPerMinute
 	}
 	challengeRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, challengeRPM)
+	// No UserSession: the endpoint is wallet-to-server and DPoP-bound, not cookie-bound.
 	rgChallenge := rgRoot.Group("")
-	rgChallenge.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
 	rgChallenge.Use(challengeRL.Middleware())
 	s.httpHelpers.Server.RegEndpoint(ctx, rgChallenge, http.MethodPost, strings.TrimPrefix(model.AuthorizationChallengePath, "/"), http.StatusOK, s.endpointOAuthAuthorizationChallenge)
 

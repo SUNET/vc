@@ -312,13 +312,6 @@ func normalizeURIForComparison(raw string) (string, bool) {
 
 	scheme := strings.ToLower(u.Scheme)
 
-	// NOT lowercased first. IDNA does the case mapping itself, as part of
-	// the UTS #46 mapping, and Go's ToLower disagrees with it: ToLower
-	// turns "İ.example" (U+0130) into "i.example", while UTS #46 maps the
-	// original to "xn--i-9bb.example". Folding first therefore REJECTED a
-	// wallet's correctly canonicalised proof and ACCEPTED one naming the
-	// distinct authority "i.example". pkg/openid4vp's CanonicalOrigin has
-	// said this in its own comment all along; this is the same rule.
 	host := u.Hostname()
 	// An address is normalized as an address, not as a name. IPv6 has many
 	// spellings of one address - 2001:0db8:0:0:0:0:0:1 and 2001:db8::1 are
@@ -338,42 +331,20 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	//
 	// Before the IDNA mapping, not after: an address is not a domain name
 	// and has no business being mapped as one.
+	//
+	// IDNA gets the host as written, not lowercased: Unicode lowercasing is
+	// not the IDNA mapping (İ lowercases to i, but maps to xn--i-9bb), so
+	// pre-lowercasing would merge distinct hosts and split equivalent ones.
 	if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = addr.String()
 	} else if ascii, err := openid4vp.BrowserHost.ToASCII(host); err == nil {
-		// A Unicode host and its A-label are the same host, and the
-		// profile is the browser's rather than a resolver's.
-		//
-		// idna.Lookup turns on StrictDomainName, which rejects an
-		// underscore anywhere in the name - and a wallet building its
-		// htu from a URL has already been through a browser-shaped
-		// parser, so it sends the A-label. Under the strict profile
-		// "İ.my_host.example" failed to map and fell through to the
-		// fold below, so the wallet's correctly normalised
-		// "xn--i-9bb.my_host.example" did not match the endpoint this
-		// deployment had configured. pkg/openid4vp's CanonicalOrigin
-		// reached the right spelling all along; this now uses the same
-		// profile rather than a second opinion about the same question.
+		// A Unicode host and its A-label are the same host. The browser
+		// profile accepts hosts a resolver profile rejects (e.g. "_").
 		host = ascii
 	} else {
-		// A mapping failure folds case rather than rejecting a proof
-		// over it: the case of a host is insignificant either way
-		// (RFC 3986 §6.2.2.1).
-		//
-		// ASCII-ONLY, which is the whole point of the helper. Go's
-		// strings.ToLower maps "İ" (U+0130) to "i", so a Unicode fold
-		// here would merge "İ…" with "i…" - distinct authorities - and
-		// let a proof for one satisfy the other. The browser profile
-		// above now maps both of those rather than refusing them, so
-		// this is a genuine last resort; folding only ASCII keeps it
-		// one even for whatever still reaches it.
-		//
-		// Folding only A-Z cannot merge two hosts differing by anything
-		// but ASCII letter case, which is exactly the difference
-		// §6.2.2.1 calls insignificant. A non-ASCII host that IDNA also
-		// refuses then matches only itself - the right answer for a host
-		// this build cannot spell the way a browser would.
-		host = asciiLower(host)
+		// No fallback: lowercasing an unmappable host can merge it with a
+		// distinct one, so the caller compares as written instead.
+		return "", false
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
@@ -396,31 +367,6 @@ func normalizeURIForComparison(raw string) (string, bool) {
 	}
 
 	return scheme + "://" + host + path, true
-}
-
-// asciiLower folds A-Z and leaves every other byte alone.
-//
-// Not strings.ToLower: Unicode case folding merges characters that are
-// different hosts - U+0130 and "i" among them - and this is used where the
-// IDNA mapping has already failed, so there is nothing left to catch that.
-// RFC 3986 §6.2.2.1 makes ASCII letter case insignificant and says nothing
-// about anything else.
-func asciiLower(s string) string {
-	var folded []byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c < 'A' || c > 'Z' {
-			continue
-		}
-		if folded == nil {
-			folded = []byte(s)
-		}
-		folded[i] = c + ('a' - 'A')
-	}
-	if folded == nil {
-		return s
-	}
-	return string(folded)
 }
 
 // normalizePercentEncoding applies the two percent-encoding rules of RFC
