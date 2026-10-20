@@ -60,7 +60,7 @@ verifier:
           block_enc_hash: 6983
           block_enc_sig: 4679
           artifact_path: /etc/vc/circuits/nym_auth-ssc.bin
-          artifact_sha256: 92dd42fd…
+          artifact_sha256: 92dd42fdf99673249eec33c7d07850bd9da66fbdab01ef26391e04c8341c1b7f
           artifact_bytes: 1062842
   preferred_vp_formats:
     circuit_zk:
@@ -190,10 +190,10 @@ because the two halves are checked separately:
   to it. A holder who substitutes a key it controls gets a proof about a
   credential that key signed — which is a credential it issued to itself.
 - The **PDP** then says whether Q belongs to an issuer this verifier
-  accepts — through the same `pkg/mdoc.VerifyIssuerChain`, under the same
-  `credential-issuer` role, as a plain mdoc presentation's DS certificate.
-  One implementation rather than two, so the two paths cannot drift into
-  trusting different things. A self-signed key does not get a decision.
+  accepts — through the same `pkg/mdoc.VerifyIssuerChain` as a plain mdoc
+  presentation's DS certificate. One implementation rather than two, so the
+  two paths cannot drift into trusting different things. A self-signed key
+  does not get a decision.
 
 Neither half is sufficient alone, and either one failing refuses the
 presentation. The `docType` the chain is evaluated for comes from the
@@ -203,6 +203,37 @@ trust policy it is judged under.
 This reveals no more than a plain mdoc presentation already does: a DS
 certificate identifies the issuer and says nothing about which credential or
 which subject.
+
+### The request the PDP actually receives
+
+Worth writing out, because the action on the wire is **not** the role the
+code sets. The verifier sets the role `credential-issuer`; `GetEffectiveAction`
+in `pkg/trust` then derives the action from that role plus the docType, and
+that derived value is what is sent:
+
+```json
+{
+  "subject":  { "type": "key", "id": "<issuer URL from the leaf DS cert's URI SAN>" },
+  "resource": { "type": "x5c", "id": "<same as subject.id>",
+                "key": ["<standard base64 DER, leaf first>", "..."] },
+  "action":   { "name": "mdoc-issuer" }
+}
+```
+
+| | |
+|---|---|
+| `mdoc-issuer` | any mdoc docType, including `eu.europa.ec.eudi.nym_auth.1` |
+| `mdl-issuer` | the `org.iso.18013.5.1.mDL` docType specifically |
+| `credential-issuer` | a **looser** policy (fingerprint whitelist) — **not** this path |
+
+That last row is the one to watch when writing policy: a rule written for
+`credential-issuer` will never match a circuit_zk presentation, because the
+verifier never sends that action for one.
+
+There is **no `doc_type` in the context**. The docType selects the action
+name and nothing else; the context carries only what `TrustOptions` adds,
+and this path sets none. `resource.id` must equal `subject.id` or go-trust
+rejects the request before sending it.
 
 The leaf key must be P-256, because the circuit's arithmetic is. A key on
 another curve cannot be a public input to it, so accepting one would mean
