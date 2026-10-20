@@ -67,7 +67,13 @@ type NymAuthCircuits struct {
 	// catalog carries mdoc Longfellow entries only, with no nym_auth
 	// descriptors and none of the four parameters this ABI needs. An
 	// entry therefore supplies its own artifact.
-	Sources []string `yaml:"sources,omitempty" validate:"omitempty,dive,httpurl"`
+	// No struct-tag validation, for the same reason the entries above
+	// have none: the validator recurses into this subtree whether or
+	// not Enable is set, so an `httpurl` tag here stops a deployment
+	// that has nym_auth switched OFF and a half-written source left
+	// behind. Checked in circuits.NewAllowlist instead, which runs
+	// only when the feature is enabled.
+	Sources []string `yaml:"sources,omitempty"`
 }
 
 // NymAuthCircuit is one allowed circuit build.
