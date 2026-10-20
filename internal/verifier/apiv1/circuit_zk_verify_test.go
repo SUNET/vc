@@ -478,3 +478,33 @@ func TestCircuitZkRedirectResponseModeIsEnforcedByTheHandler(t *testing.T) {
 	assert.NotContains(t, err.Error(), "in the clear",
 		"direct_post.jwt must get past the response-mode check")
 }
+
+// The session a real UI interaction creates must carry the response
+// mode the wallet was actually told to use.
+//
+// Without this, every QR or link circuit_zk presentation from an
+// ordinary session is refused with response_mode "" before the proof
+// is ever checked - and the handler test above does not catch it,
+// because it builds its own session and sets the field by hand.
+// Which is the point: a test that constructs the state it is
+// verifying cannot discover that nothing else constructs it.
+func TestUIInteractionSessionRecordsTheResponseMode(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+
+	reply, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: createTestDCQLForVP(t)})
+	require.NoError(t, err)
+	require.NotEmpty(t, reply.SessionID)
+
+	session, err := client.cacheService.AuthContext.GetByID(ctx, reply.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, session)
+
+	assert.Equal(t, openid4vp.ResponseModeDirectPostJWT, session.ResponseMode,
+		"the link and QR request object carries direct_post.jwt, so the session must say so")
+
+	// And it is the mode a redirect circuit_zk presentation is
+	// checked against, so a real session passes that check.
+	require.NoError(t, checkCircuitZkResponseMode(channelOpenID4VP, session),
+		"a session minted by UIInteraction must satisfy the redirect response-mode rule")
+}

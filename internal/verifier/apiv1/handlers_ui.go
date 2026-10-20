@@ -728,6 +728,19 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		requestObject.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
 	}
 
+	// The mode the wallet was actually told to use, taken FROM the
+	// object rather than repeated as a constant, so the session and
+	// the request cannot come to disagree.
+	//
+	// This is the REDIRECT object's mode. The DC API copy minted in
+	// dcAPIAuthorizationRequest overrides it with dc_api.jwt, so one
+	// session legitimately serves two modes - and what is recorded
+	// here is the one the link and the QR code carry. The verification
+	// path reads it only for a response that arrived over the redirect
+	// channel; a DC API response is identified by its own flag and
+	// never checked against this field.
+	authorizationContext.ResponseMode = requestObject.ResponseMode
+
 	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {
 		return nil, err
 	}
