@@ -1004,7 +1004,7 @@ type Verifier struct {
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 
 	// NymAuth configures verification of nym_auth pseudonym proofs
-	// (the "circuit_zk" presentation format). Off unless enable is
+	// (the "zkp_req" presentation format). Off unless enable is
 	// set, and only consulted by builds with the "zknative" Go build
 	// tag - the default build cannot check a proof at all.
 	NymAuth NymAuthVerifier `yaml:"nym_auth,omitempty"`
