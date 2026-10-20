@@ -351,8 +351,26 @@ that survives the host, and rotating it repseudonymises everyone.
 `credential_response_encryption`, or issuance fails. The namespace
 advertisement in issuer metadata is what tells it to.
 
-**Issuer requirement.** Asking is not enough on its own: this issuer
-must support response encryption too, which means at least one key in
+**Issuer requirement.** Asking is not enough on its own. Two things
+must be configured, and a delivering scope without either is refused
+at startup.
+
+A **notification endpoint**, `apigw.issuer_metadata.notification_endpoint`.
+A delivered seed comes with a `notification_id`, which is how a wallet
+reports that the commitment it was given does not open with the seed
+it was sent (SPEC 2.6 §5A.2). vc serves the endpoint unconditionally
+but ADVERTISES it only when this is set, and a wallet that cannot see
+it in the metadata will not use it — so without it the id is minted,
+the feedback loop is silently absent, and a credential whose
+commitment nobody can open looks exactly like one that works.
+
+```yaml
+apigw:
+  issuer_metadata:
+    notification_endpoint: https://issuer.example/notification
+```
+
+And **response encryption**, which means at least one key in
 `apigw.issuer_metadata.credential_encryption.keys`. Without it a
 delivering scope cannot be issued at all — a wallet that asks is
 refused for lack of support, one that does not is refused for the

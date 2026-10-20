@@ -162,6 +162,25 @@ func (c *Client) checkSeedAdvertisement(scope string, meta *model.CredentialMeta
 		}
 	}
 
+	if c.issuerMetadata == nil || c.issuerMetadata.NotificationEndpoint == "" {
+		// A delivered seed comes with a notification_id, which is how
+		// a wallet reports that the commitment it was given does not
+		// open with the seed it was sent (privatedata-spec SPEC 2.6
+		// section 5A.2). Without an advertised notification endpoint
+		// the wallet has nowhere to send it: the id is minted, the
+		// feedback loop is silently absent, and a credential whose
+		// commitment nobody can open is indistinguishable from one
+		// that works.
+		//
+		// vc serves the endpoint unconditionally; it is ADVERTISED
+		// only when apigw.issuer_metadata.notification_endpoint is
+		// set, and a wallet that cannot see it in the metadata will
+		// not use it.
+		return fmt.Errorf("%s: delivers a seed, which comes with a notification_id the wallet reports a failed "+
+			"commitment check through, but this issuer advertises no notification endpoint - set "+
+			"apigw.issuer_metadata.notification_endpoint", where)
+	}
+
 	if c.cfg.APIGW == nil || len(c.cfg.APIGW.IssuerMetadata.CredentialEncryption.Keys) == 0 {
 		return fmt.Errorf("%s: delivers a seed, which is only sent in an encrypted response, but this issuer has no "+
 			"apigw.issuer_metadata.credential_encryption.keys - a wallet asking for encryption would be refused for "+

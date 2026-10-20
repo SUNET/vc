@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,11 @@ func deliveringScope(t *testing.T, withKeys bool) *Client {
 		log:         logger.NewSimple("test"),
 		cfg:         &model.Cfg{Common: &model.Common{}, APIGW: apigw},
 		seedSources: nil,
+		issuerMetadata: &openid4vci.CredentialIssuerMetadataParameters{
+			// Advertised, as a delivering issuer must: the wallet
+			// reports a failed commitment check through it.
+			NotificationEndpoint: "https://issuer.example/notification",
+		},
 	}
 }
 
@@ -89,6 +95,23 @@ func TestStartupRefusesDeliveryWithoutEncryptionKeys(t *testing.T) {
 
 	with := deliveringScope(t, true)
 	assert.NoError(t, checkScope(t, with, []string{"org.siros.nym_auth"}))
+}
+
+// A delivering scope on an issuer that advertises no notification
+// endpoint is refused.
+//
+// The wallet reports a seed that does not open its commitment through
+// that endpoint (privatedata-spec SPEC 2.6 section 5A.2). Without it
+// the notification_id is minted and has nowhere to go, the feedback
+// loop is silently absent, and a credential whose commitment nobody
+// can open looks exactly like one that works.
+func TestStartupRefusesDeliveryWithoutANotificationEndpoint(t *testing.T) {
+	client := deliveringScope(t, true)
+	client.issuerMetadata.NotificationEndpoint = ""
+
+	err := checkScope(t, client, []string{"org.siros.nym_auth"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notification_endpoint")
 }
 
 // A scope that does not deliver is unaffected by any of it.

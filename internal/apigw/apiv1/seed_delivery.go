@@ -3,6 +3,7 @@ package apiv1
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 
@@ -131,6 +132,13 @@ func (c *Client) deliverSeeds(response *openid4vci.CredentialResponse, seeds map
 		response.CredentialMetadata.Extensions = map[string]json.RawMessage{}
 	}
 	response.CredentialMetadata.Extensions[model.SeedMetadataMember] = member
+
+	// NAMESPACES only, never a value, and at INFO because the
+	// alternative is what an operator has today: a successful
+	// issuance that looks identical whether or not the seed went with
+	// it. Delivering a secret is a different act from issuing a
+	// credential and deserves a line saying it happened.
+	c.log.Info("Delivered a secret seed", "namespaces", slices.Sorted(maps.Keys(seeds)), "notification_id", response.NotificationID)
 	return nil
 }
 
