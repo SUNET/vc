@@ -67,7 +67,7 @@ verifier:
       circuit_id_values: ["urn:circuits:longfellow:nym_auth:v1"]
       circuit_proof_system_values: ["longfellow-libzk-v1"]
   trust:
-    pdp_url: https://pdp.example/access/v1/evaluation
+    pdp_url: https://pdp.example/pdp     # BASE url; /evaluation is appended
 ```
 
 Four separate things have to be right, and each fails differently. They are
@@ -145,7 +145,14 @@ A verifier that offered **no** list offered nothing, and every response is
 then refused. That is the intended reading rather than an oversight: the
 alternative is the holder choosing what it is verified against.
 
-### `trust.pdp_url` — mandatory here, and the reason is sharp
+### `trust.pdp_url` — the BASE url, and mandatory here
+
+It is the PDP's **base** URL. The client appends `/evaluation` itself
+(`BaseURL + DefaultEvaluationPath`), so configuring the evaluation endpoint
+gives `…/evaluation/evaluation`, every request 404s, and every presentation
+is refused — a failure that looks like a trust problem and is a typo.
+
+
 
 The issuer key the circuit proves a signature under comes from the
 presentation's own `x5chain`, which the **holder** sends. The PDP is the
