@@ -13,6 +13,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/trust"
 )
 
 // Q - the key the credential was signed with - is a PUBLIC INPUT to
@@ -64,6 +65,30 @@ import (
 // its own silence as a yes.
 var ErrNoTrustEvaluator = errors.New("circuit_zk: no trust evaluator is configured, so no issuer key can be trusted")
 
+// ErrAllowAllTrustEvaluator is the refusal for a deployment whose trust
+// configuration trusts everything.
+//
+// A nil evaluator is not the only way to have no trust decision.
+// NewTrustEvaluatorFromConfig returns an AllowAllEvaluator when
+// verifier.trust.pdp_url is empty, and that evaluator answers
+// Trusted=true to every question - which for this path means a chain
+// the HOLDER minted is accepted as a trusted issuer.
+//
+// That breaks the whole construction rather than weakening it. The
+// circuit proves "this credential was signed by Q" for the Q it is
+// given; the only thing standing between that and a holder issuing a
+// credential to itself is the trust layer saying Q belongs to a real
+// issuer. With allow-all there is nothing on that side, so a holder
+// can self-sign, choose its own issuer key, and so choose its own
+// pseudonym - which for known-offender matching means a flagged
+// person presents a value that matches nothing and reads as innocent.
+//
+// Allow-all is a legitimate mode for other formats, where a holder
+// cannot supply the key it is measured against. It is not legitimate
+// here, so this refuses rather than inheriting it.
+var ErrAllowAllTrustEvaluator = errors.New("circuit_zk: verifier.trust.pdp_url is not set, so every issuer is trusted; " +
+	"nym_auth takes the issuer key from the holder's own certificate chain and cannot be used without a PDP")
+
 // circuitZkIssuerKey validates the presentation's issuer chain and
 // returns the leaf's public key as Q.
 //
@@ -77,6 +102,13 @@ func (c *Client) circuitZkIssuerKey(
 ) (*ecdsa.PublicKey, error) {
 	if c.trustEvaluator == nil {
 		return nil, ErrNoTrustEvaluator
+	}
+	if _, allowAll := c.trustEvaluator.(*trust.AllowAllEvaluator); allowAll {
+		// Defence in depth: configuration validation refuses this at
+		// startup. Checked here too because the consequence of being
+		// wrong is a holder-chosen pseudonym, and this is the point
+		// that cannot be bypassed.
+		return nil, ErrAllowAllTrustEvaluator
 	}
 	if len(presentation.X5Chain) == 0 {
 		// Unreachable through ValidateCircuitZkResponse, which makes

@@ -258,6 +258,42 @@ func TestCircuitZkIssuerKeyReturnsNothingWhenUntrusted(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+// An allow-all trust evaluator is refused, and the case that makes it
+// matter is a chain the HOLDER minted.
+//
+// NewTrustEvaluatorFromConfig returns AllowAllEvaluator when
+// verifier.trust.pdp_url is empty, and it is not nil - so the nil
+// check above does not catch it, and every chain gets Trusted=true.
+//
+// That is not a weaker check, it is no check. The circuit proves "this
+// credential was signed by Q" for whatever Q it is handed; the only
+// thing standing between that and a holder issuing a credential to
+// itself is the trust layer. Without it the holder picks its own
+// issuer key and therefore its own pseudonym, and a flagged person
+// presents a value that matches nothing and reads as innocent.
+func TestCircuitZkIssuerKeyRefusesAnAllowAllEvaluator(t *testing.T) {
+	// A certificate the "holder" signed for itself, which is exactly
+	// what a real attacker would send.
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	now := time.Now()
+	selfSigned := testDSCertificate(t, key, &key.PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
+	presentation := openid4vp.CircuitZkPresentation{X5Chain: [][]byte{selfSigned.Raw}}
+
+	client := issuerKeyClient(trust.NewTrustEvaluatorFromConfig(""))
+	got, err := client.circuitZkIssuerKey(t.Context(), presentation, "eu.europa.ec.eudi.nym_auth.1", now)
+
+	require.ErrorIs(t, err, ErrAllowAllTrustEvaluator)
+	assert.Nil(t, got, "a self-signed holder-minted issuer must yield no key")
+
+	// And a real evaluator still works, so this refuses the mode and
+	// not the path.
+	got, err = issuerKeyClient(&fakeTrustEvaluator{trusted: true}).circuitZkIssuerKey(
+		t.Context(), presentation, "eu.europa.ec.eudi.nym_auth.1", now)
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+}
+
 // The thumbprint names a key in a log line without putting one in it,
 // and two keys are two thumbprints.
 func TestIssuerKeyThumbprint(t *testing.T) {

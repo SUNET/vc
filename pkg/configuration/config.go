@@ -450,6 +450,21 @@ func checkNymAuthVerifier(cfg *model.Cfg) error {
 	if err := nymauth.CheckVerifierID(cfg.Verifier.NymAuth.VerifierID); err != nil {
 		return fmt.Errorf("verifier.nym_auth.verifier_id: %w", err)
 	}
+	if cfg.Verifier.Trust.PDPURL == "" {
+		// nym_auth takes the issuer key from the holder's own
+		// certificate chain, so the PDP is the only thing that says
+		// the key belongs to a real issuer. With no PDP the evaluator
+		// is AllowAllEvaluator, which answers Trusted=true to
+		// everything - and a holder can then self-sign, choose its own
+		// issuer key, and so choose its own pseudonym.
+		//
+		// Allow-all is legitimate for formats where the holder cannot
+		// supply the key it is measured against. Here it removes the
+		// only check there is, so a deployment that configures it is
+		// refused rather than started.
+		return fmt.Errorf("verifier.nym_auth is enabled but verifier.trust.pdp_url is empty, so every issuer would be trusted; " +
+			"nym_auth takes the issuer key from the holder's own certificate chain and cannot be used without a PDP")
+	}
 	if len(cfg.Verifier.NymAuth.Circuits.Allow) == 0 {
 		// Enabled with nothing allowed verifies nothing. Refused
 		// rather than started, because "on" and "cannot check a

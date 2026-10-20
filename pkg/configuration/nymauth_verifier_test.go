@@ -23,20 +23,26 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	sum := sha256.Sum256([]byte(content))
 
-	return &model.Cfg{Verifier: &model.Verifier{NymAuth: model.NymAuthVerifier{
-		Enable:     true,
-		VerifierID: "verifier.example",
-		Circuits: model.NymAuthCircuits{Allow: []model.NymAuthCircuit{{
-			Config:         nymauth.ConfigKnownOffenderMatchingSSC,
-			HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
-			SigCircuitID:   "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb",
-			BlockEncHash:   6983,
-			BlockEncSig:    4679,
-			ArtifactPath:   path,
-			ArtifactSHA256: hex.EncodeToString(sum[:]),
-			ArtifactBytes:  int64(len(content)),
-		}}},
-	}}}
+	return &model.Cfg{Verifier: &model.Verifier{
+		// A PDP is part of a valid nym_auth configuration, not an
+		// extra: the issuer key comes from the holder's own chain,
+		// so without one there is nothing that says the key belongs
+		// to a real issuer.
+		Trust: model.TrustConfig{PDPURL: "https://pdp.example/access/v1/evaluation"},
+		NymAuth: model.NymAuthVerifier{
+			Enable:     true,
+			VerifierID: "verifier.example",
+			Circuits: model.NymAuthCircuits{Allow: []model.NymAuthCircuit{{
+				Config:         nymauth.ConfigKnownOffenderMatchingSSC,
+				HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
+				SigCircuitID:   "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb",
+				BlockEncHash:   6983,
+				BlockEncSig:    4679,
+				ArtifactPath:   path,
+				ArtifactSHA256: hex.EncodeToString(sum[:]),
+				ArtifactBytes:  int64(len(content)),
+			}}},
+		}}}
 }
 
 // Every one of these would otherwise surface as a REFUSED PROOF, with
@@ -63,6 +69,19 @@ func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.VerifierID = ""
 		assert.Error(t, checkNymAuthVerifier(cfg))
+	})
+
+	t.Run("enabled with no PDP", func(t *testing.T) {
+		// NewTrustEvaluatorFromConfig returns AllowAllEvaluator for
+		// an empty pdp_url, and it answers Trusted=true to every
+		// question. For nym_auth that means a chain the HOLDER
+		// minted is accepted as a trusted issuer - so the holder
+		// picks its own issuer key and therefore its own pseudonym,
+		// and a flagged person presents a value that matches nothing.
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.Trust.PDPURL = ""
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "pdp_url")
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "holder's own certificate chain")
 	})
 
 	t.Run("enabled with nothing allowed", func(t *testing.T) {
