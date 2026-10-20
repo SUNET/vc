@@ -297,8 +297,33 @@ func testNymAuthPSCStoreContract(t *testing.T, store NymAuthPSCStore) {
 		require.NoError(t, store.Erase(ctx, subject))
 	})
 
+	t.Run("evidence references differing only in case are different evidence", func(t *testing.T) {
+		// The idempotency key is opaque and operator-supplied. On a
+		// case-INSENSITIVE collation - MariaDB's default - "evidence-A"
+		// and "evidence-a" compare equal, so a second and genuinely
+		// different approval would be taken for a replay and change
+		// nothing: the operator is told the reset succeeded and the
+		// record is still there.
+		subject := pscDigest("evidence-casing")
+		require.NoError(t, store.Accept(ctx, subject, first, now))
+		require.NoError(t, store.Reset(ctx, subject, "operator-e", "evidence-E", now))
+		require.NoError(t, store.Accept(ctx, subject, second, now.Add(time.Hour)))
+
+		require.NoError(t, store.Reset(ctx, subject, "operator-e", "evidence-e", now.Add(2*time.Hour)))
+
+		got, err := store.Get(ctx, subject)
+		require.NoError(t, err)
+		assert.Nil(t, got, "the second reset is a real reset, not a replay of the first")
+
+		trail, err := store.Resets(ctx, subject)
+		require.NoError(t, err)
+		assert.Len(t, trail, 2, "two distinct references are two audit rows")
+		require.NoError(t, store.Erase(ctx, subject))
+	})
+
 	t.Run("malformed arguments are refused before they reach the table", func(t *testing.T) {
 		assert.ErrorContains(t, store.Accept(ctx, "not-hex", first, now), "not hex")
+		assert.ErrorContains(t, store.Accept(ctx, subject, strings.ToUpper(first), now), "not lowercase hex")
 		assert.ErrorContains(t, store.Accept(ctx, subject, "abcd", now), "not 32")
 		assert.ErrorContains(t, store.Accept(ctx, strings.Repeat("aa", 31), first, now), "not 32")
 		assert.ErrorContains(t, store.Reset(ctx, "not-hex", "operator-1", "evidence-9", now), "not hex")

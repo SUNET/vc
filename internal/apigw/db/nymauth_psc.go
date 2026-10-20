@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -161,12 +162,27 @@ func checkPSCArgs(subjectKey, psc string) error {
 	return checkHexDigest(psc, "commitment")
 }
 
+// lowercaseHexDigest matches a canonical SHA-256 digest: lowercase hex,
+// exactly 32 bytes.
+//
+// Canonical, and not merely decodable. hex.DecodeString accepts
+// uppercase and mixed case, and both stores persist and compare the
+// STRING - so the same commitment in different casing would be an
+// ErrPSCConflict against itself, and two casings of one subject key
+// would be two records for one person. Refused rather than
+// lower-cased: a caller producing uppercase built the value by some
+// other route, and that is worth knowing rather than smoothing over.
+var lowercaseHexDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 func checkHexDigest(value, what string) error {
-	raw, err := hex.DecodeString(value)
-	if err != nil {
-		return fmt.Errorf("nymauth: %s is not hex: %w", what, err)
-	}
-	if len(raw) != PSCCommitmentBytes {
+	if !lowercaseHexDigest.MatchString(value) {
+		if raw, err := hex.DecodeString(value); err == nil && len(raw) == PSCCommitmentBytes {
+			return fmt.Errorf("nymauth: %s is not lowercase hex; a digest has one representation here", what)
+		}
+		if _, err := hex.DecodeString(value); err != nil {
+			return fmt.Errorf("nymauth: %s is not hex: %w", what, err)
+		}
+		raw, _ := hex.DecodeString(value)
 		return fmt.Errorf("nymauth: %s is %d bytes, not %d", what, len(raw), PSCCommitmentBytes)
 	}
 	return nil
