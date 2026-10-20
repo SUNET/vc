@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,18 @@ func commitmentClient(t *testing.T, format string, claim *model.CommitmentClaim,
 				Seeds: map[string]*model.SeedSource{"primary": source},
 			},
 		},
+		// An offered configuration, as startup has by the time the
+		// commitment checks run: Generate builds the metadata well
+		// before initSeedSources is called.
+		issuerMetadata: &openid4vci.CredentialIssuerMetadataParameters{
+			CredentialConfigurationsSupported: map[string]openid4vci.CredentialConfigurationsSupported{
+				"nym_auth": {
+					Doctype:             "eu.europa.ec.eudi.nym_auth.1",
+					ProofTypesSupported: map[string]openid4vci.ProofsTypesSupported{"jwt": {}},
+				},
+			},
+		},
+		pscStore: &fakePSCStore{},
 	}
 	return c
 }
@@ -612,6 +625,7 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"] = &model.CommitmentClaim{
 					Source: model.CommitmentSourceHolder, Subjects: []string{"personal_administrative_number"},
 				}
+				c.pscStore = nil
 			},
 			want: "commitment store, which is not configured",
 		},
@@ -641,6 +655,45 @@ func TestStartupRefusesAConfigurationItCannotHonour(t *testing.T) {
 				}
 			},
 			want: "there is no seed to deliver",
+		},
+		{
+			name: "a holder-supplied commitment on a configuration advertising attestation proofs",
+			mutate: func(c *Client) {
+				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"] = &model.CommitmentClaim{
+					Source: model.CommitmentSourceHolder, Subjects: []string{"personal_administrative_number"},
+				}
+				config := c.issuerMetadata.CredentialConfigurationsSupported["nym_auth"]
+				config.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
+					"jwt":         {},
+					"attestation": {},
+				}
+				c.issuerMetadata.CredentialConfigurationsSupported["nym_auth"] = config
+			},
+			want: "cannot carry the",
+		},
+		{
+			name: "a holder-supplied commitment with no issuer metadata to check against",
+			mutate: func(c *Client) {
+				// Cannot compare, so refuse: the remaining checks are
+				// about what the scope advertises.
+				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"] = &model.CommitmentClaim{
+					Source: model.CommitmentSourceHolder, Subjects: []string{"personal_administrative_number"},
+				}
+				c.issuerMetadata = nil
+			},
+			want: "issuer metadata is not available",
+		},
+		{
+			name: "a holder-supplied commitment on a configuration declaring neither doctype nor vct",
+			mutate: func(c *Client) {
+				c.cfg.Common.CredentialMetadata["nym_auth"].Commitments["ssc"] = &model.CommitmentClaim{
+					Source: model.CommitmentSourceHolder, Subjects: []string{"personal_administrative_number"},
+				}
+				config := c.issuerMetadata.CredentialConfigurationsSupported["nym_auth"]
+				config.Doctype = ""
+				c.issuerMetadata.CredentialConfigurationsSupported["nym_auth"] = config
+			},
+			want: "neither doctype nor vct",
 		},
 		{
 			name: "an unknown commitment source",

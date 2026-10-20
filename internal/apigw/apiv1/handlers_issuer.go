@@ -465,6 +465,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 			if len(req.Proofs.JWT) != len(jwks) {
 				return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "number of extracted keys does not match number of JWT proofs"}
 			}
+			verified := make([]map[string]any, 0, len(req.Proofs.JWT))
 			for i, jwtProof := range req.Proofs.JWT {
 				pubKey, err := c.proofJWKToPublicKey(jwks[i])
 				if err != nil {
@@ -475,25 +476,14 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 					c.log.Error(verifyErr, "proof JWT verification failed", "proof_index", i)
 					return nil, verifyErr
 				}
-				proofPSC, pscErr := pscFromProofClaims(claims)
-				if pscErr != nil {
-					return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: pscErr.Error()}
-				}
-				// A batch binds one credential per key, and the
-				// commitment is per SUBJECT, not per key. Two proofs
-				// carrying different commitments would mean one
-				// request claiming to be two people; refused rather
-				// than resolved by taking the first, which would issue
-				// the whole batch against a commitment only one of
-				// them named.
-				if i > 0 && proofPSC != holderPSC {
-					return nil, &openid4vci.Error{
-						Err:              openid4vci.ErrInvalidProof,
-						ErrorDescription: "the proofs carry different " + model.PSCProofClaim + " claims; a commitment is per subject, not per key",
-					}
-				}
-				holderPSC = proofPSC
+				verified = append(verified, claims)
 			}
+			// Across the batch, from the VERIFIED claim sets only.
+			batchPSC, pscErr := pscAcrossProofs(verified)
+			if pscErr != nil {
+				return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: pscErr.Error()}
+			}
+			holderPSC = batchPSC
 		default:
 			// publicKey is unused by VerifyProofWithOptions for DIVP/attestation.
 			if err := req.VerifyProofWithOptions(nil, verifyOpts); err != nil {

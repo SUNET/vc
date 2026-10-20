@@ -167,6 +167,13 @@ func (c *Client) checkHolderCommitment(scope, where string, claim *model.Commitm
 		return fmt.Errorf("%s: source %q needs the nym_auth commitment store, which is not configured", where, claim.Source)
 	}
 
+	if c.issuerMetadata == nil {
+		// Cannot compare, so refuse. The checks below are about what
+		// this scope ADVERTISES, and a build that cannot see its own
+		// issuer metadata cannot confirm any of them - accepting the
+		// configuration would be asserting they hold.
+		return fmt.Errorf("%s: the issuer metadata is not available, so scope %q cannot be checked for the proof types a holder-supplied commitment needs", where, scope)
+	}
 	config, offered := c.issuerMetadata.CredentialConfigurationsSupported[scope]
 	if !offered {
 		return fmt.Errorf("%s: expects a holder-supplied commitment but scope %q is not an offered credential configuration", where, scope)
@@ -178,6 +185,21 @@ func (c *Client) checkHolderCommitment(scope, where string, claim *model.Commitm
 		// this combination as an error too.
 		return fmt.Errorf("%s: expects the commitment in the proof JWT, but scope %q declares no proof_types_supported", where, scope)
 	}
+	for proofType := range config.ProofTypesSupported {
+		// EVERY advertised proof type must be able to carry it, not
+		// just one of them. The commitment is read from a JWT proof
+		// and from nowhere else, so a configuration advertising
+		// "attestation" as well lets a wallet pick the branch that
+		// cannot carry the value - and the wallet is then refused for
+		// a commitment it had no way to send. Advertising a choice
+		// where only one option works is a trap, so the configuration
+		// is refused instead.
+		if proofType != proofTypeJWT {
+			return fmt.Errorf("%s: scope %q advertises proof type %q, which cannot carry the %s claim; "+
+				"a holder-supplied commitment needs proof_types_supported to be %q alone",
+				where, scope, proofType, model.PSCProofClaim, proofTypeJWT)
+		}
+	}
 	if config.Doctype == "" && config.VCT == "" {
 		// The engine passes the configuration's vct - or doctype for
 		// mdoc - to the wallet as the credential type, and fails the
@@ -187,6 +209,11 @@ func (c *Client) checkHolderCommitment(scope, where string, claim *model.Commitm
 	}
 	return nil
 }
+
+// proofTypeJWT is the only OpenID4VCI proof type a holder-supplied
+// commitment can ride in: the claim is read from a JWT proof's
+// validated claims, and nothing else has a claim set to read.
+const proofTypeJWT = "jwt"
 
 // checkSeedAdvertisement refuses a delivering scope whose advertisement
 // would be malformed, or that no wallet could ever complete.

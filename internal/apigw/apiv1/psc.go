@@ -126,7 +126,49 @@ func pscFromProofClaims(claims map[string]any) (string, error) {
 	if len(decoded) != pscBytes {
 		return "", fmt.Errorf("the %s claim is %d bytes; a commitment is %d", model.PSCProofClaim, len(decoded), pscBytes)
 	}
+	// Decoding is not enough: Go's decoder SKIPS CR and LF, and
+	// accepts a final character whose unused low bits are not zero. So
+	// a newline spliced into the middle, and "...AB" where "...AA" was
+	// meant, both decode to 32 bytes - two spellings of one
+	// commitment, from a wire contract that says there is one. A
+	// canonical re-encoding is the cheapest way to say "exactly these
+	// characters" without writing a second decoder.
+	if base64.RawURLEncoding.EncodeToString(decoded) != encoded {
+		return "", fmt.Errorf("the %s claim is not canonical base64url; it decodes to %d bytes that re-encode differently",
+			model.PSCProofClaim, len(decoded))
+	}
 	return hex.EncodeToString(decoded), nil
+}
+
+// pscAcrossProofs reduces a batch's per-proof commitments to the one
+// the request is making.
+//
+// A batch binds one credential per KEY, and a commitment is per
+// SUBJECT. So every proof in a request must carry the same one, and
+// two different ones is a single request claiming to be two people.
+// Refused rather than resolved by taking the first, which would issue
+// the whole batch against a commitment only one proof named.
+//
+// "Some proofs carry it and some do not" is refused for the same
+// reason: it is not a request where the commitment is absent, and it
+// is not one where it is present. Whichever it was read as, half the
+// proofs would be saying otherwise.
+func pscAcrossProofs(claims []map[string]any) (string, error) {
+	var agreed string
+	for i, set := range claims {
+		psc, err := pscFromProofClaims(set)
+		if err != nil {
+			return "", err
+		}
+		if i == 0 {
+			agreed = psc
+			continue
+		}
+		if psc != agreed {
+			return "", fmt.Errorf("the proofs carry different %s claims; a commitment is per subject, not per key", model.PSCProofClaim)
+		}
+	}
+	return agreed, nil
 }
 
 // pscConflictError is the refusal a second, different commitment gets.

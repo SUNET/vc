@@ -142,3 +142,60 @@ func TestSeedDeliveryIsCheckedBeforeTheFormatDispatch(t *testing.T) {
 	assert.Less(t, int(checkAt), int(switchAt),
 		"checkSeedDelivery must run BEFORE the format dispatch, or a refused delivery still burns a status-list entry")
 }
+
+// The commitment is read from the VERIFIED claim sets, and from
+// nothing else.
+//
+// A position guard, because the failure it catches is silent: reading
+// a psc from a parsed-but-unverified proof would work perfectly for
+// every honest wallet, and would let anyone place a commitment for a
+// subject they do not control. The whole reason the claim lives in
+// the proof is that its signature covers it.
+//
+// It asserts that VCICredential has no call to pscFromProofClaims at
+// all - the batch path goes through pscAcrossProofs over claim sets
+// VerifyWithClaims returned, and the single-proof path reads the
+// claims that same call produced. A direct call appearing here would
+// be a second, unverified source.
+func TestTheCommitmentIsReadOnlyFromVerifiedProofs(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "handlers_issuer.go", nil, parser.SkipObjectResolution)
+	require.NoError(t, err)
+
+	var dispatcher *ast.FuncDecl
+	ast.Inspect(file, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "VCICredential" {
+			dispatcher = fn
+		}
+		return dispatcher == nil
+	})
+	require.NotNil(t, dispatcher, "no VCICredential in handlers_issuer.go; this guard is not looking at anything")
+
+	var verifyWithClaims, acrossProofs, plainVerify int
+	ast.Inspect(dispatcher, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch fn := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			switch fn.Sel.Name {
+			case "VerifyWithClaims":
+				verifyWithClaims++
+			case "Verify":
+				plainVerify++
+			}
+		case *ast.Ident:
+			if fn.Name == "pscAcrossProofs" {
+				acrossProofs++
+			}
+		}
+		return true
+	})
+
+	assert.Positive(t, verifyWithClaims, "the claims must come from the call that verified them")
+	assert.Equal(t, 1, acrossProofs, "the batch path reduces the verified claim sets exactly once")
+	assert.Zero(t, plainVerify,
+		"a plain Verify discards the claims, so a caller needing them would have to parse the proof a second time")
+}
