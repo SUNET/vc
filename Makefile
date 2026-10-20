@@ -67,7 +67,12 @@ RESERVED_TAGS           := latest testing demo dev
 # netgo,osusergo ride along under CGO to bypass glibc NSS.
 ZKNATIVE_TAG            := zknative
 ZK_CRED_LONGFELLOW_REPO ?= https://github.com/sirosfoundation/zk-cred-longfellow.git
-ZK_CRED_LONGFELLOW_REF  ?= main
+# Pinned; bump deliberately. This is main plus the four nym_auth commits
+# of that crate's `feat/nymauth-prove` branch, which is what carries
+# include/zk_cred_longfellow_nymauth.h (pkg/nymauth/verifier/zknative
+# needs it, and the staging below requires it). Move this back to a
+# main SHA once that branch lands upstream.
+ZK_CRED_LONGFELLOW_REF  ?= cf2eba996ba1fac247539d515d8bab502da48f94
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
@@ -163,7 +168,7 @@ help: ## Show this help message
 	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib   (needs cmake; required by verifier build))
 	$(info   make zk-native-lib-vega       - Fetch/build zk-cred-vega's Go C-ABI lib         (needs Rust; required by verifier build))
 	$(info   make test-bbsnative           - Run pkg/bbs's cgo tests                          (requires bbs-native-lib))
-	$(info   make test-zknative            - Run pkg/mdoc's zknative tests                    (requires zk-native-lib zk-native-lib-vega))
+	$(info   make test-zknative            - Run the zknative tests (pkg/mdoc, pkg/nymauth)   (requires zk-native-lib zk-native-lib-vega))
 	$(info )
 	$(info Local dev binaries (native ZK, produced outside the Docker image):)
 	$(info   make build-verifier-zknative  - Build the verifier binary with zknative to ./bin (dynamic-libc, needs LD_LIBRARY_PATH))
@@ -355,10 +360,31 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" fetch --depth 1 origin "$(ZK_CRED_LONGFELLOW_REF)"
 	git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" checkout FETCH_HEAD
 	$(MAKE) -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" go-cabi
-	@mkdir -p "$(ZK_CRED_LONGFELLOW_STAGE)/include" "$(ZK_CRED_LONGFELLOW_STAGE)/lib"
-	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/zk_cred_longfellow_go.h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/"
+	@mkdir -p "$(ZK_CRED_LONGFELLOW_STAGE)/include" "$(ZK_CRED_LONGFELLOW_STAGE)/lib" "$(ZK_CRED_LONGFELLOW_STAGE)/test-vectors/nymauth"
+	@# Both headers, because this repo has two consumers of that crate's
+	@# plain C ABI: pkg/mdoc/zknative (the mdoc ZK/PPID verifier,
+	@# zk_cred_longfellow_go.h) and pkg/nymauth/verifier/zknative (the
+	@# nym_auth verifier, zk_cred_longfellow_nymauth.h). Name the missing
+	@# one rather than letting `cp` report a path: a REF without the
+	@# nym_auth header is the likely cause, and that is not something a
+	@# "No such file or directory" tells the operator.
+	@for h in zk_cred_longfellow_go.h zk_cred_longfellow_nymauth.h; do \
+		test -f "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" || ( \
+			echo "zk-cred-longfellow@$(ZK_CRED_LONGFELLOW_REF) staged no $$h." >&2; \
+			echo "Both headers are required. Check that ZK_CRED_LONGFELLOW_REF points at a commit carrying include/$$h." >&2; \
+			exit 1); \
+		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/"; \
+	done
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
-	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
+	@# The nym_auth vectors ship with the crate (the circuit artifact, a
+	@# real proof and the request values that produced it), and
+	@# pkg/nymauth/verifier's zknative test verifies that proof rather
+	@# than only comparing derivations. Staged here, the way
+	@# bbs-native-lib stages emlun_reference.json, so the fixture
+	@# arrives with the library it belongs to instead of being vendored
+	@# into this repo and going stale against it.
+	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/test-vectors/nymauth"/* "$(ZK_CRED_LONGFELLOW_STAGE)/test-vectors/nymauth/"
+	@echo "Staged zk-cred-longfellow's Go C-ABI lib + headers + nym_auth vectors in $(ZK_CRED_LONGFELLOW_STAGE)"
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) go {build,test} -tags $(ZKNATIVE_TAG) ./..."
 
 zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not staged
@@ -368,14 +394,15 @@ zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not
 	@# valid `.so`-only stage. Guard is shared between build-verifier-zknative
 	@# and test-zknative; the message names both so the operator re-runs the
 	@# right one.
-	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || ( \
+	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_nymauth.h" || ( \
 		echo "The 'zknative' build tag was requested but zk-cred-longfellow is not staged." >&2; \
-		echo "Both $(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so and $(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h are required." >&2; \
+		echo "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so and both headers under $(ZK_CRED_LONGFELLOW_STAGE)/include (zk_cred_longfellow_go.h, zk_cred_longfellow_nymauth.h) are required." >&2; \
+		echo "A stage made before the nym_auth header existed has only the first: re-run 'make zk-native-lib' to refresh it." >&2; \
 		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run the requesting target ('make build-verifier-zknative' or 'make test-zknative')." >&2; \
 		exit 1)
 
 zk-native-lib-ensure: _check-native-host ## Stage zk-cred-longfellow only when it's missing (for local build-*)
-	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || $(MAKE) --no-print-directory zk-native-lib
+	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_nymauth.h" || $(MAKE) --no-print-directory zk-native-lib
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
 	@# Header for cgo compile, archive for the static link (pkg/bbs uses -l:libzk_cred_bbs.a).
@@ -448,10 +475,10 @@ zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not 
 zk-native-lib-vega-ensure: _check-native-host ## Stage zk-cred-vega only when it's missing (for local build-*)
 	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || $(MAKE) --no-print-directory zk-native-lib-vega
 
-test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
+test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run the zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
-		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/...
+		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
