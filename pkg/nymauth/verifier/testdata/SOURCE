@@ -12,8 +12,17 @@ redirect handover vectors added by #14)
 The digest is unchanged from the pre-merge pin this replaced (#14's branch
 head 274ed845), so the merge moved the provenance and not the bytes.
 
-zk-cred-longfellow ships the same file byte for byte; either repository is a
-valid source, and they must not diverge.
+zk-cred-longfellow ships this file too, and the two must agree. They are NOT
+byte-identical today: Longfellow v0.1.2's copy is sha256 697d016b..., the
+pre-redirect version, because the derive_redirect and rejects_redirect arrays
+were added in vega and Longfellow has not mirrored them yet.
+
+The arrays they BOTH carry - version, min_nonce_chars, derive, digest,
+rejects - must be identical, and TestVendoredVectorsAgreeWithLongfellow (a
+zknative test, since Longfellow's copy is only staged in that build) enforces
+exactly that. It is the check that would catch the library changing a
+transcript shape under this file. Tighten it to full equality once Longfellow
+mirrors the redirect arrays.
 
 These vectors are what tells this verifier and the two native provers that
 they agree about what a presentation is bound to. Vendored rather than
