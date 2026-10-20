@@ -249,6 +249,9 @@ func validateCircuitZkPresentation(raw json.RawMessage, request CircuitZkRequest
 	// Values in REQUEST order, so the reported failure does not depend
 	// on how a decoder happened to order a map.
 	for _, item := range request.Items {
+		if err := refuseDuplicateResultMembers(results[item.Return]); err != nil {
+			return CircuitZkPresentation{}, err
+		}
 		if err := readCircuitZkResult(item, results[item.Return], &presentation); err != nil {
 			return CircuitZkPresentation{}, err
 		}
