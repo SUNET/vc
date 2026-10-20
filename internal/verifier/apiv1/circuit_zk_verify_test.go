@@ -3,10 +3,13 @@ package apiv1
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/notify"
@@ -32,25 +35,24 @@ import (
 // from it.
 func TestCircuitZkRequestTakesTheOfferFromConfiguration(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
-		PreferredVPFormats: &openid4vp.VPFormatsSupported{CircuitZk: &openid4vp.CircuitZkFormat{
-			CircuitIDValues:          []string{"urn:circuits:longfellow:nym_auth:v1"},
-			CircuitProofSystemValues: []string{"longfellow-libzk-v1"},
+		PreferredVPFormats: &openid4vp.VPFormatsSupported{ZkpReq: &openid4vp.ZkpReqFormat{
+			SystemIDValues:    []string{"urn:circuits:longfellow:nym_auth:v1"},
+			ProofSystemValues: []string{"longfellow-libzk-v1"},
 		}},
 	}}}
 
 	multiple := true
 	query := openid4vp.CredentialQuery{
 		ID:       "nym_attestation",
-		Format:   openid4vp.FormatCircuitZk,
+		Format:   openid4vp.FormatZkpReq,
 		Multiple: &multiple,
-		Req:      []openid4vp.ReqItem{{ID: "age_check", Return: "age-1"}},
+		Req:      []openid4vp.ReqItem{{FnID: "age_check", Return: "age-1"}},
 	}
 
 	request := client.circuitZkRequestFor(query)
 	assert.Equal(t, "nym_attestation", request.QueryID)
 	assert.True(t, request.Multiple)
-	assert.Equal(t, []string{"urn:circuits:longfellow:nym_auth:v1"}, request.OfferedCircuitIDs)
-	assert.Equal(t, []string{"longfellow-libzk-v1"}, request.OfferedProofSystems)
+	assert.Equal(t, []string{"urn:circuits:longfellow:nym_auth:v1"}, request.OfferedSystemIDs)
 	assert.Equal(t, query.Req, request.Items)
 }
 
@@ -60,8 +62,8 @@ func TestCircuitZkRequestWithNoOfferIsEmpty(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
 
 	request := client.circuitZkRequestFor(openid4vp.CredentialQuery{ID: "q"})
-	assert.Empty(t, request.OfferedCircuitIDs)
-	assert.Empty(t, request.OfferedProofSystems)
+	assert.Empty(t, request.OfferedSystemIDs)
+	assert.Empty(t, request.OfferedSystemIDs)
 	assert.False(t, request.Multiple, "DCQL multiple defaults to false")
 }
 
@@ -161,7 +163,8 @@ func TestCircuitZkSessionBuildsTheDCAPITranscript(t *testing.T) {
 
 	assert.NotEmpty(t, session.Transcript)
 	assert.Equal(t, "eu.europa.ec.eudi.nym_auth.1", session.DocType)
-	assert.False(t, session.Now.IsZero())
+	assert.True(t, session.Now.IsZero(),
+		"T is the prover's and belongs to the presentation, not the session")
 
 	// The rulebook's MUST digest for the bare verifier_id.
 	want, err := verifier.VerifierInput("verifier.example")
@@ -173,12 +176,28 @@ func TestCircuitZkSessionBuildsTheDCAPITranscript(t *testing.T) {
 // too, not only at startup: hashing it yields a pseudonym no other
 // implementation reports, so a comparison never matches and the
 // subject looks innocent.
-func TestCircuitZkSessionRefusesAPrefixedVerifierID(t *testing.T) {
+func TestCircuitZkSessionUsesThePrefixedVerifierID(t *testing.T) {
+	// v0.4 hashes the verifier_id exactly as published, prefix
+	// included, and the archive's reference pseudonyms are computed
+	// from that form. This test asserted the opposite until the rule
+	// reversed on 2026-10-20.
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
 		NymAuth: model.NymAuthVerifier{VerifierID: "x509_san_dns:verifier.example"},
 	}}}
 
-	_, err := client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
+	session, err := client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
+		"pOA0oqEAhLnqug2r7Ve4tQ", "", "eu.europa.ec.eudi.nym_auth.1", nil)
+	require.NoError(t, err)
+
+	want, err := verifier.VerifierInput("x509_san_dns:verifier.example")
+	require.NoError(t, err)
+	assert.Equal(t, want, session.VerifierInput)
+	assert.Equal(t, "6eae85a0", hex.EncodeToString(session.VerifierInput[:])[:8],
+		"the archive's own verifier_input for this client_id")
+
+	// A marker with nothing after it still names no Verifier.
+	client.cfg.Verifier.NymAuth.VerifierID = "x509_san_dns:"
+	_, err = client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
 		"pOA0oqEAhLnqug2r7Ve4tQ", "", "eu.europa.ec.eudi.nym_auth.1", nil)
 	assert.ErrorContains(t, err, "verifier_id")
 }
@@ -187,7 +206,7 @@ func TestCircuitZkSessionRefusesAPrefixedVerifierID(t *testing.T) {
 // from the response would be verifying a statement the holder chose.
 func TestCircuitZkAgeBoundsComeFromTheRequest(t *testing.T) {
 	bounds, err := circuitZkAgeBounds(openid4vp.ReqItem{
-		ID: "age_check", Return: "age-1",
+		FnID: "age_check", Return: "age-1",
 		Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"},
 	})
 	require.NoError(t, err)
@@ -195,14 +214,14 @@ func TestCircuitZkAgeBoundsComeFromTheRequest(t *testing.T) {
 	assert.Equal(t, "2013-10-09", bounds.Cutoff)
 
 	_, err = circuitZkAgeBounds(openid4vp.ReqItem{
-		ID: "age_check", Return: "age-1", Params: map[string]any{"ge": 2008},
+		FnID: "age_check", Return: "age-1", Params: map[string]any{"ge": 2008},
 	})
 	assert.ErrorContains(t, err, "is not a string")
 
 	// A window narrower than the rulebook allows is refused by the
 	// mapping, not passed to a circuit.
 	_, err = circuitZkAgeBounds(openid4vp.ReqItem{
-		ID: "age_check", Return: "age-1",
+		FnID: "age_check", Return: "age-1",
 		Params: map[string]any{"ge": "2008-01-01", "le": "2008-06-01"},
 	})
 	assert.ErrorContains(t, err, "at least 365")
@@ -216,11 +235,11 @@ func TestCircuitZkCredentialPublishesTheVerifiedPseudonyms(t *testing.T) {
 	returned := make([]byte, 32)
 	returned[0] = 0xbb
 
-	presentation := openid4vp.CircuitZkPresentation{
-		CircuitID:   "urn:c",
-		ProofSystem: "longfellow-libzk-v1",
-		Pseudonyms:  map[string][]byte{"nym-1": claimed},
-		Satisfied:   []string{"age-1"},
+	presentation := openid4vp.ZkpPresentation{
+		SystemID: "urn:c",
+
+		Pseudonyms: map[string][]byte{"nym-1": claimed},
+		Satisfied:  []string{"age-1"},
 	}
 
 	credential := circuitZkCredential("nym_auth", presentation, map[string][]byte{"nym-1": returned})
@@ -232,7 +251,7 @@ func TestCircuitZkCredentialPublishesTheVerifiedPseudonyms(t *testing.T) {
 	assert.NotContains(t, string(encoded), base64.RawURLEncoding.EncodeToString(claimed),
 		"and never the one the response claimed")
 	assert.Equal(t, true, credential.Credential["age-1"])
-	assert.Equal(t, "urn:c", credential.Credential["circuit_id"])
+	assert.Equal(t, "urn:c", credential.Credential["system_id"])
 	assert.Equal(t, "nym_auth", credential.Scope)
 }
 
@@ -243,7 +262,7 @@ func TestCircuitZkNativeStubRefuses(t *testing.T) {
 		t.Skip("this build has the zknative tag; the stub is not compiled in")
 	}
 	client := &Client{}
-	_, err := client.verifyCircuitZkPresentation(t.Context(), openid4vp.CircuitZkPresentation{},
+	_, err := client.verifyCircuitZkPresentation(t.Context(), openid4vp.ZkpPresentation{},
 		circuitZkSession{}, nil, nil)
 	assert.ErrorIs(t, err, ErrCircuitZkNotBuilt)
 }
@@ -257,30 +276,26 @@ func TestCircuitZkNativeStubRefuses(t *testing.T) {
 // exercised: the validator's vectors are whole envelopes, and the
 // dispatch's tests never called the validator.
 func TestCircuitZkRawTokenFeedsTheValidator(t *testing.T) {
-	const body = `{
-	  "state": "s",
-	  "vp_token": {
-	    "nym_attestation": [{
-	      "circuit_id": "urn:c",
-	      "proof_system": "longfellow-libzk-v1",
-	      "proof": "AQID",
-	      "x5chain": ["Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Nj"],
-	      "results": {"age-1": {"satisfied": true}}
-	    }]
-	  }
-	}`
+	presentation := zkpPresentationB64(t, "urn:c",
+		[][]byte{[]byte(strings.Repeat("c", 48))}, nowProofTime(),
+		map[string]any{"age-1": true})
+	body, err := json.Marshal(map[string]any{
+		"state":    "s",
+		"vp_token": map[string]any{"nym_attestation": []any{presentation}},
+	})
+	require.NoError(t, err)
 
 	var response openid4vp.VPResponse
-	require.NoError(t, json.Unmarshal([]byte(body), &response))
+	require.NoError(t, json.Unmarshal(body, &response))
 
 	raw, err := circuitZkRawToken(response, "nym_attestation")
 	require.NoError(t, err)
 
-	got, err := openid4vp.ValidateCircuitZkResponse(raw, openid4vp.CircuitZkRequest{
-		QueryID:             "nym_attestation",
-		Items:               []openid4vp.ReqItem{{ID: openid4vp.CircuitZkFunctionAgeCheck, Return: "age-1"}},
-		OfferedCircuitIDs:   []string{"urn:c"},
-		OfferedProofSystems: []string{"longfellow-libzk-v1"},
+	got, err := openid4vp.ValidateZkpReqResponse(raw, openid4vp.ZkpReqRequest{
+		QueryID:          "nym_attestation",
+		Items:            []openid4vp.ReqItem{{FnID: openid4vp.FunctionAgeCheck, Return: "age-1"}},
+		OfferedSystemIDs: []string{"urn:c"},
+		SourceFormat:     openid4vp.SourceFormatMsoMdoc,
 	})
 	require.NoError(t, err, "the dispatch must hand the validator what the validator expects")
 	require.Len(t, got, 1)
@@ -343,27 +358,25 @@ func TestCircuitZkRoutingIgnoresTheSingleQueryFallback(t *testing.T) {
 		Scopes:                   []string{"custom_claim"},
 		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
 			ID:     "nym_attestation",
-			Format: openid4vp.FormatCircuitZk,
+			Format: openid4vp.FormatZkpReq,
 			Meta:   openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
 			Req: []openid4vp.ReqItem{{
-				ID:     openid4vp.CircuitZkFunctionAgeCheck,
+				FnID:   openid4vp.FunctionAgeCheck,
 				Return: "age-1",
 				Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"},
 			}},
 		}}},
 	}))
 
-	leaf := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("c", 48)))
+	leaf := []byte(strings.Repeat("c", 48))
 	plaintext, err := json.Marshal(map[string]any{
 		"state": state,
 		"vp_token": map[string]any{
-			"nym_attestation": []any{map[string]any{
-				"circuit_id":   "urn:circuits:longfellow:nym_auth:v1",
-				"proof_system": "longfellow-libzk-v1",
-				"proof":        base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("p", 48))),
-				"x5chain":      []string{leaf},
-				"results":      map[string]any{"age-1": map[string]any{"satisfied": true}},
-			}},
+			"nym_attestation": []any{zkpPresentationB64(t,
+				"urn:circuits:longfellow:nym_auth:v1",
+				[][]byte{leaf}, nowProofTime(),
+				map[string]any{"age-1": true},
+			)},
 		},
 	})
 	require.NoError(t, err)
@@ -409,9 +422,9 @@ func TestCircuitZkRedirectResponseModeIsEnforcedByTheHandler(t *testing.T) {
 		require.NoError(t, err)
 		client.cfg.Verifier.NymAuth.VerifierID = "verifier.example"
 		client.cfg.Verifier.PreferredVPFormats = &openid4vp.VPFormatsSupported{
-			CircuitZk: &openid4vp.CircuitZkFormat{
-				CircuitIDValues:          []string{"urn:circuits:longfellow:nym_auth:v1"},
-				CircuitProofSystemValues: []string{"longfellow-libzk-v1"},
+			ZkpReq: &openid4vp.ZkpReqFormat{
+				SystemIDValues:    []string{"urn:circuits:longfellow:nym_auth:v1"},
+				ProofSystemValues: []string{"longfellow-libzk-v1"},
 			},
 		}
 
@@ -430,28 +443,22 @@ func TestCircuitZkRedirectResponseModeIsEnforcedByTheHandler(t *testing.T) {
 			Scopes:                   []string{"nym_attestation"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
 				ID:     "nym_attestation",
-				Format: openid4vp.FormatCircuitZk,
+				Format: openid4vp.FormatZkpReq,
 				Meta:   openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
 				Req: []openid4vp.ReqItem{{
-					ID:     openid4vp.CircuitZkFunctionAgeCheck,
+					FnID:   openid4vp.FunctionAgeCheck,
 					Return: "age-1",
 					Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"},
 				}},
 			}}},
 		}))
 
-		leaf := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("c", 48)))
+		presentation := zkpPresentationB64(t, "urn:circuits:longfellow:nym_auth:v1",
+			[][]byte{[]byte(strings.Repeat("c", 48))}, nowProofTime(),
+			map[string]any{"age-1": true})
 		plaintext, err := json.Marshal(map[string]any{
-			"state": state,
-			"vp_token": map[string]any{
-				"nym_attestation": []any{map[string]any{
-					"circuit_id":   "urn:circuits:longfellow:nym_auth:v1",
-					"proof_system": "longfellow-libzk-v1",
-					"proof":        base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("p", 48))),
-					"x5chain":      []string{leaf},
-					"results":      map[string]any{"age-1": map[string]any{"satisfied": true}},
-				}},
-			},
+			"state":    state,
+			"vp_token": map[string]any{"nym_attestation": []any{presentation}},
 		})
 		require.NoError(t, err)
 		body, err := jwe.Encrypt(plaintext,
@@ -510,44 +517,98 @@ func TestUIInteractionSessionRecordsTheResponseMode(t *testing.T) {
 		"a session minted by UIInteraction must satisfy the redirect response-mode rule")
 }
 
-// T is decided in ONE place, and that place says where the value
-// came from.
+// T is the PROVER'S proof_time, checked against this verifier's
+// clock rather than replaced by it.
 //
-// It is the receipt time today, which is known to be wrong: the
-// circuit binds all 20 bytes of T into its public inputs, so a prover
-// that used any other second produces a proof that cannot verify. The
-// fix needs a cross-implementation decision and is tracked on #830.
-// What is asserted here is the structure that makes the fix small -
-// one function, and a recorded source - and the diagnostics that stop
-// the failure reading as a bad proof.
-func TestCircuitZkProofTimeNamesItsSource(t *testing.T) {
-	now, source := circuitZkProofTime(nil)
+// The circuit binds all 20 bytes of T into its public inputs, so only
+// the prover knows which second it proved at. The window is what
+// makes accepting that value safe.
+func TestCircuitZkProofTimeAcceptsAValueInsideTheWindow(t *testing.T) {
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 
-	assert.False(t, now.IsZero(), "T must be a real timestamp")
-	assert.Equal(t, proofTimeReceipt, source)
-	assert.Contains(t, source, "PROVISIONAL",
-		"the source string is what an operator sees in the log; it has to say this one cannot match")
+	proved := now.Add(-30 * time.Second)
+	got, err := client.circuitZkProofTime(openid4vp.ZkpPresentation{
+		HasProofTime: true, ProofTime: proved,
+	}, now)
+	require.NoError(t, err)
+	assert.True(t, got.Equal(proved), "T is the prover's value, unchanged")
 }
 
-// A verification failure under the provisional T names the likeliest
-// cause, instead of leaving an operator to suspect the circuit, the
-// artifact or the issuer key.
-func TestCircuitZkTimeBindingHintExplainsTheProvisionalT(t *testing.T) {
-	provisional := circuitZkSession{
-		Now:       time.Date(2026, 10, 20, 9, 30, 0, 0, time.UTC),
-		NowSource: proofTimeReceipt,
+// Outside the window is REFUSED, not clamped, and the message names
+// the deviation and the limit - the operator's next question is
+// always "by how much".
+func TestCircuitZkProofTimeRefusesOutsideTheWindow(t *testing.T) {
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name  string
+		at    time.Time
+		names string
+	}{
+		{name: "too far ahead", at: now.Add(2 * time.Minute), names: "in the future"},
+		{name: "too old", at: now.Add(-20 * time.Minute), names: "old"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.circuitZkProofTime(openid4vp.ZkpPresentation{
+				HasProofTime: true, ProofTime: tc.at,
+			}, now)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.names)
+		})
 	}
-	hint := circuitZkTimeBindingHint(provisional)
 
-	assert.Contains(t, hint, "2026-10-20T09:30:00Z", "the T actually used")
-	assert.Contains(t, hint, proofTimeReceipt, "and where it came from")
-	assert.Contains(t, hint, "830", "and where the explanation lives")
-
-	// And it EXPIRES. Once T comes from the session the hint is empty,
-	// so a genuine bad proof is not annotated with a cause that no
-	// longer applies - which would be its own wild goose chase.
-	settled := provisional
-	settled.NowSource = proofTimeSession
-	assert.Empty(t, circuitZkTimeBindingHint(settled),
-		"the hint must disappear with the gap it describes")
+	// And no proof_time at all is a refusal: a proof checked against a
+	// guessed T is not checked.
+	_, err := client.circuitZkProofTime(openid4vp.ZkpPresentation{}, now)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no proof_time")
 }
+
+// The window is configurable, and defaults to the shared
+// recommendation when a deployment has not chosen.
+func TestCircuitZkToleranceDefaultsToTheRecommendation(t *testing.T) {
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
+	skew, maxAge := client.circuitZkTolerance()
+	assert.Equal(t, openid4vp.RecommendedSkew, skew)
+	assert.Equal(t, openid4vp.RecommendedMaxAge, maxAge)
+
+	client.cfg.Verifier.NymAuth.ProofTimeSkewSeconds = 5
+	client.cfg.Verifier.NymAuth.ProofTimeMaxAgeSeconds = 7
+	skew, maxAge = client.circuitZkTolerance()
+	assert.Equal(t, 5*time.Second, skew)
+	assert.Equal(t, 7*time.Second, maxAge)
+}
+
+// zkpPresentationB64 builds one presentation the way a prover does:
+// CBOR, then unpadded base64url.
+//
+// Written out here rather than hand-coded as a constant so a test
+// reads as the shape it means. The validator's own conformance is
+// pinned by the vendored vectors in pkg/openid4vp; what these tests
+// need is a presentation that gets PAST it, so the dispatch and the
+// trust path can be exercised.
+func zkpPresentationB64(t *testing.T, systemID string, keySet [][]byte, proofTime string, results map[string]any) string {
+	t.Helper()
+
+	presentation := map[string]any{
+		"system_id":      systemID,
+		"proof":          []byte(strings.Repeat("p", 48)),
+		"issuer_key_set": keySet,
+		"results":        results,
+	}
+	if proofTime != "" {
+		parsed, err := openid4vp.ParseProofTime(proofTime)
+		require.NoError(t, err)
+		presentation["proof_time"] = cbor.Tag{Number: 0, Content: parsed.UTC().Format(openid4vp.ProofTimeLayout)}
+	}
+	encoder, err := cbor.EncOptions{Sort: cbor.SortCanonical}.EncMode()
+	require.NoError(t, err)
+	encoded, err := encoder.Marshal(presentation)
+	require.NoError(t, err)
+	return base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+// nowProofTime is a proof_time inside any sane tolerance window.
+func nowProofTime() string { return openid4vp.RenderProofTimeOrPanic(time.Now()) }

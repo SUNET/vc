@@ -78,7 +78,7 @@ func testDSCertificate(t *testing.T, signer any, public any, notBefore, notAfter
 }
 
 // testP256Chain is a one-certificate chain and the key inside it.
-func testP256Chain(t *testing.T) (openid4vp.CircuitZkPresentation, *ecdsa.PublicKey) {
+func testP256Chain(t *testing.T) (openid4vp.ZkpPresentation, *ecdsa.PublicKey) {
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -86,7 +86,7 @@ func testP256Chain(t *testing.T) (openid4vp.CircuitZkPresentation, *ecdsa.Public
 
 	now := time.Now()
 	cert := testDSCertificate(t, key, &key.PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
-	return openid4vp.CircuitZkPresentation{X5Chain: [][]byte{cert.Raw}}, &key.PublicKey
+	return openid4vp.ZkpPresentation{IssuerKeySet: [][]byte{cert.Raw}}, &key.PublicKey
 }
 
 func issuerKeyClient(evaluator trust.TrustEvaluator) *Client {
@@ -144,7 +144,7 @@ func TestCircuitZkIssuerKeyRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		client       func(t *testing.T) *Client
-		presentation func(t *testing.T) openid4vp.CircuitZkPresentation
+		presentation func(t *testing.T) openid4vp.ZkpPresentation
 		contains     string
 	}{{
 		// Fail closed: a verifier that cannot ask whether an issuer
@@ -159,13 +159,13 @@ func TestCircuitZkIssuerKeyRefusals(t *testing.T) {
 		// is not checked.
 		name:         "no chain in the presentation",
 		client:       func(*testing.T) *Client { return issuerKeyClient(&fakeTrustEvaluator{trusted: true}) },
-		presentation: func(*testing.T) openid4vp.CircuitZkPresentation { return openid4vp.CircuitZkPresentation{} },
-		contains:     "carries no issuer certificate chain",
+		presentation: func(*testing.T) openid4vp.ZkpPresentation { return openid4vp.ZkpPresentation{} },
+		contains:     "carries no issuer key set",
 	}, {
 		name:   "the chain is not DER",
 		client: func(*testing.T) *Client { return issuerKeyClient(&fakeTrustEvaluator{trusted: true}) },
-		presentation: func(*testing.T) openid4vp.CircuitZkPresentation {
-			return openid4vp.CircuitZkPresentation{X5Chain: [][]byte{[]byte("not a certificate")}}
+		presentation: func(*testing.T) openid4vp.ZkpPresentation {
+			return openid4vp.ZkpPresentation{IssuerKeySet: [][]byte{[]byte("not a certificate")}}
 		},
 		contains: "does not parse",
 	}, {
@@ -189,23 +189,23 @@ func TestCircuitZkIssuerKeyRefusals(t *testing.T) {
 		// curve cannot be a public input to it.
 		name:   "the leaf key is not P-256",
 		client: func(*testing.T) *Client { return issuerKeyClient(&fakeTrustEvaluator{trusted: true}) },
-		presentation: func(t *testing.T) openid4vp.CircuitZkPresentation {
+		presentation: func(t *testing.T) openid4vp.ZkpPresentation {
 			key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 			require.NoError(t, err)
 			now := time.Now()
 			cert := testDSCertificate(t, key, &key.PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
-			return openid4vp.CircuitZkPresentation{X5Chain: [][]byte{cert.Raw}}
+			return openid4vp.ZkpPresentation{IssuerKeySet: [][]byte{cert.Raw}}
 		},
 		contains: "is on P-384, and the circuit takes P-256",
 	}, {
 		name:   "the leaf key is not ECDSA at all",
 		client: func(*testing.T) *Client { return issuerKeyClient(&fakeTrustEvaluator{trusted: true}) },
-		presentation: func(t *testing.T) openid4vp.CircuitZkPresentation {
+		presentation: func(t *testing.T) openid4vp.ZkpPresentation {
 			public, private, err := ed25519.GenerateKey(rand.Reader)
 			require.NoError(t, err)
 			now := time.Now()
 			cert := testDSCertificate(t, private, public, now.Add(-time.Hour), now.Add(time.Hour))
-			return openid4vp.CircuitZkPresentation{X5Chain: [][]byte{cert.Raw}}
+			return openid4vp.ZkpPresentation{IssuerKeySet: [][]byte{cert.Raw}}
 		},
 		contains: "and the circuit takes a P-256 key",
 	}} {
@@ -230,7 +230,7 @@ func TestCircuitZkIssuerKeyHonoursTheCertificateValidityPeriod(t *testing.T) {
 
 	issued := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	cert := testDSCertificate(t, key, &key.PublicKey, issued, issued.Add(24*time.Hour))
-	presentation := openid4vp.CircuitZkPresentation{X5Chain: [][]byte{cert.Raw}}
+	presentation := openid4vp.ZkpPresentation{IssuerKeySet: [][]byte{cert.Raw}}
 	client := issuerKeyClient(&fakeTrustEvaluator{trusted: true})
 
 	_, err = client.circuitZkIssuerKey(t.Context(), presentation, "eu.europa.ec.eudi.nym_auth.1", issued.Add(time.Hour))
@@ -278,7 +278,7 @@ func TestCircuitZkIssuerKeyRefusesAnAllowAllEvaluator(t *testing.T) {
 	require.NoError(t, err)
 	now := time.Now()
 	selfSigned := testDSCertificate(t, key, &key.PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
-	presentation := openid4vp.CircuitZkPresentation{X5Chain: [][]byte{selfSigned.Raw}}
+	presentation := openid4vp.ZkpPresentation{IssuerKeySet: [][]byte{selfSigned.Raw}}
 
 	client := issuerKeyClient(trust.NewTrustEvaluatorFromConfig(""))
 	got, err := client.circuitZkIssuerKey(t.Context(), presentation, "eu.europa.ec.eudi.nym_auth.1", now)

@@ -52,7 +52,7 @@ func (c *Client) verifyCircuitZkScope(
 
 	// Shape, and binding to what THIS request offered. Nothing here
 	// is a verified fact yet; a pseudonym is the holder's claim.
-	presentations, err := openid4vp.ValidateCircuitZkResponse(raw, c.circuitZkRequestFor(query))
+	presentations, err := openid4vp.ValidateZkpReqResponse(raw, c.circuitZkRequestFor(query))
 	if err != nil {
 		c.log.Error(err, "circuit_zk presentation refused", "scope", scope, "query_id", query.ID)
 		return nil, fmt.Errorf("scope %s: %w", scope, err)
@@ -104,23 +104,36 @@ func (c *Client) verifyCircuitZkScope(
 		//
 		// session.DocType is the REQUEST's docType - the response
 		// does not get to choose the trust policy it is judged under.
-		issuerKey, err := c.circuitZkIssuerKey(ctx, presentation, session.DocType, time.Now())
+		// T first: it is the prover's, and a presentation whose T is
+		// outside this verifier's window is refused before any work
+		// is done on its behalf.
+		proofTime, err := c.circuitZkProofTime(presentation, time.Now())
+		if err != nil {
+			c.log.Error(err, "zkp_req proof_time refused", "scope", scope,
+				"system_id", presentation.SystemID, "proof_time", presentation.ProofTimeText)
+			return nil, fmt.Errorf("scope %s: %w", scope, err)
+		}
+		presentationSession := session
+		presentationSession.Now = proofTime
+		presentationSession.NowSource = proofTimeSource
+
+		issuerKey, err := c.circuitZkIssuerKey(ctx, presentation, presentationSession.DocType, time.Now())
 		if err != nil {
 			c.log.Error(err, "no trusted issuer key for the circuit_zk presentation",
-				"scope", scope, "doc_type", session.DocType, "circuit_id", presentation.CircuitID)
+				"scope", scope, "doc_type", session.DocType, "system_id", presentation.SystemID)
 			return nil, fmt.Errorf("scope %s: %w", scope, err)
 		}
 
-		verified, err := c.verifyCircuitZkPresentation(ctx, presentation, session, query.Req, issuerKey)
+		verified, err := c.verifyCircuitZkPresentation(ctx, presentation, presentationSession, query.Req, issuerKey)
 		if err != nil {
 			c.log.Error(err, "circuit_zk proof did not verify", "scope", scope,
-				"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey),
+				"system_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey),
 				"t", session.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", session.NowSource)
-			return nil, fmt.Errorf("scope %s: the proof did not verify against the issuer key the chain established%s: %w",
-				scope, circuitZkTimeBindingHint(session), err)
+			return nil, fmt.Errorf("scope %s: the proof did not verify against the issuer key the key set established: %w",
+				scope, err)
 		}
 		c.log.Info("circuit_zk proof verified", "scope", scope,
-			"circuit_id", presentation.CircuitID, "issuer_key", issuerKeyThumbprint(issuerKey))
+			"system_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey))
 
 		credentials = append(credentials, circuitZkCredential(scope, presentation, verified))
 	}
@@ -168,29 +181,6 @@ func checkCircuitZkResponseMode(channel circuitZkChannel, authCtx *cache.Authori
 	return nil
 }
 
-// circuitZkTimeBindingHint names the known cause of a failure that
-// would otherwise read as a bad proof.
-//
-// The circuit binds all 20 bytes of T into its public inputs, so a
-// prover and a verifier that disagree about the second produce
-// different inputs and the proof cannot verify - with nothing
-// distinguishing that from a forged or corrupted one. While T is the
-// receipt time it CANNOT match, so every real presentation fails this
-// way, and an operator reading "the proof did not verify" would go
-// looking at the circuit, the artifact or the issuer key.
-//
-// Empty once T comes from the session, so a genuine bad proof is not
-// annotated with a cause that no longer applies.
-func circuitZkTimeBindingHint(session circuitZkSession) string {
-	if session.NowSource != proofTimeReceipt {
-		return ""
-	}
-	return fmt.Sprintf(" (NOTE: T was %s, from %s. The circuit binds T into its public inputs, so a prover "+
-		"that used any other second produces a proof that cannot verify. This is a known gap pending a "+
-		"cross-implementation decision - see SUNET/vc#830 - and is the likeliest cause of this failure)",
-		session.Now.UTC().Format("2006-01-02T15:04:05Z"), session.NowSource)
-}
-
 // circuitZkCredential renders a verified presentation as claims.
 //
 // Only the pseudonyms the native verifier RETURNED, keyed by the
@@ -200,10 +190,18 @@ func circuitZkTimeBindingHint(session circuitZkSession) string {
 //
 // base64url because a pseudonym is 32 opaque bytes and every other
 // binary value we publish is spelled that way.
-func circuitZkCredential(scope string, presentation openid4vp.CircuitZkPresentation, verified map[string][]byte) sdjwtvc.CredentialCache {
+func circuitZkCredential(scope string, presentation openid4vp.ZkpPresentation, verified map[string][]byte) sdjwtvc.CredentialCache {
 	claims := map[string]any{
-		"circuit_id":   presentation.CircuitID,
-		"proof_system": presentation.ProofSystem,
+		// system_id alone. A v0.4 presentation carries no proof
+		// system and no circuit id: the system is named by system_id,
+		// and the verifier's registry maps it to a proof system.
+		"system_id": presentation.SystemID,
+	}
+	if presentation.HasProofTime {
+		// The T the proof was checked against, as the prover spelled
+		// it. Published because a consumer comparing two pseudonyms
+		// may need to know how old each one's proof is.
+		claims["proof_time"] = presentation.ProofTimeText
 	}
 	for handle, pseudonym := range verified {
 		claims[handle] = base64.RawURLEncoding.EncodeToString(pseudonym)

@@ -687,7 +687,7 @@ func copyDCQL(src *DCQL) *DCQL {
 			dst.Credentials[i].Req = make([]ReqItem, len(cred.Req))
 			for j, item := range cred.Req {
 				dst.Credentials[i].Req[j] = ReqItem{
-					ID:     item.ID,
+					FnID:   item.FnID,
 					Return: item.Return,
 					Params: copyAnyMap(item.Params),
 					Extra:  copyAnyMap(item.Extra),

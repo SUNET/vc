@@ -443,7 +443,22 @@ func checkLegacyCredentialResponseEncryption(cfg *model.Cfg) error {
 // will not load, and an operator looking at a failed presentation has
 // no reason to suspect the configuration.
 func checkNymAuthVerifier(cfg *model.Cfg) error {
-	if cfg == nil || cfg.Verifier == nil || !cfg.Verifier.NymAuth.Enable {
+	if cfg == nil || cfg.Verifier == nil {
+		return nil
+	}
+	// The pre-v0.4 format and member names, refused BEFORE the enable
+	// check: a configuration carrying them was written against the
+	// old wire shape, and starting with it silently ignored is the
+	// failure this refuses. They land in Extra rather than erroring
+	// on their own, so nothing else would notice.
+	//
+	// Named individually, with the replacement, because an operator
+	// reading "unknown member" would reasonably go looking for a typo
+	// rather than for a rename.
+	if err := refuseLegacyZkpReqKeys(cfg.Verifier.PreferredVPFormats); err != nil {
+		return err
+	}
+	if !cfg.Verifier.NymAuth.Enable {
 		return nil
 	}
 
@@ -1132,5 +1147,40 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
 	}
 
+	return nil
+}
+
+// legacyZkpReqKeys maps every pre-v0.4 name onto the one that
+// replaced it. There are no aliases: rulebook v0.4 renamed these on
+// the wire, and a verifier that quietly accepted the old spelling
+// would send one shape while its operator believed it sent another.
+var legacyZkpReqKeys = map[string]string{
+	"circuit_id_values":           "system_id_values",
+	"circuit_proof_system_values": "proof_system_values",
+}
+
+// refuseLegacyZkpReqKeys stops a deployment whose configuration still
+// speaks the pre-v0.4 names.
+//
+// Startup rather than first presentation: the old keys would be
+// carried as unknown members, the offered lists would be empty, and
+// EVERY presentation would then be refused as naming a system the
+// request never offered - which reads as a wallet problem.
+func refuseLegacyZkpReqKeys(formats *openid4vp.VPFormatsSupported) error {
+	if formats == nil {
+		return nil
+	}
+	if _, legacy := formats.Extra["circuit_zk"]; legacy {
+		return fmt.Errorf("verifier.preferred_vp_formats.circuit_zk is the pre-v0.4 name; rename it to zkp_req")
+	}
+	if formats.ZkpReq == nil {
+		return nil
+	}
+	for old, replacement := range legacyZkpReqKeys {
+		if _, legacy := formats.ZkpReq.Extra[old]; legacy {
+			return fmt.Errorf("verifier.preferred_vp_formats.zkp_req.%s is the pre-v0.4 name; rename it to %s",
+				old, replacement)
+		}
+	}
 	return nil
 }

@@ -56,17 +56,17 @@ func TestCircuitZkPredicateOnlyPresentationIsRefused(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
 
 	items := []openid4vp.ReqItem{{
-		ID:     openid4vp.CircuitZkFunctionAgeCheck,
+		FnID:   openid4vp.FunctionAgeCheck,
 		Return: "age-range-123",
 		Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"},
 	}}
 	// Proof bytes nothing would accept, which is the point: no part
 	// of this presentation is checkable, so none of it may pass.
-	presentation := openid4vp.CircuitZkPresentation{
-		CircuitID:   "urn:circuits:longfellow:nym_auth:v1",
-		ProofSystem: "longfellow-libzk-v1",
-		Proof:       []byte("not a proof"),
-		Satisfied:   []string{"age-range-123"},
+	presentation := openid4vp.ZkpPresentation{
+		SystemID: "urn:circuits:longfellow:nym_auth:v1",
+
+		Proof:     []byte("not a proof"),
+		Satisfied: []string{"age-range-123"},
 	}
 
 	verified, err := client.verifyCircuitZkPresentation(t.Context(), presentation, session, items, issuerKey)
@@ -82,7 +82,7 @@ func TestCircuitZkNoItemsIsRefused(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
 
 	verified, err := client.verifyCircuitZkPresentation(
-		t.Context(), openid4vp.CircuitZkPresentation{Proof: []byte("not a proof")}, session, nil, issuerKey)
+		t.Context(), openid4vp.ZkpPresentation{Proof: []byte("not a proof")}, session, nil, issuerKey)
 	require.Error(t, err)
 	assert.Nil(t, verified)
 }
@@ -94,9 +94,9 @@ func TestCircuitZkNoIssuerKeyIsRefused(t *testing.T) {
 	session, _ := zknativeTestSession(t)
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
 
-	items := []openid4vp.ReqItem{{ID: openid4vp.CircuitZkFunctionAgeCheck, Return: "age-1"}}
+	items := []openid4vp.ReqItem{{FnID: openid4vp.FunctionAgeCheck, Return: "age-1"}}
 	_, err := client.verifyCircuitZkPresentation(
-		t.Context(), openid4vp.CircuitZkPresentation{}, session, items, nil)
+		t.Context(), openid4vp.ZkpPresentation{}, session, items, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no issuer key")
 }

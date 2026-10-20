@@ -16,7 +16,7 @@ import (
 // conformance vector.
 func vendoredVectorQuery(t *testing.T, name string) json.RawMessage {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "pkg", "openid4vp", "testdata", "circuit_zk", name))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "pkg", "openid4vp", "testdata", "zkp_req", "zkp_req", name))
 	require.NoError(t, err)
 	var doc struct {
 		Query json.RawMessage `json:"query"`

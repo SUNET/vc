@@ -1,0 +1,90 @@
+{
+  "description": "Requests that are well-formed but unsatisfiable per the rulebook are NOT rejected by the planner (see ../zkp_req_unsat for the unsatisfiability rules): le before ge, a one-day span, no age bound, two age_check items, two pseudonym items, a pseudonym without params (no ver, prf or config), require_cryptographic_holder_binding false, and no doctype_value (vct_values only).",
+  "query": {
+    "id": "q",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "vct_values": [
+        "urn:example"
+      ]
+    },
+    "require_cryptographic_holder_binding": false,
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "a1",
+        "params": {
+          "ge": "2013-10-09",
+          "le": "2008-10-10"
+        }
+      },
+      {
+        "fn_id": "age_check",
+        "return": "a2",
+        "params": {
+          "ge": "2010-01-01",
+          "le": "2010-01-01"
+        }
+      },
+      {
+        "fn_id": "age_check",
+        "return": "a3"
+      },
+      {
+        "fn_id": "pseudonym",
+        "return": "p1"
+      },
+      {
+        "fn_id": "pseudonym",
+        "return": "p2",
+        "params": {
+          "config": "known-offender-matching-ssc"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "age_check",
+          "handle": "a1",
+          "params": {
+            "ge": "2013-10-09",
+            "le": "2008-10-10"
+          }
+        },
+        {
+          "function_id": "age_check",
+          "handle": "a2",
+          "params": {
+            "ge": "2010-01-01",
+            "le": "2010-01-01"
+          }
+        },
+        {
+          "function_id": "age_check",
+          "handle": "a3",
+          "params": {}
+        },
+        {
+          "function_id": "pseudonym",
+          "handle": "p1",
+          "params": {}
+        },
+        {
+          "function_id": "pseudonym",
+          "handle": "p2",
+          "params": {
+            "config": "known-offender-matching-ssc"
+          }
+        }
+      ],
+      "meta_doctype": null,
+      "system_filter": {},
+      "source_format": "mso_mdoc",
+      "meta_schema_id": null
+    }
+  }
+}

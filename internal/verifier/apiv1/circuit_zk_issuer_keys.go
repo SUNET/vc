@@ -58,6 +58,15 @@ import (
 // from the response. A holder choosing the docType would be choosing
 // which trust policy it is judged under.
 
+// longfellowIssuerKeySetSize is how many certificates the Longfellow
+// system's issuer key set carries: exactly one, the Document Signer.
+//
+// From the archive circuits, which are authoritative on circuit
+// semantics. The shared response shape permits up to eight because it
+// describes every system; this verifier knows which system it is
+// verifying for.
+const longfellowIssuerKeySetSize = 1
+
 // ErrNoTrustEvaluator is the refusal a verifier with no PDP gives.
 //
 // Fail closed, and deliberately not "nothing is trusted, carry on": a
@@ -96,7 +105,7 @@ var ErrAllowAllTrustEvaluator = errors.New("circuit_zk: verifier.trust.pdp_url i
 // moment a certificate is judged at.
 func (c *Client) circuitZkIssuerKey(
 	ctx context.Context,
-	presentation openid4vp.CircuitZkPresentation,
+	presentation openid4vp.ZkpPresentation,
 	docType string,
 	now time.Time,
 ) (*ecdsa.PublicKey, error) {
@@ -110,20 +119,29 @@ func (c *Client) circuitZkIssuerKey(
 		// that cannot be bypassed.
 		return nil, ErrAllowAllTrustEvaluator
 	}
-	if len(presentation.X5Chain) == 0 {
-		// Unreachable through ValidateCircuitZkResponse, which makes
-		// x5chain a required non-empty member. Kept because the
-		// consequence of being wrong about that is verifying a proof
-		// against no key, which is not verifying it - a belief worth
-		// one comparison.
-		return nil, errors.New("circuit_zk: the presentation carries no issuer certificate chain")
+	if len(presentation.IssuerKeySet) == 0 {
+		// Unreachable through ValidateZkpReqResponse, which makes
+		// issuer_key_set a required non-empty member. Kept because
+		// the consequence of being wrong about that is verifying a
+		// proof against no key, which is not verifying it - a belief
+		// worth one comparison.
+		return nil, errors.New("zkp_req: the presentation carries no issuer key set")
+	}
+	if len(presentation.IssuerKeySet) != longfellowIssuerKeySetSize {
+		// The shared shape allows up to eight; the ARCHIVE CIRCUITS
+		// take exactly one for this system, and on circuit semantics
+		// the archive wins over the shared shape. More than one would
+		// mean choosing which to treat as the leaf, and the circuit
+		// has no notion of a chain to walk.
+		return nil, fmt.Errorf("zkp_req: the issuer key set has %d elements; the %s system takes exactly %d",
+			len(presentation.IssuerKeySet), presentation.SystemID, longfellowIssuerKeySetSize)
 	}
 
-	chain := make([]*x509.Certificate, 0, len(presentation.X5Chain))
-	for i, der := range presentation.X5Chain {
+	chain := make([]*x509.Certificate, 0, len(presentation.IssuerKeySet))
+	for i, der := range presentation.IssuerKeySet {
 		cert, err := x509.ParseCertificate(der)
 		if err != nil {
-			return nil, fmt.Errorf("circuit_zk: certificate %d in the issuer chain does not parse: %w", i, err)
+			return nil, fmt.Errorf("zkp_req: issuer key %d does not parse as a certificate: %w", i, err)
 		}
 		chain = append(chain, cert)
 	}
@@ -136,14 +154,14 @@ func (c *Client) circuitZkIssuerKey(
 	// leaf's SAN, as the SDKs and the deployed PDP request shape
 	// expect - and the docType is the request's.
 	if err := mdoc.VerifyIssuerChain(ctx, c.trustEvaluator, chain, docType, "", now); err != nil {
-		return nil, fmt.Errorf("circuit_zk: the issuer chain is not trusted for docType %q: %w", docType, err)
+		return nil, fmt.Errorf("zkp_req: the issuer key set is not trusted for docType %q: %w", docType, err)
 	}
 
 	// Only after the chain is trusted: an untrusted chain's key is
 	// not a key this verifier has any business looking at.
 	key, isECDSA := chain[0].PublicKey.(*ecdsa.PublicKey)
 	if !isECDSA {
-		return nil, fmt.Errorf("circuit_zk: the issuer certificate holds a %T, and the circuit takes a P-256 key",
+		return nil, fmt.Errorf("zkp_req: the issuer certificate holds a %T, and the circuit takes a P-256 key",
 			chain[0].PublicKey)
 	}
 	if key.Curve != elliptic.P256() {
@@ -151,7 +169,7 @@ func (c *Client) circuitZkIssuerKey(
 		// arithmetic is over P-256. A key on another curve cannot be
 		// a public input to it, so accepting one would mean verifying
 		// against something the circuit never saw.
-		return nil, fmt.Errorf("circuit_zk: the issuer key is on %s, and the circuit takes P-256",
+		return nil, fmt.Errorf("zkp_req: the issuer key is on %s, and the circuit takes P-256",
 			key.Curve.Params().Name)
 	}
 	return key, nil

@@ -1,0 +1,22 @@
+{
+  "description": "meta has a type value but no source_format (REQUIRED by rulebook v0.4).",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "h",
+        "params": {
+          "ge": "2008-10-10"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "invalid_meta"
+  }
+}
