@@ -54,6 +54,13 @@ type Request struct {
 	// presentation is bound to, built from the verifier's own origin
 	// and nonce. The circuits take it whole, as the transcript seed.
 	//
+	// Checked here for SHAPE only - one three-item CBOR array, which
+	// the e2 derivation enforces. Length limits belong to a BACKEND:
+	// Longfellow's C ABI takes 32 to 65536 bytes, and the shared
+	// digest vector's 12-byte transcript derives a correct e2 and must
+	// stay usable here. A backend bound applied in this package would
+	// refuse a request some other circuit accepts.
+	//
 	// e2 is DERIVED from it (see E2) rather than carried beside it.
 	// The circuits take both, and a request that carried them as two
 	// independent fields could name one session in the seed and
@@ -74,14 +81,6 @@ type Request struct {
 
 // TimeLayout is how the circuits take T for an mdoc: 20 ASCII bytes.
 const TimeLayout = "2006-01-02T15:04:05Z"
-
-// Bounds on the transcript seed the circuits accept. A seed outside
-// them is refused here, with the length named, rather than at the
-// native boundary, which reports it as a generic invalid input.
-const (
-	MinTranscriptBytes = 32
-	MaxTranscriptBytes = 65536
-)
 
 // E2 is the challenge digest this request binds the proof to: SHA-256
 // of the device-authentication message over SessionTranscript and
@@ -114,6 +113,14 @@ func (r Request) Check() error {
 	if r.IssuerKey == nil {
 		return fmt.Errorf("nymauth: no issuer key; Q must come from the resolved issuer chain, never from the proof")
 	}
+	if r.IssuerKey.Curve == nil {
+		// Checked before the comparison below, which would otherwise
+		// dereference it to name the curve in the error: a zero
+		// ecdsa.PublicKey fails the P-256 test and then panics while
+		// explaining why. A caller handed an incomplete key needs an
+		// error, not a crash.
+		return fmt.Errorf("nymauth: the issuer key names no curve")
+	}
 	if r.IssuerKey.Curve != elliptic.P256() {
 		return fmt.Errorf("nymauth: the issuer key is on %s; the circuits are built for P-256", r.IssuerKey.Curve.Params().Name)
 	}
@@ -125,10 +132,6 @@ func (r Request) Check() error {
 	}
 	if err := r.checkInputs(); err != nil {
 		return err
-	}
-	if n := len(r.SessionTranscript); n < MinTranscriptBytes || n > MaxTranscriptBytes {
-		return fmt.Errorf("nymauth: the transcript seed is %d bytes; the circuits take %d to %d",
-			n, MinTranscriptBytes, MaxTranscriptBytes)
 	}
 	if _, err := r.E2(); err != nil {
 		// Derivation is the only check of the transcript's shape and

@@ -42,6 +42,30 @@ func testRequest(t *testing.T) Request {
 // request built from the fixture derives a digest those vectors pin.
 const testDocType = "eu.europa.ec.eudi.nym_auth.1"
 
+// A transcript shorter than any one backend's floor is still a valid
+// request here.
+//
+// The shared digest vector's transcript is 12 bytes and derives a
+// correct e2. Longfellow's C ABI takes 32 to 65536, which is
+// Longfellow's bound and is enforced where the request is flattened
+// for it - applying it in this package would refuse a request another
+// circuit accepts.
+func TestRequestAcceptsAShortSharedVectorTranscript(t *testing.T) {
+	vectors := loadChallengeVectors(t)
+	transcript, err := hex.DecodeString(vectors.Digest[0].SessionTranscriptHex)
+	require.NoError(t, err)
+	require.Less(t, len(transcript), 32, "the point of this test is that it is short")
+
+	r := testRequest(t)
+	r.SessionTranscript = transcript
+	r.DocType = vectors.Digest[0].DocType
+	require.NoError(t, r.Check())
+
+	got, err := r.E2()
+	require.NoError(t, err)
+	assert.Equal(t, vectors.Digest[0].ChallengeDigestHex, hex.EncodeToString(got[:]))
+}
+
 // e2 is DERIVED from the request's own transcript and docType, and the
 // value it derives is the one the shared vectors pin. A request that
 // carried e2 as a field could name one session in the seed and another
@@ -125,13 +149,16 @@ func TestRequestRefusesWhatItCannotCheckAgainst(t *testing.T) {
 	t.Run("no transcript seed", func(t *testing.T) {
 		r := testRequest(t)
 		r.SessionTranscript = nil
-		assert.ErrorContains(t, r.Check(), "the transcript seed is 0 bytes")
+		assert.ErrorContains(t, r.Check(), "needs a session transcript")
 	})
 
-	t.Run("a transcript seed over the circuits' bound", func(t *testing.T) {
+	t.Run("an issuer key naming no curve", func(t *testing.T) {
+		// A zero ecdsa.PublicKey. The curve comparison below it used
+		// to dereference the nil curve to name it in the error, so an
+		// incomplete key crashed the caller instead of being refused.
 		r := testRequest(t)
-		r.SessionTranscript = make([]byte, MaxTranscriptBytes+1)
-		assert.ErrorContains(t, r.Check(), "the circuits take 32 to 65536")
+		r.IssuerKey = &ecdsa.PublicKey{}
+		assert.ErrorContains(t, r.Check(), "names no curve")
 	})
 
 	t.Run("a transcript seed that is not one CBOR array", func(t *testing.T) {
