@@ -13,12 +13,14 @@ import (
 // JSON null is a TYPE ERROR wherever it appears, never an absent or
 // an empty value.
 //
-// This is the shared ruling across the implementations, and it needs
-// saying because Go makes the wrong answer the easy one: its decoder
-// treats null as "leave the target alone" and returns no error, so
-// every member would otherwise be refused as whatever its zero value
-// happens to look like - an empty circuit id, an empty chain, an
-// empty certificate - each a different wrong code for one mistake.
+// The vendored vectors now cover these same twelve positions, so this
+// is deliberate duplication. It stays because it says the one thing a
+// vector cannot: WHICH wrong answer each position would give without
+// the check. That is Go-specific - its decoder treats null as "leave
+// the target alone" and returns no error, so a member is refused as
+// whatever its zero value happens to look like - and a reader who
+// does not know that trap will read the refusal as redundant and
+// remove it. The "instead" column is the argument for keeping it.
 func TestCircuitZkNullIsAlwaysATypeError(t *testing.T) {
 	request := CircuitZkRequest{
 		QueryID: "nym_attestation",
