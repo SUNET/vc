@@ -102,6 +102,19 @@ func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 		if entry.HashCircuitID == entry.SigCircuitID {
 			return nil, fmt.Errorf("%s: the hash and signature circuit ids are the same, which no real build has", where)
 		}
+		// Both Ligero parameters, and both non-zero. Dropping the
+		// struct tags (they ran whether or not the feature was
+		// enabled) moved every field's check here, and a zero
+		// block_enc is not a default - it is a parameter the loader
+		// compares against its allowed build and refuses, after the
+		// artifact has been read and hashed, with a status code that
+		// says "bad circuit" and not "you left a number out".
+		if entry.BlockEncHash == 0 {
+			return nil, fmt.Errorf("%s: block_enc_hash is zero; it is the hash circuit's Ligero parameter and the loader checks it", where)
+		}
+		if entry.BlockEncSig == 0 {
+			return nil, fmt.Errorf("%s: block_enc_sig is zero; it is the signature circuit's Ligero parameter and the loader checks it", where)
+		}
 		if _, err := hex.DecodeString(entry.ArtifactSHA256); err != nil || len(entry.ArtifactSHA256) != 2*sha256.Size {
 			return nil, fmt.Errorf("%s: artifact_sha256 is not a 64-character hex SHA-256", where)
 		}

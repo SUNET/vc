@@ -83,6 +83,27 @@ func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 	// entry can be well-formed and name a file that is not there, or
 	// one whose digest moved when it was rebuilt, and both would
 	// otherwise surface as a refused proof.
+	t.Run("a Ligero parameter left out", func(t *testing.T) {
+		// Zero is not a default here: the loader compares both
+		// against its allowed build and refuses - after reading and
+		// hashing the artifact - with a status code that says "bad
+		// circuit" and not "you left a number out".
+		for _, tc := range []struct {
+			name   string
+			mutate func(*model.NymAuthCircuit)
+			want   string
+		}{
+			{"block_enc_hash", func(e *model.NymAuthCircuit) { e.BlockEncHash = 0 }, "block_enc_hash is zero"},
+			{"block_enc_sig", func(e *model.NymAuthCircuit) { e.BlockEncSig = 0 }, "block_enc_sig is zero"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				cfg := nymAuthCfg(t)
+				tc.mutate(&cfg.Verifier.NymAuth.Circuits.Allow[0])
+				assert.ErrorContains(t, checkNymAuthVerifier(cfg), tc.want)
+			})
+		}
+	})
+
 	t.Run("an artifact that is not there", func(t *testing.T) {
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.Circuits.Allow[0].ArtifactPath = filepath.Join(t.TempDir(), "absent.bin")
