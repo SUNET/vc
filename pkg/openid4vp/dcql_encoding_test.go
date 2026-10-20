@@ -204,7 +204,7 @@ func TestMultipleRoundTripsAbsentFalseAndTrue(t *testing.T) {
 // that rule.
 //
 // The duplicate check ran only after a SUCCESSFUL typed decode. An
-// unmodelled member - `"req": {}` - made the decode fail, the query went
+// unmodelled member - `"_req": {}` - made the decode fail, the query went
 // raw, and the check never ran: the shadow still reported the last meta's
 // constraint, so validation passed, while the request was emitted with
 // BOTH metas. A first-wins wallet reads the empty one and is handed an
@@ -218,7 +218,7 @@ func TestRawPathIsNotAWayPastTheConstraintChecks(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{
 			name: "duplicate meta, reached through an unmodelled member",
-			body: `{"id":"q","format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]},"req":{}}`,
+			body: `{"id":"q","format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]},"_req":{}}`,
 			want: "named more than once",
 		},
 		{
@@ -228,7 +228,7 @@ func TestRawPathIsNotAWayPastTheConstraintChecks(t *testing.T) {
 		},
 		{
 			name: "duplicate format, same route",
-			body: `{"id":"q","format":"dc+sd-jwt","format":"mso_mdoc","meta":{},"req":{}}`,
+			body: `{"id":"q","format":"dc+sd-jwt","format":"mso_mdoc","meta":{},"_req":{}}`,
 			want: "named more than once",
 		},
 		{
@@ -267,7 +267,7 @@ func TestRawPathIsNotAWayPastTheConstraintChecks(t *testing.T) {
 // still read and still emitted as it arrived.
 func TestRawPathStillCarriesUnmodelledMembers(t *testing.T) {
 	for _, body := range []string{
-		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"req":{}}`,
+		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"_req":{}}`,
 		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"claims":{}}`,
 		`{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"],"future_member":1}}`,
 	} {

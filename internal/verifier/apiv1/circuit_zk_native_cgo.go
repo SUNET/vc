@@ -27,7 +27,7 @@ import (
 // way.
 func (c *Client) verifyCircuitZkPresentation(
 	ctx context.Context,
-	presentation openid4vp.CircuitZkPresentation,
+	presentation openid4vp.ZkpPresentation,
 	session circuitZkSession,
 	items []openid4vp.ReqItem,
 	issuerKey any,
@@ -54,14 +54,14 @@ func (c *Client) verifyCircuitZkPresentation(
 	// would do, and the predicate would be asserted by the holder and
 	// believed by the verifier.
 	//
-	// Counted rather than special-cased on item.ID, because the
+	// Counted rather than special-cased on item.FnID, because the
 	// invariant is "something was checked", not "a pseudonym was
 	// asked for" - a function added later that this loop skips would
 	// otherwise reopen exactly this hole, silently.
 	checked := 0
 	verified := map[string][]byte{}
 	for _, item := range items {
-		if item.ID != openid4vp.CircuitZkFunctionPseudonym {
+		if item.FnID != openid4vp.FunctionPseudonym {
 			continue
 		}
 		claimed, present := presentation.Pseudonyms[item.Return]

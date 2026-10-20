@@ -34,10 +34,10 @@ func TestAuthorizationContextKeepsExactNumbersThroughBSON(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
-				ID: "nym", Format: openid4vp.FormatCircuitZk,
+				ID: "nym", Format: openid4vp.FormatZkpReq,
 				Meta: openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
 				Req: []openid4vp.ReqItem{{
-					ID: openid4vp.FunctionPseudonym, Return: "nym-1",
+					FnID: openid4vp.FunctionPseudonym, Return: "nym-1",
 					Params: map[string]any{"p": json.Number(tc.literal)},
 				}},
 			}}}
@@ -62,7 +62,7 @@ func TestAuthorizationContextKeepsExactNumbersThroughBSON(t *testing.T) {
 // And a query the typed model cannot hold survives too - the raw escape
 // hatch is no use if it only works on the replica that built it.
 func TestAuthorizationContextKeepsARawQueryThroughBSON(t *testing.T) {
-	const wire = `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[{"fn_id":"age_check"}]}}`
+	const wire = `{"id":"q","format":"zkp_req","meta":{"doctype_value":"d"},"claims":{"_req":[{"fn_id":"age_check"}]}}`
 	credential, err := openid4vp.NewRawCredentialQuery([]byte(wire))
 	require.NoError(t, err)
 
@@ -179,10 +179,10 @@ func TestAuthorizationContextWithoutADCQLQuery(t *testing.T) {
 // neither build is broken by the other's documents.
 func TestAuthorizationContextSurvivesARollingUpgrade(t *testing.T) {
 	query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
-		ID: "nym", Format: openid4vp.FormatCircuitZk,
+		ID: "nym", Format: openid4vp.FormatZkpReq,
 		Meta: openid4vp.MetaQuery{DoctypeValue: "d"},
 		Req: []openid4vp.ReqItem{{
-			ID: openid4vp.FunctionPseudonym, Return: "nym-1",
+			FnID: openid4vp.FunctionPseudonym, Return: "nym-1",
 			Params: map[string]any{"p": json.Number("1.00000000000000001")},
 		}},
 	}}}
@@ -259,7 +259,7 @@ func TestAuthorizationContextRefusesACorruptExactQuery(t *testing.T) {
 // the query that had just been removed.
 func TestClearingTheQueryClearsTheExactCopy(t *testing.T) {
 	query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
-		ID: "nym", Format: openid4vp.FormatCircuitZk,
+		ID: "nym", Format: openid4vp.FormatZkpReq,
 		Meta: openid4vp.MetaQuery{DoctypeValue: "d"},
 	}}}
 
@@ -296,9 +296,9 @@ func TestAuthorizationContextStoresNumbersBeyondFloat64Range(t *testing.T) {
 		t.Run(literal, func(t *testing.T) {
 			var query openid4vp.DCQL
 			require.NoError(t, json.Unmarshal([]byte(`{"credentials":[{
-				"id":"nym","format":"circuit_zk",
+				"id":"nym","format":"zkp_req",
 				"meta":{"doctype_value":"eu.europa.ec.eudi.nym_auth.1"},
-				"req":[{"id":"pseudonym-v1-sha256","return":"nym-1",
+				"_req":[{"fn_id":"pseudonym","return":"nym-1",
 					"params":{"p":`+literal+`}}]}]}`), &query))
 
 			stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: &query})
@@ -330,9 +330,9 @@ func TestAuthorizationContextStoresNumbersBeyondFloat64Range(t *testing.T) {
 func TestAuthorizationContextKeepsTheLegacyCopyWhenItCan(t *testing.T) {
 	var query openid4vp.DCQL
 	require.NoError(t, json.Unmarshal([]byte(`{"credentials":[{
-		"id":"nym","format":"circuit_zk",
+		"id":"nym","format":"zkp_req",
 		"meta":{"doctype_value":"eu.europa.ec.eudi.nym_auth.1"},
-		"req":[{"id":"pseudonym-v1-sha256","return":"nym-1","params":{"p":7}}]}]}`), &query))
+		"_req":[{"fn_id":"pseudonym","return":"nym-1","params":{"p":7}}]}]}`), &query))
 
 	stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: &query})
 	require.NoError(t, err)
@@ -350,7 +350,7 @@ func TestAuthorizationContextKeepsTheLegacyCopyWhenItCan(t *testing.T) {
 func TestAuthorizationContextStillFailsWhenTheQueryIsNotTheCause(t *testing.T) {
 	var query openid4vp.DCQL
 	require.NoError(t, json.Unmarshal([]byte(`{"credentials":[{
-		"id":"nym","format":"circuit_zk",
+		"id":"nym","format":"zkp_req",
 		"meta":{"doctype_value":"eu.europa.ec.eudi.nym_auth.1"}}]}`), &query))
 
 	_, err := bson.Marshal(&AuthorizationContext{
@@ -422,7 +422,7 @@ func TestAuthorizationContextKeepsExactClaimValuesThroughBSON(t *testing.T) {
 // conformance vector.
 func vendoredVectorQuery(t *testing.T, name string) json.RawMessage {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "openid4vp", "testdata", "circuit_zk", name))
+	raw, err := os.ReadFile(filepath.Join("..", "openid4vp", "testdata", "zkp_req", "zkp_req", name))
 	require.NoError(t, err)
 	var doc struct {
 		Query json.RawMessage `json:"query"`

@@ -156,7 +156,7 @@ func constraintFamily(format string) string {
 	// circuit_zk is matched on doctype_value too (the nym_auth rulebook's
 	// own examples carry one), so an mdoc scope can be requested as a
 	// circuit proof over the same document.
-	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk, openid4vp.FormatCircuitZk:
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk, openid4vp.FormatZkpReq:
 		return "doctype"
 	// Not jwt_vc_json: DCQLMetaQuery refuses it, so calling it family-
 	// compatible here would approve an override the query builder then drops.
@@ -367,7 +367,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					// publishes a button that asks a wallet for nothing and
 					// gets nothing back - which looks like a wallet fault
 					// and is not one.
-					if scopeCfg.Format == openid4vp.FormatCircuitZk && len(scopeCfg.Req) == 0 {
+					if scopeCfg.Format == openid4vp.FormatZkpReq && len(scopeCfg.Req) == 0 {
 						c.log.Error(nil, "preset omitted from the verifier UI: a circuit_zk credential has no req",
 							"preset", label, "scope", scope)
 						abandonPreset = true
@@ -397,8 +397,8 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					// perfectly good answer - the shared vectors read a
 					// missing filter as "any circuit" - but it has to be
 					// the operator's answer.
-					if scopeCfg.Format == openid4vp.FormatCircuitZk &&
-						vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats).CircuitZk == nil {
+					if scopeCfg.Format == openid4vp.FormatZkpReq &&
+						vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats).ZkpReq == nil {
 						c.log.Error(nil, "preset omitted from the verifier UI: circuit_zk is not advertised in verifier.preferred_vp_formats, so a wallet would be asked for a proof the request declares no support for",
 							"preset", label, "scope", scope)
 						abandonPreset = true
@@ -434,13 +434,13 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// document to a query whose whole point is to reveal none of
 				// them, and an operator's explicit claims on such a scope
 				// are a configuration mistake worth not silently honouring.
-				if uiCred.Format == openid4vp.FormatCircuitZk {
+				if uiCred.Format == openid4vp.FormatZkpReq {
 					claims = nil
 					excludeSet = nil
 				}
 
 				// Resolve claims: use explicit claims, or fall back to VCTM claims
-				if len(claims) == 0 && meta != nil && uiCred.Format != openid4vp.FormatCircuitZk {
+				if len(claims) == 0 && meta != nil && uiCred.Format != openid4vp.FormatZkpReq {
 					if vctm := meta.GetVCTM(); vctm != nil {
 						// First pass: collect all valid paths (including array-element paths with null)
 						var allPaths [][]*string

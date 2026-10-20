@@ -45,44 +45,61 @@ type circuitZkSession struct {
 	// public inputs differ and the proof cannot verify.
 	Now time.Time
 
-	// NowSource records where Now came from, for the log line and for
-	// the refusal message. See circuitZkProofTime.
+	// NowSource records where Now came from, for the log line.
 	NowSource string
 }
 
-// circuitZkProofTime decides T and says where it came from.
+// proofTimeSource names T's origin in a log line. There is one: the
+// prover supplies it in the presentation.
+const proofTimeSource = "presentation proof_time"
+
+// circuitZkProofTime takes T from the presentation and checks it
+// against this verifier's clock.
 //
-// ONE place, because T is the value the prover and this verifier have
-// to agree on exactly, and the agreement is still being settled.
+// T is the PROVER'S, per rulebook v0.4. That is not a weakening: the
+// circuit binds all 20 bytes of T into its public inputs, so prover
+// and verifier must use the same second, and only the prover knows
+// which second it proved at. What makes a prover-supplied value safe
+// is the window - without one a holder could replay a proof made long
+// ago, against a credential since revoked, or one made with a clock
+// set forward.
 //
-// TODAY IT IS THE RECEIPT TIME, AND THAT IS KNOWN TO BE WRONG. The
-// wallet proved at some earlier second and cannot predict when its
-// response arrives, so a real presentation's public inputs will not
-// match and the proof will not verify. Every test in this repository
-// derives and verifies inside one process, with one clock, which is
-// why nothing here fails.
-//
-// The fix needs a cross-implementation decision - the verifier has to
-// choose T, communicate it, and reuse it, and the shared circuit_zk
-// request format currently has no member carrying one. That is being
-// routed through the rulebook and the request spec. When it lands,
-// this function reads the value off the session and the rest of the
-// file does not change; that is the whole reason it exists.
-//
-// SUNET/vc#830 carries the trace.
-func circuitZkProofTime(authCtx *cache.AuthorizationContext) (time.Time, string) {
-	_ = authCtx // the session will carry T once the convention is settled
-	return time.Now(), proofTimeReceipt
+// REFUSED rather than clamped. Clamping would verify against a T the
+// prover did not use, which cannot succeed and would then report the
+// wrong reason for the failure.
+func (c *Client) circuitZkProofTime(presentation openid4vp.ZkpPresentation, now time.Time) (time.Time, error) {
+	if !presentation.HasProofTime {
+		// Unreachable for mso_mdoc, which the response validator
+		// makes it required for. Kept because a proof checked against
+		// a guessed T is not checked.
+		return time.Time{}, errors.New("zkp_req: the presentation carries no proof_time, so there is no T to verify against")
+	}
+	skew, maxAge := c.circuitZkTolerance()
+	if err := openid4vp.CheckProofTimeTolerance(presentation.ProofTime, now, skew, maxAge); err != nil {
+		return time.Time{}, fmt.Errorf("zkp_req: %w", err)
+	}
+	return presentation.ProofTime, nil
 }
 
-const (
-	// proofTimeReceipt is the provisional source: this verifier's
-	// clock when the response arrived.
-	proofTimeReceipt = "receipt-time (PROVISIONAL - cannot match the prover)"
-	// proofTimeSession is what it becomes when the request-creation
-	// path supplies T.
-	proofTimeSession = "session"
-)
+// circuitZkTolerance is the configured window, or the shared
+// recommendation when a deployment has not chosen.
+//
+// The recommendation rather than something invented here: a verifier
+// that has not thought about it should behave the way every other
+// implementation assumes it does.
+func (c *Client) circuitZkTolerance() (skew, maxAge time.Duration) {
+	skew, maxAge = openid4vp.RecommendedSkew, openid4vp.RecommendedMaxAge
+	if c.cfg == nil || c.cfg.Verifier == nil {
+		return skew, maxAge
+	}
+	if configured := c.cfg.Verifier.NymAuth.ProofTimeSkewSeconds; configured > 0 {
+		skew = time.Duration(configured) * time.Second
+	}
+	if configured := c.cfg.Verifier.NymAuth.ProofTimeMaxAgeSeconds; configured > 0 {
+		maxAge = time.Duration(configured) * time.Second
+	}
+	return skew, maxAge
+}
 
 // circuitZkRequestFor builds the response-side request from the
 // verifier's own DCQL query and its own offered formats.
@@ -94,15 +111,18 @@ const (
 // ValidateCircuitZkResponse then refuses every response, which is the
 // intended reading: a circuit this verifier never named is not one it
 // can decide it trusts after seeing a proof from it.
-func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.CircuitZkRequest {
-	request := openid4vp.CircuitZkRequest{
+func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.ZkpReqRequest {
+	request := openid4vp.ZkpReqRequest{
 		QueryID:  query.ID,
 		Items:    query.Req,
 		Multiple: query.AllowsMultiple(),
+		// From the REQUEST's own meta: proof_time is required for
+		// mso_mdoc, because every approved circuit there checks the
+		// MSO validity period.
+		SourceFormat: query.Meta.SourceFormat,
 	}
-	if formats := c.cfg.Verifier.PreferredVPFormats; formats != nil && formats.CircuitZk != nil {
-		request.OfferedCircuitIDs = formats.CircuitZk.CircuitIDValues
-		request.OfferedProofSystems = formats.CircuitZk.CircuitProofSystemValues
+	if formats := c.cfg.Verifier.PreferredVPFormats; formats != nil && formats.ZkpReq != nil {
+		request.OfferedSystemIDs = formats.ZkpReq.SystemIDValues
 	}
 	return request
 }
@@ -205,13 +225,15 @@ func (c *Client) circuitZkSessionFor(authCtx *cache.AuthorizationContext, channe
 		return circuitZkSession{}, fmt.Errorf("circuit_zk: verifier.nym_auth.verifier_id: %w", err)
 	}
 
-	now, nowSource := circuitZkProofTime(authCtx)
+	// Now is deliberately NOT set here. T is the prover's, carried in
+	// each presentation, so it belongs to the presentation and not to
+	// the session - a response may legally carry several, and one
+	// session-wide T would be the first presentation's imposed on the
+	// rest.
 	return circuitZkSession{
 		Transcript:    transcript,
 		DocType:       docType,
 		VerifierInput: verifierInput,
-		Now:           now,
-		NowSource:     nowSource,
 	}, nil
 }
 
@@ -228,7 +250,7 @@ func circuitZkVerifierRequest(session circuitZkSession, issuerKey *ecdsa.PublicK
 
 	inputs := make([]verifier.CircuitInput, 0, len(items))
 	for _, item := range items {
-		if item.ID != verifier.FunctionAgeCheck {
+		if item.FnID != verifier.FunctionAgeCheck {
 			// Only the predicates this build can map. A pseudonym
 			// function contributes no circuit input of its own - it
 			// names the configuration, which selects the build.
