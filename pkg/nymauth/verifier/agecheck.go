@@ -178,3 +178,33 @@ func shiftDate(value string, days int, what string) (string, error) {
 	}
 	return shifted.Format(time.DateOnly), nil
 }
+
+// checkAgeCheckValues validates a contribution built by hand rather
+// than through AgeCheck.Bounds().
+//
+// Bounds() parses every date it is given, but a CircuitInput is a plain
+// map and anything may construct one - the generic layer checks only
+// that the declared inputs are filled. So the dates are checked here,
+// where "earliest" being a date is known, rather than at the native
+// boundary, which reports it as a generic invalid input.
+//
+// The sentinels are the one exception, because they are not dates:
+// they are how "no bound" is spelled.
+func checkAgeCheckValues(values map[string][]byte) error {
+	for input, sentinel := range map[string]string{
+		InputEarliest: NoLowerBound,
+		InputCutoff:   NoUpperBound,
+	} {
+		value := string(values[input])
+		if value == sentinel {
+			continue
+		}
+		if _, err := parseDate(value, input); err != nil {
+			return err
+		}
+	}
+	return AgeBounds{
+		Earliest: string(values[InputEarliest]),
+		Cutoff:   string(values[InputCutoff]),
+	}.checkRange()
+}
