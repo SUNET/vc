@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SUNET/vc/internal/verifier/cache"
@@ -22,6 +23,8 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/nymauth/circuits"
+	"github.com/SUNET/vc/pkg/nymauth/verifier"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/pki"
@@ -49,6 +52,23 @@ type Client struct {
 	pkiSigner      pki.Signer
 	pkiSigningCert *x509.Certificate
 	pkiSignerChain []string
+
+	// nymAuthCircuits is the operator's allowlist of nym_auth circuit
+	// builds. Nil unless verifier.nym_auth.enable is set, and a
+	// circuit_zk presentation is refused without it: nothing outside
+	// the allowlist is ever loaded.
+	nymAuthCircuits *circuits.Allowlist
+
+	// nymAuthVerifiers caches one loaded circuit handle per pseudonym
+	// configuration. Loading is the expensive step - about 0.15 s and
+	// a megabyte of artifact - and the handle holds no interior
+	// mutability, so one per configuration is reused across
+	// presentations and goroutines.
+	//
+	// Populated only in a build with the "zknative" tag; the default
+	// build cannot construct one and refuses before it would try.
+	nymAuthVerifiers map[string]*verifier.NativeVerifier
+	nymAuthMu        sync.Mutex
 
 	// registrationCertificate is the Registrar-issued WRPRC presented to
 	// wallets in verifier_info. Nil when none is configured.
@@ -106,6 +126,21 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
 			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
 		}),
+	}
+
+	// The nym_auth circuit allowlist, when the feature is on.
+	//
+	// Here and not lazily at the first presentation: an allowlist
+	// that cannot be resolved is a deployment that cannot verify, and
+	// discovering that from a refused proof tells an operator nothing
+	// about the configuration. Config load already checks the same
+	// thing; this is where the resolved value is kept.
+	if c.cfg.Verifier.NymAuth.Enable {
+		c.nymAuthCircuits, err = circuits.NewAllowlist(c.cfg.Verifier.NymAuth.Circuits)
+		if err != nil {
+			return nil, err
+		}
+		c.log.Info("nym_auth verification enabled", "configs", c.nymAuthCircuits.Configs())
 	}
 
 	// Load PKI signing key and chain for request object signing and OIDC

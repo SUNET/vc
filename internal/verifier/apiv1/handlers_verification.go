@@ -3,7 +3,6 @@ package apiv1
 import (
 	"bytes"
 	"context"
-	"crypto"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -226,6 +225,31 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
+		// circuit_zk first, and out of the format switch below.
+		//
+		// Every other format's presentation is a STRING, and
+		// vpTokensForScope takes it as one; a circuit_zk presentation
+		// is an object whose validation needs the raw bytes, because
+		// a repeated member or handle cannot be seen after decoding.
+		// Routing it through the string path would re-encode it, and
+		// re-encoded bytes are exactly the ones a duplicate check can
+		// no longer see.
+		//
+		// Selected by the REQUEST - the DCQL credential query's own
+		// format - and never by anything in the response.
+		if query, known := c.requestedQuery(authCtx, scopeQueryIDs, scope); known && openid4vp.IsCircuitZkFormat(query.Format) {
+			responseURI, err := c.zkResponseURI(scope)
+			if err != nil {
+				return nil, err
+			}
+			credentials, err := c.verifyCircuitZkScope(ctx, authCtx, vpResponse, scope, query, req.DCAPI, responseURI, nil)
+			if err != nil {
+				return nil, err
+			}
+			scopeCredentials[scope] = append(scopeCredentials[scope], credentials...)
+			continue
+		}
+
 		vpTokens, err := c.vpTokensForScope(authCtx, scopeQueryIDs, defaultAllowed, vpResponse, scope)
 		if err != nil {
 			return nil, err
@@ -478,10 +502,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// "direct_post" responseURI can never verify against a
 			// recomputed transcript using a different one, regardless of
 			// whether the underlying disclosed claims are correct.
-			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "direct_post")
+			responseURI, err := c.zkResponseURI(scope)
 			if err != nil {
-				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
-				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
+				return nil, err
 			}
 			// BuildOID4VPSessionTranscript's own doc comment: the JWK
 			// thumbprint is nil "unless the request advertised an
@@ -506,30 +529,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// below is still on the key ID rather than on the response mode,
 			// so a future caller that leaves it unset gets a nil thumbprint
 			// rather than a wrong one.
-			var readerPubKeyThumbprint []byte
-			if authCtx.EphemeralEncryptionKeyID != "" {
-				if privKey, found := c.cacheService.EphemeralEncryptionKey.Get(ctx, authCtx.EphemeralEncryptionKeyID); found {
-					pubKeyIface, err := privKey.PublicKey()
-					if err != nil {
-						c.log.Error(err, "failed to derive public key for ZK session transcript", "scope", scope)
-						return nil, fmt.Errorf("failed to derive public key for scope %s: %w", scope, err)
-					}
-					tp, err := pubKeyIface.Thumbprint(crypto.SHA256)
-					if err != nil {
-						c.log.Error(err, "failed to compute JWK thumbprint for ZK session transcript", "scope", scope)
-						return nil, fmt.Errorf("failed to compute JWK thumbprint for scope %s: %w", scope, err)
-					}
-					readerPubKeyThumbprint = tp
-				} else {
-					// A miss means the key expired or was evicted between
-					// issuing the request and the wallet answering it. The
-					// wallet built ITS transcript with that key, so carrying
-					// on with a nil thumbprint guarantees a mismatch - and
-					// one that surfaces as an opaque proof failure rather
-					// than as the cache miss it actually is.
-					c.log.Error(nil, "ephemeral encryption key missing from cache for ZK session transcript", "scope", scope, "key_id", authCtx.EphemeralEncryptionKeyID)
-					return nil, fmt.Errorf("ephemeral encryption key %q is no longer cached, cannot rebuild the session transcript the wallet used for scope %s", authCtx.EphemeralEncryptionKeyID, scope)
-				}
+			readerPubKeyThumbprint, err := c.readerKeyThumbprint(ctx, authCtx, scope)
+			if err != nil {
+				return nil, err
 			}
 			// The handover follows how the response arrived, because the two
 			// hash different things and a wallet only ever produced one of

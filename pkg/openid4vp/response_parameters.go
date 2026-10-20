@@ -10,6 +10,21 @@ import (
 type VPResponse struct {
 	VPToken map[string][]string `json:"vp_token,omitempty" bson:"vp_token" validate:"required"`
 	State   string              `json:"state,omitempty" bson:"state" validate:"required"`
+
+	// VPTokenRaw is every vp_token entry as it arrived, before any
+	// decoding.
+	//
+	// Needed because not every presentation is a string. A circuit_zk
+	// presentation is an OBJECT, and its validation has to run on the
+	// raw text: a repeated member or a repeated result handle cannot
+	// be seen after decoding, since Go keeps the last of a repeated
+	// key and discards the other silently.
+	//
+	// Not persisted (bson:"-") and not serialised: it is the input
+	// bytes, kept for the length of one verification. A round trip
+	// through storage would re-encode them, and re-encoded bytes are
+	// exactly the ones a duplicate check can no longer see.
+	VPTokenRaw map[string]json.RawMessage `json:"-" bson:"-"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for VPResponse.
@@ -42,11 +57,13 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 	}
 
 	v.VPToken = make(map[string][]string)
+	v.VPTokenRaw = make(map[string]json.RawMessage)
 
 	// Try as object (DCQL format): {"id": "token"} or {"id": ["token1","token2"]}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw.VPToken, &obj); err == nil {
 		for key, val := range obj {
+			v.VPTokenRaw[key] = val
 			// Try as string first
 			var s string
 			if err := json.Unmarshal(val, &s); err == nil {
@@ -71,6 +88,19 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 					}
 				}
 				v.VPToken[key] = arr
+				continue
+			}
+			// An array of OBJECTS is a presentation format whose
+			// elements are not strings - circuit_zk is the first.
+			// It stays in VPTokenRaw only: the string map is what
+			// every other format reads, and putting a re-encoded
+			// object in it would hand that format a token it cannot
+			// parse while hiding the raw bytes the new one needs.
+			//
+			// Anything else still fails here. Admitting one more
+			// legitimate shape is not the same as admitting
+			// everything.
+			if isArrayOfObjects(val) {
 				continue
 			}
 			return fmt.Errorf("vp_token[%q]: expected string or array of strings", key)
@@ -151,4 +181,24 @@ func ResponseParametersFromJSON(data []byte) (*ResponseParameters, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// isArrayOfObjects reports whether raw is a non-empty JSON array whose
+// every element is an object.
+//
+// Deliberately narrow. It admits exactly the shape a circuit_zk
+// presentation array has, so a vp_token entry that is a number, a
+// nested array or a mix keeps failing with the message it always had.
+func isArrayOfObjects(raw json.RawMessage) bool {
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil || len(elements) == 0 {
+		return false
+	}
+	for _, element := range elements {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(element, &object); err != nil {
+			return false
+		}
+	}
+	return true
 }
