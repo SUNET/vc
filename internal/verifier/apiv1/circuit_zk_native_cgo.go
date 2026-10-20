@@ -42,6 +42,23 @@ func (c *Client) verifyCircuitZkPresentation(
 		return nil, err
 	}
 
+	// checked counts the items whose proof was ACTUALLY verified.
+	//
+	// The loop below calls the native verifier once per pseudonym
+	// item and not at all for anything else, so a request carrying
+	// only predicates - an age_check with no pseudonym - would run it
+	// zero times and return an empty map and a nil error. The caller
+	// reads nil as "verified" and caches the presentation's
+	// "satisfied": true as a checked fact. It is not: in that path
+	// nothing looked at the proof at all, so any base64url bytes
+	// would do, and the predicate would be asserted by the holder and
+	// believed by the verifier.
+	//
+	// Counted rather than special-cased on item.ID, because the
+	// invariant is "something was checked", not "a pseudonym was
+	// asked for" - a function added later that this loop skips would
+	// otherwise reopen exactly this hole, silently.
+	checked := 0
 	verified := map[string][]byte{}
 	for _, item := range items {
 		if item.ID != openid4vp.CircuitZkFunctionPseudonym {
@@ -72,6 +89,21 @@ func (c *Client) verifyCircuitZkPresentation(
 		}
 		// The RETURNED value, never the claimed one.
 		verified[item.Return] = pseudonym[:]
+		checked++
+	}
+
+	if checked == 0 {
+		// Fail closed. The proof is one proof over the whole request,
+		// and the only way this build has to check it is a pseudonym
+		// item's Verify - so with none, there is no verification to
+		// do and no way to say the predicates hold.
+		//
+		// A predicate-only request is therefore one this verifier
+		// must not send; refused here rather than only where requests
+		// are built, because this is the point that cannot be
+		// bypassed.
+		return nil, fmt.Errorf("circuit_zk: this request asks only for predicates, and the proof is checked by verifying a pseudonym; "+
+			"a predicate-only request has no verification path in this build, so its %d result(s) cannot be accepted", len(items))
 	}
 	return verified, nil
 }

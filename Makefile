@@ -494,8 +494,14 @@ zk-native-lib-vega-ensure: _check-native-host ## Stage zk-cred-vega only when it
 
 test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run the zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
+	@# internal/verifier/... is here because the circuit_zk proof check
+	@# lives in internal/verifier/apiv1/circuit_zk_native_cgo.go, behind
+	@# the same tag. build-verifier-zknative compiled it and nothing ran
+	@# it, which is how a predicate-only presentation came to verify
+	@# without its proof being looked at - the stub refuses everything,
+	@# so no default-build test can reach that code.
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
-		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/...
+		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/... ./internal/verifier/...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation

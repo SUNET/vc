@@ -237,7 +237,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		//
 		// Selected by the REQUEST - the DCQL credential query's own
 		// format - and never by anything in the response.
-		if query, known := c.requestedQuery(authCtx, scopeQueryIDs, scope); known && openid4vp.IsCircuitZkFormat(query.Format) {
+		//
+		// requestedQueryExact, NOT requestedQuery: the latter falls
+		// back to the sole credential query when a scope maps to
+		// none, which is right for a legacy session whose mapping was
+		// lost but wrong as a routing decision. An unclaimed scope
+		// would inherit another query's format, take this path, and
+		// have that query's presentation cached under its own name -
+		// the attribution check in vpTokensForScope, which is what
+		// refuses exactly that, never runs on this path.
+		//
+		// A scope no credential query names belongs in the loop
+		// below, where it fails.
+		if query, known := c.requestedQueryExact(authCtx, scopeQueryIDs, scope); known && openid4vp.IsCircuitZkFormat(query.Format) {
 			responseURI, err := c.zkResponseURI(scope)
 			if err != nil {
 				return nil, err

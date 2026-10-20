@@ -3,12 +3,18 @@ package apiv1
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/internal/verifier/cache"
+	"github.com/SUNET/vc/internal/verifier/notify"
+	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/nymauth/verifier"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -219,4 +225,88 @@ func TestCircuitZkRawTokenRefusesAMissingQuery(t *testing.T) {
 
 	_, err := circuitZkRawToken(response, "nym_attestation")
 	assert.ErrorContains(t, err, "no presentation for credential query")
+}
+
+// The circuit_zk path is chosen by the scope's OWN credential query,
+// never by requestedQuery's sole-query fallback.
+//
+// That fallback exists for a legacy session whose scope-to-query
+// mapping was lost, and it is right where it is used: with exactly
+// one query there is no ambiguity about which one a scope meant. As a
+// ROUTING decision it is wrong. A scope that no query names would
+// inherit the sole query's format, take the circuit_zk path, and have
+// that query's presentation verified and cached under its own name -
+// while the attribution check that refuses exactly this, in
+// vpTokensForScope, sits on the branch that is no longer taken.
+//
+// Driven through the handler and not through requestedQueryExact,
+// because the bug is WHICH lookup the routing line calls: a test on
+// the helpers passes with either one wired up.
+func TestCircuitZkRoutingIgnoresTheSingleQueryFallback(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+	ctx := t.Context()
+
+	openid4vpClient, err := openid4vp.New(ctx, &openid4vp.Config{})
+	require.NoError(t, err)
+	client.openid4vp = openid4vpClient
+
+	notifyService, err := notify.New(ctx, client.cfg, logger.NewSimple("test"))
+	require.NoError(t, err)
+	client.notify = notifyService
+
+	const (
+		kid   = "czk-routing-kid"
+		state = "czk-routing-state"
+	)
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
+	require.NoError(t, err)
+	// One circuit_zk query, and a scope that names none - the shape
+	// "openid profile custom_claim" produces, where profile selects
+	// the template and custom_claim is deliberately left unclaimed so
+	// that it fails in the validation loop rather than vanishing.
+	require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
+		SessionID:                "czk-routing-session",
+		State:                    state,
+		EphemeralEncryptionKeyID: kid,
+		Nonce:                    "czk-routing-nonce",
+		ClientID:                 "x509_san_dns:verifier.example.com",
+		Scopes:                   []string{"custom_claim"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "nym_attestation",
+			Format: openid4vp.FormatCircuitZk,
+			Meta:   openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
+			Req: []openid4vp.ReqItem{{
+				ID:     openid4vp.CircuitZkFunctionAgeCheck,
+				Return: "age-1",
+				Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"},
+			}},
+		}}},
+	}))
+
+	leaf := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("c", 48)))
+	plaintext, err := json.Marshal(map[string]any{
+		"state": state,
+		"vp_token": map[string]any{
+			"nym_attestation": []any{map[string]any{
+				"circuit_id":   "urn:circuits:longfellow:nym_auth:v1",
+				"proof_system": "longfellow-libzk-v1",
+				"proof":        base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("p", 48))),
+				"x5chain":      []string{leaf},
+				"results":      map[string]any{"age-1": map[string]any{"satisfied": true}},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	body, err := jwe.Encrypt(plaintext,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(body)})
+	require.Error(t, err, "an unclaimed scope cannot be satisfied by another query's presentation")
+	assert.Contains(t, err.Error(), "names no credential query in this request",
+		"the unclaimed scope must be refused by the attribution check")
+	assert.NotContains(t, err.Error(), "circuit_zk",
+		"it must never have reached the circuit_zk path: that path has no attribution check")
 }
