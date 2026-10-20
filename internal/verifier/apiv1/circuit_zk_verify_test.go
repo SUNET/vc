@@ -75,7 +75,7 @@ func TestCircuitZkRequestWithNoOfferIsEmpty(t *testing.T) {
 // does not exist yet.
 func TestCircuitZkSessionRefusesAnUnsupportedChannel(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
-		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
+		NymAuth: model.NymAuthVerifier{VerifierID: "x509_san_dns:verifier.example"},
 	}}}
 
 	_, err := client.circuitZkSessionFor(nil, circuitZkChannel("ble"), "https://verifier.example",
@@ -154,7 +154,7 @@ func TestCircuitZkRedirectRequiresDirectPostJWT(t *testing.T) {
 // verifier_input comes from the CONFIGURED bare verifier_id.
 func TestCircuitZkSessionBuildsTheDCAPITranscript(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
-		NymAuth: model.NymAuthVerifier{VerifierID: "verifier.example"},
+		NymAuth: model.NymAuthVerifier{VerifierID: "x509_san_dns:verifier.example"},
 	}}}
 
 	session, err := client.circuitZkSessionFor(nil, channelDCAPI, "https://verifier.example", "",
@@ -167,7 +167,7 @@ func TestCircuitZkSessionBuildsTheDCAPITranscript(t *testing.T) {
 		"T is the prover's and belongs to the presentation, not the session")
 
 	// The rulebook's MUST digest for the bare verifier_id.
-	want, err := verifier.VerifierInput("verifier.example")
+	want, err := verifier.VerifierInput("x509_san_dns:verifier.example")
 	require.NoError(t, err)
 	assert.Equal(t, want, session.VerifierInput)
 }
