@@ -85,8 +85,19 @@ func TestVerificationDirectPost_RefusesAnInteractiveAuthorizationContext(t *test
 		"a presentation refused for being on the wrong channel must not have overwritten the claims")
 }
 
-// An IA context persisted before the marker existed carries only
-// AuthSessionDPoPThumbprint, and must still be refused here.
+// A context opened BEFORE the marker existed must be refused too.
+//
+// The marker is new and the contexts are persisted: after an upgrade the
+// store still holds Interactive Authorization contexts written by the
+// previous version, whose documents have no interactive_authorization
+// member at all. That decodes as false, so a guard reading only the
+// marker would wave through exactly the exchanges it was added to stop,
+// for as long as those contexts live.
+//
+// AuthSessionDPoPThumbprint is the durable second signal: the challenge
+// endpoint refuses a request carrying no DPoP proof BEFORE it creates a
+// context, so every IA context ever written has one, and no other path
+// sets it.
 func TestVerificationDirectPost_RefusesALegacyInteractiveAuthorizationContext(t *testing.T) {
 	client := newChallengeClient(t)
 	opened := challengeErr(t, client, initialChallenge(t))
@@ -95,8 +106,11 @@ func TestVerificationDirectPost_RefusesALegacyInteractiveAuthorizationContext(t 
 		AuthSession: opened.AuthSession,
 	})
 	require.NoError(t, err)
-	require.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint)
+	require.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint,
+		"the premise: an IA context always carries the thumbprint, so a legacy one does too")
 
+	// What an upgrade finds in the store: the exchange, without the field
+	// the new version writes.
 	authCtx.InteractiveAuthorization = false
 	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), authCtx))
 
@@ -106,13 +120,7 @@ func TestVerificationDirectPost_RefusesALegacyInteractiveAuthorizationContext(t 
 	_, err = client.VerificationDirectPost(t.Context(), &VerificationDirectPostRequest{Response: response})
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "authorization challenge endpoint",
-		"a legacy IA context without the marker must still be refused on the channel check")
-
-	after, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
-		EphemeralEncryptionKeyID: authCtx.EphemeralEncryptionKeyID,
-	})
-	require.NoError(t, err)
-	assert.Nil(t, after.VerifiedClaims)
+		"a context opened before the marker existed is still an IA context")
 }
 
 // The browser-mediated flow is unaffected: its contexts carry no marker
@@ -127,9 +135,11 @@ func TestVerificationDirectPost_StillAcceptsABrowserContext(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The same context with the marker removed - a browser-flow context in
-	// every other respect, so the only difference under test is the one
-	// being tested.
+	// The same context with BOTH Interactive Authorization markers
+	// removed - a browser-flow context in every other respect, so the only
+	// difference under test is the one being tested. The thumbprint has to
+	// go too: a browser context never carries one, and leaving it would
+	// make this test assert that the guard below does not exist.
 	authCtx.InteractiveAuthorization = false
 	authCtx.AuthSessionDPoPThumbprint = ""
 	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), authCtx))

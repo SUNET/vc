@@ -207,7 +207,16 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// enforced here the audience and the mdoc session transcript would be
 	// the browser flow's, not the ones the wallet signed over, so the two
 	// channels are not interchangeable whatever this endpoint checks.
-	// The thumbprint check covers IA contexts persisted before the marker existed.
+	//
+	// Either marker refuses, because the marker is NEW and the contexts
+	// are PERSISTED. A context opened by the previous version is still in
+	// the store after an upgrade with no interactive_authorization member
+	// at all, which decodes as false - so for as long as those contexts
+	// live, the guard would wave through exactly the exchanges it exists
+	// to stop. AuthSessionDPoPThumbprint is the durable second signal:
+	// the challenge endpoint refuses a request without a DPoP proof
+	// before it creates a context, so every IA context ever written has
+	// one, and nothing else sets it.
 	if authCtx.InteractiveAuthorization || authCtx.AuthSessionDPoPThumbprint != "" {
 		c.log.Error(nil, "interactive authorization context answered at the browser-mediated endpoint",
 			"session_id", authCtx.SessionID, "kid", kid)
