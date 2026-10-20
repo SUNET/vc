@@ -324,11 +324,29 @@ SHA256("verifier.example")              = be6a6400…4a41   (MUST)
 SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
 ```
 
-A value carrying `semantic_id:` or `x509_san_dns:` is therefore **refused**
-rather than stripped. Hashing it would succeed and return a pseudonym no
-Verifier could have reported, so the loop would simply never match and the
-operator would conclude the subject is innocent — and stripping it would
-quietly accept a caller that is confused about which value it holds.
+A value carrying `x509_san_dns:` is therefore **refused** rather than
+stripped. Hashing it would succeed and return a pseudonym no Verifier could
+have reported, so the loop would simply never match and the operator would
+conclude the subject is innocent — and stripping it would quietly accept a
+caller that is confused about which value it holds.
+
+**`semantic_id:` is not the same kind of thing, and must NOT be stripped.**
+It looks like a Client Identifier Prefix and is not one: for a semantic
+Verifier the verifier_id *is* the whole string `semantic_id:<identifier>`,
+and that whole string is what is hashed. Pass it exactly as the Verifier
+publishes it.
+
+```
+-verifier-id verifier.example                 # x509_san_dns Verifier: bare, no prefix
+-verifier-id semantic_id:age-over-18-check    # semantic Verifier: the marker is part of the value
+```
+
+So the rule is not "strip anything before a colon". It is: a Client
+Identifier Prefix is never hashed, and a semantic identifier always is.
+Getting this backwards fails the same silent way as the prefixed form —
+a pseudonym no Verifier reports, a loop that never matches, and a subject
+who looks innocent. The one case refused is a bare `semantic_id:` with
+nothing after it, which names no Verifier at all.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can
