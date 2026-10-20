@@ -81,10 +81,17 @@ func Pseudonym(config string, seed, proverInput, verifierInput []byte) ([]byte, 
 	return h.Sum(nil), nil
 }
 
-// Client Identifier prefixes the OpenID4VP Client Identifier scheme uses.
+// Two strings that both look like a prefix and a colon, and are not the
+// same kind of thing at all.
 //
-// They are NOT part of the hashed input. They are listed here only so
-// that a value carrying one can be refused: see checkVerifierID.
+// VerifierIDX509SANDNS is an OpenID4VP Client Identifier Prefix. It is
+// NOT part of the hashed input, and is named here only so that a value
+// carrying it can be refused: see checkVerifierID.
+//
+// VerifierIDSemantic is part of the `semantic` verifier_id VALUE, not a
+// Client Identifier Prefix - nym_auth_rulebook PR #7 says so in those
+// words. A semantic Verifier's verifier_id is the whole string
+// "semantic_id:<identifier>", and that whole string is what is hashed.
 const (
 	VerifierIDSemantic   = "semantic_id:"
 	VerifierIDX509SANDNS = "x509_san_dns:"
@@ -93,9 +100,16 @@ const (
 // checkVerifierID refuses an identifier no conforming Verifier could have
 // reported.
 //
-// The hashed input is the BARE verifier_id - "verifier.example" - never
-// the prefixed Client Identifier and never client_id as it appears in the
-// request. verifier_id_type is agreed out of band and is not hashed.
+// The hashed input is the BARE verifier_id - "verifier.example" for an
+// x509_san_dns Verifier, "semantic_id:<identifier>" for a semantic one -
+// never the prefixed Client Identifier and never client_id as it appears
+// in the request. verifier_id_type is agreed out of band and is not
+// hashed.
+//
+// "Bare" is about the Client Identifier Prefix, not about colons. A
+// semantic verifier_id carries "semantic_id:" as part of its own value
+// and is hashed whole; refusing it would leave semantic deployments
+// unable to derive verifier_input at all.
 //
 // WHICH RULEBOOK: nym_auth_rulebook PR #7, "verifier_input: SHA-256 over
 // the bare verifier_id, never the prefixed client_id" (stacked on #5).
@@ -131,12 +145,17 @@ func checkVerifierID(verifierID string) error {
 	if verifierID == "" {
 		return fmt.Errorf("nymauth: no verifier_id")
 	}
-	for _, prefix := range []string{VerifierIDSemantic, VerifierIDX509SANDNS} {
-		if strings.HasPrefix(verifierID, prefix) {
-			return fmt.Errorf("nymauth: verifier_id %q carries the Client Identifier prefix %q; "+
-				"the hashed input is the bare verifier_id, and hashing the prefixed form yields a pseudonym no Verifier reports",
-				verifierID, prefix)
-		}
+	if strings.HasPrefix(verifierID, VerifierIDX509SANDNS) {
+		return fmt.Errorf("nymauth: verifier_id %q carries the Client Identifier prefix %q; "+
+			"the hashed input is the bare verifier_id, and hashing the prefixed form yields a pseudonym no Verifier reports",
+			verifierID, VerifierIDX509SANDNS)
+	}
+	if verifierID == VerifierIDSemantic {
+		// The semantic form with nothing after the colon names no
+		// Verifier. It hashes cleanly, like every other wrong value
+		// here, so it is refused rather than turned into a pseudonym
+		// nobody reports.
+		return fmt.Errorf("nymauth: verifier_id %q is the semantic form with no identifier after it", verifierID)
 	}
 	return nil
 }
