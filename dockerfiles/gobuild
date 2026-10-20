@@ -5,8 +5,11 @@
 # under. Worker layers skip these installs when they detect the tools are
 # already present (see dockerfiles/worker).
 # Pinned to -bookworm so glibc matches distroless/cc-debian12 at runtime.
-# Keep this tag aligned with GOBUILD_IMAGE default in dockerfiles/worker.
-FROM golang:1.27.1-bookworm
+# Keep this tag aligned with GOBUILD_IMAGE default in dockerfiles/worker,
+# and both aligned with go.mod's `go` directive: GOTOOLCHAIN=local in the
+# worker build forbids the automatic toolchain upgrade, so an image older
+# than go.mod fails the build outright with "go.mod requires go >= ...".
+FROM golang:1.27.2-bookworm
 
 WORKDIR /go/src/app
 
