@@ -87,6 +87,41 @@ func TestDeliveringASeedLeavesTheAdvertisementAlone(t *testing.T) {
 	assert.NotContains(t, after, secret, "a subject's seed must never reach the issuer metadata")
 }
 
+// The seed is delivered whether or not the issuer echoes
+// credential_metadata on the response.
+//
+// They are two different things that happen to share a carrier.
+// emit_credential_metadata_on_response decides whether the response
+// REPEATS the configuration's metadata; the seed is a per-response
+// value that must travel regardless, so deliverSeeds creates the
+// object when there is none. A deployment reading the flag as a
+// prerequisite would turn it on for no reason - and turning it on is
+// what made the shared-pointer bug reachable.
+func TestASeedIsDeliveredWithoutEchoingCredentialMetadata(t *testing.T) {
+	client := deliveringClient(t)
+	client.cfg.APIGW.Delivery.EmitCredentialMetadataOnResponse = nil // the default: false
+
+	const secret = "0123456789abcdef0123456789abcdef"
+	response := client.newCredentialResponse(nil, "nym_auth", "nym_auth")
+	require.Nil(t, response.CredentialMetadata, "nothing is echoed with the flag off")
+
+	require.NoError(t, client.deliverSeeds(response,
+		map[string]string{model.DefaultSeedNamespace: secret},
+		&openid4vci.CredentialResponseEncryption{}))
+
+	require.NotNil(t, response.CredentialMetadata, "the delivery creates the object it needs")
+	delivered, ok := response.CredentialMetadata.Extensions[model.SeedMetadataMember]
+	require.True(t, ok, "the seed must reach the wallet with the flag off")
+	assert.Contains(t, string(delivered), secret)
+	assert.NotEmpty(t, response.NotificationID, "and a delivered seed brings a notification_id")
+
+	// It also survives the trip onto the wire.
+	encoded, err := json.Marshal(response)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), model.SeedMetadataMember)
+	assert.Contains(t, string(encoded), secret)
+}
+
 // Two issuances must not see each other's seed. Sharing the metadata
 // object made the last writer win, so one subject could be handed
 // another's.
