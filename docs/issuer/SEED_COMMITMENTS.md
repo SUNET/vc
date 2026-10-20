@@ -345,9 +345,12 @@ anything**, and no exception to remember.
 Getting it wrong in either direction fails the same silent way: hashing the
 wrong value returns a perfectly well-formed pseudonym that matches nothing,
 the loop reports no match, and the operator concludes the subject is
-innocent. A wrong answer, not an error. The only values refused are ones
-naming no Verifier at all — an empty string, or a marker with nothing after
-it.
+innocent. A wrong answer, not an error. A value that is neither form is refused outright, naming both and — when it
+looks like a hostname — the value you probably meant. The bare DNS name was
+the *correct* value until the reversal, so anything written before then
+carries one, and without that refusal it would hash cleanly into a pseudonym
+that matches nothing. The only other values refused are ones naming no
+Verifier at all — an empty string, or a marker with nothing after it.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can

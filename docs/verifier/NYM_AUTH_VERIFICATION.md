@@ -99,9 +99,24 @@ says the opposite. The archive circuits settle it: their reference
 `pseudonym.json` pairs `client_id` `x509_san_dns:verifier.example` with
 `verifier_input` `6eae85a0…`.
 
-The only values refused are ones naming no verifier at all — an empty
-string, or a marker with nothing after it. Getting this wrong does not
-produce an error: it produces a pseudonym no other implementation reports.
+**A value that is neither form is refused at startup**, naming both and —
+when it looks like a hostname — the value you probably meant. That check
+matters more than it sounds: the bare DNS name was the *correct* value until
+the reversal, so every configuration written before it carries one. Without
+the check such a deployment starts cleanly and produces pseudonyms no other
+implementation reports — a wrong answer about a person, with no error
+anywhere.
+
+```
+verifier_id "sirosid-gdc-vc-verifier.fly.dev" starts with neither
+"x509_san_dns:" nor "semantic_id:", and rulebook v0.4 defines no other
+form; it looks like a DNS name, so the verifier_id is probably
+"x509_san_dns:sirosid-gdc-vc-verifier.fly.dev"
+```
+
+Nothing is normalised, case included: `X509_SAN_DNS:` is refused too. The
+only other values refused are ones naming no verifier at all — an empty
+string, or a marker with nothing after it.
 
 ### The circuit allowlist — nothing outside it is ever loaded
 
@@ -303,6 +318,7 @@ takes a null reader-key thumbprint for exactly that case.
 | `requires "direct_post.jwt"` | a redirect presentation whose response was not encrypted |
 | `circuits.allow is empty` | enabled, but nothing is allowed, so nothing could verify |
 | `the handover for this channel is pending shared vectors` | a delivery channel with no defined transcript |
+| `starts with neither` | `verifier_id` is not one of the two forms v0.4 defines |
 | `is the pre-v0.4 name` | configuration still says `circuit_zk` / `circuit_id_values` / `circuit_proof_system_values` |
 | `takes exactly 1` | `issuer_key_set` has more than one certificate for the Longfellow system |
 | `proof_time is ... in the future` / `... old` | the prover's clock is outside the tolerance window |
