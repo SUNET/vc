@@ -7,14 +7,18 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +66,9 @@ type testEnvironment struct {
 	deferredTransactionID string
 	deferredReady         bool
 
+	// holderKey is the wallet's signing key, so fixtures can be bound to it.
+	holderKey *ecdsa.PrivateKey
+
 	// Interactive Authorization (OpenID4VCI 1.1)
 	challengeRequests  []url.Values
 	challengeKey       jwk.Key
@@ -91,6 +98,7 @@ type vpResponseCapture struct {
 // setupTestEnvironment creates mock issuer/oauth2/verifier servers and a configured wallet client.
 func setupTestEnvironment(t *testing.T, opts ...envOption) *testEnvironment {
 	t.Helper()
+	var err error
 
 	env := &testEnvironment{
 		t:                 t,
@@ -107,17 +115,24 @@ func setupTestEnvironment(t *testing.T, opts ...envOption) *testEnvironment {
 	env.setupOAuth2Server()
 	env.setupVerifierServer()
 
+	env.holderKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalECPrivateKey(env.holderKey)
+	require.NoError(t, err)
+	keyPath := filepath.Join(t.TempDir(), "wallet.pem")
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0o600))
+
 	env.cfg = &config.Config{
 		Wallet: config.WalletIdentity{
 			ClientID:     "test-wallet-client",
 			KeyAlgorithm: "ES256",
+			KeyPath:      keyPath,
 		},
 		APIServer: config.APIServer{Addr: ":0"},
 		Scenarios: []config.Scenario{},
 	}
 
 	ctx := context.Background()
-	var err error
 	env.wallet, err = apiv1.New(ctx, env.cfg, env.log)
 	require.NoError(t, err)
 
@@ -376,6 +391,15 @@ func (env *testEnvironment) setupOAuth2Server() {
 			return
 		}
 
+		if err := env.validateIAPresentation(r.FormValue("openid4vp_response")); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+
 		json.NewEncoder(w).Encode(map[string]string{"authorization_code": "test-ia-code"})
 	})
 
@@ -489,15 +513,18 @@ func (env *testEnvironment) setupVerifierServer() {
 // createMockSDJWT generates a minimal SD-JWT for testing (header.payload.sig~disclosure~)
 func createMockSDJWT(t *testing.T) string {
 	t.Helper()
-	return createMockSDJWTWithVCT(t, "urn:credential:test")
+
+	holder, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	return createMockSDJWTWithVCT(t, "urn:credential:test", &holder.PublicKey)
 }
 
-// createMockSDJWTWithVCT is the same credential under a chosen type, for
-// tests that need one a particular DCQL query actually asks for.
-func createMockSDJWTWithVCT(t *testing.T, vct string) string {
+// createMockSDJWTWithVCT is the same credential under a chosen type and
+// bound to a chosen holder key, for tests whose presentation is checked.
+func createMockSDJWTWithVCT(t *testing.T, vct string, holder *ecdsa.PublicKey) string {
 	t.Helper()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, jwtv5.MapClaims{
@@ -505,10 +532,10 @@ func createMockSDJWTWithVCT(t *testing.T, vct string) string {
 		"iat": time.Now().Unix(),
 		"vct": vct,
 		"cnf": map[string]any{
-			"jwk": jwktest.PublicKeyJWK(&key.PublicKey),
+			"jwk": jwktest.PublicKeyJWK(holder),
 		},
 	})
-	signed, err := token.SignedString(key)
+	signed, err := token.SignedString(issuerKey)
 	require.NoError(t, err)
 
 	// SD-JWT format: issuer-jwt~disclosure1~disclosure2~

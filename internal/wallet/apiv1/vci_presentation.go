@@ -220,7 +220,10 @@ func encryptToRequestKey(ro *openid4vp.RequestObject, payload []byte) (string, e
 		return "", fmt.Errorf("the request asked for an encrypted response but advertised no encryption key")
 	}
 
-	key := ro.ClientMetadata.JWKS.Keys[0]
+	key, err := selectEncryptionKey(ro.ClientMetadata.JWKS.Keys)
+	if err != nil {
+		return "", err
+	}
 	public, err := publicOf(key)
 	if err != nil {
 		return "", err
@@ -238,6 +241,50 @@ func encryptToRequestKey(ro *openid4vp.RequestObject, payload []byte) (string, e
 		return "", fmt.Errorf("encrypting the openid4vp response: %w", err)
 	}
 	return string(encrypted), nil
+}
+
+// selectEncryptionKey picks the first advertised key this wallet can
+// encrypt to with ECDH-ES, by its properties rather than its position.
+func selectEncryptionKey(keys []jwk.Key) (jwk.Key, error) {
+	for _, key := range keys {
+		if usableForECDHES(key) {
+			return key, nil
+		}
+	}
+	return nil, fmt.Errorf("none of the %d keys the request advertised is usable for ECDH-ES response encryption", len(keys))
+}
+
+// usableForECDHES reports whether key is an EC (P-256/384/521) or X25519
+// key not restricted by alg, use or key_ops to something other than
+// ECDH-ES key agreement.
+func usableForECDHES(key jwk.Key) bool {
+	var crv jwa.EllipticCurveAlgorithm
+	switch key.KeyType() {
+	case jwa.EC():
+		if err := key.Get(jwk.ECDSACrvKey, &crv); err != nil {
+			return false
+		}
+		if crv != jwa.P256() && crv != jwa.P384() && crv != jwa.P521() {
+			return false
+		}
+	case jwa.OKP():
+		if err := key.Get(jwk.OKPCrvKey, &crv); err != nil || crv != jwa.X25519() {
+			return false
+		}
+	default:
+		return false
+	}
+
+	if alg, ok := key.Algorithm(); ok && alg.String() != jwa.ECDH_ES().String() {
+		return false
+	}
+	if use, ok := key.KeyUsage(); ok && use != string(jwk.ForEncryption) {
+		return false
+	}
+	if ops, ok := key.KeyOps(); ok && !slices.Contains(ops, jwk.KeyOpDeriveKey) && !slices.Contains(ops, jwk.KeyOpDeriveBits) {
+		return false
+	}
+	return true
 }
 
 // supportedContentEncryption is the JWE "enc" this wallet can produce,
@@ -503,6 +550,10 @@ func credentialTypeMatches(cred *credential.StoredCredential, query openid4vp.Cr
 		return slices.Contains(query.Meta.VCTValues, credentialVCT(cred))
 	case query.Meta.DoctypeValue != "":
 		return credentialVCT(cred) == query.Meta.DoctypeValue
+	case len(query.Meta.TypeValues) > 0:
+		// This wallet does not read W3C credential types yet; matching
+		// nothing keeps an unrelated credential of the format out.
+		return false
 	default:
 		return true
 	}

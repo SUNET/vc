@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -189,5 +190,39 @@ func TestApplyDerivations_MissingInputClaimIsNoOp(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty result, got %v", got)
+	}
+}
+
+// An age derivation reading a claim an earlier derivation generated is a
+// misconfigured chain, not the Holder's data, and must not be marked as
+// invalid claim input.
+func TestApplyDerivations_InvalidInputFromEarlierDerivationIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "age_over_18", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"birthdate": "1996-01-30"}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain reading a generated boolean")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a misconfigured chain must not be reported as invalid holder input: %v", err)
+	}
+}
+
+// A holder-supplied invalid birthdate stays marked even after an unrelated
+// earlier derivation.
+func TestApplyDerivations_InvalidHolderInputAfterEarlierDerivationIsHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Lowercase: &primitives.LowercaseArgs{Input: "email"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"email": "A@B.se", "birthdate": "2099-01-01"}, now)
+	if !errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a future birthdate from the holder must stay marked, got %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,12 +31,23 @@ func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now t
 	for i, d := range list {
 		derived, err := d.Apply(working, now)
 		if err != nil {
+			if i > 0 && errors.Is(err, primitives.ErrInvalidClaimInput) && !failsOnHolderClaims(d, claims, now) {
+				// %v, not %w: the input came from an earlier derivation, so this is a configuration fault.
+				return nil, fmt.Errorf("derivations[%d]: input produced by an earlier derivation is unusable: %v", i, err)
+			}
 			return nil, fmt.Errorf("derivations[%d]: %w", i, err)
 		}
 		MergeNestedClaims(out, derived)
 		MergeNestedClaims(working, derived)
 	}
 	return out, nil
+}
+
+// failsOnHolderClaims reports whether d rejects the holder-supplied claims
+// alone as invalid input, i.e. without anything earlier derivations added.
+func failsOnHolderClaims(d primitives.Derivation, claims map[string]any, now time.Time) bool {
+	_, err := d.Apply(CloneNestedClaims(claims), now)
+	return errors.Is(err, primitives.ErrInvalidClaimInput)
 }
 
 // MergeNestedClaims deep-merges src into dst. When both dst[k] and src[k]

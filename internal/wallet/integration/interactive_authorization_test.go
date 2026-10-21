@@ -4,10 +4,13 @@ package integration
 
 import (
 	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -20,9 +23,113 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// iaRequestedVCT is the type the mock issuer's DCQL query asks for.
+const iaRequestedVCT = "https://credentials.example.com/identity_credential"
+
+// validateIAPresentation is the mock challenge endpoint's check of the
+// openid4vp_response: decrypted with the advertised key, every presented
+// credential of the requested type, and every Key Binding JWT signed by
+// the key in that credential's cnf and bound to this exchange.
+func (env *testEnvironment) validateIAPresentation(envelope string) error {
+	env.mu.Lock()
+	decryptionKey := env.challengeKey
+	env.mu.Unlock()
+	if decryptionKey == nil {
+		return fmt.Errorf("no openid4vp_request was issued")
+	}
+
+	var wrapper struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(envelope), &wrapper); err != nil || wrapper.Response == "" {
+		return fmt.Errorf("openid4vp_response is not an encrypted response envelope")
+	}
+	decrypted, err := jwe.Decrypt([]byte(wrapper.Response), jwe.WithKey(jwa.ECDH_ES(), decryptionKey))
+	if err != nil {
+		return fmt.Errorf("decrypting openid4vp_response: %w", err)
+	}
+
+	var payload struct {
+		VPToken map[string][]string `json:"vp_token"`
+	}
+	if err := json.Unmarshal(decrypted, &payload); err != nil {
+		return fmt.Errorf("reading vp_token: %w", err)
+	}
+	presented := payload.VPToken["pid_auth"]
+	if len(presented) == 0 {
+		return fmt.Errorf("vp_token carries no presentation for pid_auth")
+	}
+
+	origin, err := openid4vp.CanonicalOrigin(env.oauth2Server.URL + "/authorize-challenge")
+	if err != nil {
+		return err
+	}
+	for _, p := range presented {
+		if err := checkHolderBoundPresentation(p, iaRequestedVCT, "ia-nonce", "ia:"+origin); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkHolderBoundPresentation verifies an SD-JWT presentation's type and
+// that its Key Binding JWT is signed by the credential's cnf key with the
+// expected nonce, audience and sd_hash. The issuer signature is not
+// checked: the mock issuer keys are throwaway.
+func checkHolderBoundPresentation(presentation, wantVCT, wantNonce, wantAud string) error {
+	cut := strings.LastIndex(presentation, "~")
+	if cut < 0 || cut == len(presentation)-1 {
+		return fmt.Errorf("presentation carries no key binding JWT")
+	}
+	sdJWT, kbJWT := presentation[:cut+1], presentation[cut+1:]
+
+	issuerJWT, _, _ := strings.Cut(sdJWT, "~")
+	issuerClaims := jwtv5.MapClaims{}
+	if _, _, err := jwtv5.NewParser().ParseUnverified(issuerJWT, issuerClaims); err != nil {
+		return fmt.Errorf("reading the issuer-signed JWT: %w", err)
+	}
+	if vct, _ := issuerClaims["vct"].(string); vct != wantVCT {
+		return fmt.Errorf("presented vct %q, requested %q", vct, wantVCT)
+	}
+
+	cnf, _ := issuerClaims["cnf"].(map[string]any)
+	cnfJWK, err := json.Marshal(cnf["jwk"])
+	if err != nil || cnf["jwk"] == nil {
+		return fmt.Errorf("credential carries no cnf.jwk")
+	}
+	holderKey, err := jwk.ParseKey(cnfJWK)
+	if err != nil {
+		return fmt.Errorf("parsing cnf.jwk: %w", err)
+	}
+	if _, err := jws.Verify([]byte(kbJWT), jws.WithKey(jwa.ES256(), holderKey)); err != nil {
+		return fmt.Errorf("key binding JWT is not signed by the credential's holder key: %w", err)
+	}
+
+	kbClaims := jwtv5.MapClaims{}
+	kbToken, _, err := jwtv5.NewParser().ParseUnverified(kbJWT, kbClaims)
+	if err != nil {
+		return fmt.Errorf("reading the key binding JWT: %w", err)
+	}
+	if typ, _ := kbToken.Header["typ"].(string); typ != "kb+jwt" {
+		return fmt.Errorf("key binding JWT typ is %q", typ)
+	}
+	if nonce, _ := kbClaims["nonce"].(string); nonce != wantNonce {
+		return fmt.Errorf("key binding JWT nonce is %q, want %q", nonce, wantNonce)
+	}
+	if aud, _ := kbClaims["aud"].(string); aud != wantAud {
+		return fmt.Errorf("key binding JWT aud is %q, want %q", aud, wantAud)
+	}
+	sum := sha256.Sum256([]byte(sdJWT))
+	if sdHash, _ := kbClaims["sd_hash"].(string); sdHash != base64.RawURLEncoding.EncodeToString(sum[:]) {
+		return fmt.Errorf("key binding JWT sd_hash does not match the presented SD-JWT")
+	}
+	return nil
+}
 
 // interactiveAuthorizationRequest builds the openid4vp_request the mock
 // issuer puts in its 403, advertising an encryption key so the wallet has
@@ -53,7 +160,7 @@ func (env *testEnvironment) interactiveAuthorizationRequest() map[string]any {
 			"credentials": []map[string]any{{
 				"id":     "pid_auth",
 				"format": "dc+sd-jwt",
-				"meta":   map[string]any{"vct_values": []string{"https://credentials.example.com/identity_credential"}},
+				"meta":   map[string]any{"vct_values": []string{iaRequestedVCT}},
 			}},
 		},
 		"client_metadata": map[string]any{
@@ -274,12 +381,50 @@ func TestVCI_InteractiveAuthorization_KeyBindingAudience(t *testing.T) {
 func (env *testEnvironment) seedPresentableCredential(t *testing.T) {
 	t.Helper()
 	env.wallet.Store().Add(&credential.StoredCredential{
-		RawCredential: createMockSDJWT(t),
+		RawCredential: createMockSDJWTWithVCT(t, iaRequestedVCT, &env.holderKey.PublicKey),
 		Format:        "dc+sd-jwt",
-		VCT:           "https://credentials.example.com/identity_credential",
+		VCT:           iaRequestedVCT,
 		IssuerURL:     "https://issuer.example.com",
 		ScenarioName:  "setup",
 	})
+}
+
+// The mock challenge endpoint checks holder binding, so a credential bound
+// to someone else's key cannot be redeemed for a code.
+func TestVCI_InteractiveAuthorization_RejectsAForeignHolderBinding(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	env.wallet.Store().Add(&credential.StoredCredential{
+		RawCredential: createMockSDJWTWithVCT(t, iaRequestedVCT, &other.PublicKey),
+		Format:        "dc+sd-jwt",
+		VCT:           iaRequestedVCT,
+		IssuerURL:     "https://issuer.example.com",
+		ScenarioName:  "setup",
+	})
+	env.addScenario(config.Scenario{
+		Name: "ia-foreign-holder",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-foreign-holder")
+	require.NoError(t, err)
+	require.False(t, result.Success, "a presentation with an invalid holder binding must not earn a code")
+
+	env.mu.Lock()
+	tokenRequests := env.tokenRequestsReceived
+	env.mu.Unlock()
+	assert.Empty(t, tokenRequests)
 }
 
 // keyBindingAudience reads the aud claim off the Key Binding JWT at the
@@ -683,7 +828,7 @@ func TestVCI_InteractiveAuthorization_PresentsAnIssuedCredential(t *testing.T) {
 	// Exactly what issuance stores: the legacy format identifier, and no
 	// vct recorded, because runVCIScenario does not read the credential.
 	env.wallet.Store().Add(&credential.StoredCredential{
-		RawCredential: createMockSDJWTWithVCT(t, "https://credentials.example.com/identity_credential"),
+		RawCredential: createMockSDJWTWithVCT(t, iaRequestedVCT, &env.holderKey.PublicKey),
 		Format:        "vc+sd-jwt",
 		IssuerURL:     env.issuerServer.URL,
 		ScenarioName:  "issued",
