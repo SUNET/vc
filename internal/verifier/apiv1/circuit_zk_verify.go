@@ -72,11 +72,17 @@ func (c *Client) circuitZkProofTime(presentation openid4vp.ZkpPresentation, now 
 		// Unreachable for mso_mdoc, which the response validator
 		// makes it required for. Kept because a proof checked against
 		// a guessed T is not checked.
-		return time.Time{}, errors.New("zkp_req: the presentation carries no proof_time, so there is no T to verify against")
+		return time.Time{}, refuseZkpReq(CodeZkpReqProofTimeMissing,
+			"the presentation carries no proof_time, so there is no T to verify against", nil)
 	}
 	skew, maxAge := c.circuitZkTolerance()
 	if err := openid4vp.CheckProofTimeTolerance(presentation.ProofTime, now, skew, maxAge); err != nil {
-		return time.Time{}, fmt.Errorf("zkp_req: %w", err)
+		// The deviation and the limit are in the detail on purpose:
+		// without them a wallet cannot tell a clock that is wrong from
+		// a proof that is stale, and both arrive here.
+		return time.Time{}, refuseZkpReq(CodeZkpReqProofTimeOutOfRange,
+			fmt.Sprintf("proof_time %s is outside this verifier's window (skew %s into the future, %s of age)",
+				presentation.ProofTimeText, skew, maxAge), err)
 	}
 	return presentation.ProofTime, nil
 }
@@ -141,10 +147,11 @@ func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.
 // without a word.
 func circuitZkRawToken(vpResponse openid4vp.VPResponse, queryID string) (json.RawMessage, error) {
 	if entry, found := vpResponse.VPTokenRaw[queryID]; !found || len(entry) == 0 {
-		return nil, fmt.Errorf("zkp_req: the response carries no presentation for credential query %q", queryID)
+		return nil, refuseZkpReq(CodeZkpReqNoPresentation,
+			fmt.Sprintf("the response carries no presentation for credential query %q", queryID), nil)
 	}
 	if len(vpResponse.VPTokenEnvelope) == 0 {
-		return nil, fmt.Errorf("zkp_req: the response carries no vp_token to validate")
+		return nil, refuseZkpReq(CodeZkpReqNoPresentation, "the response carries no vp_token to validate", nil)
 	}
 	return vpResponse.VPTokenEnvelope, nil
 }
@@ -207,9 +214,9 @@ func circuitZkChannelFor(dcAPI bool) circuitZkChannel {
 func (c *Client) circuitZkSessionFor(authCtx *cache.AuthorizationContext, channel circuitZkChannel, origin, clientID, nonce, responseURI, docType string, readerThumbprint []byte) (circuitZkSession, error) {
 	build, supported := circuitZkTranscripts[channel]
 	if !supported {
-		return circuitZkSession{}, fmt.Errorf("zkp_req: this presentation arrived over the %q channel, and the nym_auth "+
-			"circuits define a session transcript only for %q; the handover for this channel is pending shared vectors",
-			channel, channelDCAPI)
+		return circuitZkSession{}, refuseZkpReq(CodeZkpReqWrongChannel,
+			fmt.Sprintf("this presentation arrived over the %q channel, and the nym_auth circuits define a session "+
+				"transcript only for %q; the handover for this channel is pending shared vectors", channel, channelDCAPI), nil)
 	}
 
 	transcript, err := build(origin, clientID, nonce, responseURI, readerThumbprint)
