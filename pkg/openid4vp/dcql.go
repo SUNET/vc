@@ -57,9 +57,9 @@ type CredentialQuery struct {
 	// ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers for elements in claims that specifies which combinations of claims for the Credential are requested. The rules for selecting claims to send are defined in Section 6.4.1.
 	ClaimSet [][]string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required,min=1,dive,required"`
 
-	// Req is the circuit_zk format's list of requested calculations.
+	// Req is the zkp_req format's list of requested calculations.
 	//
-	// It replaces Claims rather than accompanying it: a circuit_zk
+	// It replaces Claims rather than accompanying it: a zkp_req
 	// presentation discloses no issuer-signed attribute at all, so every
 	// value a Verifier wants is the output of a function named here. A
 	// query carrying both is one the planner rejects - which this does
@@ -330,7 +330,7 @@ func rawFromYAML(unmarshal func(any) error) (json.RawMessage, error) {
 //
 // With Extra empty this is byte-identical to the struct encoding it
 // replaces, which TestCredentialQueryEncodingUnchanged pins: every format
-// other than circuit_zk goes through here too, and none of them should be
+// other than zkp_req goes through here too, and none of them should be
 // able to tell this method exists.
 func (q CredentialQuery) MarshalJSON() ([]byte, error) {
 	// Returned as-is, which encoding/json then compacts and HTML-escapes
@@ -847,7 +847,7 @@ func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 // array this model cannot hold is an unmodelled shape rather than an
 // ordinary invalid query.
 //
-// Only req. A circuit_zk request carries its arguments there, the
+// Only req. A zkp_req request carries its arguments there, the
 // rulebook is moving, and the vendored conformance set includes negative
 // vectors - a numeric item id, array-valued params - that exist to be
 // SENT. Without this they were accepted by NewRawCredentialQuery and
@@ -1057,7 +1057,7 @@ type VPFormatsSupported struct {
 	MsoMdoc *MsoMdocFormat `json:"mso_mdoc,omitempty" yaml:"mso_mdoc,omitempty"`
 
 	// ZkpReq is the configuration for zero-knowledge circuit
-	// presentations (circuit_zk): which proof systems and circuits a proof
+	// presentations (zkp_req): which proof systems and circuits a proof
 	// may come from.
 	ZkpReq *ZkpReqFormat `json:"zkp_req,omitempty" yaml:"zkp_req,omitempty"`
 
@@ -1685,7 +1685,7 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 	// model; it is not a way around the constraint rules, and it is not
 	// specific to one format. Reading format and meta back out of the raw
 	// bytes keeps both true at once: an SD-JWT query with no vct_values is
-	// still refused here even though it arrived raw, and a circuit_zk one
+	// still refused here even though it arrived raw, and a zkp_req one
 	// still falls to the permissive default below, as every format this
 	// build does not constrain does.
 	if query.Raw != nil {

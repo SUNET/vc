@@ -680,7 +680,7 @@ func copyDCQL(src *DCQL) *DCQL {
 			}
 		}
 
-		// Copy the circuit_zk request. Params and Extra are opaque trees
+		// Copy the zkp_req request. Params and Extra are opaque trees
 		// this package passes through unchanged, so they are deep-copied
 		// through their JSON encoding rather than walked field by field.
 		if len(cred.Req) > 0 {
