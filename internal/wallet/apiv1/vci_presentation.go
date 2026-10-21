@@ -487,13 +487,37 @@ func optionIsAnswerable(option []string, answerable map[string][]*credential.Sto
 // query not being satisfiable rather than silently replaced.
 func (c *Client) presentableCredentials(vci *config.VCIScenario) ([]*credential.StoredCredential, error) {
 	if vci.PresentCredential == "" {
-		return c.store.List(), nil
+		now := time.Now()
+		var valid []*credential.StoredCredential
+		for _, cred := range c.store.List() {
+			if credentialValidAt(cred, now) {
+				valid = append(valid, cred)
+			}
+		}
+		return valid, nil
 	}
 	cred, ok := c.store.Get(vci.PresentCredential)
 	if !ok {
 		return nil, fmt.Errorf("credential %q named by present_credential is not in this wallet", vci.PresentCredential)
 	}
 	return []*credential.StoredCredential{cred}, nil
+}
+
+// credentialValidAt reports whether a JWT-based credential's exp and nbf
+// admit now. A credential whose payload cannot be read here (an mdoc) has
+// no window this wallet can check, and is kept.
+func credentialValidAt(cred *credential.StoredCredential, now time.Time) bool {
+	payload, ok := issuerPayload(cred.RawCredential)
+	if !ok {
+		return true
+	}
+	if exp, ok := payload["exp"].(float64); ok && !now.Before(time.Unix(int64(exp), 0)) {
+		return false
+	}
+	if nbf, ok := payload["nbf"].(float64); ok && now.Before(time.Unix(int64(nbf), 0)) {
+		return false
+	}
+	return true
 }
 
 // matchingCredentials is DCQL §6.1 matching: the format, the

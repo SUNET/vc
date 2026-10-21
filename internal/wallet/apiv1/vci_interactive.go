@@ -40,6 +40,8 @@ type challengeResponse struct {
 	OpenID4VPRequest        json.RawMessage `json:"openid4vp_request"`
 	RequestURI              string          `json:"request_uri"`
 	ExpiresIn               int             `json:"expires_in"`
+
+	status int
 }
 
 // doInteractiveAuthorization runs an OpenID4VCI 1.1 Interactive
@@ -88,6 +90,14 @@ func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2Ser
 			step.Error = err.Error()
 			result.Steps = append(result.Steps, step)
 			return "", err
+		}
+
+		// OpenID4VCI 1.1: a code comes with 200, an interaction request
+		// with 403. Anything else is a nonconforming answer to report.
+		if statusErr := challengeStatusError(resp); statusErr != nil {
+			step.Error = statusErr.Error()
+			result.Steps = append(result.Steps, step)
+			return "", statusErr
 		}
 
 		if resp.AuthorizationCode != "" {
@@ -167,11 +177,23 @@ func (c *Client) offeredInteractionTypes(vci *config.VCIScenario) []string {
 	return []string{interactionOpenID4VPPresentation}
 }
 
+// challengeStatusError reports an Authorization Challenge response whose
+// HTTP status does not fit its body.
+func challengeStatusError(resp challengeResponse) error {
+	switch {
+	case resp.AuthorizationCode != "" && resp.status != http.StatusOK:
+		return fmt.Errorf("authorization challenge returned an authorization_code with HTTP %d, want 200", resp.status)
+	case resp.Error == "insufficient_authorization" && resp.status != http.StatusForbidden:
+		return fmt.Errorf("authorization challenge returned insufficient_authorization with HTTP %d, want 403", resp.status)
+	}
+	return nil
+}
+
 // postChallenge sends one Authorization Challenge Request.
 //
 // Both the success and the interaction-required answers are JSON bodies
-// that this wallet has to read, so the HTTP status is not what decides:
-// a 403 carrying insufficient_authorization is the flow working.
+// that this wallet has to read, so the body is decoded whatever the
+// status, and the status is kept for challengeStatusError.
 func (c *Client) postChallenge(ctx context.Context, endpoint string, form url.Values) (challengeResponse, error) {
 	var parsed challengeResponse
 
@@ -199,6 +221,7 @@ func (c *Client) postChallenge(ctx context.Context, endpoint string, form url.Va
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return parsed, fmt.Errorf("decoding authorization challenge response (HTTP %d): %w", resp.StatusCode, err)
 	}
+	parsed.status = resp.StatusCode
 	return parsed, nil
 }
 

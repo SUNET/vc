@@ -81,6 +81,11 @@ type testEnvironment struct {
 	// interaction_types_supported exists to make visible.
 	iaIgnoreOfferedTypes bool
 
+	// iaCodeStatus and iaInteractionStatus override the HTTP status the
+	// mock answers with, to drive nonconforming servers. Zero is 200/403.
+	iaCodeStatus        int
+	iaInteractionStatus int
+
 	// offerIssuerState makes /credential-offer serve an issuer-initiated
 	// offer whose authorization_code grant carries a FRESH issuer_state on
 	// every fetch, which is what a real prepared issuance does. Two runs
@@ -380,7 +385,11 @@ func (env *testEnvironment) setupOAuth2Server() {
 				body["openid4vp_request"] = env.interactiveAuthorizationRequest()
 			}
 
-			w.WriteHeader(http.StatusForbidden)
+			status := http.StatusForbidden
+			if env.iaInteractionStatus != 0 {
+				status = env.iaInteractionStatus
+			}
+			w.WriteHeader(status)
 			json.NewEncoder(w).Encode(body)
 			return
 		}
@@ -400,6 +409,9 @@ func (env *testEnvironment) setupOAuth2Server() {
 			return
 		}
 
+		if env.iaCodeStatus != 0 {
+			w.WriteHeader(env.iaCodeStatus)
+		}
 		json.NewEncoder(w).Encode(map[string]string{"authorization_code": "test-ia-code"})
 	})
 
@@ -523,18 +535,29 @@ func createMockSDJWT(t *testing.T) string {
 // bound to a chosen holder key, for tests whose presentation is checked.
 func createMockSDJWTWithVCT(t *testing.T, vct string, holder *ecdsa.PublicKey) string {
 	t.Helper()
+	return createMockSDJWTWithClaims(t, vct, holder, nil)
+}
+
+// createMockSDJWTWithClaims adds extra issuer-signed claims, such as
+// _sd_alg or exp.
+func createMockSDJWTWithClaims(t *testing.T, vct string, holder *ecdsa.PublicKey, extra map[string]any) string {
+	t.Helper()
 
 	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, jwtv5.MapClaims{
+	claims := jwtv5.MapClaims{
 		"iss": "https://issuer.example.com",
 		"iat": time.Now().Unix(),
 		"vct": vct,
 		"cnf": map[string]any{
 			"jwk": jwktest.PublicKeyJWK(holder),
 		},
-	})
+	}
+	for k, v := range extra {
+		claims[k] = v
+	}
+	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 	signed, err := token.SignedString(issuerKey)
 	require.NoError(t, err)
 

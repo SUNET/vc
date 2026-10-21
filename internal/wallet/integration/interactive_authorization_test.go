@@ -11,19 +11,21 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/internal/wallet/config"
 	"github.com/SUNET/vc/internal/wallet/credential"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,13 +84,7 @@ func (env *testEnvironment) validateIAPresentation(envelope string) error {
 // expected nonce, audience and sd_hash. The issuer signature is not
 // checked: the mock issuer keys are throwaway.
 func checkHolderBoundPresentation(presentation, wantVCT, wantNonce, wantAud string) error {
-	cut := strings.LastIndex(presentation, "~")
-	if cut < 0 || cut == len(presentation)-1 {
-		return fmt.Errorf("presentation carries no key binding JWT")
-	}
-	sdJWT, kbJWT := presentation[:cut+1], presentation[cut+1:]
-
-	issuerJWT, _, _ := strings.Cut(sdJWT, "~")
+	issuerJWT, _, _ := strings.Cut(presentation, "~")
 	issuerClaims := jwtv5.MapClaims{}
 	if _, _, err := jwtv5.NewParser().ParseUnverified(issuerJWT, issuerClaims); err != nil {
 		return fmt.Errorf("reading the issuer-signed JWT: %w", err)
@@ -97,38 +93,12 @@ func checkHolderBoundPresentation(presentation, wantVCT, wantNonce, wantAud stri
 		return fmt.Errorf("presented vct %q, requested %q", vct, wantVCT)
 	}
 
-	cnf, _ := issuerClaims["cnf"].(map[string]any)
-	cnfJWK, err := json.Marshal(cnf["jwk"])
-	if err != nil || cnf["jwk"] == nil {
-		return fmt.Errorf("credential carries no cnf.jwk")
-	}
-	holderKey, err := jwk.ParseKey(cnfJWK)
-	if err != nil {
-		return fmt.Errorf("parsing cnf.jwk: %w", err)
-	}
-	if _, err := jws.Verify([]byte(kbJWT), jws.WithKey(jwa.ES256(), holderKey)); err != nil {
-		return fmt.Errorf("key binding JWT is not signed by the credential's holder key: %w", err)
-	}
-
-	kbClaims := jwtv5.MapClaims{}
-	kbToken, _, err := jwtv5.NewParser().ParseUnverified(kbJWT, kbClaims)
-	if err != nil {
-		return fmt.Errorf("reading the key binding JWT: %w", err)
-	}
-	if typ, _ := kbToken.Header["typ"].(string); typ != "kb+jwt" {
-		return fmt.Errorf("key binding JWT typ is %q", typ)
-	}
-	if nonce, _ := kbClaims["nonce"].(string); nonce != wantNonce {
-		return fmt.Errorf("key binding JWT nonce is %q, want %q", nonce, wantNonce)
-	}
-	if aud, _ := kbClaims["aud"].(string); aud != wantAud {
-		return fmt.Errorf("key binding JWT aud is %q, want %q", aud, wantAud)
-	}
-	sum := sha256.Sum256([]byte(sdJWT))
-	if sdHash, _ := kbClaims["sd_hash"].(string); sdHash != base64.RawURLEncoding.EncodeToString(sum[:]) {
-		return fmt.Errorf("key binding JWT sd_hash does not match the presented SD-JWT")
-	}
-	return nil
+	// The production verifier: signature against cnf, typ, nonce, aud, iat,
+	// and sd_hash under the credential's _sd_alg.
+	return sdjwtvc.VerifyKeyBinding(presentation, issuerClaims, sdjwtvc.KeyBindingExpectations{
+		Nonce:    wantNonce,
+		Audience: wantAud,
+	})
 }
 
 // interactiveAuthorizationRequest builds the openid4vp_request the mock
@@ -902,5 +872,175 @@ func TestVCI_InteractiveAuthorization_RefusesAnInteractionItDidNotOffer(t *testi
 	env.mu.Unlock()
 	for _, r := range requests {
 		assert.Empty(t, r.Get("openid4vp_response"), "no presentation may be sent for an interaction never offered")
+	}
+}
+
+// A credential whose issuer chose a non-default _sd_alg must be bound
+// under that hash, or the production verifier rejects a valid
+// presentation.
+func TestVCI_InteractiveAuthorization_KeyBindingUsesTheCredentialsSDAlg(t *testing.T) {
+	for _, alg := range []string{"sha-384", "sha-512"} {
+		t.Run(alg, func(t *testing.T) {
+			env := setupTestEnvironment(t, func(e *testEnvironment) {
+				e.iaMetadataSpelling = "normative"
+			})
+			defer env.cleanup()
+
+			env.wallet.Store().Add(&credential.StoredCredential{
+				RawCredential: createMockSDJWTWithClaims(t, iaRequestedVCT, &env.holderKey.PublicKey, map[string]any{"_sd_alg": alg}),
+				Format:        "dc+sd-jwt",
+				VCT:           iaRequestedVCT,
+				ScenarioName:  "setup",
+			})
+			env.addScenario(config.Scenario{
+				Name: "ia-sd-alg",
+				Type: "vci",
+				VCI: &config.VCIScenario{
+					IssuerURL:                   env.issuerServer.URL,
+					Scope:                       "pid",
+					UseInteractiveAuthorization: true,
+					CredentialConfigurationID:   "test_credential",
+				},
+			})
+
+			result, err := env.wallet.RunScenario(t.Context(), "ia-sd-alg")
+			require.NoError(t, err)
+			require.True(t, result.Success, "scenario failed: %s", result.Error)
+		})
+	}
+}
+
+// Automatic selection skips an expired credential and presents its valid
+// replacement, whatever order the store lists them in.
+func TestVCI_InteractiveAuthorization_SkipsAnExpiredCredential(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	expired := createMockSDJWTWithClaims(t, iaRequestedVCT, &env.holderKey.PublicKey, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()})
+	notYet := createMockSDJWTWithClaims(t, iaRequestedVCT, &env.holderKey.PublicKey, map[string]any{"nbf": time.Now().Add(time.Hour).Unix()})
+	valid := createMockSDJWTWithClaims(t, iaRequestedVCT, &env.holderKey.PublicKey, map[string]any{"exp": time.Now().Add(time.Hour).Unix()})
+	for id, raw := range map[string]string{"expired": expired, "not-yet-valid": notYet, "valid": valid} {
+		env.wallet.Store().Add(&credential.StoredCredential{ID: id, RawCredential: raw, Format: "dc+sd-jwt", VCT: iaRequestedVCT})
+	}
+	env.addScenario(config.Scenario{
+		Name: "ia-expired",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	// Map iteration is random, so several runs would expose an
+	// order-dependent pick.
+	for range 5 {
+		result, err := env.wallet.RunScenario(t.Context(), "ia-expired")
+		require.NoError(t, err)
+		require.True(t, result.Success, "scenario failed: %s", result.Error)
+	}
+
+	validIssuerJWT, _, _ := strings.Cut(valid, "~")
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	for i := 1; i < len(requests); i += 2 {
+		payload := env.decryptIAResponse(t, requests[i].Get("openid4vp_response"))
+		presented := payload["vp_token"].(map[string]any)["pid_auth"].([]any)[0].(string)
+		presentedIssuerJWT, _, _ := strings.Cut(presented, "~")
+		assert.Equal(t, validIssuerJWT, presentedIssuerJWT, "only the valid credential may be presented")
+	}
+}
+
+// An explicitly named credential is presented even when expired, so a
+// scenario can drive the Issuer's rejection of it.
+func TestVCI_InteractiveAuthorization_PresentCredentialOverridesValidity(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	env.wallet.Store().Add(&credential.StoredCredential{
+		ID:            "expired",
+		RawCredential: createMockSDJWTWithClaims(t, iaRequestedVCT, &env.holderKey.PublicKey, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}),
+		Format:        "dc+sd-jwt",
+		VCT:           iaRequestedVCT,
+	})
+	env.addScenario(config.Scenario{
+		Name: "ia-named-expired",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+			PresentCredential:           "expired",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-named-expired")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.Len(t, requests, 2)
+	assert.NotEmpty(t, requests[1].Get("openid4vp_response"))
+}
+
+// A code must arrive with 200 and an interaction request with 403; a
+// server answering otherwise is reported, not followed.
+func TestVCI_InteractiveAuthorization_RequiresTheSpecifiedStatus(t *testing.T) {
+	for name, tc := range map[string]struct {
+		opt  envOption
+		want string
+	}{
+		"code with 500": {
+			opt:  func(e *testEnvironment) { e.iaCodeStatus = http.StatusInternalServerError },
+			want: "authorization_code with HTTP 500",
+		},
+		"interaction with 200": {
+			opt:  func(e *testEnvironment) { e.iaInteractionStatus = http.StatusOK },
+			want: "insufficient_authorization with HTTP 200",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := setupTestEnvironment(t, func(e *testEnvironment) {
+				e.iaMetadataSpelling = "normative"
+			}, tc.opt)
+			defer env.cleanup()
+
+			env.seedPresentableCredential(t)
+			env.addScenario(config.Scenario{
+				Name: "ia-status",
+				Type: "vci",
+				VCI: &config.VCIScenario{
+					IssuerURL:                   env.issuerServer.URL,
+					Scope:                       "pid",
+					UseInteractiveAuthorization: true,
+					CredentialConfigurationID:   "test_credential",
+				},
+			})
+
+			result, err := env.wallet.RunScenario(t.Context(), "ia-status")
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			assert.Contains(t, result.Error, tc.want)
+
+			env.mu.Lock()
+			tokenRequests := env.tokenRequestsReceived
+			requests := env.challengeRequests
+			env.mu.Unlock()
+			assert.Empty(t, tokenRequests, "a nonconforming answer must not be redeemed")
+			if name == "interaction with 200" {
+				for _, r := range requests {
+					assert.Empty(t, r.Get("openid4vp_response"), "no presentation for a nonconforming interaction request")
+				}
+			}
+		})
 	}
 }
