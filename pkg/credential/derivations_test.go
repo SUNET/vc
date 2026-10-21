@@ -259,3 +259,35 @@ func TestApplyDerivations_ReformattedGeneratedInputIsNotHolderFault(t *testing.T
 		t.Errorf("a generated value must not be reported as invalid holder input: %v", err)
 	}
 }
+
+// A container created by a computing derivation is generated too, so a
+// later derivation reading the container is a configuration fault.
+func TestApplyDerivations_GeneratedNestedContainerIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Random: &primitives.RandomArgs{Output: "identity.birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "identity", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain feeding a generated map into age")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a generated container must not be reported as invalid holder input: %v", err)
+	}
+}
+
+// A holder container that a derivation adds a leaf to stays the holder's.
+func TestApplyDerivations_HolderContainerKeepsProvenance(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Random: &primitives.RandomArgs{Output: "identity.document_id"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "identity", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"identity": map[string]any{"name": "x"}}, now)
+	if !errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a holder-supplied container must stay marked, got %v", err)
+	}
+}

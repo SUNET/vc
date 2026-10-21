@@ -40,28 +40,30 @@ func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now t
 			}
 			return nil, fmt.Errorf("derivations[%d]: %w", i, err)
 		}
-		isGenerated := !d.ReformatsInput() || generated[d.InputClaim()]
-		for _, path := range leafPaths(derived, "") {
-			generated[path] = isGenerated
-		}
+		recordProvenance(generated, working, derived, "", !d.ReformatsInput() || generated[d.InputClaim()])
 		MergeNestedClaims(out, derived)
 		MergeNestedClaims(working, derived)
 	}
 	return out, nil
 }
 
-// leafPaths returns the dot-notation paths of every non-map value in m.
-func leafPaths(m map[string]any, prefix string) []string {
-	var paths []string
-	for k, v := range m {
+// recordProvenance tags every leaf in derived, and every container derived
+// newly creates in existing, with isGenerated. Containers that already
+// existed keep their provenance, since they still hold the earlier values.
+func recordProvenance(generated map[string]bool, existing, derived map[string]any, prefix string, isGenerated bool) {
+	for k, v := range derived {
 		path := prefix + k
-		if sub, ok := v.(map[string]any); ok {
-			paths = append(paths, leafPaths(sub, path+".")...)
+		sub, isMap := v.(map[string]any)
+		if !isMap {
+			generated[path] = isGenerated
 			continue
 		}
-		paths = append(paths, path)
+		prior, priorIsMap := existing[k].(map[string]any)
+		if !priorIsMap {
+			generated[path] = isGenerated
+		}
+		recordProvenance(generated, prior, sub, path+".", isGenerated)
 	}
-	return paths
 }
 
 // MergeNestedClaims deep-merges src into dst. When both dst[k] and src[k]

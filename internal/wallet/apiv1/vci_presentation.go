@@ -496,15 +496,14 @@ func (c *Client) presentableCredentials(vci *config.VCIScenario) ([]*credential.
 	return []*credential.StoredCredential{cred}, nil
 }
 
-// matchingCredentials is DCQL §6.1 matching, to the extent a wallet
-// holding raw credentials can perform it: the format, and the
-// format-specific type constraint.
+// matchingCredentials is DCQL §6.1 matching: the format, the
+// format-specific type constraint, and the claims and claim_sets.
 //
-// Claims-level constraints are not applied. This wallet presents whole
-// credentials rather than computing a disclosure subset, so a credential
-// of the right type either satisfies the claim query or the Issuer will
-// say so - which, for a test wallet, is the more useful outcome than
-// refusing locally and reporting nothing.
+// Each match is a copy whose RawCredential is reduced to the disclosures
+// the query asks for (§6.4.1), so the key-binding hash covers only what is
+// presented. A credential this wallet cannot reduce - anything but an
+// SD-JWT - does not match a claim-constrained query, which leaves any
+// credential-set alternative usable.
 func matchingCredentials(candidates []*credential.StoredCredential, query openid4vp.CredentialQuery) []*credential.StoredCredential {
 	var matched []*credential.StoredCredential
 	for _, cred := range candidates {
@@ -514,7 +513,17 @@ func matchingCredentials(candidates []*credential.StoredCredential, query openid
 		if !credentialTypeMatches(cred, query) {
 			continue
 		}
-		matched = append(matched, cred)
+		reduced, ok := selectClaims(cred.RawCredential, query)
+		if !ok {
+			if len(query.Claims) > 0 {
+				continue
+			}
+			// Not an SD-JWT and nothing was asked of its claims.
+			reduced = cred.RawCredential
+		}
+		presented := *cred
+		presented.RawCredential = reduced
+		matched = append(matched, &presented)
 	}
 	return matched
 }
