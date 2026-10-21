@@ -125,7 +125,8 @@ func (c *Client) circuitZkIssuerKey(
 		// the consequence of being wrong about that is verifying a
 		// proof against no key, which is not verifying it - a belief
 		// worth one comparison.
-		return nil, errors.New("zkp_req: the presentation carries no issuer key set")
+		return nil, refuseZkpReq(CodeZkpReqIssuerKeySetEmpty,
+			"the presentation carries no issuer key set", nil)
 	}
 	if len(presentation.IssuerKeySet) != longfellowIssuerKeySetSize {
 		// The shared shape allows up to eight; the ARCHIVE CIRCUITS
@@ -133,15 +134,17 @@ func (c *Client) circuitZkIssuerKey(
 		// the archive wins over the shared shape. More than one would
 		// mean choosing which to treat as the leaf, and the circuit
 		// has no notion of a chain to walk.
-		return nil, fmt.Errorf("zkp_req: the issuer key set has %d elements; the %s system takes exactly %d",
-			len(presentation.IssuerKeySet), presentation.SystemID, longfellowIssuerKeySetSize)
+		return nil, refuseZkpReq(CodeZkpReqIssuerKeySetSize,
+			fmt.Sprintf("the issuer key set has %d elements; the %s system takes exactly %d - send the Document Signer certificate alone",
+				len(presentation.IssuerKeySet), presentation.SystemID, longfellowIssuerKeySetSize), nil)
 	}
 
 	chain := make([]*x509.Certificate, 0, len(presentation.IssuerKeySet))
 	for i, der := range presentation.IssuerKeySet {
 		cert, err := x509.ParseCertificate(der)
 		if err != nil {
-			return nil, fmt.Errorf("zkp_req: issuer key %d does not parse as a certificate: %w", i, err)
+			return nil, refuseZkpReq(CodeZkpReqIssuerKeyNotACert,
+				fmt.Sprintf("issuer key %d does not parse as a certificate", i), err)
 		}
 		chain = append(chain, cert)
 	}
@@ -154,23 +157,24 @@ func (c *Client) circuitZkIssuerKey(
 	// leaf's SAN, as the SDKs and the deployed PDP request shape
 	// expect - and the docType is the request's.
 	if err := mdoc.VerifyIssuerChain(ctx, c.trustEvaluator, chain, docType, "", now); err != nil {
-		return nil, fmt.Errorf("zkp_req: the issuer key set is not trusted for docType %q: %w", docType, err)
+		return nil, refuseZkpReq(CodeZkpReqIssuerNotTrusted,
+			fmt.Sprintf("the issuer key set is not trusted for docType %q", docType), err)
 	}
 
 	// Only after the chain is trusted: an untrusted chain's key is
 	// not a key this verifier has any business looking at.
 	key, isECDSA := chain[0].PublicKey.(*ecdsa.PublicKey)
 	if !isECDSA {
-		return nil, fmt.Errorf("zkp_req: the issuer certificate holds a %T, and the circuit takes a P-256 key",
-			chain[0].PublicKey)
+		return nil, refuseZkpReq(CodeZkpReqIssuerKeyNotECDSA,
+			fmt.Sprintf("the issuer certificate holds a %T, and the circuit takes a P-256 key", chain[0].PublicKey), nil)
 	}
 	if key.Curve != elliptic.P256() {
 		// Not a limitation to be lifted quietly: the circuit's field
 		// arithmetic is over P-256. A key on another curve cannot be
 		// a public input to it, so accepting one would mean verifying
 		// against something the circuit never saw.
-		return nil, fmt.Errorf("zkp_req: the issuer key is on %s, and the circuit takes P-256",
-			key.Curve.Params().Name)
+		return nil, refuseZkpReq(CodeZkpReqIssuerKeyWrongCurve,
+			fmt.Sprintf("the issuer key is on %s, and the circuit takes P-256", key.Curve.Params().Name), nil)
 	}
 	return key, nil
 }
