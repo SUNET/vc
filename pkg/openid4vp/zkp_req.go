@@ -22,12 +22,12 @@ import (
 //
 // Distinct from FormatMsoMdocZk, which is multipaz's ZK presentation of an
 // mdoc: that one returns a DeviceResponse-shaped vp_token and discloses
-// attributes. A circuit_zk query discloses nothing. Every value a Verifier
+// attributes. A zkp_req query discloses nothing. Every value a Verifier
 // wants is the OUTPUT of a function it asks for in Req, computed inside
 // the circuit and returned under a handle.
 const FormatZkpReq = "zkp_req"
 
-// IsZkpReqFormat reports whether format is the circuit_zk identifier.
+// IsZkpReqFormat reports whether format is the zkp_req identifier.
 func IsZkpReqFormat(format string) bool { return format == FormatZkpReq }
 
 // Function identifiers the nym_auth rulebook registers. They are not an
@@ -66,11 +66,11 @@ const (
 	PrfHashDHBLS12381G1 = "hashdh-bls12381g1"
 )
 
-// ReqItem is one requested calculation inside a circuit_zk credential
+// ReqItem is one requested calculation inside a zkp_req credential
 // query: a function, a handle its result is returned under, and the
 // function's parameters.
 //
-// A zkp_req preset needs two things to be published - a non-empty _req,
+// A zkp_req preset needs two things to be published - a non-empty req,
 // and verifier.preferred_vp_formats.zkp_req advertising the format:
 //
 //	```yaml
@@ -146,7 +146,7 @@ func (r *ReqItem) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ZkpReqFormat is the circuit_zk entry of client_metadata's
+// ZkpReqFormat is the zkp_req entry of client_metadata's
 // vp_formats_supported: which proof systems and circuits the Verifier will
 // accept a proof from.
 //
@@ -435,7 +435,7 @@ func splitMembers(data []byte, what string, known ...string) ([]byte, map[string
 // YAML support for the extension bags.
 //
 // Extra is tagged yaml:"-", so without these an operator configuring
-// .verifier.preferred_vp_formats.circuit_zk or a presentation request
+// .verifier.preferred_vp_formats.zkp_req or a presentation request
 // template could not use it at all - the members would be read and
 // silently dropped, which is the worst way for an escape hatch to fail.
 // pkg/configuration loads both of those from YAML.

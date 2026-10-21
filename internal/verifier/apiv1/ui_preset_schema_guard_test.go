@@ -79,14 +79,25 @@ func TestEveryPublishedPresetFieldSurvivesTheBrowserSchema(t *testing.T) {
 // Spelled out rather than derived, because which fields are DCQL-relevant
 // is not something the Go types say: validations deliberately goes no
 // further than the UI.
-func TestCircuitZkReqReachesThePostedQuery(t *testing.T) {
+func TestZkpReqReqReachesThePostedQuery(t *testing.T) {
 	js := presentationDefinitionJS(t)
 
 	dcql := between(t, js, "const dcqlQueryCredentialSchema = v.object({", "const credentialSetQuerySchema")
-	require.Contains(t, dcql, "req:",
-		"the DCQL schema must declare req, or the query is stripped again on the way out")
+	require.Contains(t, dcql, "_req:",
+		"the DCQL schema must declare the WIRE member _req, or the query is stripped again on the way out")
 
 	copied := between(t, js, "async handleSelectPredefinedPresentationDefinition(id)", "v.safeParse(dcqlQuerySchema")
-	require.Contains(t, copied, "cred.req",
-		"the preset-to-query copy must carry req, or a circuit_zk query asks the wallet for nothing")
+	require.Contains(t, copied, "c._req = cred.req",
+		"the preset-to-query copy must turn the preset's req into the wire's _req, or a zkp_req query asks the wallet for nothing")
+
+	// The item key, which is the half that broke the live operator UI:
+	// the schema validated `id` while the server published `fn_id`, so
+	// parsing /ui/metadata threw and the page never left its spinner.
+	source, err := os.ReadFile(filepath.Join("..", "staticembed", "req-schema.js"))
+	require.NoError(t, err)
+	check := between(t, string(source), "export const reqSchema", "\n);")
+	require.Contains(t, check, "item.fn_id",
+		"req-schema.js must check the v0.4 item key fn_id")
+	require.NotContains(t, check, "item.id",
+		"req-schema.js still checks the pre-v0.4 item key id, which the server no longer publishes")
 }

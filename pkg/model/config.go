@@ -854,7 +854,7 @@ type VerificationPresetScope struct {
 	// query discloses no issuer-signed attribute at all - every value it
 	// yields is the output of a function named in Req - so neither these
 	// claims nor the VCTM fall-back are attached to it. Listing claims on
-	// a circuit_zk credential is a configuration mistake rather than an
+	// a zkp_req credential is a configuration mistake rather than an
 	// instruction, and is dropped rather than honoured.
 	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
 	// ExcludeClaims lists claims to exclude from the DCQL query.
@@ -878,8 +878,8 @@ type VerificationPresetScope struct {
 	// required whenever Format is "zkp_req", since such a query
 	// discloses nothing and every value comes from a function named here.
 	//
-	// A circuit_zk preset needs TWO things to be published: a non-empty
-	// req here, and verifier.preferred_vp_formats.circuit_zk advertising
+	// A zkp_req preset needs TWO things to be published: a non-empty
+	// req here, and verifier.preferred_vp_formats.zkp_req advertising
 	// the format (an empty mapping will do - see that field). Without
 	// either, the preset is omitted and the reason is logged, rather than
 	// a button being offered that asks a wallet for a proof the request
@@ -915,7 +915,7 @@ type VerificationPresetScope struct {
 	// flag. An operator who wants to be told their preset violates the
 	// nym_auth rulebook asks for it by name and is told while they are
 	// still editing configuration; traffic is never validated, because a
-	// circuit_zk request that is not a nym_auth request is not invalid and
+	// zkp_req request that is not a nym_auth request is not invalid and
 	// this server is not the one to decide.
 	Validate string `yaml:"validate,omitempty" validate:"omitempty,oneof=nym_auth" doc_example:"\"nym_auth\""`
 }
@@ -963,9 +963,9 @@ type Verifier struct {
 	//
 	// Required for a zkp_req preset. The circuit filter - which proof
 	// systems and circuits this Verifier will accept a proof from - lives
-	// at preferred_vp_formats.circuit_zk and nowhere else, so a preset
+	// at preferred_vp_formats.zkp_req and nowhere else, so a preset
 	// using that format is NOT PUBLISHED unless it is set. An empty
-	// `circuit_zk: {}` is a complete answer and means "any circuit"; no
+	// `zkp_req: {}` is a complete answer and means "any circuit"; no
 	// default is supplied, because those identifiers are
 	// deployment-specific and guessing one would pin this Verifier to a
 	// single implementation.

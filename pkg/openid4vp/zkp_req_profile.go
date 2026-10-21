@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// ProfileNymAuth validates a circuit_zk request against the EUDI nym_auth
+// ProfileNymAuth validates a zkp_req request against the EUDI nym_auth
 // rulebook.
 //
 // It is one profile among possible others, which is why it is named
-// rather than being a "strict" flag. A circuit_zk request that is not a
+// rather than being a "strict" flag. A zkp_req request that is not a
 // nym_auth request is not invalid - the format is general, the rulebook
 // is one use of it - and a boolean would say otherwise.
 const ProfileNymAuth = "nym_auth"
@@ -81,7 +81,7 @@ func validateNymAuth(query CredentialQuery) error {
 		return fmt.Errorf("a raw query cannot be checked against the %s profile; the profile reads members a raw query does not model", ProfileNymAuth)
 	}
 	if !IsZkpReqFormat(query.Format) {
-		return fmt.Errorf("format is %q, and the %s profile describes circuit_zk requests", query.Format, ProfileNymAuth)
+		return fmt.Errorf("format is %q, and the %s profile describes zkp_req requests", query.Format, ProfileNymAuth)
 	}
 	if err := validateNymAuthMeta(query.Meta); err != nil {
 		return err
@@ -95,7 +95,7 @@ func validateNymAuth(query CredentialQuery) error {
 		return fmt.Errorf("require_cryptographic_holder_binding is explicitly false, which the %s rulebook does not allow", ProfileNymAuth)
 	}
 	if len(query.Claims) > 0 || len(query.ClaimSet) > 0 {
-		return fmt.Errorf("a circuit_zk query discloses nothing, so it carries no claims: every value comes from req")
+		return fmt.Errorf("a zkp_req query discloses nothing, so it carries no claims: every value comes from req")
 	}
 	if len(query.Req) == 0 {
 		return fmt.Errorf("req is required and must not be empty")
