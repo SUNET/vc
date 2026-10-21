@@ -69,7 +69,8 @@ func (c *Client) verifyCircuitZkPresentation(
 			// Unreachable after validation, which requires exactly
 			// the request's handles - and checked anyway, because
 			// the alternative is verifying against a zero pseudonym.
-			return nil, fmt.Errorf("zkp_req: no pseudonym for handle %q", item.Return)
+			return nil, refuseZkpReq(CodeZkpReqNoPseudonym,
+				fmt.Sprintf("no pseudonym for handle %q", item.Return), nil)
 		}
 
 		config, err := circuitZkConfigOf(item)
@@ -85,7 +86,13 @@ func (c *Client) verifyCircuitZkPresentation(
 		copy(claimedArray[:], claimed)
 		pseudonym, err := native.Verify(request, claimedArray, presentation.Proof)
 		if err != nil {
-			return nil, fmt.Errorf("zkp_req: handle %q: %w", item.Return, err)
+			// The proof did not verify against the issuer key the key
+			// set established. Which handle it was is the useful part
+			// for a prover; WHY is deliberately not elaborated, since
+			// the only honest answer is "the proof is not valid for
+			// these public inputs".
+			return nil, refuseZkpReq(CodeZkpReqProofDidNotVerify,
+				fmt.Sprintf("the proof did not verify for handle %q", item.Return), err)
 		}
 		// The RETURNED value, never the claimed one.
 		verified[item.Return] = pseudonym[:]
@@ -102,8 +109,9 @@ func (c *Client) verifyCircuitZkPresentation(
 		// must not send; refused here rather than only where requests
 		// are built, because this is the point that cannot be
 		// bypassed.
-		return nil, fmt.Errorf("zkp_req: this request asks only for predicates, and the proof is checked by verifying a pseudonym; "+
-			"a predicate-only request has no verification path in this build, so its %d result(s) cannot be accepted", len(items))
+		return nil, refuseZkpReq(CodeZkpReqNothingChecked,
+			fmt.Sprintf("this request asks only for predicates, and the proof is checked by verifying a pseudonym; "+
+				"a predicate-only request has no verification path in this build, so its %d result(s) cannot be accepted", len(items)), nil)
 	}
 	return verified, nil
 }
