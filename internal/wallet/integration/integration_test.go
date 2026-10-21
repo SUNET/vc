@@ -86,6 +86,10 @@ type testEnvironment struct {
 	iaCodeStatus        int
 	iaInteractionStatus int
 
+	// iaOmitAuthSession makes a presentation challenge carry no
+	// auth_session, which leaves the wallet nothing to continue with.
+	iaOmitAuthSession bool
+
 	// offerIssuerState makes /credential-offer serve an issuer-initiated
 	// offer whose authorization_code grant carries a FRESH issuer_state on
 	// every fetch, which is what a real prepared issuance does. Two runs
@@ -383,6 +387,9 @@ func (env *testEnvironment) setupOAuth2Server() {
 				body["expires_in"] = 60
 			} else {
 				body["openid4vp_request"] = env.interactiveAuthorizationRequest()
+				if env.iaOmitAuthSession {
+					delete(body, "auth_session")
+				}
 			}
 
 			status := http.StatusForbidden

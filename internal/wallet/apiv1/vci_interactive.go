@@ -138,6 +138,12 @@ func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2Ser
 
 		switch resp.InteractionTypeRequired {
 		case interactionOpenID4VPPresentation:
+			// Without auth_session the answer would be taken as a new
+			// initial request, so a presentation would be disclosed for
+			// an exchange that cannot continue.
+			if resp.AuthSession == "" {
+				return "", fmt.Errorf("issuer requires %s but sent no auth_session to continue the exchange with; refusing to present", resp.InteractionTypeRequired)
+			}
 			encoded, err := c.performPresentationInteraction(ctx, endpoint, &resp, vci, result)
 			if err != nil {
 				return "", err

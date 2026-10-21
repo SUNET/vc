@@ -1044,3 +1044,38 @@ func TestVCI_InteractiveAuthorization_RequiresTheSpecifiedStatus(t *testing.T) {
 		})
 	}
 }
+
+// A presentation challenge without auth_session cannot be continued, so
+// answering it would disclose a credential for nothing.
+func TestVCI_InteractiveAuthorization_RefusesToPresentWithoutAuthSession(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+		e.iaOmitAuthSession = true
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-no-auth-session",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-no-auth-session")
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	assert.Contains(t, result.Error, "auth_session")
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.Len(t, requests, 1, "nothing is sent after a challenge that cannot be continued")
+	for _, step := range result.Steps {
+		assert.NotEqual(t, "openid4vp_presentation", step.Name, "no presentation may be built")
+	}
+}
