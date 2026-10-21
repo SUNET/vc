@@ -1,9 +1,9 @@
 import * as v from "valibot";
 
 /**
- * reqSchema validates a circuit_zk `req` WITHOUT rebuilding it.
+ * reqSchema validates a zkp_req `req` WITHOUT rebuilding it.
  *
- * `req` is the circuit_zk format's list of requested calculations, and its
+ * `req` is the zkp_req format's list of requested calculations, and its
  * `params` are inputs to a proof: the server passes them through exactly
  * as an operator configured them, and so must the browser. A parameter
  * silently removed on the way out is a different proof input, which is a
@@ -21,8 +21,8 @@ import * as v from "valibot";
  *
  *   params in  -> config, constructor, prototype, normal
  *   params out -> config, normal
- *   item   in  -> id, return, params, toString, extra
- *   item   out -> id, return, params, extra
+ *   item   in  -> fn_id, return, params, toString, extra
+ *   item   out -> fn_id, return, params, extra
  *
  * So the shape is CHECKED and the original value is handed back
  * untouched: `v.any()` performs no transformation, and `v.check` cannot,
@@ -44,13 +44,13 @@ export const reqSchema = v.pipe(
                     item !== null &&
                     typeof item === "object" &&
                     !Array.isArray(item) &&
-                    typeof item.id === "string" &&
+                    typeof item.fn_id === "string" &&
                     typeof item.return === "string" &&
                     (item.params === undefined ||
                         (typeof item.params === "object" &&
                             item.params !== null &&
                             !Array.isArray(item.params))),
             ),
-        "req must be an array of {id, return, params?} items",
+        "req must be an array of {fn_id, return, params?} items",
     ),
 );
