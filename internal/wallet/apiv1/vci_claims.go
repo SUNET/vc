@@ -124,6 +124,9 @@ func (sd *sdJWT) resolve(node any, path []*string, need []string) []claimMatch {
 			child, elementNeed := element, need
 			if disc, ok := sd.arrayElement(element); ok {
 				child, elementNeed = disc.value, append(slices.Clone(need), disc.raw)
+			} else if isArrayPlaceholder(element) {
+				// An undisclosed element or a decoy: there is no value to match.
+				continue
 			}
 			matches = append(matches, sd.resolve(child, path[1:], elementNeed)...)
 		}
@@ -163,6 +166,17 @@ func (sd *sdJWT) nested(node any) []string {
 		}
 	}
 	return out
+}
+
+// isArrayPlaceholder reports whether element is a {"...": digest} array
+// element marker (SD-JWT §4.2.4.2), disclosed or not.
+func isArrayPlaceholder(element any) bool {
+	m, ok := element.(map[string]any)
+	if !ok || len(m) != 1 {
+		return false
+	}
+	_, ok = m["..."].(string)
+	return ok
 }
 
 func (sd *sdJWT) arrayElement(element any) (sdDisclosure, bool) {

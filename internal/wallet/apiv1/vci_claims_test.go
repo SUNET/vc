@@ -167,3 +167,48 @@ func TestMatchingCredentials_NonSDJWTWithClaimsDoesNotMatch(t *testing.T) {
 	q.Claims = nil
 	assert.Len(t, matchingCredentials(candidates, q), 1)
 }
+
+// An array element whose disclosure is absent - not held, or a decoy - has
+// no value, so a wildcard over the array must not be satisfied by it.
+func TestSelectClaims_UndisclosedArrayPlaceholderIsNotAValue(t *testing.T) {
+	_, held := disclosure(t, "salt-se", "SE")
+	payload, err := json.Marshal(map[string]any{
+		"vct":           "urn:test",
+		"nationalities": []any{map[string]any{"...": "decoy-digest"}, map[string]any{"...": held}},
+	})
+	require.NoError(t, err)
+	// Neither disclosure is present: one is a decoy, the other was not kept.
+	raw := "eyJhbGciOiJFUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(payload) + ".sig~"
+
+	wildcard := openid4vp.CredentialQuery{
+		ID:     "nat",
+		Format: "dc+sd-jwt",
+		Claims: []openid4vp.ClaimQuery{{Path: []*string{new("nationalities"), nil}}},
+	}
+	_, ok := selectClaims(raw, wildcard)
+	assert.False(t, ok, "an unresolved placeholder must not satisfy a terminal wildcard")
+
+	alternative, _ := testSDJWT(t)
+	candidates := []*credential.StoredCredential{
+		{ID: "placeholders-only", Format: "dc+sd-jwt", VCT: "urn:test", RawCredential: raw},
+	}
+	other := []*credential.StoredCredential{
+		{ID: "has-given-name", Format: "dc+sd-jwt", VCT: "urn:test", RawCredential: alternative},
+	}
+	given := openid4vp.CredentialQuery{ID: "given", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("given_name")}}}
+
+	answerable := map[string][]*credential.StoredCredential{}
+	if m := matchingCredentials(candidates, wildcard); len(m) > 0 {
+		answerable["nat"] = m
+	}
+	if m := matchingCredentials(other, given); len(m) > 0 {
+		answerable["given"] = m
+	}
+	selected, err := selectCredentialQueries(&openid4vp.DCQL{
+		Credentials:    []openid4vp.CredentialQuery{wildcard, given},
+		CredentialSets: []openid4vp.CredentialSetQuery{{Options: [][]string{{"nat"}, {"given"}}}},
+	}, answerable)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"given": true}, selected,
+		"the unsatisfiable option must not be chosen over a valid alternative")
+}
