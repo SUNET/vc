@@ -282,6 +282,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkPreAuthOfferExposure(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	if err := checkPresentationScopeFromScope(cfg, serviceName); err != nil {
 		return nil, err
 	}
@@ -1030,6 +1034,74 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	}
 
 	return secrets, nil
+}
+
+// checkPreAuthOfferExposure refuses a configuration where
+// allow_preauth_offer would be a login bypass.
+//
+// The flag lets POST /api/v1/datastore/preauth_offer mint an offer for a
+// scope that is otherwise login-gated. On a deployment where that
+// endpoint has no authenticated principal in front of it, that is an open
+// endpoint for minting a credential whose whole point is that it requires
+// a login - available to anyone who can reach the port.
+//
+// Refused here rather than guarded in the handler, for the same reason
+// interactive_authorization is: with neither JWKS nor OIDC configured the
+// API-auth middleware is a pass-through, and the admin session it would
+// otherwise look for is granted anonymously when OIDC is absent. There is
+// no authenticated principal to require, so the only honest check is on
+// the configuration that left none.
+//
+// A scope whose auth_provider IS preauth is not covered: nothing is
+// bypassed by minting an offer for a credential that has no other way to
+// be issued, and that is the behaviour this endpoint already had.
+func checkPreAuthOfferExposure(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+
+	flagged := []string{}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Datastore.Scopes)) {
+		entry := cfg.APIGW.DataSources.Datastore.Scopes[scope]
+		if entry.AllowPreAuthOffer && entry.AuthProvider != model.AuthProviderPreAuth {
+			flagged = append(flagged, scope)
+		}
+	}
+	if len(flagged) == 0 {
+		return nil
+	}
+	named := strings.Join(flagged, ", ")
+
+	if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+		return fmt.Errorf(
+			"apigw.data_sources.datastore.scopes sets allow_preauth_offer on login-gated %s "+
+				"but apigw.api_server.api_auth configures neither jwks nor oidc: the flag lets "+
+				"/api/v1/datastore/preauth_offer mint an offer for a credential this scope "+
+				"otherwise gates behind a login, and without API authentication anyone who can "+
+				"reach the port may call it", named)
+	}
+
+	// Having a Bearer mode configured is not enough on its own, because
+	// the admin session is an alternative to it rather than a second check
+	// on top of it.
+	//
+	// With the admin UI on and no OIDC, /ui/login grants a session with
+	// admin_subject "anonymous" to anybody who asks, and SessionOrAPIAuth
+	// accepts a session INSTEAD of falling through to the Bearer
+	// middleware. So a deployment with jwks enabled and the admin UI on
+	// still exposes minting to an anonymous caller, and the JWKS
+	// configuration says nothing about it.
+	if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+		return fmt.Errorf(
+			"apigw.data_sources.datastore.scopes sets allow_preauth_offer on login-gated %s "+
+				"with apigw.admin_ui_enable true and apigw.api_server.api_auth.oidc disabled: "+
+				"the admin UI grants an anonymous session when OIDC is absent, and that session "+
+				"is accepted in place of a bearer token - so /api/v1/datastore/preauth_offer "+
+				"would be reachable without authenticating anybody. Configure oidc, or turn the "+
+				"admin UI off", named)
+	}
+
+	return nil
 }
 
 // checkInteractiveAuthorization refuses a configuration that advertises

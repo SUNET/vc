@@ -1164,3 +1164,71 @@ func TestDatastorePreAuthOffer_ChecksDatastoreEntrySpecifically(t *testing.T) {
 	require.ErrorAs(t, err, &helperErr)
 	assert.Equal(t, "invalid_scope", helperErr.Title)
 }
+
+// --- allow_preauth_offer ---
+
+// preAuthOfferClientWithScopes is newPreAuthOfferTestClient with the
+// datastore scopes replaced, so a case can say exactly how the scope it
+// mints for is configured.
+func preAuthOfferClientWithScopes(t *testing.T, scopes map[string]model.DatastoreScope) (*Client, *memoryDatastoreStore) {
+	t.Helper()
+	client, datastore := newPreAuthOfferTestClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes = scopes
+	return client, datastore
+}
+
+// The gate this endpoint has always had. A login-gated scope is not
+// mintable as an offer, because that would hand out a credential whose
+// whole point is that it required a login.
+//
+// This is the case allow_preauth_offer makes configurable, so it is the
+// case that must keep failing when the flag is absent.
+func TestDatastorePreAuthOfferRefusesALoginGatedScopeWithoutTheFlag(t *testing.T) {
+	client, datastore := preAuthOfferClientWithScopes(t, map[string]model.DatastoreScope{
+		"diploma": {AuthProvider: model.AuthProviderOIDC},
+	})
+	seedDoc(t, datastore, "SUNET", "diploma", "doc-1", []string{"person-1"}, map[string]any{"given_name": "John"})
+
+	_, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET", Scope: "diploma", DocumentID: "doc-1",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allow_preauth_offer",
+		"the refusal must name the flag, or an operator cannot tell this apart from a missing scope")
+}
+
+// With the flag, the same scope is mintable - and the offer names the
+// BASE configuration id, which is the whole point: the twin scope existed
+// only to carry a second id for the same credential.
+func TestDatastorePreAuthOfferAcceptsAFlaggedScopeAndNamesTheBaseConfiguration(t *testing.T) {
+	client, datastore := preAuthOfferClientWithScopes(t, map[string]model.DatastoreScope{
+		"diploma": {AuthProvider: model.AuthProviderOIDC, AllowPreAuthOffer: true},
+	})
+	seedDoc(t, datastore, "SUNET", "diploma", "doc-1", []string{"person-1"}, map[string]any{"given_name": "John"})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET", Scope: "diploma", DocumentID: "doc-1",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"diploma"}, reply.CredentialOffer.CredentialConfigurationIDs,
+		"the offer must name the base configuration, not a twin")
+	_, ok := reply.CredentialOffer.Grants[openid4vci.GrantTypePreAuthorizedCode]
+	assert.True(t, ok)
+}
+
+// A scope with no datastore entry at all is refused for a different
+// reason, and says so. Pinned because the flag added a second clause to
+// the same check, and one message covering both would leave an operator
+// guessing which of the two they have.
+func TestDatastorePreAuthOfferRefusesAnUnknownScopeByName(t *testing.T) {
+	client, datastore := preAuthOfferClientWithScopes(t, map[string]model.DatastoreScope{
+		"diploma": {AuthProvider: model.AuthProviderOIDC, AllowPreAuthOffer: true},
+	})
+	seedDoc(t, datastore, "SUNET", "no_such_scope", "doc-1", []string{"person-1"}, map[string]any{"given_name": "John"})
+
+	_, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET", Scope: "no_such_scope", DocumentID: "doc-1",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no datastore entry")
+}
