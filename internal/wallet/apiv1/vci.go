@@ -142,6 +142,10 @@ func (c *Client) executeScenario(ctx context.Context, scenario *config.Scenario)
 
 // runVCIScenario executes an OpenID4VCI credential issuance flow
 func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, result *ScenarioResult) error {
+	// Everything this run discovers for itself lives here rather than on
+	// the scenario, which is shared between runs. See vciFlow.
+	flow := newVCIFlow(vci)
+
 	// Step 1: Resolve credential offer or metadata
 	var issuerURL string
 	var credentialConfigID string
@@ -163,14 +167,7 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 			credentialConfigID = offerParams.CredentialConfigurationIDs[0]
 		}
 
-		// Check for pre-authorized code in grants
-		if grants, ok := offerParams.Grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"]; ok {
-			if grantMap, ok := grants.(map[string]any); ok {
-				if code, ok := grantMap["pre-authorized_code"].(string); ok {
-					vci.PreAuthorizedCode = code
-				}
-			}
-		}
+		flow.adoptOfferGrants(offerParams.Grants)
 	} else if vci.CredentialOffer != "" {
 		step := StepResult{Name: "parse_credential_offer", StartedAt: time.Now()}
 		var offerParams openid4vci.CredentialOfferParameters
@@ -186,6 +183,10 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 		if len(offerParams.CredentialConfigurationIDs) > 0 {
 			credentialConfigID = offerParams.CredentialConfigurationIDs[0]
 		}
+
+		// The same grants, through the same path. An inline offer is the
+		// other spelling of the same document, not a lesser one.
+		flow.adoptOfferGrants(offerParams.Grants)
 	} else {
 		issuerURL = vci.IssuerURL
 		credentialConfigID = vci.CredentialConfigurationID
@@ -212,11 +213,19 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 	step.Detail = fmt.Sprintf("credential_endpoint=%s configs=%d", metadata.CredentialEndpoint, len(metadata.CredentialConfigurationsSupported))
 	result.Steps = append(result.Steps, step)
 
+	// The Issuer publishes which scope asks for which credential
+	// configuration, so a scenario that named only the configuration does
+	// not have to repeat it.
+	flow.adoptAdvertisedScope(metadata, credentialConfigID)
+
 	// Step 3: Fetch OAuth2 authorization server metadata
 	step = StepResult{Name: "fetch_oauth2_metadata", StartedAt: time.Now()}
-	authServerURL := issuerURL
-	if len(metadata.AuthorizationServers) > 0 {
-		authServerURL = metadata.AuthorizationServers[0]
+	authServerURL, err := flow.authorizationServerFor(metadata, issuerURL)
+	if err != nil {
+		step.Error = err.Error()
+		step.CompletedAt = time.Now()
+		result.Steps = append(result.Steps, step)
+		return err
 	}
 	oauth2Meta, err := c.fetchOAuth2Metadata(ctx, authServerURL)
 	step.CompletedAt = time.Now()
@@ -248,9 +257,9 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 	var accessToken string
 	var tokenType string
 
-	if vci.PreAuthorizedCode != "" {
+	if flow.preAuthorizedCode != "" {
 		step = StepResult{Name: "token_request_pre_auth", StartedAt: time.Now()}
-		tokenResp, err := c.tokenRequestPreAuth(ctx, oauth2Meta.TokenEndpoint, vci)
+		tokenResp, err := c.tokenRequestPreAuth(ctx, oauth2Meta.TokenEndpoint, vci, flow)
 		step.CompletedAt = time.Now()
 		if err != nil {
 			step.Error = err.Error()
@@ -264,10 +273,47 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 		}
 		step.Detail = fmt.Sprintf("token_type=%s c_nonce=%s", tokenType, cNonce)
 		result.Steps = append(result.Steps, step)
+	} else if vci.UseInteractiveAuthorization || (oauth2Meta.interactiveAuthorizationRequired() && oauth2Meta.challengeEndpoint() != "") {
+		// OpenID4VCI 1.1 Interactive Authorization. Taken either because
+		// the scenario asked for it, or because the issuer says it
+		// accepts nothing else - a wallet that ignored
+		// require_interactive_authorization would send the user to a
+		// browser that refuses them.
+		step = StepResult{Name: "interactive_authorization", StartedAt: time.Now()}
+		authCode, err := c.doInteractiveAuthorization(ctx, oauth2Meta, vci, flow, result)
+		step.CompletedAt = time.Now()
+		if err != nil {
+			step.Error = err.Error()
+			result.Steps = append(result.Steps, step)
+			return fmt.Errorf("interactive authorization: %w", err)
+		}
+		result.Steps = append(result.Steps, step)
+
+		// DPoP is not optional on this leg. The Authorization Challenge
+		// Endpoint binds every exchange to the key the challenge was sent
+		// with, and the Token Endpoint refuses a code carrying that
+		// binding unless the redemption proves the same key. Leaving it to
+		// vci.UseDPoP meant the default Interactive Authorization scenario
+		// obtained a code it could not spend.
+		step = StepResult{Name: "token_request_auth_code", StartedAt: time.Now()}
+		tokenResp, err := c.tokenRequestAuthCode(ctx, oauth2Meta.TokenEndpoint, authCode, vci, flow, true)
+		step.CompletedAt = time.Now()
+		if err != nil {
+			step.Error = err.Error()
+			result.Steps = append(result.Steps, step)
+			return fmt.Errorf("token request: %w", err)
+		}
+		accessToken = tokenResp.AccessToken
+		tokenType = tokenResp.TokenType
+		if tokenResp.CNonce != "" {
+			cNonce = tokenResp.CNonce
+		}
+		step.Detail = fmt.Sprintf("token_type=%s", tokenType)
+		result.Steps = append(result.Steps, step)
 	} else {
 		// Authorization code flow
 		step = StepResult{Name: "authorization", StartedAt: time.Now()}
-		authCode, err := c.doAuthorization(ctx, oauth2Meta, vci, credentialConfigID)
+		authCode, err := c.doAuthorization(ctx, oauth2Meta, vci, flow, credentialConfigID)
 		step.CompletedAt = time.Now()
 		if err != nil {
 			step.Error = err.Error()
@@ -278,7 +324,7 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 		result.Steps = append(result.Steps, step)
 
 		step = StepResult{Name: "token_request_auth_code", StartedAt: time.Now()}
-		tokenResp, err := c.tokenRequestAuthCode(ctx, oauth2Meta.TokenEndpoint, authCode, vci)
+		tokenResp, err := c.tokenRequestAuthCode(ctx, oauth2Meta.TokenEndpoint, authCode, vci, flow, vci.UseDPoP)
 		step.CompletedAt = time.Now()
 		if err != nil {
 			step.Error = err.Error()
@@ -403,6 +449,35 @@ type oauth2ServerMetadata struct {
 	TokenEndpoint         string `json:"token_endpoint"`
 	PAREndpoint           string `json:"pushed_authorization_request_endpoint"`
 	NonceEndpoint         string `json:"nonce_endpoint"`
+
+	// The OpenID4VCI 1.1 Interactive Authorization members, under the
+	// spellings its normative text uses.
+	ChallengeEndpoint               string `json:"authorization_challenge_endpoint"`
+	RequireInteractiveAuthorization bool   `json:"require_interactive_authorization"`
+
+	// And under the spellings its change log records instead. A wallet is
+	// the party that has to interoperate with whichever a server chose,
+	// so it reads both rather than picking a side - see
+	// openid/OpenID4VCI#811. Unexported from the scenario's point of
+	// view: challengeEndpoint() below is what callers use.
+	ChallengeEndpointAlt               string `json:"interactive_authorization_endpoint"`
+	RequireInteractiveAuthorizationAlt bool   `json:"require_interactive_authorization_request"`
+}
+
+// challengeEndpoint is the Authorization Challenge Endpoint under
+// whichever spelling this server published it, or "" if it published
+// neither.
+func (m *oauth2ServerMetadata) challengeEndpoint() string {
+	if m.ChallengeEndpoint != "" {
+		return m.ChallengeEndpoint
+	}
+	return m.ChallengeEndpointAlt
+}
+
+// interactiveAuthorizationRequired reports whether this server accepts
+// only Interactive Authorization, under either spelling.
+func (m *oauth2ServerMetadata) interactiveAuthorizationRequired() bool {
+	return m.RequireInteractiveAuthorization || m.RequireInteractiveAuthorizationAlt
 }
 
 func (c *Client) fetchOAuth2Metadata(ctx context.Context, serverURL string) (*oauth2ServerMetadata, error) {
@@ -446,10 +521,10 @@ func (c *Client) fetchNonce(ctx context.Context, issuerURL string) (*openid4vci.
 	return &nonceResp, nil
 }
 
-func (c *Client) tokenRequestPreAuth(ctx context.Context, tokenEndpoint string, vci *config.VCIScenario) (*openid4vci.TokenResponse, error) {
+func (c *Client) tokenRequestPreAuth(ctx context.Context, tokenEndpoint string, vci *config.VCIScenario, flow *vciFlow) (*openid4vci.TokenResponse, error) {
 	data := url.Values{
 		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
-		"pre-authorized_code": {vci.PreAuthorizedCode},
+		"pre-authorized_code": {flow.preAuthorizedCode},
 	}
 	if vci.TXCode != "" {
 		data.Set("tx_code", vci.TXCode)
@@ -480,6 +555,19 @@ func (c *Client) tokenRequestPreAuth(ctx context.Context, tokenEndpoint string, 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		// OpenID4VCI 1.1 added invalid_tx_code, and the distinction it
+		// draws is one the Holder sees: 1.0 answered invalid_grant both
+		// for a mistyped Transaction Code and for an offer that is
+		// finished, so a wallet could not tell "try again" from "this is
+		// over". Reported as its own error so a scenario can assert which
+		// one an issuer sent.
+		var oauthErr struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		if json.Unmarshal(body, &oauthErr) == nil && oauthErr.Error == "invalid_tx_code" {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidTXCode, oauthErr.ErrorDescription)
+		}
 		return nil, fmt.Errorf("token request HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -490,15 +578,13 @@ func (c *Client) tokenRequestPreAuth(ctx context.Context, tokenEndpoint string, 
 	return &tokenResp, nil
 }
 
-func (c *Client) doAuthorization(ctx context.Context, oauth2Meta *oauth2ServerMetadata, vci *config.VCIScenario, credentialConfigID string) (string, error) {
+func (c *Client) doAuthorization(ctx context.Context, oauth2Meta *oauth2ServerMetadata, vci *config.VCIScenario, flow *vciFlow, credentialConfigID string) (string, error) {
 	codeVerifier := uuid.New().String() + uuid.New().String()
 	codeChallenge := computeS256Challenge(codeVerifier)
+	flow.codeVerifier = codeVerifier
 
 	state := uuid.New().String()
-	redirectURI := vci.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8080/callback"
-	}
+	redirectURI := redirectURIFor(vci)
 
 	if vci.UsePAR && oauth2Meta.PAREndpoint != "" {
 		parData := url.Values{
@@ -600,11 +686,8 @@ func (c *Client) followAuthorization(ctx context.Context, authURL string) (strin
 	return "", fmt.Errorf("authorization did not redirect (HTTP %d): %s", resp.StatusCode, string(body))
 }
 
-func (c *Client) tokenRequestAuthCode(ctx context.Context, tokenEndpoint, code string, vci *config.VCIScenario) (*openid4vci.TokenResponse, error) {
-	redirectURI := vci.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8080/callback"
-	}
+func (c *Client) tokenRequestAuthCode(ctx context.Context, tokenEndpoint, code string, vci *config.VCIScenario, flow *vciFlow, requireDPoP bool) (*openid4vci.TokenResponse, error) {
+	redirectURI := redirectURIFor(vci)
 
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
@@ -613,13 +696,21 @@ func (c *Client) tokenRequestAuthCode(ctx context.Context, tokenEndpoint, code s
 		"client_id":    {c.cfg.Wallet.ClientID},
 	}
 
+	// The verifier for the challenge this code came from. It was computed
+	// and then never sent, so every PKCE-enforcing issuer refused this
+	// wallet's authorization_code requests - and the half of PKCE that
+	// does the work is this half.
+	if flow.codeVerifier != "" {
+		data.Set("code_verifier", flow.codeVerifier)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	if vci.UseDPoP {
+	if requireDPoP || vci.UseDPoP {
 		dpopToken, err := c.createDPoPProof(http.MethodPost, tokenEndpoint, "")
 		if err != nil {
 			return nil, fmt.Errorf("creating DPoP proof: %w", err)
@@ -836,6 +927,34 @@ func (c *Client) createProofJWT(ctx context.Context, audience, cNonce string) (s
 	return signed, nil
 }
 
+// dpopHTU is the "htu" claim for a request to uri: RFC 9449 §4.2 defines
+// it as the HTTP target URI WITHOUT its query and fragment.
+//
+// The URI was being copied in whole, so an endpoint published with a
+// query - "https://as.example/challenge?tenant=a", which is an ordinary
+// way to write a multi-tenant deployment - produced a proof that this
+// repository's own validator rejects, in pkg/oauth2.DPoP.Validate. Every
+// DPoP-protected request this wallet makes would have failed against such
+// a deployment, and the failure would have looked like the server's.
+//
+// Only the claim is trimmed. The request still goes to the full URI; the
+// query is part of where the wallet is talking to, just not part of what
+// the proof is bound to.
+func dpopHTU(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		// Not a URL this function can take apart. The server will reject
+		// the proof, which is the honest outcome - inventing an htu here
+		// would only hide where the problem is.
+		return uri
+	}
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	u.RawFragment = ""
+	return u.String()
+}
+
 func (c *Client) createDPoPProof(method, uri, accessToken string) (string, error) {
 	_, alg := jose.GetSigningMethodFromKey(c.signingKey)
 
@@ -853,7 +972,7 @@ func (c *Client) createDPoPProof(method, uri, accessToken string) (string, error
 	body := jwtv5.MapClaims{
 		"jti": uuid.New().String(),
 		"htm": method,
-		"htu": uri,
+		"htu": dpopHTU(uri),
 		"iat": time.Now().Unix(),
 	}
 

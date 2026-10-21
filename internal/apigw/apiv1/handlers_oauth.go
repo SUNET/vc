@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -23,6 +24,50 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// requestURITTL bounds how long a request_uri may be left unredeemed.
+//
+// It is short because it protects one round trip: the wallet has the value
+// in hand already and only has to open a browser with it.
+const requestURITTL = 60 * time.Second
+
+// authorizationCodeTTL is how long an authorization code lives once
+// /authorize has consumed the request_uri that produced it.
+//
+// It covers the browser leg - authenticating at an IdP, the consent
+// screen, the redirect back - and the wallet's redemption at the Token
+// Endpoint afterwards, so it is measured in minutes rather than the
+// seconds a request_uri gets.
+//
+// requestURITTL + authorizationCodeTTL must stay inside
+// cache.AuthContextTTL, the physical lifetime of the document the deadline
+// is written on: MongoDB's TTL index is anchored to created_at and is not
+// moved by extending expires_at, so a deadline past that window would
+// advertise a code whose context has already been deleted.
+// TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the three to
+// that relationship.
+const authorizationCodeTTL = 5 * time.Minute
+
+// codeDeadlineWithin is the authorization code's deadline for a context
+// created at createdAt: a full authorizationCodeTTL, or the moment the
+// document itself goes away, whichever comes first.
+//
+// The cap is not belt and braces. A request_uri stays resolvable, so
+// /authorize can be entered repeatedly and each visit would otherwise
+// push the deadline another five minutes out - visits at minutes 0, 4, 8
+// and 12 all pass the expiry check and the last one extends to minute 17.
+// MongoDB's TTL index is anchored to created_at and is not moved by
+// extending expires_at, so beyond that the server is advertising a code
+// against a document already scheduled for deletion. Holding every
+// extension to the retention window makes the logical deadline a promise
+// the store can keep, however many times it is extended.
+func codeDeadlineWithin(createdAt time.Time) int64 {
+	deadline := time.Now().Add(authorizationCodeTTL)
+	if retention := createdAt.Add(apigwcache.AuthContextTTL); !createdAt.IsZero() && retention.Before(deadline) {
+		deadline = retention
+	}
+	return deadline.Unix()
+}
 
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
@@ -109,6 +154,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 	}
 
+	requestURIExpiresAt := time.Now().Add(requestURITTL).Unix()
 	azt := cache.AuthorizationContext{
 		SessionID:            uuid.NewString(),
 		Code:                 uuid.NewString(),
@@ -122,7 +168,8 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		ClientID:             fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
-		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
+		ExpiresAt:            requestURIExpiresAt,
+		RequestURIExpiresAt:  requestURIExpiresAt,
 		DynamicParams:        req.DynamicParams,
 	}
 
@@ -147,7 +194,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	reply := &openid4vci.ParResponse{
 		RequestURI: requestURI,
-		ExpiresIn:  60,
+		ExpiresIn:  int(requestURITTL.Seconds()),
 	}
 
 	return reply, nil
@@ -189,9 +236,41 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 		return nil, oauth2.ErrExpiredRequest
 	}
 
+	// ExpiresAt is moved to the code's deadline below, so the request_uri is held to its own.
+	if authorizationContext.RequestURIExpiresAt > 0 && time.Now().Unix() > authorizationContext.RequestURIExpiresAt {
+		c.log.Debug("request_uri expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
+
 	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
+	}
+
+	// The request_uri's life ends here; the authorization code's begins.
+	//
+	// Both are kept in one ExpiresAt, which is checked at PAR-time length
+	// again at the Token Endpoint - so without this a code is dead
+	// requestURITTLSeconds after the request_uri was issued, however long
+	// the browser leg in between actually took. Authenticating at an IdP
+	// and reading a consent screen routinely takes longer than that, and
+	// the wallet's redemption is then refused for a code it did nothing
+	// wrong to obtain.
+	//
+	// Extending here rather than when the code is minted is deliberate:
+	// this is the one place every browser-mediated flow passes through,
+	// whether the request_uri came from /op/par or from the auth_via_web
+	// interaction, and it is the moment the short deadline has done its
+	// job. It only ever extends (see ExtendExpiry), so re-entering
+	// /authorize cannot shorten a deadline, and authorizationCodeTTL is
+	// bounded so the extended deadline stays inside the store's own
+	// lifetime - see the constant. Re-entry itself is bounded by
+	// RequestURIExpiresAt, checked above, which this does not move.
+	codeExpiresAt := codeDeadlineWithin(authorizationContext.CreatedAt)
+	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
+		&cache.AuthorizationContext{RequestURI: req.RequestURI}, codeExpiresAt); err != nil {
+		c.log.Error(err, "failed to extend authorization context expiry", "request_uri", req.RequestURI)
+		return nil, err
 	}
 
 	var redirectURL string
@@ -210,6 +289,38 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	c.log.Debug("Authorize", "authorization", authorizationContext)
 
 	return reply, nil
+}
+
+// lookupCodeBeforeConsuming resolves an authorization code for one of the
+// checks that run BEFORE the code is consumed.
+//
+// Those checks exist because forfeiture is irreversible: a request with
+// the wrong client_id, redirect_uri, transaction code or DPoP key must be
+// refused without burning a code the legitimate wallet still needs. That
+// only works if "the store could not answer" is distinguished from "there
+// is no such code":
+//
+//   - absent (ErrNoDocuments) returns (nil, nil). The caller decides what
+//     that means - usually to carry on and let consumption answer, which
+//     gives a code that never existed and one already spent the same reply,
+//     as it should.
+//   - anything else is the store failing, and is reported as server_error.
+//     Reporting it as invalid_grant would tell a wallet its code is dead
+//     over a connection reset, and a wallet that believes that discards a
+//     code that was still good; silently skipping the check would let the
+//     request it was meant to refuse proceed to forfeiture.
+func (c *Client) lookupCodeBeforeConsuming(ctx context.Context, code string) (*cache.AuthorizationContext, error) {
+	doc, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+	switch {
+	case err == nil:
+		return doc, nil
+	case errors.Is(err, cache.ErrNoDocuments):
+		return nil, nil
+	default:
+		c.log.Error(err, "failed to look up authorization code before consuming it")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"failed to look up the authorization code", 500, err)
+	}
 }
 
 // OAuthToken implements OAuth 2.0 token endpoint for credential issuance
@@ -440,10 +551,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// (RFC 6749 §4.1.3). A mismatched client_id must not burn the code, otherwise
 	// an attacker with a stolen code could invalidate it for the legitimate client.
 	if !isPreAuthFlow {
-		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		preCheck, err := c.lookupCodeBeforeConsuming(ctx, code)
 		if err != nil {
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-				"Authorization code is invalid or has already been used", 400, err)
+			return nil, err
+		}
+		if preCheck == nil {
+			// No such code. Answered by the consumption below, which gives
+			// the same reply for a code that never existed as for one
+			// already spent - and that is the reply to give.
+			preCheck = &cache.AuthorizationContext{}
 		}
 		// Reject cross-grant use: a pre-authorized code must not be redeemable
 		// via authorization_code (which would bypass the tx_code check).
@@ -493,10 +609,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// Validate transaction code (PIN) BEFORE consuming the pre-authorized code
 	// so wrong-PIN attempts do not burn the code (OID4VCI §6.3).
 	if isPreAuthFlow {
-		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		preCheck, err := c.lookupCodeBeforeConsuming(ctx, code)
 		if err != nil {
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-				"Authorization code is invalid or has already been used", 400, err)
+			return nil, err
+		}
+		if preCheck == nil {
+			// No such pre-authorized code. Same reply as one already spent.
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400)
 		}
 		// Reject cross-grant use: a plain authorization_code context must not
 		// be redeemable via the pre-authorized_code grant.
@@ -1096,6 +1216,14 @@ type walletClientAuth struct {
 	RedirectURI string
 	Scope       string
 
+	// RedirectOptional drops the REQUIREMENT for a redirect_uri, not the
+	// check on one that is sent. The Authorization Challenge Endpoint is
+	// browserless - there is nowhere to send the user back to, and
+	// draft-ietf-oauth-first-party-apps makes the parameter optional on
+	// its request - so a registered wallet with no callback was refused
+	// with invalid_client, and only a wallet attestation got past it.
+	RedirectOptional bool
+
 	// ClientAttestation and ClientAttestationPoP are the headers
 	// draft-ietf-oauth-attestation-based-client-auth §3.1 defines.
 	ClientAttestation    string
@@ -1196,7 +1324,11 @@ func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (st
 // requirements, subject binding, SPOCP tier policy - is how two endpoints
 // come to disagree about who may ask for what.
 func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientAuth) (*oauth2.Client, error) {
-	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
+	allow := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow
+	if req.RedirectOptional {
+		allow = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.AllowWithoutRedirect
+	}
+	oauthClient, err := allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err == nil {
 		return oauthClient, nil
 	}
