@@ -90,11 +90,20 @@ type Service struct {
 // AuthContextTTL is how long an authorization context - and the ephemeral
 // key that belongs to it - survives.
 //
-// Named because it is also the ceiling on an Interactive Authorization
-// exchange: that exchange is nothing but an authorization context with a
-// handle on it, so it cannot be configured to outlive this. See
+// It is the ceiling on an Interactive Authorization exchange: that
+// exchange is nothing but an authorization context with a handle on it, so
+// it cannot be configured to outlive this. See
 // model.MaxAuthSessionTTLSeconds, which must not exceed it.
-const AuthContextTTL = 10 * time.Minute
+//
+// And it has to cover more than the exchange. Whatever started a flow -
+// a request_uri or an auth_session - hands over to an authorization code
+// when it is consumed, and the code's window runs from THAT moment, so the
+// document has to survive the longest possible first leg plus the code's
+// lifetime afterwards. MongoDB's TTL index is anchored to created_at and
+// is not moved by extending expires_at, so a document that outlived this
+// would be deleted with a code still advertised against it.
+// TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the sums to it.
+const AuthContextTTL = 15 * time.Minute
 
 // New creates the apigw cache service and initialises all caches.
 func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *trace.Tracer, log *logger.Log) (*Service, error) {

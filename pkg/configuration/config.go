@@ -226,6 +226,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
+		// Needs the schemas, so it runs after the loop above.
+		if err := checkCommitmentTargets(cfg); err != nil {
+			return nil, err
+		}
+
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
 		// document is consistent.
@@ -320,6 +325,35 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	}
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
+// checkCommitmentTargets settles every seed-backed claim against the
+// schemas this service has loaded, and refuses a configuration that would
+// not do what it says.
+//
+// The issuer cannot do this at ITS startup - it has no schemas, it
+// receives them inline per request - so without this the misconfiguration
+// surfaces when someone is waiting for a credential. And it surfaces
+// quietly: an mdoc signer emits the elements its schema declares and
+// ignores anything else in the document.
+//
+// The resolution itself lives in pkg/model and is the same call the issuer
+// makes at issuance. Two implementations of it had already drifted once.
+func checkCommitmentTargets(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		meta := cfg.Common.CredentialMetadata[scope]
+		if meta == nil || len(meta.Commitments) == 0 {
+			continue
+		}
+		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{MDoc: meta.MDDL, VCTM: meta.VCTM}); err != nil {
+			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
+		}
 	}
 	return nil
 }
@@ -1035,5 +1069,57 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
 	}
 
+	// Enabling the mechanism exposes POST /api/v1/issuance/prepare, which
+	// prepares an issuance bound to a Holder the CALLER names. On a
+	// deployment with no API authentication configured that is an open
+	// endpoint for minting credential offers against any identity rule the
+	// caller likes - precisely the trusted-portal step the mechanism
+	// exists to represent, available to anyone who can reach the port.
+	//
+	// Refused here rather than guarded in the handler, because the handler
+	// has no better answer available: with neither JWKS nor OIDC
+	// configured the API-auth middleware is a pass-through, and the admin
+	// session it would otherwise look for is granted anonymously when OIDC
+	// is absent. There is no authenticated principal to require, so the
+	// only honest check is on the configuration that left none.
+	if model.BoolVal(ia.Enable, false) {
+		if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+			return errors.New(
+				"apigw.delivery.interactive_authorization.enable is true but apigw.api_server.api_auth " +
+					"configures neither jwks nor oidc: enabling it exposes /api/v1/issuance/prepare, " +
+					"which prepares an issuance for a Holder the caller names, and without API " +
+					"authentication anyone who can reach the port may call it")
+		}
+
+		// Having a Bearer mode configured is not enough on its own,
+		// because the admin session is an alternative to it rather than a
+		// second check on top of it.
+		//
+		// With the admin UI on and no OIDC, /ui/login grants a session
+		// with admin_subject "anonymous" to anybody who asks, and
+		// SessionOrAPIAuth accepts a session INSTEAD of falling through
+		// to the Bearer middleware. So a deployment with jwks enabled and
+		// the admin UI on still exposes preparation to an anonymous
+		// caller, and the JWKS configuration says nothing about it.
+		if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+			return errors.New(
+				"apigw.delivery.interactive_authorization.enable is true with apigw.admin_ui_enable " +
+					"true and apigw.api_server.api_auth.oidc disabled: the admin UI grants an " +
+					"anonymous session when OIDC is absent, and that session is accepted in place " +
+					"of a bearer token - so /api/v1/issuance/prepare would be reachable without " +
+					"authenticating anybody. Configure oidc, or turn the admin UI off")
+		}
+	}
+
 	return nil
+}
+
+// apiAuthenticationConfigured reports whether a caller reaching the admin
+// API has to be anybody in particular.
+//
+// Only the two Bearer modes count. An admin session does not: it is
+// granted anonymously when OIDC is absent, so requiring one would be a
+// check that passes for everyone.
+func apiAuthenticationConfigured(apiAuth model.APIAuth) bool {
+	return apiAuth.JWKS.Enable || apiAuth.OIDC.Enable
 }

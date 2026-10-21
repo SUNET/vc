@@ -261,3 +261,47 @@ func TestValidateRedirectURIScheme(t *testing.T) {
 		})
 	}
 }
+
+// The Authorization Challenge Endpoint is browserless, so a registered
+// wallet may have no callback at all - draft-ietf-oauth-first-party-apps
+// makes redirect_uri optional on its request. Validating such a wallet
+// through Allow refused it with a redirect_uri mismatch, and the only way
+// past that was a wallet attestation the deployment may not use.
+//
+// The requirement is dropped; the check is not. A redirect_uri that IS
+// sent must still match, because a wrong one is wrong on any endpoint.
+func TestAllowWithoutRedirect(t *testing.T) {
+	clients := Clients{"wallet-1": {
+		RedirectURIs: RedirectURIs{"https://wallet.example/cb"},
+		Scopes:       []string{"pid"},
+	}}
+
+	// The precondition that makes the rest meaningful: Allow really does
+	// refuse this wallet when it sends no redirect_uri.
+	if _, err := clients.Allow("wallet-1", "", "pid"); err == nil {
+		t.Fatal("Allow must still require a redirect_uri; this test is about the variant that does not")
+	}
+
+	if _, err := clients.AllowWithoutRedirect("wallet-1", "", "pid"); err != nil {
+		t.Fatalf("a browserless request from a registered wallet must be allowed: %v", err)
+	}
+
+	// Sent and correct.
+	if _, err := clients.AllowWithoutRedirect("wallet-1", "https://wallet.example/cb", "pid"); err != nil {
+		t.Fatalf("a matching redirect_uri must still be allowed: %v", err)
+	}
+
+	// Sent and wrong: still refused, which is the half that must not be
+	// lost. Dropping the requirement is not dropping the check.
+	if _, err := clients.AllowWithoutRedirect("wallet-1", "https://attacker.example/cb", "pid"); err == nil {
+		t.Fatal("a redirect_uri that does not match must be refused even where one is optional")
+	}
+
+	// And the scope is validated either way.
+	if _, err := clients.AllowWithoutRedirect("wallet-1", "", "not-allowed"); err == nil {
+		t.Fatal("the scope check must survive")
+	}
+	if _, err := clients.AllowWithoutRedirect("unknown", "", "pid"); !errors.Is(err, ErrClientNotFound) {
+		t.Fatalf("an unknown client must still be ErrClientNotFound, got %v", err)
+	}
+}

@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -284,5 +285,123 @@ func TestObjectValuedPinSurvivesTheChain(t *testing.T) {
 	}
 	if address["country"] != "DK" {
 		t.Fatalf("the pin was mutated: country=%v", address["country"])
+	}
+}
+
+// An age derivation reading a claim an earlier derivation generated is a
+// misconfigured chain, not the Holder's data, and must not be marked as
+// invalid claim input.
+func TestApplyDerivations_InvalidInputFromEarlierDerivationIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "age_over_18", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"birthdate": "1996-01-30"}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain reading a generated boolean")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a misconfigured chain must not be reported as invalid holder input: %v", err)
+	}
+}
+
+// A holder-supplied invalid birthdate stays marked even after an unrelated
+// earlier derivation.
+func TestApplyDerivations_InvalidHolderInputAfterEarlierDerivationIsHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Lowercase: &primitives.LowercaseArgs{Input: "email"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"email": "A@B.se", "birthdate": "2099-01-01"}, now)
+	if !errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a future birthdate from the holder must stay marked, got %v", err)
+	}
+}
+
+// A holder value normalised by an earlier derivation is still the holder's
+// data: a future birthdate reaching age through yyyymmdd_to_iso stays marked.
+func TestApplyDerivations_InvalidHolderInputThroughNormalisationIsHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: "birthdate_raw", Output: "birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"birthdate_raw": "20990101"}, now)
+	if !errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a future birthdate normalised from the holder's raw value must stay marked, got %v", err)
+	}
+}
+
+// Reformatting a generated value does not make it holder data.
+func TestApplyDerivations_ReformattedGeneratedInputIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Random: &primitives.RandomArgs{Output: "token", Format: "uuid"}},
+		{Trim: &primitives.TrimArgs{Input: "token", Output: "birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain feeding a uuid into age")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a generated value must not be reported as invalid holder input: %v", err)
+	}
+}
+
+// A container created by a computing derivation is generated too, so a
+// later derivation reading the container is a configuration fault.
+func TestApplyDerivations_GeneratedNestedContainerIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Random: &primitives.RandomArgs{Output: "identity.birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "identity", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain feeding a generated map into age")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a generated container must not be reported as invalid holder input: %v", err)
+	}
+}
+
+// A holder container that a derivation adds a leaf to stays the holder's.
+func TestApplyDerivations_HolderContainerKeepsProvenance(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Random: &primitives.RandomArgs{Output: "identity.document_id"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "identity", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"identity": map[string]any{"name": "x"}}, now)
+	if !errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a holder-supplied container must stay marked, got %v", err)
+	}
+}
+
+// A reformatting primitive that creates a container the holder never
+// supplied makes that container generated, so reading it is a
+// configuration fault even though its leaf is holder data.
+func TestApplyDerivations_ContainerCreatedByReformatIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Trim: &primitives.TrimArgs{Input: "birthdate_raw", Output: "identity.birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "identity", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"birthdate_raw": "1990-01-01"}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain feeding a map into age")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a container no holder supplied must not be reported as invalid holder input: %v", err)
 	}
 }

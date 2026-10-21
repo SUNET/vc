@@ -513,6 +513,25 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// Seed-backed claims, before anything is signed and before the issuer
+	// service is called at all.
+	//
+	// HERE rather than in each of the four signing paths inside the
+	// issuer, which is where this began. One call site means one place
+	// that decides what a commitment is worth, and the SIGNING FORMAT is
+	// in hand - which the issuer-side version had to be told separately,
+	// and got wrong when a caller named a scope configured for another
+	// format. The issuer now receives ssc as an ordinary claim and never
+	// sees a derivation secret.
+	//
+	// A no-op for a scope with no commitments configured, which is every
+	// scope in a deployment that does not use the feature.
+	documentData, err = c.injectCommitments(ctx, scope, format, documentData)
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", scope)
+		return nil, err
+	}
+
 	var credentials []openid4vci.Credential
 	var issueErr error
 

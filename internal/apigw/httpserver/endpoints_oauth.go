@@ -1,15 +1,20 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -148,7 +153,30 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 			return nil, nil
 		}
 		s.log.Error(err, "authorization challenge error")
-		return nil, err
+
+		// Anything not already typed as a protocol error reaches the
+		// generic renderer and comes back as
+		// {"error":{"title":"internal_server_error","details":{}}} - a
+		// shape no OAuth client parses. A failure to save the context is
+		// the ordinary way that happens, and from a wallet's side it is
+		// indistinguishable from the endpoint being broken, which is
+		// exactly what server_error is for (RFC 6749 §5.2).
+		//
+		// Existing OAuth and OpenID4VCI errors are passed through
+		// untouched: pkg/httphelpers/server.go renders both, and wrapping
+		// one here would replace a precise refusal with a generic one.
+		var oauthErr *oauth2.OAuthError
+		var vciErr *openid4vci.Error
+		if errors.As(err, &oauthErr) || errors.As(err, &vciErr) {
+			return nil, err
+		}
+
+		// Fixed description. The cause is carried for the log, not for
+		// the wallet - it names internal state, and a failing store is
+		// not something a wallet can act on beyond retrying.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"the authorization challenge could not be completed",
+			http.StatusInternalServerError, err)
 	}
 
 	c.JSON(http.StatusOK, reply)
@@ -183,16 +211,20 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 
 	// Persist the auth provider into the authorization context so the
 	// credential endpoint (which has no gin session) can read it back.
-	authCtx, err := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: reply.SessionID})
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("failed to get auth context for session %s: %w", reply.SessionID, err)
-	}
-	authCtx.AuthProvider = authProvider
-	authCtx.DataSource = string(credSource.DataSource)
-	authCtx.RemoteName = credSource.RemoteName
-	authCtx.AuthenticSource = credSource.AuthenticSource
-	if err := s.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+	//
+	// A targeted write of exactly these four fields, not a read-modify-
+	// Update of the whole document. OAuthAuthorize has just extended this
+	// context's deadline through ExtendExpiry, which never shortens - and
+	// a whole-document replace built from a copy read afterwards would
+	// carry whatever expires_at that copy happened to see, so two requests
+	// entering /authorize at once could have the slower one write back the
+	// earlier deadline and cut the code's life short.
+	if err := s.cacheService.AuthContext.SetAuthProvider(ctx, reply.SessionID, cache.AuthProviderFields{
+		AuthProvider:    authProvider,
+		DataSource:      string(credSource.DataSource),
+		RemoteName:      credSource.RemoteName,
+		AuthenticSource: credSource.AuthenticSource,
+	}); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("failed to update auth provider on session %s: %w", reply.SessionID, err)
 	}
@@ -682,4 +714,188 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 	c.SetAccepted("application/json")
 
 	return reply, nil
+}
+
+// endpointPrepareIssuance is the issuer-initiated half of Interactive
+// Authorization: a caller that has already authenticated the user asks
+// this server to prepare an issuance, and says which Holder may complete
+// it.
+//
+// On the admin API, behind the same authentication every other /api/v1
+// route is behind. That is where it belongs rather than being a public
+// endpoint: it is the Issuer talking to itself about a user it has
+// already authenticated, and anyone who could call it unauthenticated
+// could prepare an issuance naming any Holder they liked.
+func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPrepareIssuance")
+	defer span.End()
+
+	// An anonymous admin session is not an authenticated principal.
+	//
+	// The startup check refuses configurations that grant one, but a
+	// cookie issued before the configuration changed stays valid for its
+	// lifetime - session keys persist across restarts in HA deployments -
+	// and SessionOrAPIAuth accepts it in place of a bearer token.
+	if isAnonymousAdminSession(c) {
+		err := helpers.NewErrorDetailsWithStatus("anonymous_session_not_allowed",
+			"an anonymous admin session cannot prepare an issuance", http.StatusForbidden)
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "anonymous admin session refused")
+		return nil, err
+	}
+
+	// Refused before binding, because binding is where the two readings
+	// of this body diverge.
+	//
+	// encoding/json matches members to struct fields case-INSENSITIVELY
+	// and lets a later member overwrite an earlier one, so
+	// {"scope":"a","Scope":"b"} binds Scope to "b". The authorization
+	// middleware reads the body into a map and looks up the exact key
+	// "scope", which is "a". One request, two different scopes, and the
+	// one that was authorized is not the one that would be acted on.
+	//
+	// Refusing the ambiguity is the fix rather than picking a winner:
+	// there is no reading of a body with both members that a caller could
+	// have meant, and any rule for choosing between them would have to be
+	// kept in step with encoding/json's.
+	if err := requireCanonicalJSONBody(c, "scope", "identity_match", "authentic_source", "ttl_seconds"); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "ambiguous request body")
+		return nil, err
+	}
+
+	request := &apiv1.PrepareIssuanceRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+
+	reply, err := s.apiv1.PrepareIssuance(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "prepare issuance error")
+		return nil, err
+	}
+
+	return reply, nil
+}
+
+// isAnonymousAdminSession reports whether the request is authenticated by
+// an admin session granted anonymously by /ui/login.
+func isAnonymousAdminSession(c *gin.Context) bool {
+	v, ok := c.Get(sessions.DefaultKey)
+	if !ok {
+		return false
+	}
+	session, ok := v.(sessions.Session)
+	if !ok || session.Get(adminSessionKey) != true {
+		return false
+	}
+	subject, _ := session.Get("admin_subject").(string)
+	return subject == anonymousAdminSubject
+}
+
+// requireCanonicalJSONBody refuses any request body that the authorization
+// middleware and the request binder could read differently.
+//
+// Those two read the same bytes by different rules. The middleware parses
+// the body into a map and looks up exact lowercase keys; the binder hands
+// it to encoding/json, whose field matching is case-insensitive under a
+// Unicode fold, whose later members overwrite earlier ones, whose null
+// leaves a field untouched, and whose Decoder stops at the first value and
+// ignores whatever follows. Every one of those is a way for the scope the
+// middleware authorized to differ from the scope the handler acts on.
+//
+// Rather than model each of them, this requires a body with nothing to
+// disagree about: one JSON object, members named exactly as this request
+// defines them, none repeated, and nothing after it.
+//
+// The content type is pinned for the same reason. Binding.Request also
+// accepts form encodings, and the middleware's extraction reads the query
+// string and the JSON body but never a form body - so a form-encoded
+// request reaches binding with no resource pair checked at all.
+//
+// The body is restored for the binder, the same way the middleware
+// restores it.
+func requireCanonicalJSONBody(c *gin.Context, allowed ...string) error {
+	refuse := func(format string, args ...any) error {
+		return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, fmt.Sprintf(format, args...), 400)
+	}
+
+	if c.ContentType() != "application/json" {
+		return refuse("this request must be sent as application/json")
+	}
+
+	// A declared length, because both of the other readers insist on one.
+	//
+	// extractResourcePairs skips the body unless ContentLength > 0, and
+	// Binding.Request skips BOTH its JSON and its form branch on the same
+	// condition - and then falls through to binding from the query string
+	// by FIELD NAME. So a chunked request (ContentLength == -1) carrying
+	// a harmless "{}" body reaches binding with its values taken from
+	// "?Scope=...", which the middleware never looked at under that
+	// spelling. Refusing an undeclared length is what keeps all three
+	// reading the same request.
+	if c.Request.ContentLength <= 0 {
+		return refuse("this request must carry a body with a declared length")
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+	if err != nil {
+		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
+	}
+
+	// Streamed rather than unmarshalled into a map, because a map has
+	// already collapsed the duplicates this needs to see.
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	opening, err := decoder.Token()
+	if err != nil {
+		return refuse("the request body is not a JSON object")
+	}
+	if delim, ok := opening.(json.Delim); !ok || delim != '{' {
+		return refuse("the request body must be a JSON object")
+	}
+
+	seen := make(map[string]bool, len(allowed))
+	for decoder.More() {
+		nameToken, err := decoder.Token()
+		if err != nil {
+			return refuse("the request body is not a well-formed JSON object")
+		}
+		name, ok := nameToken.(string)
+		if !ok {
+			return refuse("the request body is not a well-formed JSON object")
+		}
+		if !slices.Contains(allowed, name) {
+			return refuse("the request body carries a member %q that this request does not define; member names are case-sensitive", name)
+		}
+		if seen[name] {
+			return refuse("the request body carries the member %q more than once", name)
+		}
+		seen[name] = true
+
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return refuse("the request body is not a well-formed JSON object")
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return refuse("the request body is not a well-formed JSON object")
+	}
+
+	// encoding/json's Decoder reads ONE value and ignores the rest, so a
+	// valid object followed by anything at all would otherwise bind
+	// cleanly while this check looked at a different reading of the body.
+	//
+	// Checked by requiring EOF rather than by More(), which is not an
+	// end-of-input test: More reports whether another ELEMENT follows in
+	// the current array or object, so it answers false for a stray "}"
+	// or "]" and would have let "<object>}" through.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return refuse("the request body carries more than one JSON value")
+	}
+
+	return nil
 }

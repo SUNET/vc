@@ -258,11 +258,31 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
-	// An Interactive Authorization context is DPoP-bound and must be answered
-	// at the Authorization Challenge Endpoint, which checks that binding.
-	if authCtx.AuthSessionDPoPThumbprint != "" {
-		c.log.Error(nil, "direct-post presentation for an interactive authorization session", "session_id", authCtx.SessionID)
-		return nil, errors.New("presentation is not accepted on this channel for this session")
+	// An Interactive Authorization exchange is answered at the
+	// Authorization Challenge Endpoint, which verifies holder binding
+	// before it accepts anything. This endpoint does not, and it finds the
+	// same context by the same ephemeral key id - so answering an IA
+	// request here is answering a request that was never made, through
+	// the weaker of the two doors.
+	//
+	// Refused rather than verified-more-strictly. Even with holder binding
+	// enforced here the audience and the mdoc session transcript would be
+	// the browser flow's, not the ones the wallet signed over, so the two
+	// channels are not interchangeable whatever this endpoint checks.
+	//
+	// Either marker refuses, because the marker is NEW and the contexts
+	// are PERSISTED. A context opened by the previous version is still in
+	// the store after an upgrade with no interactive_authorization member
+	// at all, which decodes as false - so for as long as those contexts
+	// live, the guard would wave through exactly the exchanges it exists
+	// to stop. AuthSessionDPoPThumbprint is the durable second signal:
+	// the challenge endpoint refuses a request without a DPoP proof
+	// before it creates a context, so every IA context ever written has
+	// one, and nothing else sets it.
+	if authCtx.InteractiveAuthorization || authCtx.AuthSessionDPoPThumbprint != "" {
+		c.log.Error(nil, "interactive authorization context answered at the browser-mediated endpoint",
+			"session_id", authCtx.SessionID, "kid", kid)
+		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")
 	}
 
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
@@ -335,6 +355,12 @@ type issuanceAuthBinding struct {
 	// this channel must have been signed over. Nil means the channel does
 	// not accept mdoc, which is refused explicitly rather than verified
 	// against some other channel's transcript.
+	//
+	// Both channels supply one now - direct_post and the Authorization
+	// Challenge Endpoint build different structures - so nil is for a
+	// channel added later that has not yet decided what its wallet signs
+	// over. That is the safe default, and the reason this is a callback
+	// rather than a flag.
 	MdocSessionTranscript func() ([]byte, error)
 
 	// ExpectedState is the state the response must carry back, or empty to
@@ -619,6 +645,23 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	// requested claim keys must not be accepted for this auth scope.
 	if err := c.enforceScopeCredentialType(matchedAuthScope, credential); err != nil {
 		c.log.Error(err, "verified credential type does not match matched auth scope", "matched_auth_scope", matchedAuthScope, "scope", scope)
+		return nil, err
+	}
+
+	// The rule the preparing caller supplied, where there was one.
+	//
+	// Here rather than at the Challenge Endpoint, so that an issuance
+	// prepared with a rule is bound by it whichever channel the
+	// presentation arrives on - and ABOVE the presentation-sourced branch
+	// below, which returns early: a check placed after it would be skipped
+	// by exactly the scopes that mint a credential straight out of the
+	// presentation, which are the ones with the least else standing
+	// between a wallet and an issued credential.
+	//
+	// After verification and before anything is issued or looked up: the
+	// claims are trustworthy by this point, and nothing has been done with
+	// them yet.
+	if err := c.matchPresentedIdentity(c.cfg.GetFormatForScope(matchedAuthScope), credential, authCtx.IdentityMatch); err != nil {
 		return nil, err
 	}
 
