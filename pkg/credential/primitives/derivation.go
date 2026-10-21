@@ -80,6 +80,30 @@ func (d *Derivation) Apply(claims map[string]any, now time.Time) (map[string]any
 	return out, nil
 }
 
+// InputClaim returns the claim path the configured primitive reads, or ""
+// when it reads none.
+func (d *Derivation) InputClaim() string {
+	a, _, err := d.selected()
+	if err != nil {
+		return ""
+	}
+	f := reflect.ValueOf(a).Elem().FieldByName("Input")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
+}
+
+// ReformatsInput reports whether the configured primitive's output is a
+// reformatting of its input claim, and so carries the input's provenance.
+// Primitives that compute new values (age booleans, random identifiers)
+// return false, as does any primitive not listed here.
+func (d *Derivation) ReformatsInput() bool {
+	return d.Lowercase != nil || d.Uppercase != nil || d.Trim != nil ||
+		d.CountryAlpha2 != nil || d.CountryAlpha3 != nil ||
+		d.YYYYMMDDToISO != nil || d.SWAMIDHighestAssuranceLevel != nil
+}
+
 // SelectedName returns the YAML key of the configured primitive, or ""
 // when zero or many fields are set. Provided for error-context callers.
 func (d *Derivation) SelectedName() string {
