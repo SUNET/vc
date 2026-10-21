@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,8 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/trace"
 
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -207,6 +210,334 @@ func TestEndpointOAuthAuthorizationChallenge_RateLimited(t *testing.T) {
 		"a rate limited request must not reach OAuthAuthorizationChallenge")
 }
 
+// prepareAPI records the request the transport layer built.
+type prepareAPI struct {
+	unimplementedApiv1
+	seen *apiv1.PrepareIssuanceRequest
+}
+
+func (a *prepareAPI) PrepareIssuance(_ context.Context, req *apiv1.PrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
+	a.seen = req
+	return &apiv1.PrepareIssuanceReply{IssuerState: "prepared"}, nil
+}
+
+// The scope this endpoint acts on must be the scope the authorization
+// middleware checked.
+//
+// httphelpers.Binding.Request binds headers BEFORE the JSON body, and
+// gin's header binder falls back to the FIELD NAME when there is no
+// header tag - so a "Scope:" header set the field, and a body that simply
+// omits the member left it set. The SPOCP middleware extracts the resource
+// pairs it authorizes from the query string and the JSON body and never
+// reads headers, so a scope smuggled through one was acted on without
+// having been authorized at all.
+func TestEndpointPrepareIssuance_ScopeCannotComeFromAHeader(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-endpoint-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-endpoint-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	body := `{"identity_match":{"claims":{"given_name":{"equals":"Alice"}}},"scope":"allowed_scope"}`
+	req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Scope", "forbidden_scope")
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	require.NotNil(t, api.seen, "the request should have reached the handler; body: %s", w.Body.String())
+	assert.Equal(t, "allowed_scope", api.seen.Scope,
+		"a Scope header must not decide which credential is prepared")
+
+	// And a body with no scope at all must not inherit the header's,
+	// which is the shape that actually slipped past the middleware.
+	api.seen = nil
+	bodyWithoutScope := `{"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}}`
+	req = httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(bodyWithoutScope))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Scope", "forbidden_scope")
+
+	w = httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	if api.seen != nil {
+		assert.Empty(t, api.seen.Scope,
+			"a scope the authorization middleware never saw must not reach the handler")
+	}
+}
+
+// encoding/json matches members to struct fields case-INSENSITIVELY and
+// lets a later member overwrite an earlier one, while the authorization
+// middleware reads the body into a map and looks up the exact key
+// "scope". So {"scope":"a","Scope":"b"} is one request with two scopes:
+// the middleware authorizes "a" and the handler would act on "b".
+//
+// Refusing the ambiguity is the fix rather than picking a winner. There
+// is no reading of such a body that a caller could have meant, and any
+// rule for choosing between the two would have to be kept in step with
+// encoding/json's own.
+func TestEndpointPrepareIssuance_RefusesACaseVariantScope(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-ambiguous-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-ambiguous-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	const match = `"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}`
+
+	api.seen = nil
+	w := post(`{"scope":"allowed_scope","Scope":"forbidden_scope",` + match + `}`)
+	assert.Nil(t, api.seen,
+		"a body naming one member twice must not reach preparation at all")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+
+	// The other order too: which of the two encoding/json happens to keep
+	// is not something this should depend on.
+	api.seen = nil
+	w = post(`{"Scope":"forbidden_scope","scope":"allowed_scope",` + match + `}`)
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// A LONE case variant, with no lowercase member beside it. This is
+	// the sharper version: nothing collides, the middleware's map lookup
+	// of "scope" finds nothing at all so no resource pair is authorized,
+	// and encoding/json still puts the value in the field. A rule that
+	// only refused bodies carrying BOTH spellings would leave it open.
+	api.seen = nil
+	w = post(`{"Scope":"forbidden_scope",` + match + `}`)
+	assert.Nil(t, api.seen,
+		"a scope the authorization middleware cannot see must not reach preparation")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+
+	// And the same for the other members, since the rule is about the
+	// names rather than about this one field.
+	api.seen = nil
+	w = post(`{"scope":"allowed_scope","Authentic_Source":"B",` + match + `}`)
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// U+017F LATIN SMALL LETTER LONG S. encoding/json does not compare
+	// member names with strings.ToLower - it uses a Unicode fold in which
+	// "ſ" folds to "s" (the same rule that folds U+212A KELVIN SIGN
+	// to "k") - so "ſcope" binds into Scope while an exact map lookup
+	// of "scope" sees only the member beside it. A case-folding check
+	// written with ToLower would NOT catch this, which is why the rule
+	// here is exact membership rather than any kind of folding.
+	api.seen = nil
+	w = post("{\"scope\":\"allowed_scope\",\"\u017Fcope\":\"forbidden_scope\"," + match + "}")
+	assert.Nil(t, api.seen,
+		"a Unicode fold of scope must not reach preparation either")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+
+	// The same spelling on its own, with no member for the middleware to
+	// find at all.
+	api.seen = nil
+	w = post("{\"\u017Fcope\":\"forbidden_scope\"," + match + "}")
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// And for authentic_source, which the authorization pair also reads.
+	api.seen = nil
+	w = post("{\"scope\":\"allowed_scope\",\"authentic_\u017Fource\":\"B\"," + match + "}")
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// An ordinary body is unaffected.
+	api.seen = nil
+	w = post(`{"scope":"allowed_scope",` + match + `}`)
+	require.NotNil(t, api.seen, "body: %s", w.Body.String())
+	assert.Equal(t, "allowed_scope", api.seen.Scope)
+
+	// Including one using every member this request defines.
+	api.seen = nil
+	w = post(`{"scope":"allowed_scope","authentic_source":"A","ttl_seconds":60,` + match + `}`)
+	require.NotNil(t, api.seen, "body: %s", w.Body.String())
+	assert.Equal(t, "A", api.seen.AuthenticSource)
+	assert.Equal(t, 60, api.seen.TTLSeconds)
+}
+
+// The other readings of one body that the middleware and the binder can
+// disagree about. Each of these is a way for the scope that was
+// authorized to differ from the scope that would be acted on, and none of
+// them needs an unusual member NAME - which is what the canonical-name
+// rule alone could not see.
+func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-disagree-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-disagree-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	const match = `"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}`
+	valid := `{"scope":"allowed_scope",` + match + `}`
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        string
+		query       string
+	}{
+		{
+			// A map decode keeps the LAST "scope", which is null, so the
+			// middleware authorizes nothing. encoding/json leaves a
+			// string field UNTOUCHED on null, so the struct keeps the
+			// first value. My earlier reasoning that exact duplicates
+			// agree was wrong for exactly this reason.
+			name:        "a member repeated with a null",
+			contentType: "application/json",
+			body:        `{"scope":"forbidden_scope","scope":null,` + match + `}`,
+		},
+		{
+			name:        "a member simply repeated",
+			contentType: "application/json",
+			body:        `{"scope":"allowed_scope","scope":"forbidden_scope",` + match + `}`,
+		},
+		{
+			// encoding/json's Decoder reads one value and ignores the
+			// rest; a whole-body Unmarshal refuses trailing data. So the
+			// two readers disagree about whether this body is even valid.
+			name:        "a valid object with another value after it",
+			contentType: "application/json",
+			body:        valid + `{}`,
+		},
+		{
+			// Binding.Request also accepts form encodings, and the
+			// middleware's extraction never reads a form body - so this
+			// reaches binding with no resource pair checked at all.
+			name:        "a form-encoded body",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "Scope=forbidden_scope&IdentityMatch=x",
+		},
+		{
+			name:        "not an object at all",
+			contentType: "application/json",
+			body:        `["scope","forbidden_scope"]`,
+		},
+		{
+			// gin's form binding reads the QUERY STRING as well as the
+			// body, so a form request with no body at all can still
+			// populate fields. extractResourcePairs does read
+			// c.Query("scope"), so this pair would be authorized - but
+			// only because the name happens to match, and a wallet
+			// controls the spelling. Refusing the content type removes
+			// the question.
+			name:        "a form request carrying its fields in the query string",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "",
+			query:       "?scope=forbidden_scope",
+		},
+		{
+			name:        "an empty body",
+			contentType: "application/json",
+			body:        "",
+		},
+		{
+			// Decoder.More() is not an end-of-input test: it reports
+			// whether another ELEMENT follows in the current array or
+			// object, so it answers false for a stray closing delimiter.
+			// A trailing-data check written with More() lets these two
+			// through.
+			name:        "a valid object followed by a stray brace",
+			contentType: "application/json",
+			body:        valid + `}`,
+		},
+		{
+			name:        "a valid object followed by a stray bracket",
+			contentType: "application/json",
+			body:        valid + `]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api.seen = nil
+			req := httptest.NewRequest(http.MethodPost, "/issuance/prepare"+tc.query, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			assert.Nil(t, api.seen, "this body must not reach preparation")
+			assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+		})
+	}
+
+	// A chunked request declares no length, and both other readers skip a
+	// body without one: extractResourcePairs does not look at it, and
+	// Binding.Request skips its JSON and form branches and falls through
+	// to binding from the QUERY STRING by field name. So a harmless "{}"
+	// body plus "?Scope=..." reaches the handler with a scope the
+	// middleware never saw under that spelling.
+	t.Run("a chunked request with its values in the query", func(t *testing.T) {
+		api.seen = nil
+		req := httptest.NewRequest(http.MethodPost,
+			"/issuance/prepare?Scope=forbidden_scope&IdentityMatch=%7B%7D",
+			strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		// What a chunked body looks like to net/http.
+		req.ContentLength = -1
+		req.TransferEncoding = []string{"chunked"}
+
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+
+		assert.Nil(t, api.seen, "a body with no declared length must not reach preparation")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	})
+
+	// And the ordinary request still works, so none of the above is a
+	// blanket refusal.
+	t.Run("a well-formed request is unaffected", func(t *testing.T) {
+		api.seen = nil
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(valid))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+
+		require.NotNil(t, api.seen, "body: %s", w.Body.String())
+		assert.Equal(t, "allowed_scope", api.seen.Scope)
+	})
+}
+
 // The Authorization Challenge Endpoint speaks JSON in both directions,
 // whatever the Accept header says. It is a protocol endpoint a wallet
 // posts to, not a page a browser navigates to.
@@ -291,4 +622,100 @@ func TestEndpointAuthorizationChallenge_MalformedBodyIsAnOAuthError(t *testing.T
 			assert.Zero(t, api.calls, "a request that did not bind must not reach the handler")
 		})
 	}
+}
+
+// A failure the endpoint cannot phrase in the protocol's terms is still an
+// OAuth error, not a nested internal_server_error object.
+//
+// Returned untyped - a context-save failure is the ordinary way it happens
+// - the error reached the generic renderer and came back as
+// {"error":{"title":"internal_server_error","details":{}}}, which no OAuth
+// client parses. From a wallet's side that is the endpoint being broken,
+// which is what server_error means.
+func TestEndpointAuthorizationChallenge_UntypedFailureIsAServerError(t *testing.T) {
+	api := &challengeAPI{err: errors.New("failed to save authorization context: store unavailable")}
+
+	w := postChallenge(t, challengeEngine(t, api), url.Values{"auth_session": {"opaque-handle"}}, nil)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+
+	var oauthErr oauth2.OAuthError
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oauthErr),
+		"the body must be an OAuth error, got %q", w.Body.String())
+	assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+	assert.NotEmpty(t, oauthErr.ErrorDescription)
+
+	assert.NotContains(t, w.Body.String(), "internal_server_error")
+	assert.NotContains(t, w.Body.String(), "store unavailable",
+		"the cause names internal state and belongs in the log, not the response")
+}
+
+// And a failure the endpoint CAN phrase keeps its own words: wrapping
+// every error as server_error would turn a precise refusal into a generic
+// one, which is the opposite mistake.
+func TestEndpointAuthorizationChallenge_TypedFailuresArePassedThrough(t *testing.T) {
+	api := &challengeAPI{err: oauth2.NewOAuthError(
+		oauth2.ErrCodeInvalidGrant, "auth_session is not valid", http.StatusBadRequest)}
+
+	w := postChallenge(t, challengeEngine(t, api), url.Values{"auth_session": {"opaque-handle"}}, nil)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var oauthErr oauth2.OAuthError
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oauthErr))
+	assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
+	assert.Equal(t, "auth_session is not valid", oauthErr.ErrorDescription)
+}
+
+// An anonymous admin session issued before the configuration changed stays
+// valid for its lifetime, and SessionOrAPIAuth accepts it in place of a
+// bearer token. The startup check cannot revoke it; the endpoint must.
+func TestEndpointPrepareIssuance_RefusesAnAnonymousAdminSession(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-anonymous-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-anonymous-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	store := cookie.NewStore([]byte("12345678901234567890123456789012"), []byte("1234567890123456"))
+	engine := gin.New()
+	engine.Use(sessions.Sessions("admin_session", store))
+	engine.GET("/login", func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Set(adminSessionKey, true)
+		session.Set("admin_subject", c.Query("subject"))
+		_ = session.Save()
+	})
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	prepare := func(subject string) *httptest.ResponseRecorder {
+		login := httptest.NewRecorder()
+		engine.ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/login?subject="+subject, nil))
+
+		body := `{"identity_match":{"claims":{"given_name":{"equals":"Alice"}}},"scope":"allowed_scope"}`
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, c := range login.Result().Cookies() {
+			req.AddCookie(c)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	w := prepare(anonymousAdminSubject)
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	assert.Nil(t, api.seen, "an anonymous session must not reach PrepareIssuance")
+
+	w = prepare("alice")
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotNil(t, api.seen, "an authenticated session must still be served")
 }

@@ -345,6 +345,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodGet, "/mapping/search", http.StatusOK, s.endpointIdentityMappingSearch)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/bulk", http.StatusOK, s.endpointIdentityMappingBulkCreate)
 
+	// Issuer-initiated Interactive Authorization: a caller that has
+	// already authenticated the user prepares an issuance and says who
+	// may complete it.
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")
 	// Rate limiting for datastore endpoints

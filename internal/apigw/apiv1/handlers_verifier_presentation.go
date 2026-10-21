@@ -9,6 +9,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -91,6 +92,18 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	now := time.Now()
 	derived, err := credential.ApplyDerivations(pScope.Derivations, verified, now)
 	if err != nil {
+		// Not every derivation failure is ours. A scope deriving age from
+		// a required birthdate gets whatever the credential carried, and a
+		// birthdate that is empty, malformed or in the future is the
+		// Holder's data - it passes every check above and then fails here.
+		// Reporting server_error for that tells the wallet to try again
+		// when nothing it can do will help, and by this point the
+		// auth_session has been consumed so there is nothing to try again
+		// with. Anything else - a misconfigured derivation, a broken
+		// primitive - really is ours.
+		if errors.Is(err, primitives.ErrInvalidClaimInput) {
+			return fmt.Errorf("the presented claims cannot satisfy this scope: %w", err)
+		}
 		return serverFault(fmt.Errorf("failed to apply derivations for preview: %w", err))
 	}
 	credential.MergeNestedClaims(previewData, derived)

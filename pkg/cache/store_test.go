@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +17,25 @@ import (
 func TestMemoryStoreImplementsInterface(t *testing.T) {
 	var store AuthContextStore = NewMemoryStore(5 * time.Minute)
 	require.NotNil(t, store)
+}
+
+// TestMemoryStoreSaveAnchorsCreatedAt: the retention cap in codeDeadlineWithin
+// is a no-op on a zero CreatedAt, so Save must set it and a re-save keep it.
+func TestMemoryStoreSaveAnchorsCreatedAt(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{SessionID: "anchor-1"}))
+	first, err := store.GetByID(ctx, "anchor-1")
+	require.NoError(t, err)
+	require.False(t, first.CreatedAt.IsZero(), "Save must set CreatedAt")
+	anchor := first.CreatedAt
+
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{SessionID: "anchor-1", Code: "c"}))
+	second, err := store.GetByID(ctx, "anchor-1")
+	require.NoError(t, err)
+	assert.Equal(t, anchor, second.CreatedAt, "a re-save must keep the original anchor")
 }
 
 // TestInterfaceContract_Memory runs the shared contract tests against the MemoryStore.
@@ -48,6 +69,79 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		result, err := store.GetByAuthorizationCode(ctx, "code-1")
 		require.NoError(t, err)
 		assert.Equal(t, "contract-session-1", result.SessionID)
+	})
+
+	t.Run("GetSnapshotIsolatesTheCallerAndGetDoesNot", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "contract-snapshot-1",
+			State:     "contract-snapshot-state",
+			Code:      "contract-snapshot-code",
+		}))
+		query := &AuthorizationContext{State: "contract-snapshot-state"}
+
+		// GetSnapshot is for readers. What it returns is the caller's,
+		// so the store cannot be changed by assigning to it - and, the
+		// point of the method, reading it cannot race with a concurrent
+		// claim mutating the stored document.
+		snapshot, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		snapshot.Identifier = "scribbled-on"
+
+		after, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		assert.Empty(t, after.Identifier, "a snapshot must not be a handle on the store")
+
+		// Get is for read-modify-Update, and must keep working that way:
+		// handing those callers a snapshot would turn their Update into a
+		// lost update against anything the store changed in between.
+		live, err := store.Get(ctx, query)
+		require.NoError(t, err)
+		live.Identifier = "written-back"
+		require.NoError(t, store.Update(ctx, live))
+
+		persisted, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		assert.Equal(t, "written-back", persisted.Identifier)
+	})
+
+	t.Run("ResumeIssuerState", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-1",
+			IssuerState: "contract-issuer-state-1",
+			Scopes:      []string{"pid"},
+		}))
+
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-1", &IssuerStateResume{
+			AuthSession:               "contract-auth-session-1",
+			AuthSessionDPoPThumbprint: "contract-thumbprint",
+			WalletClientID:            "wallet-1",
+			CodeChallenge:             "contract-challenge",
+			CodeChallengeMethod:       "S256",
+			ExpiresAt:                 time.Now().Add(time.Hour).Unix(),
+			CreatedAt:                 time.Now(),
+		})
+		require.NoError(t, err)
+
+		// One operation: the handle is gone AND the exchange is written.
+		// Observing one without the other is the window this method
+		// exists to close.
+		assert.Empty(t, resumed.IssuerState)
+		assert.Equal(t, "contract-auth-session-1", resumed.AuthSession)
+		assert.Equal(t, "contract-thumbprint", resumed.AuthSessionDPoPThumbprint)
+		assert.Equal(t, "wallet-1", resumed.WalletClientID)
+		assert.Equal(t, []string{"pid"}, resumed.Scopes, "the prepared issuance survives the resume")
+
+		stored, err := store.Get(ctx, &AuthorizationContext{AuthSession: "contract-auth-session-1"})
+		require.NoError(t, err)
+		assert.Equal(t, "contract-resume-1", stored.SessionID)
+
+		// And it is one-shot, for the same reason ClaimIssuerState is:
+		// two wallets scanning one offer must yield exactly one winner.
+		second, err := store.ResumeIssuerState(ctx, "contract-issuer-state-1", &IssuerStateResume{
+			AuthSession: "contract-auth-session-2",
+		})
+		require.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
 	})
 
 	t.Run("GetByQueryFields", func(t *testing.T) {
@@ -321,8 +415,430 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Nil(t, claimed)
 	})
 
+	// ExtendExpiry never shortens, and nothing else may shorten behind it.
+	//
+	// The guarantee is implemented with $max in MongoDB, which protects
+	// concurrent ExtendExpiry calls against each other - and protects
+	// nothing at all from a whole-document write that carries an older
+	// expires_at. /authorize does exactly that a moment later when it
+	// records the auth provider, so the two have to be tested together or
+	// the guarantee is only true in isolation.
+	t.Run("SetAuthProviderPreservesExtendedExpiry", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:  "contract-provider-1",
+			RequestURI: "https://example.com/req-provider-1",
+			Code:       "contract-provider-code-1",
+			ExpiresAt:  time.Now().Add(time.Minute).Unix(),
+		}))
+
+		// The deadline as a slower concurrent request would have read it,
+		// before the extension. Copied out by value: the memory store
+		// hands back the pointer it holds, so the document itself would
+		// follow the extension and prove nothing.
+		before, err := store.GetByID(ctx, "contract-provider-1")
+		require.NoError(t, err)
+		staleExpiresAt := before.ExpiresAt
+
+		extended := time.Now().Add(10 * time.Minute).Unix()
+		require.NoError(t, store.ExtendExpiry(ctx,
+			&AuthorizationContext{RequestURI: "https://example.com/req-provider-1"}, extended))
+
+		require.NoError(t, store.SetAuthProvider(ctx, "contract-provider-1", AuthProviderFields{
+			AuthProvider:    "openid4vp",
+			DataSource:      "datastore",
+			RemoteName:      "remote",
+			AuthenticSource: "source",
+		}))
+
+		result, err := store.GetByID(ctx, "contract-provider-1")
+		require.NoError(t, err)
+		assert.Equal(t, "openid4vp", result.AuthProvider)
+		assert.Equal(t, "datastore", result.DataSource)
+		assert.Equal(t, "remote", result.RemoteName)
+		assert.Equal(t, "source", result.AuthenticSource)
+		assert.Equal(t, extended, result.ExpiresAt,
+			"recording the auth provider must not write back an older deadline")
+		assert.Less(t, staleExpiresAt, result.ExpiresAt,
+			"the test is only meaningful if the extension actually moved the deadline")
+	})
+
+	// ExtendExpiry has to answer to a session_id as well as a request_uri:
+	// an Interactive Authorization exchange has just had its auth_session
+	// claimed when its code's life begins, so there is no handle left to
+	// name it by.
+	t.Run("ExtendExpiryBySessionID", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "contract-extend-1",
+			Code:      "contract-extend-code-1",
+			ExpiresAt: time.Now().Add(time.Minute).Unix(),
+		}))
+
+		extended := time.Now().Add(10 * time.Minute).Unix()
+		require.NoError(t, store.ExtendExpiry(ctx,
+			&AuthorizationContext{SessionID: "contract-extend-1"}, extended))
+
+		result, err := store.GetByID(ctx, "contract-extend-1")
+		require.NoError(t, err)
+		assert.Equal(t, extended, result.ExpiresAt)
+
+		// And still never shortens.
+		require.NoError(t, store.ExtendExpiry(ctx,
+			&AuthorizationContext{SessionID: "contract-extend-1"}, time.Now().Add(time.Second).Unix()))
+		result, err = store.GetByID(ctx, "contract-extend-1")
+		require.NoError(t, err)
+		assert.Equal(t, extended, result.ExpiresAt, "ExtendExpiry must never shorten")
+	})
+
+	// The issuer-initiated handle has to be replaced BY the opened
+	// exchange, in one mutation.
+	//
+	// Claiming and then persisting as two writes has a failure mode with
+	// no recovery: the claim lands, the persist does not, and the document
+	// has lost its issuer_state without ever gaining an auth_session - so
+	// the prepared issuance is unreachable by either handle and nothing,
+	// including the issuer that prepared it, can get it back. There is no
+	// state in which that is true here, because there is only one write.
+	t.Run("ClaimIssuerState", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-issuer-1",
+			Code:        "contract-issuer-code-1",
+			IssuerState: "contract-issuer-handle-1",
+		}))
+
+		opened, err := store.GetByID(ctx, "contract-issuer-1")
+		require.NoError(t, err)
+		toStore := *opened
+		toStore.AuthSession = "contract-issuer-auth-session-1"
+		toStore.AuthSessionDPoPThumbprint = "contract-issuer-thumbprint-1"
+		toStore.WalletClientID = "wallet-1"
+
+		claimed, err := store.ClaimIssuerState(ctx, "contract-issuer-handle-1", &toStore)
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+		assert.Empty(t, claimed.IssuerState)
+		assert.Equal(t, "contract-issuer-auth-session-1", claimed.AuthSession)
+		assert.Equal(t, "wallet-1", claimed.WalletClientID)
+
+		// The handle is spent and the exchange is open, both at once:
+		// there is no observable moment with neither.
+		_, err = store.Get(ctx, &AuthorizationContext{IssuerState: "contract-issuer-handle-1"})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+
+		byHandle, err := store.Get(ctx, &AuthorizationContext{AuthSession: "contract-issuer-auth-session-1"})
+		require.NoError(t, err, "the exchange the claim opened must be resolvable by its auth_session")
+		assert.Equal(t, "contract-issuer-1", byHandle.SessionID)
+
+		// Exactly one claimant: an issuance prepared for one Holder opens
+		// one exchange, not one per wallet that scans the offer.
+		second, err := store.ClaimIssuerState(ctx, "contract-issuer-handle-1", &toStore)
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
+	})
+
+	t.Run("ClaimIssuerState_Concurrent", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-issuer-race",
+			Code:        "contract-issuer-race-code",
+			IssuerState: "contract-issuer-handle-race",
+		}))
+
+		base, err := store.GetByID(ctx, "contract-issuer-race")
+		require.NoError(t, err)
+
+		const contenders = 8
+		var (
+			start     sync.WaitGroup
+			finished  sync.WaitGroup
+			succeeded atomic.Int32
+		)
+		start.Add(1)
+		finished.Add(contenders)
+
+		for i := range contenders {
+			go func() {
+				defer finished.Done()
+				opened := *base
+				opened.AuthSession = fmt.Sprintf("contract-issuer-race-session-%d", i)
+				start.Wait()
+				claimed, err := store.ClaimIssuerState(ctx, "contract-issuer-handle-race", &opened)
+				if err == nil && claimed != nil {
+					succeeded.Add(1)
+				}
+			}()
+		}
+		start.Done()
+		finished.Wait()
+
+		assert.Equal(t, int32(1), succeeded.Load(),
+			"exactly one of %d concurrent claimants may open the prepared issuance", contenders)
+	})
+
+	t.Run("ClaimIssuerState_Unknown", func(t *testing.T) {
+		claimed, err := store.ClaimIssuerState(ctx, "contract-issuer-never-prepared",
+			&AuthorizationContext{SessionID: "contract-issuer-1"})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, claimed)
+	})
+
+	t.Run("ClaimIssuerState_Empty", func(t *testing.T) {
+		_, err := store.ClaimIssuerState(ctx, "", &AuthorizationContext{SessionID: "contract-issuer-1"})
+		assert.Error(t, err)
+
+		_, err = store.ClaimIssuerState(ctx, "contract-issuer-handle-1", nil)
+		assert.Error(t, err)
+	})
+
 	t.Run("ClaimAuthSession_Empty", func(t *testing.T) {
 		_, err := store.ClaimAuthSession(ctx, "")
 		assert.Error(t, err)
 	})
+}
+
+// Get returns the cached pointer and then releases the lock, so a caller
+// that fetched a context is still reading the struct the store holds.
+// Claiming the handle used to WRITE into that struct, which `go test
+// -race` reports as a data race against any such reader - and a race on a
+// field that decides whether an exchange is still claimable is not a
+// theoretical one.
+//
+// The claim now replaces the stored document instead. The reader keeps a
+// consistent pre-claim snapshot; the post-claim state is reachable through
+// the cache, which is where it belongs.
+//
+// This test only means anything under -race, which is how CI runs it.
+func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:   "claim-reader-race",
+		AuthSession: "claim-reader-handle",
+		Code:        "claim-reader-code",
+	}))
+
+	// A caller that fetched the context before the claim, as every
+	// handler does.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	require.Equal(t, "claim-reader-handle", held.AuthSession)
+
+	// The read is ASSERTED, not discarded. `_ = held.AuthSession` is a
+	// read the compiler may remove, and a removed read races with
+	// nothing: the test would pass even if the claim mutated the context
+	// the store had handed out, which is the whole thing it exists to
+	// catch. Collecting the values and checking them afterwards makes the
+	// read observable, and also pins the snapshot - a caller holding this
+	// pointer must keep seeing the handle it fetched.
+	var wg sync.WaitGroup
+	seen := make([]string, 0, 2000)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			seen = append(seen, held.AuthSession)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		claimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+		assert.NoError(t, err)
+		if claimed != nil {
+			assert.Empty(t, claimed.AuthSession, "the returned copy must not carry the handle")
+		}
+	}()
+	wg.Wait()
+
+	require.Len(t, seen, 2000, "the reads must actually have happened")
+	for _, got := range seen {
+		require.Equal(t, "claim-reader-handle", got,
+			"a caller holding the context it fetched must keep seeing the handle it fetched")
+	}
+
+	// And the claim did take effect in the store, so the absence of a
+	// race is not the absence of the write.
+	reclaimed, err := store.ClaimAuthSession(ctx, "claim-reader-handle")
+	require.ErrorIs(t, err, ErrNoDocuments, "the handle must stop resolving once claimed")
+	require.Nil(t, reclaimed)
+
+	stored, err := store.Get(ctx, &AuthorizationContext{SessionID: "claim-reader-race"})
+	require.NoError(t, err)
+	assert.Empty(t, stored.AuthSession, "the stored document must have had its handle cleared")
+	assert.Equal(t, "claim-reader-code", stored.Code, "and nothing else")
+}
+
+// A resume replaces the whole document and rotates indexed fields, so the
+// OLD document's indices have to go - exactly as Update does it.
+//
+// EphemeralEncryptionKeyID is the one that matters: it is minted afresh on
+// resume so the key's life matches the exchange's. Deleting only the
+// issuer_state index left the prepared kid resolving the live exchange
+// after the rotation that exists to retire it, and nothing ever cleaned it
+// up - eviction removes the indices of the document it evicts, which names
+// only the current kid.
+func TestClaimIssuerStateRemovesTheOldDocumentsIndices(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	prepared := &AuthorizationContext{
+		SessionID:                "resume-indices",
+		IssuerState:              "resume-istate",
+		EphemeralEncryptionKeyID: "kid-prepared",
+		Code:                     "resume-code",
+	}
+	require.NoError(t, store.Save(ctx, prepared))
+
+	// The fixture's precondition: the prepared kid really does resolve
+	// before the resume, or the assertion below would pass on a context
+	// that was never reachable.
+	found, err := store.Get(ctx, &AuthorizationContext{EphemeralEncryptionKeyID: "kid-prepared"})
+	require.NoError(t, err)
+	require.Equal(t, "resume-indices", found.SessionID)
+
+	opened := *prepared
+	opened.EphemeralEncryptionKeyID = "kid-resumed"
+	opened.AuthSession = "resume-handle"
+
+	claimed, err := store.ClaimIssuerState(ctx, "resume-istate", &opened)
+	require.NoError(t, err)
+	require.Empty(t, claimed.IssuerState)
+
+	stale, err := store.Get(ctx, &AuthorizationContext{EphemeralEncryptionKeyID: "kid-prepared"})
+	require.ErrorIs(t, err, ErrNoDocuments,
+		"the prepared key id must stop resolving once the resume has rotated it")
+	require.Nil(t, stale)
+
+	// And the current one does resolve, so the cleanup did not take the
+	// live index with it.
+	current, err := store.Get(ctx, &AuthorizationContext{EphemeralEncryptionKeyID: "kid-resumed"})
+	require.NoError(t, err)
+	assert.Equal(t, "resume-indices", current.SessionID)
+	assert.Equal(t, "resume-handle", current.AuthSession)
+
+	// The other indices the opened document still carries survive too.
+	byCode, err := store.Get(ctx, &AuthorizationContext{Code: "resume-code"})
+	require.NoError(t, err)
+	assert.Equal(t, "resume-indices", byCode.SessionID)
+}
+
+// ExtendExpiry promises the same query fields as Get, and three were
+// missing from the in-memory resolver: VerifierResponseCode,
+// EphemeralEncryptionKeyID and RequestObjectID. A query Get and Mongo's
+// ExtendExpiry both answered failed in memory with "no searchable field
+// set" - a backend difference that only shows up for some callers, which
+// is worse than either behaviour on its own.
+//
+// Get and ExtendExpiry now share one resolver, so the list of fields a
+// context can be found by lives in one place and cannot drift again. This
+// test asserts the contract through BOTH, for every field.
+func TestExtendExpiryResolvesEveryFieldGetDoes(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	base := int64(1000)
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:                "every-field",
+		RequestURI:               "urn:req:1",
+		Code:                     "code-1",
+		State:                    "state-1",
+		VerifierResponseCode:     "vrc-1",
+		EphemeralEncryptionKeyID: "kid-1",
+		RequestObjectID:          "roid-1",
+		AuthSession:              "handle-1",
+		IssuerState:              "istate-1",
+		ExpiresAt:                base,
+	}))
+
+	for name, query := range map[string]*AuthorizationContext{
+		"session_id":             {SessionID: "every-field"},
+		"request_uri":            {RequestURI: "urn:req:1"},
+		"code":                   {Code: "code-1"},
+		"state":                  {State: "state-1"},
+		"verifier_response_code": {VerifierResponseCode: "vrc-1"},
+		"ephemeral_key_id":       {EphemeralEncryptionKeyID: "kid-1"},
+		"request_object_id":      {RequestObjectID: "roid-1"},
+		"auth_session":           {AuthSession: "handle-1"},
+		"issuer_state":           {IssuerState: "istate-1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Get answers it - the half that was always true.
+			found, err := store.Get(ctx, query)
+			require.NoError(t, err, "Get must resolve by %s", name)
+			require.Equal(t, "every-field", found.SessionID)
+
+			// And so must ExtendExpiry, which is the half that did not.
+			base++
+			require.NoError(t, store.ExtendExpiry(ctx, query, base),
+				"ExtendExpiry must resolve by %s, like Get and like the Mongo backend", name)
+
+			after, err := store.Get(ctx, &AuthorizationContext{SessionID: "every-field"})
+			require.NoError(t, err)
+			assert.Equal(t, base, after.ExpiresAt, "the extension must have been applied")
+		})
+	}
+}
+
+// A malformed replacement must be refused before the claim, as MongoStore
+// does, so the issuer_state stays claimable on both backends.
+func TestClaimIssuerStateValidatesBeforeClaiming(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := t.Context()
+
+	prepared := &AuthorizationContext{SessionID: "resume-invalid", IssuerState: "invalid-istate"}
+	require.NoError(t, store.Save(ctx, prepared))
+
+	opened := *prepared
+	opened.AuthSession = "invalid-handle"
+	opened.CodeChallenge = strings.Repeat("c", 129)
+
+	claimed, err := store.ClaimIssuerState(ctx, "invalid-istate", &opened)
+	require.Error(t, err)
+	require.Nil(t, claimed)
+
+	still, err := store.Get(ctx, &AuthorizationContext{IssuerState: "invalid-istate"})
+	require.NoError(t, err, "a refused replacement must not consume the issuer_state")
+	assert.Empty(t, still.AuthSession)
+}
+
+// Get hands a caller the stored document, which is what keeps a
+// read-modify-Update caller from erasing an in-store mutation that landed
+// in between: the forfeited code it writes back is the same struct the
+// forfeit was recorded on.
+//
+// That is the property this PR relied on when it narrowed its snapshot to
+// GetSnapshot instead of changing Get, so it is pinned here rather than
+// left as an observation.
+//
+// NOT a shared contract test, because MongoStore does not have this
+// property and never did: every Mongo read decodes a fresh struct and
+// Update replaces the document, so the same interleaving loses the
+// forfeit there. That divergence is real and predates this change - it is
+// the wider lost-update hazard in Update, which wants version-checked
+// writes to fix properly - and asserting it as a contract both backends
+// meet would be asserting something false.
+func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: "forfeit-1",
+		Code:      "forfeit-code",
+	}))
+
+	// What a read-modify-Update caller does: read, change a field of its
+	// own, write back.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "forfeit-1"})
+	require.NoError(t, err)
+	held.AuthProvider = "some-provider"
+
+	// Meanwhile the code is redeemed and consumed.
+	_, err = store.ForfeitAuthorizationCode(ctx, &AuthorizationContext{Code: "forfeit-code"})
+	require.NoError(t, err)
+
+	require.NoError(t, store.Update(ctx, held))
+
+	after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "forfeit-1"})
+	require.NoError(t, err)
+	assert.True(t, after.Forfeited,
+		"a consumed code must not be resurrected by a caller that read before it was consumed")
+	assert.Equal(t, "some-provider", after.AuthProvider, "and the caller's own change must still land")
 }
