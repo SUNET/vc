@@ -148,13 +148,18 @@ const metadataResponseSchema = v.object({
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
             }))),
-            // req is the circuit_zk format's requested calculations. A
+            // req is the zkp_req format's requested calculations. A
             // query in that format discloses nothing - every value comes
             // from a function named here - so a stripped req asks the
             // wallet for nothing and gets nothing back, which reads as a
             // wallet fault. Its params are inputs to a proof and are
             // passed through exactly as configured; see req-schema.js for
             // why this validates without rebuilding them.
+            //
+            // `req` on THIS side: the preset is the verifier's own
+            // configuration surface and keeps the key the YAML uses. The
+            // posted DCQL below uses the wire member `_req`. The copy
+            // from one to the other is the only place they meet.
             req: v.optional(reqSchema),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
@@ -193,7 +198,14 @@ const dcqlQueryCredentialSchema = v.object({
     // The same schema as the metadata one above, and the same reason:
     // this is the query that is actually posted, so a parameter dropped
     // here never reaches the wallet at all.
-    req: v.optional(reqSchema),
+    //
+    // `_req`, not `req`: this object is a DCQL credential query, and
+    // v0.4 names the member `_req` on the wire. The server reads it into
+    // CredentialQuery.Req, whose tag is `_req`, and encoding/json does
+    // not match `req` to that tag - it drops it, leaving a zkp_req query
+    // with no items. No error anywhere: the request goes out asking the
+    // wallet for nothing.
+    _req: v.optional(reqSchema),
 });
 
 const credentialSetQuerySchema = v.object({
@@ -669,7 +681,8 @@ Alpine.data("app", () => ({
                 /** @type {any} */
                 const c = { id: cred.id, format: cred.format, meta: cred.meta };
                 if (cred.claims) c.claims = cred.claims;
-                if (cred.req) c.req = cred.req;
+                // The preset's `req` becomes the wire's `_req` here.
+                if (cred.req) c._req = cred.req;
                 return c;
             }),
         };

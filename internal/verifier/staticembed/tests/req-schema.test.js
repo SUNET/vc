@@ -1,4 +1,4 @@
-// Unit tests for the circuit_zk `req` schema. Runs under Node's built-in
+// Unit tests for the zkp_req `req` schema. Runs under Node's built-in
 // test runner (`node --test`).
 
 import { describe, it } from "node:test";
@@ -14,7 +14,7 @@ import { reqSchema } from "../req-schema.js";
 // param is an input to a proof: a dropped one is a different pseudonym,
 // computed from a request nobody wrote.
 const req = [{
-    id: "pseudonym-v1-sha256",
+    fn_id: "pseudonym",
     return: "nym-1",
     params: {
         config: "known-offender-matching-ssc",
@@ -44,7 +44,7 @@ describe("reqSchema", () => {
         assert.equal(result.success, true);
         assert.deepEqual(
             Object.keys(result.output[0]).sort(),
-            ["extension", "id", "params", "return", "toString"],
+            ["extension", "fn_id", "params", "return", "toString"],
         );
     });
 
@@ -66,12 +66,13 @@ describe("reqSchema", () => {
             {},
             [null],
             ["a string item"],
-            [{ return: "h" }],                       // no id
-            [{ id: "f" }],                           // no return
-            [{ id: 7, return: "h" }],                // id not a string
-            [{ id: "f", return: 7 }],                // return not a string
-            [{ id: "f", return: "h", params: [] }],  // params not an object
-            [{ id: "f", return: "h", params: "x" }],
+            [{ return: "h" }],                          // no fn_id
+            [{ fn_id: "f" }],                           // no return
+            [{ fn_id: 7, return: "h" }],                // fn_id not a string
+            [{ fn_id: "f", return: 7 }],                // return not a string
+            [{ fn_id: "f", return: "h", params: [] }],  // params not an object
+            [{ fn_id: "f", return: "h", params: "x" }],
+            [{ id: "f", return: "h" }],                 // the pre-v0.4 key
         ]) {
             assert.equal(
                 v.safeParse(reqSchema, bad).success,
@@ -84,10 +85,10 @@ describe("reqSchema", () => {
     it("accepts the shapes a conforming request actually takes", () => {
         for (const good of [
             [],
-            [{ id: "f", return: "h" }],
-            [{ id: "f", return: "h", params: {} }],
-            [{ id: "pseudonym-v1-sha256", return: "n", params: { config: "c" } },
-             { id: "age_check", return: "a", params: { ge: "2008-10-10" } }],
+            [{ fn_id: "f", return: "h" }],
+            [{ fn_id: "f", return: "h", params: {} }],
+            [{ fn_id: "pseudonym", return: "n", params: { config: "c", ver: 1, prf: "sha-256" } },
+             { fn_id: "age_check", return: "a", params: { ge: "2008-10-10" } }],
         ]) {
             assert.equal(
                 v.safeParse(reqSchema, good).success,
@@ -95,5 +96,29 @@ describe("reqSchema", () => {
                 `must accept ${JSON.stringify(good)}`,
             );
         }
+    });
+});
+
+// The item key moved from `id` to `fn_id` in rulebook v0.4, and this
+// fixture was not moved with it - which is the only reason the schema
+// kept passing while it validated a shape the server had stopped
+// publishing. The live operator UI then threw on /ui/metadata and never
+// left its spinner.
+//
+// Both directions are pinned, because either one alone goes stale the
+// same way: the published shape is accepted, and the shape it replaced
+// is refused rather than quietly tolerated.
+describe("reqSchema and the v0.4 item key", () => {
+    const item = { return: "nym", params: { config: "known-offender-matching-ssc" } };
+
+    it("accepts the fn_id the server publishes", () => {
+        const result = v.safeParse(reqSchema, [{ fn_id: "pseudonym", ...item }]);
+        assert.equal(result.success, true);
+    });
+
+    it("refuses the pre-v0.4 id", () => {
+        const result = v.safeParse(reqSchema, [{ id: "pseudonym", ...item }]);
+        assert.equal(result.success, false);
+        assert.match(result.issues[0].message, /fn_id/);
     });
 });

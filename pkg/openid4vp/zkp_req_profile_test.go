@@ -130,7 +130,7 @@ func TestNymAuthProfileRejectsEachViolation(t *testing.T) {
 		{
 			name:  "the wrong format",
 			query: CredentialQuery{Format: FormatMsoMdoc, Meta: MetaQuery{DoctypeValue: "d"}, Req: []ReqItem{{FnID: FunctionAgeCheck, Return: "a"}}},
-			want:  "describes circuit_zk requests",
+			want:  "describes zkp_req requests",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
