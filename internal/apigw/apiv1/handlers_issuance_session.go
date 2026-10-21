@@ -26,9 +26,20 @@ import (
 // company they represent, and asked for a credential about it. What it
 // cannot do is reach into the wallet; so it hands the user an offer, and
 // tells this server which Holder that offer is for.
+// Every field is `header:"-"`, and that is load-bearing rather than tidy.
+//
+// httphelpers.Binding.Request binds headers BEFORE the JSON body, and
+// gin's header binder falls back to the FIELD NAME when a struct carries
+// no header tag - so a "Scope:" header would populate Scope, and a body
+// that simply omits the member leaves it there. The SPOCP authorization
+// middleware extracts the resource pairs it checks from the query string
+// and the JSON body and never looks at headers, so a scope smuggled
+// through one is acted on without having been authorized. Refusing the
+// header source keeps the value the middleware checks and the value this
+// handler acts on the same value.
 type PrepareIssuanceRequest struct {
 	// Scope is the credential being prepared.
-	Scope string `json:"scope" validate:"required"`
+	Scope string `json:"scope" header:"-" validate:"required"`
 
 	// IdentityMatch decides whether the Holder who turns up is the one
 	// this issuance was prepared for.
@@ -37,11 +48,25 @@ type PrepareIssuanceRequest struct {
 	// wallet may complete, which is what the pre-authorized grant already
 	// provides and what this endpoint exists to improve on. A caller that
 	// wants that should ask for it by name rather than by omission.
-	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match" validate:"required"`
+	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match" header:"-" validate:"required"`
+
+	// AuthenticSource names the source this credential will be issued
+	// from, and is checked against the one the scope actually resolves to.
+	//
+	// Optional, and NOT how the source is chosen - the Selector decides
+	// that, from what this deployment has running. It exists because the
+	// authorization middleware reads authentic_source out of this body and
+	// authorizes the (source, scope) pair it finds there. A caller allowed
+	// source A could otherwise send "authentic_source": "A" alongside a
+	// scope that resolves to B, pass a check about A, and have an issuance
+	// prepared against B. Supplying it means the pair that was authorized
+	// is the pair that is used; omitting it authorizes a pair with no
+	// source, which the deployment's own rules decide about.
+	AuthenticSource string `json:"authentic_source,omitempty" header:"-" validate:"omitempty"`
 
 	// TTLSeconds bounds how long the offer may be left unredeemed.
 	// Optional; the server's default applies when it is absent.
-	TTLSeconds int `json:"ttl_seconds,omitempty" validate:"omitempty,gt=0"`
+	TTLSeconds int `json:"ttl_seconds,omitempty" header:"-" validate:"omitempty,gt=0"`
 }
 
 // PrepareIssuanceReply is the prepared issuance.
@@ -126,23 +151,51 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 				req.Scope, required), 400)
 	}
 
+	// The offer names req.Scope as its credential_configuration_id, and
+	// issuance resolves it through matchScope only after the exchange is spent.
+	if c.cfg.GetCredentialMetadata(req.Scope) == nil {
+		return nil, helpers.NewErrorDetailsWithStatus("unknown_credential_configuration",
+			fmt.Sprintf("scope %q has no credential metadata, so the offer would name a credential this issuer does not advertise", req.Scope), 400)
+	}
+
+	// The source the caller named, if it named one, has to be the source
+	// this scope resolves to.
+	//
+	// The authorization middleware reads authentic_source from this body
+	// and authorizes the (source, scope) pair it finds. Nothing else
+	// compared that pair to the one preparation would actually use, so a
+	// caller permitted source A could name A, send a scope the Selector
+	// resolves to B, and have the issuance prepared against B having been
+	// authorized for nothing of the sort. Refusing the mismatch keeps the
+	// pair that was checked and the pair that is used the same pair.
+	if req.AuthenticSource != "" && req.AuthenticSource != source.AuthenticSource {
+		c.log.Error(nil, "PREPARE: authentic_source does not match the source the scope resolves to",
+			"scope", req.Scope, "named", req.AuthenticSource, "resolved", source.AuthenticSource)
+		return nil, helpers.NewErrorDetailsWithStatus("authentic_source_mismatch",
+			fmt.Sprintf("scope %q is served by authentic source %q, not %q",
+				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
+	}
+
 	// A rule naming a claim the request will not ask for can never pass.
 	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
 		return nil, err
 	}
 
-	// And the request itself has to be constructible. buildIssuanceAuthDCQL
-	// refuses an authentication scope whose format this flow cannot verify -
-	// a W3C credential, which issuance auth has not been taught to read -
-	// and refuses one with no usable meta constraint. Both are
-	// configuration errors, and discovering them at the Challenge Endpoint
-	// means preparation has already handed the caller a valid-looking offer
-	// to print and distribute whose exchange can never open. Finding out
-	// here costs one call and makes the failure the caller's, at the moment
-	// they can still do something about it.
+	// And the request itself has to be buildable, which matching claim
+	// NAMES does not establish.
+	//
+	// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
+	// query and one whose credential metadata is missing, and it is not
+	// reached until a wallet resumes the offer - by which point the
+	// failure belongs to a Holder standing in front of a QR code, for a
+	// configuration problem the caller could have been told about at the
+	// moment it prepared the issuance. Built here and thrown away: it is
+	// rebuilt when the exchange opens, from configuration that may have
+	// changed, so storing this one would only make the two disagree.
 	if _, err := c.issuanceAuthDCQL(req.Scope); err != nil {
+		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.Scope)
 		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
-			fmt.Sprintf("scope %q cannot be turned into a presentation request: %s", req.Scope, err.Error()), 400)
+			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.Scope, err), 400)
 	}
 
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
@@ -260,12 +313,7 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		claims := vpAuth.AuthScopes[authScope].AuthClaims
 		offered[authScope] = claims
-
-		// Both sides through the same expansion, against the format of
-		// the credential being PRESENTED - the auth scope's, not the one
-		// being issued.
-		format := c.cfg.GetFormatForScope(authScope)
-		if coversAll(normalisedClaimPaths(format, claims), normalisedClaimPaths(format, paths)) {
+		if coversAll(c.cfg.GetFormatForScope(authScope), claims, paths) {
 			return nil
 		}
 	}
@@ -276,24 +324,15 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 			scope, strings.Join(paths, ", "), offered), 400)
 }
 
-// normalisedClaimPaths puts claim paths into the shape the presentation
-// request will carry them, so a rule and the request are compared on what
-// they ask for rather than on how it was written.
-//
-// The separator is one that cannot occur in a claim name, so two
-// different segmentations can never collide into the same string.
-func normalisedClaimPaths(format string, claims []string) []string {
-	normalised := make([]string, 0, len(claims))
+// coversAll reports whether every path appears in claims, compared as the
+// DCQL path segments buildIssuanceAuthDCQL sends for that format.
+func coversAll(format string, claims, paths []string) bool {
+	asked := make(map[string]struct{}, len(claims))
 	for _, claim := range claims {
-		normalised = append(normalised, strings.Join(authClaimPathSegments(format, claim), "\x00"))
+		asked[strings.Join(authClaimPathSegments(format, claim), "\x00")] = struct{}{}
 	}
-	return normalised
-}
-
-// coversAll reports whether every path appears in claims.
-func coversAll(claims, paths []string) bool {
 	for _, path := range paths {
-		if !slices.Contains(claims, path) {
+		if _, ok := asked[strings.Join(authClaimPathSegments(format, path), "\x00")]; !ok {
 			return false
 		}
 	}

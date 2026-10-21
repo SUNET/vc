@@ -115,7 +115,7 @@ func main() {
 	apiv1Client.StartSignedMetadataRefresher(ctx)
 
 	// Initialize data sources (Edu-API, etc.)
-	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cacheService.Document, mainLog)
+	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cfg.APIGW.DataSources.ExternalAPI, cacheService.Document, mainLog)
 	if err != nil {
 		panic(err)
 	}

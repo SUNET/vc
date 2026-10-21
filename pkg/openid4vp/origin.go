@@ -10,7 +10,7 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// browserHost serialises a hostname the way a URL parser in a browser
+// BrowserHost serialises a hostname the way a URL parser in a browser
 // does: UTS #46 ToASCII with the flags the WHATWG URL Standard specifies
 // for a non-strict parse.
 //
@@ -21,7 +21,7 @@ import (
 // no comparison could ever match. So those three are turned back off
 // after it, and the bidi and joiner checks, which a browser does apply,
 // are kept.
-var browserHost = idna.New(
+var BrowserHost = idna.New(
 	idna.MapForLookup(),
 	idna.BidiRule(),
 	idna.StrictDomainName(false),
@@ -59,6 +59,9 @@ func CanonicalOrigin(rawURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parsing %q for its origin: %w", rawURL, err)
 	}
+	// Host rather than Hostname for the first half: a URL such as
+	// "https://:443" parses with a non-empty Host and an empty Hostname,
+	// and an origin of "https://" is not something this may return.
 	if u.Scheme == "" || u.Host == "" {
 		return "", fmt.Errorf("%q has no scheme or host, so it yields no origin", rawURL)
 	}
@@ -68,105 +71,91 @@ func CanonicalOrigin(rawURL string) (string, error) {
 	// Hostname() lowercases nothing and strips the brackets an IPv6
 	// literal is written with, so both have to be put back by hand.
 	host := u.Hostname()
-	if strings.Contains(host, ":") {
+	if host == "" {
+		return "", fmt.Errorf("%q has no host, so it yields no origin", rawURL)
+	}
+
+	switch {
+	case strings.Contains(host, ":"):
 		// An IPv6 literal, which is not a domain name and must not be put
-		// through IDNA - the colons alone would fail it. Lowercasing is
-		// not its canonical form either: a browser serialises an address
-		// the way RFC 5952 does, so "[2001:0DB8:0:0:0:0:0:1]" comes back
-		// as "[2001:db8::1]" and a lowercased spelling matches neither
-		// the Origin it reports nor the audience derived from it.
-		addr, err := netip.ParseAddr(host)
-		if err != nil {
-			return "", fmt.Errorf("parsing the IPv6 literal in %q: %w", rawURL, err)
-		}
-		host = "[" + serialiseIPv6(addr) + "]"
-	} else {
-		// ToASCII does the case folding too, as part of the UTS #46
-		// mapping, so there is no ToLower here to disagree with it.
-		host, err = browserHost.ToASCII(host)
+		// through IDNA - the colons alone would fail it.
+		//
+		// Lowercasing is not enough either: "2001:0DB8:0:0:0:0:0:1" and
+		// "2001:db8::1" are the same address written two ways, and a
+		// string comparison against the one a browser emits only works
+		// if both sides are in the canonical form RFC 5952 describes.
+		// netip.Addr.String() produces exactly that.
+		host, err = canonicalIPv6(host)
 		if err != nil {
 			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
 		}
-
-		// After the IDNA step, because the URL Standard decides a host is
-		// an IPv4 address by looking at the ASCII form.
-		if ipv4, ok := whatwgIPv4(host); ok {
-			host = ipv4
+	default:
+		// ToASCII does the case folding too, as part of the UTS #46
+		// mapping, so there is no ToLower here to disagree with it.
+		host, err = BrowserHost.ToASCII(host)
+		if err != nil {
+			return "", fmt.Errorf("serialising the host of %q as a browser would: %w", rawURL, err)
+		}
+		// The numeric check runs on the MAPPED host, because the mapping
+		// is what a browser parses. Fullwidth digits and ideographic full
+		// stops (U+3002) are not ASCII digits or dots as written, but UTS
+		// #46 maps them to "127.1"-style hosts that a browser rewrites
+		// to 127.0.0.1. Checking the host as written let those through.
+		if endsInANumber(host) {
+			if err := refuseRewritableNumericHost(host, rawURL); err != nil {
+				return "", err
+			}
 		}
 	}
 
 	origin := scheme + "://" + host
-
-	// The port is a NUMBER, and u.Port() hands back whatever was typed.
-	// A browser parses it and emits the decimal form, so ":0443" is the
-	// default port and disappears, and ":008443" comes back as ":8443" -
-	// while comparing the raw strings kept both spellings and failed
-	// against the origin a browser reports for the same URL.
-	if port := u.Port(); port != "" {
-		number, err := strconv.ParseUint(port, 10, 16)
-		if err != nil {
-			return "", fmt.Errorf("the port in %q is not a port number: %w", rawURL, err)
-		}
-		normalised := strconv.FormatUint(number, 10)
-		if normalised != defaultPortForScheme(scheme) {
-			origin += ":" + normalised
-		}
+	port, err := normalizePort(u.Port())
+	if err != nil {
+		return "", fmt.Errorf("the port of %q is not a port: %w", rawURL, err)
+	}
+	if port != "" && port != defaultPortForScheme(scheme) {
+		origin += ":" + port
 	}
 	return origin, nil
 }
 
-// serialiseIPv6 writes an address the way the WHATWG URL Standard's IPv6
-// serializer does, which is what a browser puts in an Origin.
+// refuseRewritableNumericHost refuses a host a browser would parse as an
+// IPv4 address and rewrite.
 //
-// netip.Addr.String() is RFC 5952 and agrees with it everywhere except
-// one case: an IPv4-mapped address comes back with a dotted tail,
-// "::ffff:192.0.2.1", while the URL Standard has no such case and emits
-// eight hexadecimal pieces, "::ffff:c000:201". Using String() therefore
-// not only failed to canonicalise the dotted spelling, it CONVERTED the
-// browser's own hexadecimal spelling into one the browser never emits -
-// so a correctly configured expected_origins stopped matching.
+// A host whose last label is a number is an address to a browser, not a
+// domain name, and it applies its own parser: "127.1" and "0x7f.1" both
+// become "127.0.0.1". Nothing here rewrites them, so the origin published
+// would be one no browser ever reports.
 //
-// The compression rule is the same one netip applies: the leftmost
-// longest run of two or more zero pieces becomes "::".
-func serialiseIPv6(addr netip.Addr) string {
-	b := addr.As16()
-	var pieces [8]uint16
-	for i := range pieces {
-		pieces[i] = uint16(b[2*i])<<8 | uint16(b[2*i+1])
+// Refused rather than canonicalised. The spellings a browser accepts are a
+// long tail of octal, hexadecimal and short forms, and a canonicaliser
+// that got one of them wrong would quietly produce a WRONG origin - which
+// is worse than none, because an origin is only ever used to decide that
+// two things match. An operator who wrote a numeric host meant an address,
+// and the dotted-quad spelling of it is unambiguous.
+func refuseRewritableNumericHost(host, rawURL string) error {
+	if _, err := canonicalIPv4(host); err != nil {
+		return fmt.Errorf("the host of %q is a numeric address a browser would rewrite: %w", rawURL, err)
 	}
+	return nil
+}
 
-	bestStart, bestLen := -1, 0
-	for i := 0; i < 8; {
-		if pieces[i] != 0 {
-			i++
-			continue
-		}
-		j := i
-		for j < 8 && pieces[j] == 0 {
-			j++
-		}
-		if j-i > bestLen {
-			bestStart, bestLen = i, j-i
-		}
-		i = j
+// normalizePort strips the leading zeroes a URL parser does not keep.
+//
+// A port is a NUMBER, so "0443" and "443" are the same port and a browser
+// emits neither the zeroes nor the port itself when it is the scheme's
+// default. Comparing the written form would publish an origin containing
+// ":0443" against a browser that reports none, and ":08443" against one
+// that reports ":8443".
+func normalizePort(port string) (string, error) {
+	if port == "" {
+		return "", nil
 	}
-	if bestLen < 2 {
-		bestStart = -1
+	n, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return "", fmt.Errorf("%q is not a port number: %w", port, err)
 	}
-
-	var out strings.Builder
-	for i := 0; i < 8; i++ {
-		if i == bestStart {
-			out.WriteString("::")
-			i += bestLen - 1
-			continue
-		}
-		if i > 0 && i != bestStart+bestLen {
-			out.WriteByte(':')
-		}
-		out.WriteString(strconv.FormatUint(uint64(pieces[i]), 16))
-	}
-	return out.String()
+	return strconv.FormatUint(n, 10), nil
 }
 
 // defaultPortForScheme returns the port a browser leaves out of an origin,
@@ -182,98 +171,134 @@ func defaultPortForScheme(scheme string) string {
 	}
 }
 
-// whatwgIPv4 applies the WHATWG URL Standard's IPv4 parser and serializer
-// to an already-ASCII host, reporting whether the host was one.
+// canonicalIPv6 returns addr in the single spelling RFC 5952 §4 prescribes,
+// which is the one a browser puts in an Origin header.
 //
-// A browser does not treat a dotted host as a name when its last part
-// looks numeric: "127.1" is the address 127.0.0.1, "0x7f.1" is the same
-// address, and the Origin a browser reports for either is
-// "http://127.0.0.1". Leaving them alone meant a public_url written in
-// one of those spellings produced an expected_origins entry and an mdoc
-// session transcript that the browser's own Origin never matched.
-//
-// The rules are §3.3 of the standard: at most four parts, each decimal,
-// or octal with a leading "0", or hexadecimal with a leading "0x"; a
-// trailing empty part is dropped; the last part absorbs the remaining
-// octets. Anything that does not parse is not an address, and - because
-// the last part was numeric-looking - the standard says such a host is an
-// error rather than a name. This returns false there and lets the host
-// through as written: refusing would turn a host a browser rejects
-// outright into a comparison failure, which is the same outcome by a
-// clearer route.
-func whatwgIPv4(host string) (string, bool) {
-	parts := strings.Split(host, ".")
-	if len(parts) > 1 && parts[len(parts)-1] == "" {
-		parts = parts[:len(parts)-1]
-	}
-	if len(parts) == 0 || len(parts) > 4 {
-		return "", false
-	}
-
-	// Only a host whose LAST part is numeric is an IPv4 address; anything
-	// else is a domain name and must be left exactly as it is.
-	if !isWHATWGNumber(parts[len(parts)-1]) {
-		return "", false
-	}
-
-	numbers := make([]uint64, 0, len(parts))
-	for _, part := range parts {
-		n, ok := parseWHATWGNumber(part)
-		if !ok {
-			return "", false
-		}
-		numbers = append(numbers, n)
-	}
-
-	// Every part but the last is one octet; the last absorbs the rest.
-	for _, n := range numbers[:len(numbers)-1] {
-		if n > 255 {
-			return "", false
-		}
-	}
-	last := numbers[len(numbers)-1]
-	if last >= 1<<(8*(5-uint(len(numbers)))) {
-		return "", false
-	}
-
-	address := last
-	for i, n := range numbers[:len(numbers)-1] {
-		address += n << (8 * (3 - uint(i)))
-	}
-
-	return fmt.Sprintf("%d.%d.%d.%d", address>>24&0xff, address>>16&0xff, address>>8&0xff, address&0xff), true
-}
-
-// isWHATWGNumber reports whether a host part is one the IPv4 parser would
-// read as a number at all.
-func isWHATWGNumber(part string) bool {
-	_, ok := parseWHATWGNumber(part)
-	return ok
-}
-
-// parseWHATWGNumber reads one part of an IPv4 host: decimal, octal with a
-// leading "0", or hexadecimal with a leading "0x".
-func parseWHATWGNumber(part string) (uint64, bool) {
-	if part == "" {
-		return 0, false
-	}
-
-	base := 10
-	digits := part
-	switch {
-	case len(part) >= 2 && (part[0:2] == "0x" || part[0:2] == "0X"):
-		base, digits = 16, part[2:]
-		if digits == "" {
-			// "0x" alone is zero, per the standard's empty-digits case.
-			return 0, true
-		}
-	case len(part) >= 2 && part[0] == '0':
-		base, digits = 8, part[1:]
-	}
-
-	n, err := strconv.ParseUint(digits, base, 64)
+// A zone identifier is refused: it names an interface on one host, so it
+// cannot be part of an origin two parties compare, and no browser emits one.
+func canonicalIPv6(host string) (string, error) {
+	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		return 0, false
+		return "", fmt.Errorf("%q is not an IPv6 address: %w", host, err)
 	}
-	return n, true
+	if addr.Zone() != "" {
+		return "", fmt.Errorf("%q carries a zone identifier, which is not part of an origin", host)
+	}
+	if !addr.Is6() || addr.Is4() {
+		return "", fmt.Errorf("%q is not an IPv6 address", host)
+	}
+	return "[" + serializeIPv6(addr) + "]", nil
+}
+
+// serializeIPv6 writes addr the way the WHATWG URL Standard's IPv6
+// serializer does: eight hexadecimal pieces, lowercase, with the longest
+// run of two or more zero pieces compressed to "::".
+//
+// netip.Addr.String() is RFC 5952 and agrees with that everywhere except
+// one case, which is why this exists: for an IPv4-MAPPED address it emits
+// the dotted-decimal tail, so "::ffff:c000:201" comes back as
+// "::ffff:192.0.2.1". A browser has no such special case and reports the
+// hexadecimal form, so the dotted one is an origin nothing will match.
+func serializeIPv6(addr netip.Addr) string {
+	octets := addr.As16()
+	var pieces [8]uint16
+	for i := range pieces {
+		pieces[i] = uint16(octets[2*i])<<8 | uint16(octets[2*i+1])
+	}
+
+	// The longest run of zeroes, and only when it is longer than one -
+	// a single zero piece is written out, not compressed.
+	bestStart, bestLen := -1, 1
+	for i := 0; i < len(pieces); {
+		if pieces[i] != 0 {
+			i++
+			continue
+		}
+		j := i
+		for j < len(pieces) && pieces[j] == 0 {
+			j++
+		}
+		if j-i > bestLen {
+			bestStart, bestLen = i, j-i
+		}
+		i = j
+	}
+
+	var b strings.Builder
+	for i := 0; i < len(pieces); i++ {
+		if i == bestStart {
+			if i == 0 {
+				b.WriteByte(':')
+			}
+			b.WriteByte(':')
+			i += bestLen - 1
+			continue
+		}
+		b.WriteString(strconv.FormatUint(uint64(pieces[i]), 16))
+		if i < len(pieces)-1 {
+			b.WriteByte(':')
+		}
+	}
+	return b.String()
+}
+
+// canonicalIPv4 accepts host only when it is already the dotted-quad
+// spelling of the address it names - the one form every URL parser agrees
+// on, and the only one that survives a round trip through a browser
+// unchanged.
+func canonicalIPv4(host string) (string, error) {
+	addr, err := netip.ParseAddr(host)
+	if err != nil || !addr.Is4() {
+		return "", fmt.Errorf("%q is not a dotted-quad IPv4 address; write it as four decimal octets", host)
+	}
+	if addr.String() != host {
+		return "", fmt.Errorf("%q is not the canonical spelling of %s", host, addr)
+	}
+	return host, nil
+}
+
+// endsInANumber reports whether a browser would parse host as an IPv4
+// address rather than a domain name.
+//
+// The WHATWG URL Standard decides that on the LAST label alone: a host
+// ending in a label that is a decimal or hexadecimal number goes to the
+// IPv4 parser, however many labels precede it and whatever they contain.
+// So "127.1" is an address, and so is "example.0x1".
+func endsInANumber(host string) bool {
+	labels := strings.Split(host, ".")
+	// A single trailing dot is a root label, not an empty last label.
+	if len(labels) > 1 && labels[len(labels)-1] == "" {
+		labels = labels[:len(labels)-1]
+	}
+	last := labels[len(labels)-1]
+	if last == "" {
+		return false
+	}
+
+	for _, prefix := range []string{"0x", "0X"} {
+		if hex, found := strings.CutPrefix(last, prefix); found {
+			return isHexDigits(hex)
+		}
+	}
+	return isDigits(last)
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isHexDigits(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }

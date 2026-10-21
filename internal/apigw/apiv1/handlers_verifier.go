@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -193,6 +196,33 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
+	// An Interactive Authorization exchange is answered at the
+	// Authorization Challenge Endpoint, which verifies holder binding
+	// before it accepts anything. This endpoint does not, and it finds the
+	// same context by the same ephemeral key id - so answering an IA
+	// request here is answering a request that was never made, through
+	// the weaker of the two doors.
+	//
+	// Refused rather than verified-more-strictly. Even with holder binding
+	// enforced here the audience and the mdoc session transcript would be
+	// the browser flow's, not the ones the wallet signed over, so the two
+	// channels are not interchangeable whatever this endpoint checks.
+	//
+	// Either marker refuses, because the marker is NEW and the contexts
+	// are PERSISTED. A context opened by the previous version is still in
+	// the store after an upgrade with no interactive_authorization member
+	// at all, which decodes as false - so for as long as those contexts
+	// live, the guard would wave through exactly the exchanges it exists
+	// to stop. AuthSessionDPoPThumbprint is the durable second signal:
+	// the challenge endpoint refuses a request without a DPoP proof
+	// before it creates a context, so every IA context ever written has
+	// one, and nothing else sets it.
+	if authCtx.InteractiveAuthorization || authCtx.AuthSessionDPoPThumbprint != "" {
+		c.log.Error(nil, "interactive authorization context answered at the browser-mediated endpoint",
+			"session_id", authCtx.SessionID, "kid", kid)
+		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")
+	}
+
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
 	outcome, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, &vpResponse, issuanceAuthBinding{
 		Audience:              authCtx.ClientID,
@@ -282,6 +312,30 @@ type issuanceAuthBinding struct {
 	// Interactive Authorization mints its own and checks it, because
 	// nothing there makes a state optional.
 	ExpectedState string
+
+	// VerifyHolderBinding requires the SD-JWT VC presentation to carry a
+	// Key Binding JWT that actually VERIFIES against the cnf key the
+	// Issuer bound the credential to.
+	//
+	// VPTokenValidator already verifies the KB-JWT signature against the
+	// credential's cnf key on both channels. This flag adds two checks
+	// the validator does not make: the cnf key is taken from the issuer
+	// JWT whose signature was just verified (not from the presented
+	// claims), and the credential must be inside its validity window
+	// (exp/nbf), which signature verification does not enforce.
+	//
+	// Interactive Authorization sets it: the endpoint is new, nothing
+	// depends on the weaker behaviour, and the whole purpose of the
+	// exchange is to establish WHO is asking for an issuance - a check
+	// that cannot tell the Holder from someone holding a copy does not do
+	// that job at all.
+	//
+	// The browser-mediated flow does not set it yet, and that is a real
+	// gap rather than a decision: it is pre-existing, it affects every
+	// presentation that channel has ever accepted, and turning it on
+	// there changes what an existing deployment accepts. It is named here
+	// rather than quietly left out, and is on the user's list.
+	VerifyHolderBinding bool
 }
 
 // issuanceAuthOutcome says how a presentation that authenticated an
@@ -312,6 +366,20 @@ type issuanceAuthOutcome struct {
 // passes the verifier's own client_id; Interactive Authorization passes the
 // prefixed Authorization Challenge Endpoint, which is what stops one
 // Authorization Server relaying another's challenge.
+// issuanceAuthConsumer is consumeIssuanceAuthPresentation's signature, so
+// that a channel feeding it can be tested against the pipeline rather than
+// against a PDP, a trust deployment and a datastore.
+type issuanceAuthConsumer func(ctx context.Context, authCtx *cache.AuthorizationContext, vpResponse *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error)
+
+// issuanceAuthPipeline is the consumer to feed. The real one unless a test
+// has put something else in its place - see Client.issuanceAuth.
+func (c *Client) issuanceAuthPipeline() issuanceAuthConsumer {
+	if c.issuanceAuth != nil {
+		return c.issuanceAuth
+	}
+	return c.consumeIssuanceAuthPresentation
+}
+
 func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *cache.AuthorizationContext, vpResponse *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
 	// Match a scope from the authorization context to a known credential constructor
 	scope, credMetaCfg, err := c.matchScope(authCtx.Scopes)
@@ -447,6 +515,57 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 			return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
 		}
 
+		// Who is presenting this, as distinct from whether the claims are
+		// genuine.
+		//
+		// Everything above establishes that a trusted Issuer signed these
+		// claims. A credential and its disclosures are a bearer token to
+		// anyone who obtains them, so that says nothing about the
+		// presenter - and the validator above checks only that a key
+		// binding proof is THERE, reading its nonce and audience without
+		// verifying the signature. The proof has to be checked against
+		// the cnf key the Issuer bound the credential to, and the claims
+		// carrying that key have to be the ones whose signature was just
+		// verified: reading cnf out of an unverified issuer JWT would let
+		// the presenter nominate their own key.
+		if binding.VerifyHolderBinding {
+			issuerToken, _, err := c.jwtTrustVerifier.VerifyJWTSignature(ctx, issuerJWTOf(responseParams.VPToken), scope)
+			if err != nil {
+				c.log.Error(err, "issuer JWT did not verify while checking holder binding", "scope", scope)
+				return nil, fmt.Errorf("issuer signature verification failed: %w", err)
+			}
+			issuerClaims, ok := issuerToken.Claims.(jwt.MapClaims)
+			if !ok {
+				return nil, serverFault(errors.New("verified issuer JWT carries no claims"))
+			}
+
+			// The credential has to be valid NOW, which its signature
+			// does not say.
+			//
+			// VerifyJWTSignature parses with jwt.WithoutClaimsValidation
+			// - it is answering "who signed this", and the trust
+			// evaluation it feeds is about the issuer rather than the
+			// document - and neither the VP validator nor the credential
+			// parser looks at exp or nbf either. So an expired credential
+			// presented with a freshly signed proof was accepted: the
+			// holder genuinely holds the key, the nonce is genuinely this
+			// request's, and the credential genuinely stopped being valid
+			// last year. A fresh proof does not renew a credential.
+			if err := validIssuerCredentialWindow(issuerClaims, time.Now()); err != nil {
+				c.log.Error(err, "presented credential is outside its validity window", "scope", scope)
+				return nil, fmt.Errorf("credential validity check failed: %w", err)
+			}
+
+			if err := sdjwtvc.VerifyKeyBinding(responseParams.VPToken, issuerClaims, sdjwtvc.KeyBindingExpectations{
+				Nonce:    authCtx.Nonce,
+				Audience: binding.Audience,
+			}); err != nil {
+				c.log.Error(err, "holder binding verification failed", "scope", scope)
+				return nil, fmt.Errorf("holder binding verification failed: %w", err)
+			}
+			c.log.Debug("holder binding verified", "scope", scope)
+		}
+
 		built, err := responseParams.BuildCredential()
 		if err != nil {
 			c.log.Error(err, "failed to build credential from response parameters")
@@ -520,6 +639,9 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	}
 	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
 	if err != nil {
+		if errors.Is(err, helpers.ErrNoIdentityFound) {
+			return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+		}
 		return nil, serverFault(fmt.Errorf("failed to resolve identity from VP claims: %w", err))
 	}
 
@@ -597,12 +719,19 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, format)
 		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
-			ID:                                authScope,
-			Format:                            format,
-			Multiple:                          false,
-			Meta:                              meta,
-			RequireCryptographicHolderBinding: new(false),
-			Claims:                            scopeClaimQueries,
+			ID:       authScope,
+			Format:   format,
+			Multiple: false,
+			Meta:     meta,
+			// Left unset, which is the specification's default of TRUE.
+			//
+			// It said false, which told every wallet that a presentation
+			// authenticating an issuance need not prove possession - and
+			// the verifier did not check, so the two agreed. A
+			// presentation that proves nothing about who is presenting is
+			// not an authentication, and this is the flow that decides
+			// whose documents get issued.
+			Claims: scopeClaimQueries,
 		})
 		options = append(options, []string{authScope})
 	}
@@ -659,5 +788,86 @@ func (c *Client) directPostSessionTranscript(authCtx *cache.AuthorizationContext
 			return nil, fmt.Errorf("compute ephemeral JWK thumbprint: %w", err)
 		}
 		return mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
+	}
+}
+
+// issuerJWTOf returns the issuer-signed JWT at the head of an SD-JWT VC
+// presentation, without the disclosures or the key binding proof.
+func issuerJWTOf(vpToken string) string {
+	issuerJWT, _, _ := strings.Cut(vpToken, "~")
+	return issuerJWT
+}
+
+// issuerCredentialClockSkew is how far out of its window a presented
+// credential may be and still be accepted.
+//
+// Small, and symmetric. Clocks between an Issuer, a Holder's device and
+// this server differ by seconds in practice, and refusing a credential
+// that became valid one second ago is a failure a user cannot act on;
+// accepting one that expired a minute ago is not a risk worth the
+// confusion either.
+const issuerCredentialClockSkew = 30 * time.Second
+
+// validIssuerCredentialWindow refuses a credential that has expired or has
+// not started.
+//
+// Both are read from the ISSUER-VERIFIED claims, so a presenter cannot
+// extend its own credential's life by rewriting them. A credential with
+// neither claim is accepted: SD-JWT VC makes exp OPTIONAL, and refusing
+// one that omits it would reject credentials that are valid by their own
+// terms.
+func validIssuerCredentialWindow(claims jwt.MapClaims, now time.Time) error {
+	exp, haveExp, err := numericDate(claims, "exp")
+	if err != nil {
+		return err
+	}
+	if haveExp && now.After(exp.Add(issuerCredentialClockSkew)) {
+		return fmt.Errorf("the presented credential expired at %s", exp.UTC().Format(time.RFC3339))
+	}
+
+	nbf, haveNbf, err := numericDate(claims, "nbf")
+	if err != nil {
+		return err
+	}
+	if haveNbf && now.Before(nbf.Add(-issuerCredentialClockSkew)) {
+		return fmt.Errorf("the presented credential is not valid until %s", nbf.UTC().Format(time.RFC3339))
+	}
+
+	return nil
+}
+
+// numericDate reads a JWT NumericDate claim, and distinguishes the three
+// cases that are not the same thing: absent, a date, and a value that is
+// present but is not a date.
+//
+// The last one is REFUSED rather than treated as either of the others.
+// Absent means the issuer placed no restriction; present-but-malformed
+// means the issuer placed one this server cannot read, and accepting the
+// credential without it decides in the presenter's favour a question we
+// were unable to answer. Reading it as zero would be the opposite
+// failure - 1970, expiring every credential carrying one - which is why
+// it cannot simply be parsed loosely either. Nothing upstream catches it:
+// the issuer signature check runs with claims validation off.
+func numericDate(claims jwt.MapClaims, name string) (time.Time, bool, error) {
+	raw, present := claims[name]
+	if !present || raw == nil {
+		return time.Time{}, false, nil
+	}
+
+	switch v := raw.(type) {
+	case float64:
+		return time.Unix(int64(v), 0), true, nil
+	case int64:
+		return time.Unix(v, 0), true, nil
+	case int:
+		return time.Unix(int64(v), 0), true, nil
+	case json.Number:
+		n, err := v.Float64()
+		if err != nil {
+			return time.Time{}, true, fmt.Errorf("the presented credential has a %s claim that is not a number: %q", name, v.String())
+		}
+		return time.Unix(int64(n), 0), true, nil
+	default:
+		return time.Time{}, true, fmt.Errorf("the presented credential has a %s claim that is not a NumericDate, but a %T", name, raw)
 	}
 }

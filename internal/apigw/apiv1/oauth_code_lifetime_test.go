@@ -8,6 +8,7 @@ import (
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,17 @@ import (
 func TestAuthorizationCodeTTLFitsTheAuthContextLifetime(t *testing.T) {
 	assert.LessOrEqual(t, requestURITTL+authorizationCodeTTL, apigwcache.AuthContextTTL,
 		"a request_uri's life plus the code's must fit inside the authorization context's")
+
+	// And the other first leg, which is the long one. An Interactive
+	// Authorization exchange may be configured up to
+	// MaxAuthSessionTTLSeconds and hands over to the same code window when
+	// the presentation completes, so the context has to outlast both -
+	// otherwise the endpoint returns a code against a document MongoDB
+	// has already deleted, and only in HA, where nothing else would catch
+	// it.
+	maxAuthSession := time.Duration(model.MaxAuthSessionTTLSeconds) * time.Second
+	assert.LessOrEqual(t, maxAuthSession+authorizationCodeTTL, apigwcache.AuthContextTTL,
+		"the longest auth_session plus the code's life must fit inside the authorization context's")
 }
 
 // TestAuthorizeExtendsTheCodeDeadlinePastTheRequestURI is the bug itself: one
@@ -97,6 +109,45 @@ func TestAuthorizeExtendsTheCodeDeadlinePastTheRequestURI(t *testing.T) {
 				"and that deadline is authorizationCodeTTL away, not a few seconds")
 		})
 	}
+}
+
+// TestAuthorizeDoesNotExtendTheRequestURI: extending the code's deadline at
+// /authorize must not keep the request_uri redeemable past requestURITTL.
+func TestAuthorizeDoesNotExtendTheRequestURI(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	reply, err := client.OAuthPar(t.Context(), &openid4vci.PARRequest{
+		ClientID:            "wallet-1",
+		Scope:               challengeScope,
+		ResponseType:        "code",
+		RedirectURI:         "https://wallet.example.com/cb",
+		CodeChallenge:       strings.Repeat("c", 43),
+		CodeChallengeMethod: "S256",
+	})
+	require.NoError(t, err)
+	query := &cache.AuthorizationContext{RequestURI: reply.RequestURI}
+
+	_, err = client.OAuthAuthorize(t.Context(), &openid4vci.AuthorizeRequest{RequestURI: reply.RequestURI})
+	require.NoError(t, err, "first visit inside requestURITTL")
+
+	// Age the request_uri past its deadline, as a second visit at 90s would see it.
+	visited, err := client.cacheService.AuthContext.Get(t.Context(), query)
+	require.NoError(t, err)
+	require.False(t, visited.CreatedAt.IsZero(), "a PAR context must carry the retention anchor on the memory store too")
+	aged := *visited
+	aged.RequestURIExpiresAt = time.Now().Add(-30 * time.Second).Unix()
+	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), &aged))
+
+	_, err = client.OAuthAuthorize(t.Context(), &openid4vci.AuthorizeRequest{RequestURI: reply.RequestURI})
+	assert.ErrorIs(t, err, oauth2.ErrExpiredRequest, "the request_uri must expire on its own deadline")
+
+	got, err := client.cacheService.AuthContext.Get(t.Context(), query)
+	require.NoError(t, err)
+	assert.Greater(t, got.ExpiresAt, time.Now().Unix(), "while the code stays usable")
 }
 
 // TestExtendExpiryNeverShortens: /authorize is reachable more than once

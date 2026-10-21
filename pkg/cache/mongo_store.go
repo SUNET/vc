@@ -479,13 +479,17 @@ func (s *MongoStore) Consent(ctx context.Context, query *AuthorizationContext) e
 // The TTL index on created_at is untouched by design - it is the physical
 // bound this deadline has to stay inside, not something to push out.
 func (s *MongoStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
-	if query == nil || query.RequestURI == "" {
-		return errors.New("request_uri cannot be empty")
+	if query == nil {
+		return errors.New("query cannot be nil")
+	}
+	filter := s.buildFilter(query)
+	if filter == nil {
+		return errors.New("no searchable field set on the query")
 	}
 
 	result, err := s.coll.UpdateOne(
 		ctx,
-		bson.M{"request_uri": query.RequestURI},
+		filter,
 		bson.M{"$max": bson.M{"expires_at": expiresAt}},
 	)
 	if err != nil {
@@ -701,30 +705,39 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	return &claimed, nil
 }
 
-// ClaimIssuerState atomically takes the issuer-initiated handle off the
-// context it names. See AuthContextStore.ClaimIssuerState.
+// ClaimIssuerState atomically replaces the issuer-initiated handle with the
+// exchange that claims it. See AuthContextStore.ClaimIssuerState.
 //
-// One FindOneAndUpdate filtered on the handle, which is what makes it
-// one-shot: the second request to arrive matches nothing, because the
-// first has already removed the field it filters on.
-func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error) {
+// One FindOneAndReplace filtered on the handle. The filter is what makes
+// it one-shot - the second request to arrive matches nothing, because the
+// replacement no longer carries the field it filters on - and replacing
+// rather than unsetting is what makes the claim and the opened exchange a
+// single write, so there is no outcome in which the issuance has lost its
+// issuer_state without having gained an auth_session.
+func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error) {
 	if issuerState == "" {
 		return nil, errors.New("issuerState cannot be empty")
 	}
+	if opened == nil || opened.SessionID == "" {
+		return nil, errors.New("opened document with session_id is required")
+	}
 
-	filter := bson.M{"issuer_state": issuerState}
-	update := bson.M{mongoUnset: bson.M{"issuer_state": ""}}
+	replacement := *opened
+	replacement.IssuerState = ""
+	if err := replacement.Validate(); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
 
-	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
+	filter := bson.M{"issuer_state": issuerState, "session_id": opened.SessionID}
+
+	opts := options.FindOneAndReplace().SetReturnDocument(options.After)
 	var claimed AuthorizationContext
-	if err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&claimed); err != nil {
+	if err := s.coll.FindOneAndReplace(ctx, filter, replacement, opts).Decode(&claimed); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to claim issuer_state: %w", err)
 	}
-
-	claimed.IssuerState = ""
 
 	return &claimed, nil
 }
@@ -776,4 +789,35 @@ func (s *MongoStore) ResumeIssuerState(ctx context.Context, issuerState string, 
 	}
 
 	return &resumed, nil
+}
+
+// SetAuthProvider records the provider and credential source on a context.
+//
+// A targeted $set, not a ReplaceOne. See AuthContextStore.SetAuthProvider:
+// replacing the document would also write back the expires_at the caller
+// read a moment earlier, which is how a slower /authorize could undo a
+// faster one's ExtendExpiry and shorten a deadline that only ever extends.
+func (s *MongoStore) SetAuthProvider(ctx context.Context, sessionID string, fields AuthProviderFields) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	result, err := s.coll.UpdateOne(
+		ctx,
+		bson.M{"session_id": sessionID},
+		bson.M{"$set": bson.M{
+			"auth_provider":    fields.AuthProvider,
+			"data_source":      fields.DataSource,
+			"remote_name":      fields.RemoteName,
+			"authentic_source": fields.AuthenticSource,
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set auth provider: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
 }

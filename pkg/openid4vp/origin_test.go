@@ -50,19 +50,7 @@ func TestCanonicalOrigin(t *testing.T) {
 		{name: "a zero-padded default port on http", in: "http://issuer.example:00080/op", want: "http://issuer.example"},
 		{name: "port zero is a port", in: "https://issuer.example:0", want: "https://issuer.example:0"},
 
-		// A browser does not treat a dotted host as a name when its last
-		// part is numeric: every one of these IS 127.0.0.1, and the
-		// Origin a browser reports for them says so.
 		{name: "an IPv4 address written in full", in: "http://127.0.0.1", want: "http://127.0.0.1"},
-		{name: "a shortened IPv4 address", in: "http://127.1", want: "http://127.0.0.1"},
-		{name: "a three-part IPv4 address", in: "http://127.0.1", want: "http://127.0.0.1"},
-		{name: "a one-part IPv4 address", in: "http://2130706433", want: "http://127.0.0.1"},
-		{name: "an octal IPv4 address", in: "http://0177.0.0.01", want: "http://127.0.0.1"},
-		{name: "a hexadecimal IPv4 address", in: "http://0x7f.0x0.0x0.0x1", want: "http://127.0.0.1"},
-		{name: "a mixed-radix IPv4 address", in: "http://0x7f.1", want: "http://127.0.0.1"},
-		{name: "a zero-padded IPv4 address", in: "http://127.000.000.001", want: "http://127.0.0.1"},
-		{name: "an IPv4 address with a trailing dot", in: "http://127.0.0.1.", want: "http://127.0.0.1"},
-		{name: "an IPv4 address with a port", in: "http://127.1:8080", want: "http://127.0.0.1:8080"},
 
 		// And a host that merely CONTAINS digits is still a name.
 		{name: "a hostname with numeric labels", in: "https://1.example.com", want: "https://1.example.com"},
@@ -84,6 +72,41 @@ func TestCanonicalOrigin(t *testing.T) {
 		// be one no comparison could ever match.
 		{name: "an underscore, which browsers accept", in: "https://my_host.example", want: "https://my_host.example"},
 		{name: "a label browsers see in the wild", in: "https://r3---sn-apo3qvuoxuxbt-j5pe.example", want: "https://r3---sn-apo3qvuoxuxbt-j5pe.example"},
+
+		// An IPv6 literal is the same address however it is written, and
+		// a browser emits the one spelling RFC 5952 prescribes. Compared
+		// as a plain string, every other spelling is a mismatch.
+		{name: "an IPv6 literal written out in full", in: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]", want: "https://[2001:db8::1]"},
+		{name: "an IPv6 literal with a run to compress", in: "https://[2001:db8:0:0:0:0:2:1]", want: "https://[2001:db8::2:1]"},
+		{name: "uppercase hextets fold", in: "https://[2001:DB8::ABCD]", want: "https://[2001:db8::abcd]"},
+		{name: "the loopback", in: "https://[0:0:0:0:0:0:0:1]", want: "https://[::1]"},
+
+		// A dotted-quad IPv4 address is already what a browser emits.
+		{name: "a dotted-quad address", in: "https://127.0.0.1:8443", want: "https://127.0.0.1:8443"},
+
+		// A port is a NUMBER, so leading zeroes are not part of it. A URL
+		// parser drops them - and then drops the port itself when what is
+		// left is the scheme's default.
+		{name: "a default port written with a leading zero", in: "https://issuer.example:0443", want: "https://issuer.example"},
+		{name: "a non-default port written with a leading zero", in: "https://issuer.example:08443", want: "https://issuer.example:8443"},
+		{name: "several leading zeroes", in: "https://issuer.example:000443", want: "https://issuer.example"},
+		{name: "http's default port with a leading zero", in: "http://issuer.example:080", want: "http://issuer.example"},
+
+		// An IPv4-MAPPED IPv6 address is where RFC 5952 and the WHATWG
+		// URL Standard part company: net/netip writes the dotted-decimal
+		// tail, and a browser has no such special case and reports
+		// hexadecimal pieces. The dotted form is an origin nothing emits.
+		{name: "an IPv4-mapped address stays hexadecimal", in: "https://[::ffff:c000:201]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-mapped address written in full", in: "https://[0:0:0:0:0:ffff:c000:201]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-mapped address with a port", in: "https://[::ffff:c000:201]:8443", want: "https://[::ffff:c000:201]:8443"},
+
+		// A single zero piece is written out rather than compressed, and
+		// only the LONGEST run is compressed, both per the WHATWG
+		// serializer.
+		{name: "a single zero piece is not compressed", in: "https://[2001:db8:0:1:1:1:1:1]", want: "https://[2001:db8:0:1:1:1:1:1]"},
+		{name: "the longest run wins", in: "https://[1:0:0:1:0:0:0:1]", want: "https://[1:0:0:1::1]"},
+		{name: "the unspecified address", in: "https://[::]", want: "https://[::]"},
+		{name: "a trailing run", in: "https://[2001:db8:1::]", want: "https://[2001:db8:1::]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := CanonicalOrigin(tc.in)
@@ -104,6 +127,25 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 		{name: "a punycode label that decodes to nothing valid", in: "https://xn--a.example"},
 		{name: "something bracketed that is not an address", in: "https://[2001:db8::zz]"},
 		{name: "a port outside the range a port can take", in: "https://issuer.example:70000"},
+
+		// url.Parse gives these a non-empty Host and an empty Hostname,
+		// so a check on Host alone let them through and returned
+		// "https://" as an origin.
+		{name: "a port with no host", in: "https://:443"},
+		{name: "a port with no host and a path", in: "https://:8443/op/par"},
+
+		// A browser parses a host whose last label is a number with its
+		// IPv4 parser and reports the dotted-quad form, so any other
+		// spelling would be compared against something it never emits.
+		{name: "a short-form IPv4 address", in: "https://127.1"},
+		{name: "an IPv4 address with an octal octet", in: "https://127.0.0.01"},
+		{name: "a hexadecimal IPv4 address", in: "https://0x7f.0.0.1"},
+		{name: "a single-number IPv4 address", in: "https://2130706433"},
+		{name: "a domain-looking host with a numeric last label", in: "https://example.1"},
+
+		// A zone identifier names an interface on one machine, so it is
+		// not something two parties can compare, and no browser emits one.
+		{name: "an IPv6 literal with a zone", in: "https://[fe80::1%25eth0]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := CanonicalOrigin(tc.in)
@@ -112,12 +154,116 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 	}
 }
 
-// serialiseIPv6 reimplements a serializer net/netip already has, so the
+// The numeric-host check has to run on the output of the IDNA mapping as
+// well as on the input, because the mapping can produce a numeric host.
+//
+// The switch asks whether the host AS WRITTEN ends in a number, and
+// fullwidth digits are not ASCII digits, so a host spelled in them takes
+// the domain-name branch - and UTS #46 maps it to ASCII digits. Before
+// this, "https://１２７.１" was published as the origin "https://127.1",
+// which no browser will ever report, while the ASCII spelling of exactly
+// the same host was refused.
+func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
+	for _, tc := range []struct{ name, rawURL string }{
+		{"fullwidth digits, short form", "https://１２７.１"},
+		{"fullwidth digits, hexadecimal", "https://０x７f.１"},
+		{"fullwidth digits, a single number", "https://２１３２7３０６２５"},
+		{"a fullwidth trailing label after an ASCII one", "https://example.１"},
+		{"fullwidth first label, ASCII rest, short form", "https://１２７.1"},
+		{"ideographic full stop, short form", "https://127。1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin, err := CanonicalOrigin(tc.rawURL)
+			if err == nil {
+				t.Fatalf("a host a browser would rewrite must be refused, got origin %q", origin)
+			}
+		})
+	}
+
+	// The ASCII spellings of the same hosts were already refused; this
+	// pins that the two now agree, which is the actual defect.
+	for _, rawURL := range []string{"https://127.1", "https://0x7f.1", "https://example.1"} {
+		if origin, err := CanonicalOrigin(rawURL); err == nil {
+			t.Fatalf("%q must be refused, got %q", rawURL, origin)
+		}
+	}
+
+	// Mixed width is one host, not two. The numeric check asks about the
+	// LAST label, and fullwidth digits are not ASCII digits, so checking
+	// before the mapping made acceptance depend on the width of the final
+	// character alone: "１２７.0.0.1" was refused while "１２７.0.0.１" and
+	// "１２７.０.０.１" were accepted. A browser reports the same origin for
+	// all three, which is what makes the refusal wrong rather than merely
+	// inconsistent - these are public URLs that could not produce an
+	// expected_origin or a presentation audience at all.
+	for _, rawURL := range []string{
+		"https://１２７.0.0.1",
+		"https://１２７.0.0.１",
+		"https://１２７.０.０.１",
+		"https://127.0.0.１",
+		"https://1２７.0.0.1",
+	} {
+		got, err := CanonicalOrigin(rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", rawURL, err)
+		}
+		if got != "https://127.0.0.1" {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want https://127.0.0.1", rawURL, got)
+		}
+	}
+
+	// And the mixed-width spellings of a host a browser REWRITES are still
+	// refused, so mapping first did not turn the check off.
+	for _, rawURL := range []string{
+		"https://１２７.1",
+		"https://127.１",
+		"https://０x７f.1",
+	} {
+		if origin, err := CanonicalOrigin(rawURL); err == nil {
+			t.Fatalf("%q must be refused, got %q", rawURL, origin)
+		}
+	}
+
+	// And a host that maps to a CANONICAL dotted quad is still accepted:
+	// the refusal is of spellings a browser rewrites, not of addresses.
+	for _, tc := range []struct{ rawURL, want string }{
+		{"https://１２７.０.０.１", "https://127.0.0.1"},
+		{"https://１２７.0.0.1", "https://127.0.0.1"},
+		{"https://127。0.0.1", "https://127.0.0.1"},
+		{"https://127.0.0.1", "https://127.0.0.1"},
+		{"https://127.0.0.1:8443", "https://127.0.0.1:8443"},
+	} {
+		got, err := CanonicalOrigin(tc.rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", tc.rawURL, err)
+		}
+		if got != tc.want {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want %q", tc.rawURL, got, tc.want)
+		}
+	}
+
+	// A name that merely CONTAINS digits is a name, not an address.
+	for _, tc := range []struct{ rawURL, want string }{
+		{"https://1issuer.example.com", "https://1issuer.example.com"},
+		{"https://１issuer.example.com", "https://1issuer.example.com"},
+		{"https://münchen.example", "https://xn--mnchen-3ya.example"},
+	} {
+		got, err := CanonicalOrigin(tc.rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", tc.rawURL, err)
+		}
+		if got != tc.want {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want %q", tc.rawURL, got, tc.want)
+		}
+	}
+}
+
+// serializeIPv6 reimplements a serializer net/netip already has, so the
 // two are held to each other everywhere they are supposed to agree -
 // which is everywhere except the IPv4-mapped case the URL Standard does
 // not have. Without this the hand-written compression could drift and
 // only the handful of cases spelled out above would notice.
-func TestSerialiseIPv6AgreesWithNetipExceptWhereItMustNot(t *testing.T) {
+func TestSerializeIPv6AgreesWithNetipExceptWhereItMustNot(t *testing.T) {
 	for _, in := range []string{
 		"::", "::1", "2001:db8::1", "2001:db8:0:0:1:0:0:1",
 		"fe80::1", "ff02::2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
@@ -126,50 +272,12 @@ func TestSerialiseIPv6AgreesWithNetipExceptWhereItMustNot(t *testing.T) {
 		addr, err := netip.ParseAddr(in)
 		require.NoError(t, err)
 		require.False(t, addr.Is4In6(), "%s is the case the two deliberately differ on", in)
-		assert.Equal(t, addr.String(), serialiseIPv6(addr), "disagreed on %s", in)
+		assert.Equal(t, addr.String(), serializeIPv6(addr), "disagreed on %s", in)
 	}
 
 	// And the one case they must differ on.
 	mapped, err := netip.ParseAddr("::ffff:192.0.2.1")
 	require.NoError(t, err)
 	assert.Equal(t, "::ffff:192.0.2.1", mapped.String(), "netip renders the dotted tail")
-	assert.Equal(t, "::ffff:c000:201", serialiseIPv6(mapped), "a browser renders eight hex pieces")
-}
-
-// The IPv4 parser is the WHATWG URL Standard's §3.3, not net/netip's, and
-// the two disagree about which spellings exist at all. These are the
-// shapes the standard accepts and the shapes it does not.
-func TestWHATWGIPv4(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want string
-		ok   bool
-	}{
-		{in: "127.0.0.1", want: "127.0.0.1", ok: true},
-		{in: "127.1", want: "127.0.0.1", ok: true},
-		{in: "0x7f000001", want: "127.0.0.1", ok: true},
-		{in: "0377.0.0.1", want: "255.0.0.1", ok: true},
-		{in: "0", want: "0.0.0.0", ok: true},
-		{in: "4294967295", want: "255.255.255.255", ok: true},
-
-		// Out of range: the last part absorbs only the octets left over.
-		{in: "4294967296", ok: false},
-		{in: "256.1.1.1", ok: false},
-		{in: "1.2.3.4.5", ok: false},
-		{in: "08", ok: false}, // 8 is not an octal digit
-		{in: "0x", want: "0.0.0.0", ok: true},
-
-		// Not an address at all, because the last part is not a number.
-		{in: "example.com", ok: false},
-		{in: "127.0.0.1x", ok: false},
-		{in: "1.example", ok: false},
-	} {
-		t.Run(tc.in, func(t *testing.T) {
-			got, ok := whatwgIPv4(tc.in)
-			assert.Equal(t, tc.ok, ok)
-			if tc.ok {
-				assert.Equal(t, tc.want, got)
-			}
-		})
-	}
+	assert.Equal(t, "::ffff:c000:201", serializeIPv6(mapped), "a browser renders eight hex pieces")
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -46,6 +47,27 @@ const requestURITTL = 60 * time.Second
 // TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the three to
 // that relationship.
 const authorizationCodeTTL = 5 * time.Minute
+
+// codeDeadlineWithin is the authorization code's deadline for a context
+// created at createdAt: a full authorizationCodeTTL, or the moment the
+// document itself goes away, whichever comes first.
+//
+// The cap is not belt and braces. A request_uri stays resolvable, so
+// /authorize can be entered repeatedly and each visit would otherwise
+// push the deadline another five minutes out - visits at minutes 0, 4, 8
+// and 12 all pass the expiry check and the last one extends to minute 17.
+// MongoDB's TTL index is anchored to created_at and is not moved by
+// extending expires_at, so beyond that the server is advertising a code
+// against a document already scheduled for deletion. Holding every
+// extension to the retention window makes the logical deadline a promise
+// the store can keep, however many times it is extended.
+func codeDeadlineWithin(createdAt time.Time) int64 {
+	deadline := time.Now().Add(authorizationCodeTTL)
+	if retention := createdAt.Add(apigwcache.AuthContextTTL); !createdAt.IsZero() && retention.Before(deadline) {
+		deadline = retention
+	}
+	return deadline.Unix()
+}
 
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
@@ -132,6 +154,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 	}
 
+	requestURIExpiresAt := time.Now().Add(requestURITTL).Unix()
 	azt := cache.AuthorizationContext{
 		SessionID:            uuid.NewString(),
 		Code:                 uuid.NewString(),
@@ -145,7 +168,8 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		ClientID:             fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
-		ExpiresAt:            time.Now().Add(requestURITTL).Unix(),
+		ExpiresAt:            requestURIExpiresAt,
+		RequestURIExpiresAt:  requestURIExpiresAt,
 		DynamicParams:        req.DynamicParams,
 	}
 
@@ -212,6 +236,12 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 		return nil, oauth2.ErrExpiredRequest
 	}
 
+	// ExpiresAt is moved to the code's deadline below, so the request_uri is held to its own.
+	if authorizationContext.RequestURIExpiresAt > 0 && time.Now().Unix() > authorizationContext.RequestURIExpiresAt {
+		c.log.Debug("request_uri expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
+
 	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
@@ -234,8 +264,9 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	// job. It only ever extends (see ExtendExpiry), so re-entering
 	// /authorize cannot shorten a deadline, and authorizationCodeTTL is
 	// bounded so the extended deadline stays inside the store's own
-	// lifetime - see the constant.
-	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	// lifetime - see the constant. Re-entry itself is bounded by
+	// RequestURIExpiresAt, checked above, which this does not move.
+	codeExpiresAt := codeDeadlineWithin(authorizationContext.CreatedAt)
 	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
 		&cache.AuthorizationContext{RequestURI: req.RequestURI}, codeExpiresAt); err != nil {
 		c.log.Error(err, "failed to extend authorization context expiry", "request_uri", req.RequestURI)
@@ -544,6 +575,35 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 				"redirect_uri does not match the authorization request", 400)
 		}
+
+		// A code that came out of an Interactive Authorization exchange
+		// carries that exchange's DPoP key, and must be redeemed with it.
+		//
+		// Checked here, on the context this block already read, and that
+		// placement is the whole of it: forfeiture below is irreversible,
+		// so refusing after it would let anyone holding the code burn it
+		// with any valid proof - the bound wallet then finds its own
+		// redemption refused, having done nothing wrong. A second read
+		// would not only cost another round trip; a read that FAILED
+		// would skip this check and leave exactly the burn it exists to
+		// prevent, because the failure of a check is not a reason to
+		// stop checking.
+		//
+		// Everything else here binds the ACCESS TOKEN to whatever key
+		// signed the proof on this request, which says nothing about who
+		// obtained the authorization. Without this, a flow opened with
+		// key A yields a code that key B can spend - and the association
+		// OpenID4VCI 1.1 §5.2 and draft-ietf-oauth-first-party-apps ask
+		// for between auth_session and a DPoP key is only worth having if
+		// the same key turns up here.
+		//
+		// It is not atomic with the consumption below and does not need
+		// to be: it only ever refuses, and a concurrent request that
+		// slipped past it still meets the same check on the consumed
+		// document.
+		if err := c.checkInteractiveAuthorizationBinding(preCheck, dpopThumbprint); err != nil {
+			return nil, err
+		}
 	}
 
 	// Validate transaction code (PIN) BEFORE consuming the pre-authorized code
@@ -623,35 +683,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				}
 				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 					"invalid tx_code", 400)
-			}
-		}
-	}
-
-	// A code that came out of an Interactive Authorization exchange carries
-	// that exchange's DPoP key, and must be redeemed with it.
-	//
-	// Checked BEFORE the code is consumed, and that ordering is the whole
-	// of it: forfeiture is irreversible, so refusing after it would let
-	// anyone holding the code burn it with any valid proof - the bound
-	// wallet then finds its own redemption refused, having done nothing
-	// wrong. The read is not atomic with the consumption below, but it does
-	// not need to be: it only ever refuses, and a concurrent request that
-	// slipped past it still meets the same check on the consumed document.
-	//
-	// Everything else here binds the ACCESS TOKEN to whatever key signed
-	// the proof on this request, which says nothing about who obtained the
-	// authorization. Without this, a flow opened with key A yields a code
-	// that key B can spend - and the association OpenID4VCI 1.1 §5.2 and
-	// draft-ietf-oauth-first-party-apps ask for between auth_session and a
-	// DPoP key is only worth having if the same key turns up here.
-	if !isPreAuthFlow {
-		bound, lookupErr := c.lookupCodeBeforeConsuming(ctx, code)
-		if lookupErr != nil {
-			return nil, lookupErr
-		}
-		if bound != nil {
-			if err := c.checkInteractiveAuthorizationBinding(bound, dpopThumbprint); err != nil {
-				return nil, err
 			}
 		}
 	}
@@ -1185,6 +1216,14 @@ type walletClientAuth struct {
 	RedirectURI string
 	Scope       string
 
+	// RedirectOptional drops the REQUIREMENT for a redirect_uri, not the
+	// check on one that is sent. The Authorization Challenge Endpoint is
+	// browserless - there is nowhere to send the user back to, and
+	// draft-ietf-oauth-first-party-apps makes the parameter optional on
+	// its request - so a registered wallet with no callback was refused
+	// with invalid_client, and only a wallet attestation got past it.
+	RedirectOptional bool
+
 	// ClientAttestation and ClientAttestationPoP are the headers
 	// draft-ietf-oauth-attestation-based-client-auth §3.1 defines.
 	ClientAttestation    string
@@ -1199,21 +1238,6 @@ type walletClientAuth struct {
 	LogPrefix string
 }
 
-// authenticateOAuthClient resolves the wallet behind a request to an
-// oauth2.Client, by static configuration or by wallet attestation.
-//
-// A statically configured client that the allowlist accepts wins outright.
-// Anything else falls through to attestation, which is the normal path: a
-// wallet with a Wallet Instance Attestation is not in the static map and is
-// not expected to be. That is why an unknown client_id logs at Debug while
-// a CONFIGURED client that still fails logs at Warn - the second is a
-// mismatch somebody has to fix, the first is Tuesday.
-//
-// Extracted from OAuthPar unchanged. Interactive Authorization's
-// Authorization Challenge Endpoint has to authenticate the same wallets
-// the same way, and duplicating sixty lines of attestation handling - PoP
-// requirements, subject binding, SPOCP tier policy - is how two endpoints
-// come to disagree about who may ask for what.
 // checkInteractiveAuthorizationBinding refuses a redemption whose DPoP key
 // is not the one the authorization was obtained under.
 //
@@ -1264,7 +1288,11 @@ func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (st
 		return "", oauth2.OAuthErrJTIReplay
 	}
 
-	if dpop.HTU != htu {
+	// Compared after URI normalization, which is what RFC 9449 §4.3 asks
+	// for: a wallet builds htu from the URL it requested and an operator
+	// writes the endpoint in configuration, so the two differ in the ways
+	// RFC 3986 calls insignificant without either side being wrong.
+	if !oauth2.SameHTU(dpop.HTU, htu) {
 		return "", oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
 			fmt.Sprintf("invalid htu: expected %s, got %s", htu, dpop.HTU), 400)
 	}
@@ -1280,8 +1308,27 @@ func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (st
 	return dpop.Thumbprint, nil
 }
 
+// authenticateOAuthClient resolves the wallet behind a request to an
+// oauth2.Client, by static configuration or by wallet attestation.
+//
+// A statically configured client that the allowlist accepts wins outright.
+// Anything else falls through to attestation, which is the normal path: a
+// wallet with a Wallet Instance Attestation is not in the static map and is
+// not expected to be. That is why an unknown client_id logs at Debug while
+// a CONFIGURED client that still fails logs at Warn - the second is a
+// mismatch somebody has to fix, the first is Tuesday.
+//
+// Extracted from OAuthPar unchanged. Interactive Authorization's
+// Authorization Challenge Endpoint has to authenticate the same wallets
+// the same way, and duplicating sixty lines of attestation handling - PoP
+// requirements, subject binding, SPOCP tier policy - is how two endpoints
+// come to disagree about who may ask for what.
 func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientAuth) (*oauth2.Client, error) {
-	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
+	allow := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow
+	if req.RedirectOptional {
+		allow = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.AllowWithoutRedirect
+	}
+	oauthClient, err := allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err == nil {
 		return oauthClient, nil
 	}

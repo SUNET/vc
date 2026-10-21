@@ -4,6 +4,16 @@ import (
 	"context"
 )
 
+// AuthProviderFields are the four values that say which auth provider, and
+// which credential source, will serve a context. Plain strings so this
+// package stays independent of pkg/model.
+type AuthProviderFields struct {
+	AuthProvider    string
+	DataSource      string
+	RemoteName      string
+	AuthenticSource string
+}
+
 // AuthContextStore defines the interface for authorization context storage.
 // Implementations can use in-memory caching, MongoDB, or other backends.
 // This abstraction enables horizontal scaling (HA) by allowing shared storage backends.
@@ -74,12 +84,26 @@ type AuthContextStore interface {
 	// store replaces unconditionally.
 	ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error)
 
-	// ClaimIssuerState atomically takes the issuer-initiated handle off
-	// the context it names, with the same one-shot guarantee as
-	// ClaimAuthSession and for the same reason: an issuance prepared for
-	// one Holder must open one exchange, not one per wallet that scans
-	// the offer.
-	ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error)
+	// ClaimIssuerState atomically replaces the issuer-initiated handle with
+	// the exchange that claims it, and returns the document as it now
+	// stands.
+	//
+	// opened is the whole document the claimant wants stored: the context
+	// as it was read, with the handle cleared and the wallet's half filled
+	// in. One mutation, filtered on the handle - which gives the same
+	// one-shot guarantee as ClaimAuthSession, for the same reason (an
+	// issuance prepared for one Holder must open one exchange, not one per
+	// wallet that scans the offer) AND makes the claim and the opened
+	// exchange inseparable.
+	//
+	// That second property is the point of the signature. Claiming and
+	// then persisting as two writes leaves a window where the first
+	// succeeded and the second did not: the document has lost its
+	// issuer_state and never gained an auth_session, so the prepared
+	// issuance is unreachable by either handle and nothing can recover it.
+	// A transient store failure must not be able to destroy a prepared
+	// issuance.
+	ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error)
 
 	// ResumeIssuerState claims the issuer-initiated handle AND records the
 	// exchange that replaces it, in one store operation.
@@ -116,10 +140,17 @@ type AuthContextStore interface {
 	// Consent marks an authorization context as consented.
 	Consent(ctx context.Context, query *AuthorizationContext) error
 
-	// ExtendExpiry moves the expiry of the context the request_uri in query
-	// names out to expiresAt, and is how a request_uri's short life is kept
-	// separate from the authorization code's. It never shortens: a value
-	// at or before the stored one leaves the document alone.
+	// ExtendExpiry moves the expiry of the context query names out to
+	// expiresAt, and is how the short life of whatever started a flow -
+	// a request_uri, an auth_session - is kept separate from the
+	// authorization code's. It never shortens: a value at or before the
+	// stored one leaves the document alone.
+	//
+	// query is resolved the same way Get resolves one, so a caller holding
+	// a session_id need not have a request_uri: the browser flow extends by
+	// the request_uri it is consuming, and Interactive Authorization by the
+	// session whose auth_session it has just claimed and which therefore no
+	// longer has a handle to name.
 	//
 	// It moves the logical deadline only. A store with its own physical
 	// lifetime - MongoDB's TTL index is anchored to created_at - still
@@ -127,6 +158,18 @@ type AuthContextStore interface {
 	// extended deadline inside that window rather than assume this buys
 	// more time than the store will hold.
 	ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error
+
+	// SetAuthProvider records which auth provider, and which credential
+	// source, will serve a context.
+	//
+	// A targeted write rather than Update, and that is the point of it
+	// existing: Update replaces the whole document, so persisting these
+	// four fields from a copy read a moment earlier also writes back every
+	// OTHER field as it was then - including expires_at, undoing an
+	// ExtendExpiry that a concurrent request had already applied. The
+	// never-shortens guarantee is only worth having if nothing else
+	// overwrites the field behind it.
+	SetAuthProvider(ctx context.Context, sessionID string, fields AuthProviderFields) error
 
 	// AddToken adds a token to an authorization context identified by code.
 	AddToken(ctx context.Context, code string, token *Token) error

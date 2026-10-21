@@ -64,6 +64,24 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	// alphabetically for deterministic iteration.
 	require.Len(t, dcql.CredentialSets, 1)
 	assert.Equal(t, [][]string{{"eduid"}, {"pid"}}, dcql.CredentialSets[0].Options)
+
+	// Every query must ask the wallet to prove possession. This flow is
+	// an authentication - it decides whose documents get issued - and it
+	// once sent require_cryptographic_holder_binding: false, telling
+	// every wallet that a presentation here need not prove anything about
+	// who is presenting.
+	//
+	// Asserted on the pointer as well as on the effective value, because
+	// the two say different things: nil is the specification's default of
+	// true, and an explicit true would be a second place to maintain the
+	// default. Either way an explicit false cannot creep back in
+	// unnoticed.
+	for _, cq := range dcql.Credentials {
+		assert.Nil(t, cq.RequireCryptographicHolderBinding,
+			"%s: leave the field unset so the spec default governs", cq.ID)
+		assert.True(t, cq.RequiresCryptographicHolderBinding(),
+			"%s: issuance authentication must require cryptographic holder binding", cq.ID)
+	}
 }
 
 // TestBuildIssuanceAuthDCQLByFormat pins the constraint to the credential's
