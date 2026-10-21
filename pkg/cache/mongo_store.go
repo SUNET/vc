@@ -651,6 +651,21 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	return nil
 }
 
+// mongoUnset is the update operator that removes a field, which is how
+// every one-shot handle in this store is consumed.
+const mongoUnset = "$unset"
+
+// GetSnapshot resolves a context the way Get does. See
+// AuthContextStore.GetSnapshot.
+//
+// For this store the two are already the same thing: every read decodes
+// BSON into a fresh struct, so a Mongo caller has never shared a document
+// with anyone. The method exists so the two backends present one contract
+// and a caller does not have to know which it is talking to.
+func (s *MongoStore) GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	return s.Get(ctx, query)
+}
+
 // ClaimAuthSession atomically takes the Interactive Authorization handle off
 // the context it names. See AuthContextStore.ClaimAuthSession.
 //
@@ -670,7 +685,7 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	filter := bson.M{"auth_session": authSession}
 	// Only the handle. The thumbprint is the binding the authorization
 	// code inherits - see the memory store's note.
-	update := bson.M{"$unset": bson.M{"auth_session": ""}}
+	update := bson.M{mongoUnset: bson.M{"auth_session": ""}}
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
 	var claimed AuthorizationContext
@@ -725,6 +740,55 @@ func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string, o
 	}
 
 	return &claimed, nil
+}
+
+// ResumeIssuerState claims the issuer-initiated handle and writes the
+// resumed exchange in one FindOneAndUpdate. See
+// AuthContextStore.ResumeIssuerState.
+//
+// The $unset that consumes the handle and the $set that records the
+// exchange are one update on one document, so the two cannot come apart:
+// either the filter still matches and both apply, or neither does. The
+// document is returned After the write because that is the state the
+// caller answers from.
+func (s *MongoStore) ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if resume == nil {
+		return nil, errors.New("resume cannot be nil")
+	}
+
+	filter := bson.M{"issuer_state": issuerState}
+	update := bson.M{
+		mongoUnset: bson.M{"issuer_state": ""},
+		// Field for field what IssuerStateResume.applyTo writes in the
+		// memory store; the two have to stay in step or an issuance
+		// resumes differently depending on which backend is configured.
+		"$set": bson.M{
+			"auth_session":                 resume.AuthSession,
+			"auth_session_dpop_thumbprint": resume.AuthSessionDPoPThumbprint,
+			"wallet_client_id":             resume.WalletClientID,
+			"redirect_url":                 resume.WalletURI,
+			"code_challenge":               resume.CodeChallenge,
+			"code_challenge_method":        resume.CodeChallengeMethod,
+			"dcql_query":                   resume.DCQLQuery,
+			"ephemeral_encryption_key_id":  resume.EphemeralEncryptionKeyID,
+			"expires_at":                   resume.ExpiresAt,
+			"created_at":                   resume.CreatedAt,
+		},
+	}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var resumed AuthorizationContext
+	if err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&resumed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to resume issuer_state: %w", err)
+	}
+
+	return &resumed, nil
 }
 
 // SetAuthProvider records the provider and credential source on a context.

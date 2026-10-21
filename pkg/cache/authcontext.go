@@ -132,12 +132,19 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 
 // Get retrieves an authorization context by query fields
 func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.getLocked(query)
+}
+
+// getLocked is the body Get and GetSnapshot share: resolve the query to a
+// session id and hand back the stored document. Both hold the read lock,
+// which is what makes GetSnapshot's copy safe against a concurrent claim.
+func (c *MemoryStore) getLocked(query *AuthorizationContext) (*AuthorizationContext, error) {
 	if query == nil {
 		return nil, errors.New("query cannot be nil")
 	}
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 
 	// The same resolver ExtendExpiry uses, so the two cannot drift: the
 	// list of fields a context can be found by belongs in one place.
@@ -153,6 +160,36 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 	}
 
 	return item.Value(), nil
+}
+
+// GetSnapshot resolves a context the way Get does and returns a COPY.
+//
+// Get hands back the stored document itself, which is what lets a caller
+// mutate it and persist with Update - the pattern this codebase is built
+// on. It also means a caller reading those fields races with any
+// concurrent claim mutating the same struct, and several requests reach
+// the Authorization Challenge Endpoint with one issuer_state while one of
+// them is consuming it.
+//
+// A caller cannot take that copy for itself: it has to be made under the
+// read lock that excludes the writers, and only the store holds it. So
+// this is a separate method rather than a change to Get - callers that
+// read-modify-Update still need the document, and giving every one of
+// them a snapshot would turn their Update into a lost update against any
+// in-store mutation that landed in between.
+//
+// The copy is shallow. That is enough here because nothing mutates a
+// context's slices or sub-objects in place; they are replaced whole.
+func (c *MemoryStore) GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	doc, err := c.getLocked(query)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := *doc
+	return &snapshot, nil
 }
 
 // GetWithAccessToken retrieves an authorization context by access token
@@ -873,6 +910,53 @@ func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, 
 
 	claimed := stored
 	return &claimed, nil
+}
+
+// ResumeIssuerState claims the issuer-initiated handle and writes the
+// resumed exchange in the same critical section. See
+// AuthContextStore.ResumeIssuerState.
+func (c *MemoryStore) ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if resume == nil {
+		return nil, errors.New("resume cannot be nil")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("issuer_state:%s", issuerState)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	stored := item.Value()
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if stored.IssuerState != issuerState {
+		return nil, ErrNoDocuments
+	}
+
+	// Old indices first: the handle being removed and the auth_session
+	// being added both live there, and rebuilding over a stale map would
+	// leave the consumed handle resolvable.
+	c.deleteIndices(stored)
+	stored.IssuerState = ""
+	resume.applyTo(stored)
+	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+	c.updateIndices(stored)
+
+	resumed := *stored
+	return &resumed, nil
 }
 
 // claimIndexedHandle is the shared body of the two claims: resolve a

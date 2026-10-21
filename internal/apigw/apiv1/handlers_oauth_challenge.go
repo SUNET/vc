@@ -463,6 +463,10 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	}
 }
 
+// The one answer an unresolvable issuer_state gets, whether it never
+// existed or has expired.
+const errDescIssuerStateInvalid = "issuer_state is invalid or has expired"
+
 // authorizationChallengeIntermediate handles every request after the first:
 // it finds the exchange the auth_session names, consumes whatever the
 // interaction produced, and - when that leaves the Holder established -
@@ -1162,7 +1166,7 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	authCtx := &local
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"issuer_state is invalid or has expired", 400)
+			errDescIssuerStateInvalid, 400)
 	}
 
 	// The prepared issuance names the scope; a wallet asking for a

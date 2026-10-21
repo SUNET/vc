@@ -42,6 +42,11 @@ var BrowserHost = idna.New(
 // unnormalised origin fails a comparison it should pass and the deployment
 // looks broken while being configured correctly.
 //
+// An IPv6 literal is serialised the way the WHATWG URL Standard - and
+// therefore a browser - does, rather than merely lowercased: the same
+// address has many valid spellings and only one canonical one. A port is
+// normalised as the number it is, for the same reason.
+//
 // An internationalized host is converted to its A-label form, which is the
 // other half of the same problem: a browser reporting an Origin for
 // "münchen.example" emits "xn--mnchen-3ya.example", and public_url

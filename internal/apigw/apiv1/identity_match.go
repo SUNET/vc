@@ -31,11 +31,18 @@ var errIdentityMismatch = errors.New("the presented credential does not identify
 // here that it would write anywhere else and an mdoc's literal
 // namespace-qualified key keeps working.
 //
-// The returned error names the claim that failed but NEVER the values.
-// It is handed back to whoever is holding the wallet: telling them which
-// of several candidate identities the issuance was prepared for would
-// turn a failed match into an oracle for the portal session's contents.
-// The values go to the log instead.
+// Neither the returned error NOR the log names the values. The error is
+// handed back to whoever is holding the wallet, and telling them which of
+// several candidate identities the issuance was prepared for would turn a
+// failed match into an oracle for the portal session's contents.
+//
+// The log is not a safer place for them. These values are names and
+// national identifiers - the expected one taken from the portal session,
+// the presented one read out of someone's credential - and writing them
+// at Info puts both into log retention, log shipping and everything with
+// read access to either, which is what SECURITY_HARDENING_PLAN.md's first
+// phase exists to stop. The claim path is what makes a failure
+// diagnosable; the values only make it quotable.
 func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[string]any, match *openid4vci.IdentityMatch) error {
 	if match == nil {
 		// Nothing to check. The decision that an issuance may be prepared
@@ -58,8 +65,7 @@ func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[strin
 		}
 
 		if !claimValueMatches(value, []string{test.Equals}) {
-			c.log.Info("identity match failed: claim value differs",
-				"claim", path, "expected", test.Equals, "presented", value)
+			c.log.Info("identity match failed: claim value differs", "claim", path)
 			return fmt.Errorf("%w: claim %q does not match", errIdentityMismatch, path)
 		}
 	}

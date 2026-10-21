@@ -71,6 +71,79 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Equal(t, "contract-session-1", result.SessionID)
 	})
 
+	t.Run("GetSnapshotIsolatesTheCallerAndGetDoesNot", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "contract-snapshot-1",
+			State:     "contract-snapshot-state",
+			Code:      "contract-snapshot-code",
+		}))
+		query := &AuthorizationContext{State: "contract-snapshot-state"}
+
+		// GetSnapshot is for readers. What it returns is the caller's,
+		// so the store cannot be changed by assigning to it - and, the
+		// point of the method, reading it cannot race with a concurrent
+		// claim mutating the stored document.
+		snapshot, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		snapshot.Identifier = "scribbled-on"
+
+		after, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		assert.Empty(t, after.Identifier, "a snapshot must not be a handle on the store")
+
+		// Get is for read-modify-Update, and must keep working that way:
+		// handing those callers a snapshot would turn their Update into a
+		// lost update against anything the store changed in between.
+		live, err := store.Get(ctx, query)
+		require.NoError(t, err)
+		live.Identifier = "written-back"
+		require.NoError(t, store.Update(ctx, live))
+
+		persisted, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		assert.Equal(t, "written-back", persisted.Identifier)
+	})
+
+	t.Run("ResumeIssuerState", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-1",
+			IssuerState: "contract-issuer-state-1",
+			Scopes:      []string{"pid"},
+		}))
+
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-1", &IssuerStateResume{
+			AuthSession:               "contract-auth-session-1",
+			AuthSessionDPoPThumbprint: "contract-thumbprint",
+			WalletClientID:            "wallet-1",
+			CodeChallenge:             "contract-challenge",
+			CodeChallengeMethod:       "S256",
+			ExpiresAt:                 time.Now().Add(time.Hour).Unix(),
+			CreatedAt:                 time.Now(),
+		})
+		require.NoError(t, err)
+
+		// One operation: the handle is gone AND the exchange is written.
+		// Observing one without the other is the window this method
+		// exists to close.
+		assert.Empty(t, resumed.IssuerState)
+		assert.Equal(t, "contract-auth-session-1", resumed.AuthSession)
+		assert.Equal(t, "contract-thumbprint", resumed.AuthSessionDPoPThumbprint)
+		assert.Equal(t, "wallet-1", resumed.WalletClientID)
+		assert.Equal(t, []string{"pid"}, resumed.Scopes, "the prepared issuance survives the resume")
+
+		stored, err := store.Get(ctx, &AuthorizationContext{AuthSession: "contract-auth-session-1"})
+		require.NoError(t, err)
+		assert.Equal(t, "contract-resume-1", stored.SessionID)
+
+		// And it is one-shot, for the same reason ClaimIssuerState is:
+		// two wallets scanning one offer must yield exactly one winner.
+		second, err := store.ResumeIssuerState(ctx, "contract-issuer-state-1", &IssuerStateResume{
+			AuthSession: "contract-auth-session-2",
+		})
+		require.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
+	})
+
 	t.Run("GetByQueryFields", func(t *testing.T) {
 		result, err := store.Get(ctx, &AuthorizationContext{State: "state-1"})
 		require.NoError(t, err)
@@ -724,4 +797,48 @@ func TestClaimIssuerStateValidatesBeforeClaiming(t *testing.T) {
 	still, err := store.Get(ctx, &AuthorizationContext{IssuerState: "invalid-istate"})
 	require.NoError(t, err, "a refused replacement must not consume the issuer_state")
 	assert.Empty(t, still.AuthSession)
+}
+
+// Get hands a caller the stored document, which is what keeps a
+// read-modify-Update caller from erasing an in-store mutation that landed
+// in between: the forfeited code it writes back is the same struct the
+// forfeit was recorded on.
+//
+// That is the property this PR relied on when it narrowed its snapshot to
+// GetSnapshot instead of changing Get, so it is pinned here rather than
+// left as an observation.
+//
+// NOT a shared contract test, because MongoStore does not have this
+// property and never did: every Mongo read decodes a fresh struct and
+// Update replaces the document, so the same interleaving loses the
+// forfeit there. That divergence is real and predates this change - it is
+// the wider lost-update hazard in Update, which wants version-checked
+// writes to fix properly - and asserting it as a contract both backends
+// meet would be asserting something false.
+func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: "forfeit-1",
+		Code:      "forfeit-code",
+	}))
+
+	// What a read-modify-Update caller does: read, change a field of its
+	// own, write back.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "forfeit-1"})
+	require.NoError(t, err)
+	held.AuthProvider = "some-provider"
+
+	// Meanwhile the code is redeemed and consumed.
+	_, err = store.ForfeitAuthorizationCode(ctx, &AuthorizationContext{Code: "forfeit-code"})
+	require.NoError(t, err)
+
+	require.NoError(t, store.Update(ctx, held))
+
+	after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "forfeit-1"})
+	require.NoError(t, err)
+	assert.True(t, after.Forfeited,
+		"a consumed code must not be resurrected by a caller that read before it was consumed")
+	assert.Equal(t, "some-provider", after.AuthProvider, "and the caller's own change must still land")
 }

@@ -122,6 +122,18 @@ func TestPrepareIssuance_AcceptsAMatchOneAuthScopeCanSatisfy(t *testing.T) {
 		VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:thin:1"},
 	}
 
+	// The second auth scope needs credential metadata like any other: the
+	// presentation request names every configured auth scope, so one with
+	// nothing to constrain it is a request that cannot be built at all.
+	// Without this the configuration describes a deployment whose
+	// challenge exchange could never open, which preparation now refuses -
+	// and refusing it is the point, so the fixture has to be a deployment
+	// that would work rather than one that would not.
+	client.cfg.Common.CredentialMetadata["thin_auth"] = &model.CredentialMetadata{
+		Format: openid4vp.FormatSDJWTVC,
+		VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:thin:1"},
+	}
+
 	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope:         challengeScope,
 		IdentityMatch: portalMatch(),

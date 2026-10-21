@@ -27,6 +27,22 @@ type AuthContextStore interface {
 	// Get retrieves an authorization context by query fields (sessionID, requestURI, code, state, etc.).
 	Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
 
+	// GetSnapshot retrieves a context the way Get does, but returns a
+	// copy the caller owns rather than the stored document.
+	//
+	// Get hands back the stored document itself, which is what lets a
+	// caller mutate it and persist with Update. That also makes every
+	// reader a writer's neighbour: reading the fields it was given races
+	// with any concurrent claim mutating the same struct, and several
+	// requests do reach the Authorization Challenge Endpoint with one
+	// issuer_state while one of them is consuming it.
+	//
+	// Use this wherever a context is only READ. A caller that goes on to
+	// Update must use Get: writing a snapshot back would replace whatever
+	// an in-store mutation - a forfeited code, a redeemed pre-authorized
+	// code, an added token - had recorded in the meantime.
+	GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
+
 	// GetByID retrieves an authorization context by session ID.
 	GetByID(ctx context.Context, id string) (*AuthorizationContext, error)
 
@@ -88,6 +104,23 @@ type AuthContextStore interface {
 	// A transient store failure must not be able to destroy a prepared
 	// issuance.
 	ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error)
+
+	// ResumeIssuerState claims the issuer-initiated handle AND records the
+	// exchange that replaces it, in one store operation.
+	//
+	// ClaimIssuerState followed by Update does the same thing in two, and
+	// the gap between them is a hole: the prepared issuance is consumed by
+	// the first call and the resumable exchange only exists after the
+	// second, so a failure in between destroys an issuance that nothing
+	// re-prepares. A wallet is then holding a handle the server has eaten
+	// and no auth_session to continue with, over a server-side fault it
+	// did nothing to cause.
+	//
+	// Same one-shot guarantee as ClaimIssuerState: exactly one caller
+	// wins, everyone else gets ErrNoDocuments. The returned document is
+	// the resumed one - after the write, not before - because that is the
+	// state the caller goes on to answer from.
+	ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error)
 
 	// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
 	// distinct clients (per DPoP thumbprint). Returns the auth context or an error if

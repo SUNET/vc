@@ -300,6 +300,15 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 			fmt.Sprintf("scope %q has no authentication scopes configured, so no claim could be matched on", scope), 400)
 	}
 
+	// Compared in the shape the REQUEST will carry, not the shape the
+	// configuration is written in. For mdoc, buildIssuanceAuthDCQL expands
+	// a bare "family_name" into the namespace-qualified
+	// ["org.iso.18013.5.1", "family_name"] that DCQL requires, so a rule
+	// written the qualified way - the way it has to be written to match an
+	// mdoc's literal key - was being reported as unaskable even though the
+	// request asks for exactly that claim. Putting both sides through
+	// authClaimPathSegments is what makes the comparison about the claim
+	// rather than about how it happened to be spelled.
 	offered := make(map[string][]string, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		claims := vpAuth.AuthScopes[authScope].AuthClaims
