@@ -298,7 +298,7 @@ make build-seed-recover
 ./bin/seed_recover -config /etc/vc/config.yaml -seed primary \
     -subject SE -subject 198001011234 \
     -pseudonym-config known-offender-matching-ssc \
-    -verifier-id verifier.example \
+    -verifier-id x509_san_dns:verifier.example \
     -expect <pseudonym the verifier reported>
 ```
 
@@ -313,40 +313,47 @@ there is nothing to compare against, and exiting 0 regardless would report
 a match for every candidate. The seed itself is printed only with
 `-show-seed`.
 
-`-verifier-id` is the **bare** verifier_id — `verifier.example` — not the
-prefixed Client Identifier and not `client_id` as it appears in the
-request. `verifier_id_type` is agreed out of band between wallet and
-verifier and is not hashed. The rulebook states this with worked digests
-and marks the prefixed form MUST NOT:
+`-verifier-id` is the verifier_id **exactly as the Verifier publishes it,
+prefix and all**. Rulebook v0.4 defines two forms and no others, and the
+whole string is what is hashed:
 
 ```
-SHA256("verifier.example")              = be6a6400…4a41   (MUST)
-SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
+x509_san_dns:<dns name>
+semantic_id:<identifier>
 ```
 
-A value carrying `x509_san_dns:` is therefore **refused** rather than
-stripped. Hashing it would succeed and return a pseudonym no Verifier could
-have reported, so the loop would simply never match and the operator would
-conclude the subject is innocent — and stripping it would quietly accept a
-caller that is confused about which value it holds.
-
-**`semantic_id:` is not the same kind of thing, and must NOT be stripped.**
-It looks like a Client Identifier Prefix and is not one: for a semantic
-Verifier the verifier_id *is* the whole string `semantic_id:<identifier>`,
-and that whole string is what is hashed. Pass it exactly as the Verifier
-publishes it.
+The worked digests, which v0.4 inverted relative to earlier drafts:
 
 ```
--verifier-id verifier.example                 # x509_san_dns Verifier: bare, no prefix
--verifier-id semantic_id:age-over-18-check    # semantic Verifier: the marker is part of the value
+SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST)
+SHA256("verifier.example")              = be6a6400…4a41   (the bare DNS
+                                                           name, which is
+                                                           NOT a verifier_id)
 ```
 
-So the rule is not "strip anything before a colon". It is: a Client
-Identifier Prefix is never hashed, and a semantic identifier always is.
-Getting this backwards fails the same silent way as the prefixed form —
-a pseudonym no Verifier reports, a loop that never matches, and a subject
-who looks innocent. The one case refused is a bare `semantic_id:` with
-nothing after it, which names no Verifier at all.
+A value that is neither form is **refused** rather than repaired. The bare
+DNS name was the correct value until 2026-10-20, so a script or a runbook
+written before then still passes one, and it still looks entirely
+plausible. Hashing it would succeed and return a pseudonym no Verifier
+could have reported: the loop would never match, and the operator would
+conclude the subject is innocent. That is a wrong answer about a person
+rather than an error anyone sees, which is why this refuses instead of
+stripping or guessing.
+
+```
+-verifier-id x509_san_dns:verifier.example    # an x509_san_dns Verifier
+-verifier-id semantic_id:age-over-18-check    # a semantic Verifier
+```
+
+Nothing is stripped and nothing is normalised — not case, not a trailing
+dot, not an internationalised name. Where v0.4 is silent on those, this
+hashes the bytes it was given; the questions are filed with the rulebook
+author rather than answered locally.
+
+For a semantic Verifier the identifier is taken from the registration
+certificate when one is present, and from the access certificate
+otherwise. The one value refused for naming no Verifier at all is a bare
+prefix with nothing after it.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can
