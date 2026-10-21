@@ -226,6 +226,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
+		// Needs the schemas, so it runs after the loop above.
+		if err := checkCommitmentTargets(cfg); err != nil {
+			return nil, err
+		}
+
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
 		// document is consistent.
@@ -320,6 +325,35 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	}
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
+// checkCommitmentTargets settles every seed-backed claim against the
+// schemas this service has loaded, and refuses a configuration that would
+// not do what it says.
+//
+// The issuer cannot do this at ITS startup - it has no schemas, it
+// receives them inline per request - so without this the misconfiguration
+// surfaces when someone is waiting for a credential. And it surfaces
+// quietly: an mdoc signer emits the elements its schema declares and
+// ignores anything else in the document.
+//
+// The resolution itself lives in pkg/model and is the same call the issuer
+// makes at issuance. Two implementations of it had already drifted once.
+func checkCommitmentTargets(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		meta := cfg.Common.CredentialMetadata[scope]
+		if meta == nil || len(meta.Commitments) == 0 {
+			continue
+		}
+		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{MDoc: meta.MDDL, VCTM: meta.VCTM}); err != nil {
+			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
+		}
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
@@ -50,6 +51,16 @@ type Client struct {
 	// gRPC clients
 	issuerClient   apiv1_issuer.IssuerServiceClient
 	registryClient apiv1_registry.RegistryServiceClient
+
+	// seedSources are the per-subject seed sources, by configured name.
+	// Empty unless APIGW.Seeds is set, in which case every scope naming
+	// one has been checked against it at startup.
+	//
+	// Here rather than in the issuer service: the seed is derived and its
+	// commitment injected before the issuer is called, so the issuer
+	// receives an ordinary claim and the derivation secret never leaves
+	// this process.
+	seedSources map[string]seed.Source
 
 	// Signing key and chain for signing metadata
 	pkiSigner      pki.Signer
@@ -168,6 +179,17 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authP
 	if fedCfg := cfg.APIGW.OpenIDFederation; fedCfg != nil && fedCfg.Enabled {
 		fedSigner := pki.NewSignerConfig(cfg.APIGW.KeyConfig)
 		c.openidFederationService = openidfederation.New(fedCfg, fedSigner, cfg.APIGW.PublicURL)
+	}
+
+	// Seed sources, and the commitment configuration that names them.
+	//
+	// At startup, so a deployment whose seed configuration cannot work -
+	// a missing secret, a scope naming a source that is not there, a
+	// commitment the credential's own type metadata forbids - fails here
+	// rather than at the first issuance, with a person waiting.
+	if err := c.initSeedSources(); err != nil {
+		c.log.Error(err, "seed sources")
+		return nil, err
 	}
 
 	// Initialize gRPC client for issuer service
