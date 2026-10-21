@@ -156,6 +156,68 @@ type VerificationDirectPostResponse struct {
 	RedirectURI                       string `json:"redirect_uri"`
 }
 
+// decorateWithPresentedClaims copies the configured claims of the
+// verified presentation over the datastore documents, and records which
+// claims it took.
+//
+// Separated from VerificationDirectPost so both of its outcomes can be
+// tested: that a decorated document carries the overrides AND the
+// provenance, and that a missing or unconvertible source claim returns an
+// error - which, because this runs before the caller publishes anything,
+// means nothing is cached for a presentation that could not be honoured.
+//
+// The provenance travels inside the documents, written in the caller's
+// single cache Set. Recording it separately - on the authorization
+// context - was a second write that could interleave with that one,
+// leaving one request's document paired with another's provenance.
+// publishPresentedDocuments decorates the datastore documents with the
+// verified presentation and publishes the RESULT for issuance.
+//
+// One function because the two steps are one fact: what is published has
+// to be what was decorated. Keeping them apart in the handler made that
+// fact unobservable - the AST wiring guard can see that
+// decorateWithPresentedClaims is CALLED, not that its return value is
+// what reaches the cache, and discarding it left every test in this
+// package green while the overrides and their provenance were lost.
+//
+// Nothing is published when the decoration refuses, which is the other
+// half: issuing from datastore values would assert claims the holder
+// never presented.
+func (c *Client) publishPresentedDocuments(
+	ctx context.Context,
+	sessionID string,
+	documents map[string]*model.CompleteDocument,
+	sourceFormat string,
+	credential map[string]any,
+	entry model.AuthScopeEntry,
+	scope, matchedAuthScope string,
+) error {
+	decorated, err := c.decorateWithPresentedClaims(documents, sourceFormat, credential, entry, scope, matchedAuthScope)
+	if err != nil {
+		return err
+	}
+	c.cacheService.Document.Set(ctx, sessionID, decorated)
+	return nil
+}
+
+func (c *Client) decorateWithPresentedClaims(
+	documents map[string]*model.CompleteDocument,
+	sourceFormat string,
+	credential map[string]any,
+	entry model.AuthScopeEntry,
+	scope, matchedAuthScope string,
+) (map[string]*model.CompleteDocument, error) {
+	if len(entry.DocumentClaims) == 0 {
+		return documents, nil
+	}
+	copied, err := presentedDocumentClaims(sourceFormat, credential, entry, c.cfg.GetCredentialMetadata(scope))
+	if err != nil {
+		c.log.Error(err, "cannot copy presented claims into the issued document", "matched_auth_scope", matchedAuthScope, "scope", scope)
+		return nil, fmt.Errorf("presented claim copy failed: %w", err)
+	}
+	return applyPresentedDocumentClaims(documents, copied), nil
+}
+
 func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDirectPostRequest) (*VerificationDirectPostResponse, error) {
 	c.log.Debug("Verification direct-post")
 
@@ -624,7 +686,8 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	if !ok {
 		return nil, serverFault(fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope))
 	}
-	identityClaims, err := model.ExtractIdentityClaims(credential, authScopeEntry.AuthClaims)
+	authSourceFormat := c.cfg.GetFormatForScope(matchedAuthScope)
+	identityClaims, err := extractAuthScopeIdentity(authSourceFormat, credential, authScopeEntry)
 	if err != nil {
 		c.log.Error(err, "required identity claims missing from presented credential", "matched_auth_scope", matchedAuthScope, "scope", scope)
 		return nil, fmt.Errorf("identity extraction failed: %w", err)
@@ -667,8 +730,15 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		return nil, errors.New("no documents found for the provided identity")
 	}
 
-	// Cache PID documents for session
-	c.cacheService.Document.Set(ctx, authCtx.SessionID, documents)
+	// Copy the configured claims of the verified presentation over the
+	// datastore document (e.g. the birth date of a nym_auth attestation is
+	// the one in the PID/mDL/Photo ID the holder just presented, not a
+	// stored copy of it), and publish the result. Fails closed when a
+	// configured claim is missing.
+	if err := c.publishPresentedDocuments(ctx, authCtx.SessionID, documents,
+		authSourceFormat, credential, authScopeEntry, scope, matchedAuthScope); err != nil {
+		return nil, err
+	}
 
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 
@@ -690,9 +760,17 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 	options := make([][]string, 0, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		entry := vpAuth.AuthScopes[authScope]
-		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims)+len(entry.DocumentClaims))
 		format := cfg.GetFormatForScope(authScope)
-		for _, claim := range entry.AuthClaims {
+		// The claims copied into the issued document have to be disclosed
+		// too, so they are requested alongside the identity claims.
+		requested := slices.Clone(entry.AuthClaims)
+		for _, src := range slices.Sorted(maps.Keys(entry.DocumentClaims)) {
+			if !slices.Contains(requested, src) {
+				requested = append(requested, src)
+			}
+		}
+		for _, claim := range requested {
 			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
 				Path: openid4vp.StringPath(authClaimPathSegments(format, claim)...),
 			})

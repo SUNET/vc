@@ -639,6 +639,21 @@ func NewValidator() (*validator.Validate, error) {
 					if len(entry.AuthClaims) == 0 {
 						sl.ReportError(entry.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_auth_scope", name)
 					}
+					for claim, attr := range entry.IdentityAttributes {
+						if !slices.Contains(entry.AuthClaims, claim) {
+							sl.ReportError(entry.IdentityAttributes, "IdentityAttributes", "IdentityAttributes", "identity_attribute_not_an_auth_claim", name+"."+claim)
+						}
+						switch attr {
+						case "given_name", "family_name", "birth_date", "authentic_source_person_id":
+						default:
+							sl.ReportError(entry.IdentityAttributes, "IdentityAttributes", "IdentityAttributes", "identity_attribute_unknown", name+"."+claim)
+						}
+					}
+					for src, dst := range entry.DocumentClaims {
+						if dst == "" || strings.Contains(dst, ".") {
+							sl.ReportError(entry.DocumentClaims, "DocumentClaims", "DocumentClaims", "document_claim_target_must_be_top_level", name+"."+src)
+						}
+					}
 				}
 				if len(cred.AuthClaims) > 0 {
 					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_allowed_for_openid4vp", scope)
