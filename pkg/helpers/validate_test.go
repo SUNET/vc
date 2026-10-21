@@ -323,6 +323,70 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			errorContains: "",
 		},
 		{
+			name: "identity_attributes and document_claims on an auth scope pass",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"nym_auth": {
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name", "birthdate"}, IdentityAttributes: map[string]string{"birthdate": "birth_date"}, DocumentClaims: map[string]string{"birthdate": "birth_date"}},
+						},
+					},
+				}},
+			},
+			shouldError:   false,
+			errorContains: "",
+		},
+		{
+			name: "identity_attributes for a claim that is not an auth claim is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"nym_auth": {
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}, IdentityAttributes: map[string]string{"birthdate": "birth_date"}},
+						},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "identity_attribute_not_an_auth_claim",
+		},
+		{
+			name: "identity_attributes naming an unknown attribute is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"nym_auth": {
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"birthdate"}, IdentityAttributes: map[string]string{"birthdate": "dob"}},
+						},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "identity_attribute_unknown",
+		},
+		{
+			name: "document_claims with a nested target is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"nym_auth": {
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}, DocumentClaims: map[string]string{"birthdate": "a.b"}},
+						},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "document_claim_target_must_be_top_level",
+		},
+		{
 			name: "empty datastore passes",
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{}},

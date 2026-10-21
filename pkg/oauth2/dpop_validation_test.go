@@ -616,3 +616,76 @@ func TestSameHTU_PercentEncoding(t *testing.T) {
 		})
 	}
 }
+
+// IDNA does the case mapping itself, and Go's ToLower disagrees with it.
+//
+// Folding before the mapping turned "İ.example" (U+0130) into
+// "i.example", while UTS #46 maps the original to "xn--i-9bb.example" -
+// so a wallet's correctly canonicalised proof was REFUSED and one naming
+// the distinct authority "i.example" was ACCEPTED. Both directions are
+// asserted, because the accepting one is the security half.
+func TestSameHTU_UnicodeCaseIsIDNAsToDo(t *testing.T) {
+	const dotted = "https://İ.example/token"         // İ.example
+	const aLabel = "https://xn--i-9bb.example/token" // what UTS #46 maps it to
+	const plainI = "https://i.example/token"         // what ToLower makes of it
+
+	if !SameHTU(dotted, aLabel) {
+		t.Fatalf("%q is the A-label of %q; a proof naming either must satisfy the other", aLabel, dotted)
+	}
+	if SameHTU(dotted, plainI) {
+		t.Fatalf("%q and %q are different authorities", dotted, plainI)
+	}
+	if SameHTU(aLabel, plainI) {
+		t.Fatalf("%q and %q are different authorities", aLabel, plainI)
+	}
+
+	// The ordinary foldings still fold - the fix is about which component
+	// does the folding, not about giving it up.
+	for _, pair := range [][2]string{
+		{"https://MÜNCHEN.example/token", "https://xn--mnchen-3ya.example/token"},
+		{"https://München.example/token", "https://münchen.example/token"},
+		{"https://EXAMPLE.COM/token", "https://example.com/token"},
+		{"https://ẞ.example/token", "https://ß.example/token"}, // ẞ and ß
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same host", pair[0], pair[1])
+		}
+	}
+}
+
+// A wallet's browser-normalised hostname has to match the endpoint a
+// deployment configured, underscores and all.
+//
+// idna.Lookup turns on StrictDomainName, which rejects an underscore
+// anywhere in the name - so "İ.my_host.example" did not map, fell through
+// to the ASCII fold, and a wallet sending the correct A-label
+// "xn--i-9bb.my_host.example" was answered with invalid_dpop_proof. The
+// comparison now uses the same browser profile CanonicalOrigin does.
+//
+// The negatives are the other half: mapping these hosts rather than
+// refusing them is what keeps "İ…" and "i…" distinct, instead of leaving
+// them to a Unicode fold that merges them.
+func TestSameHTU_UnderscoreHostsMapLikeABrowser(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"https://\u0130.my_host.example/token", "https://xn--i-9bb.my_host.example/token"},
+		{"https://\u0130_host.example/token", "https://xn--i_host-pyd.example/token"},
+		{"https://M\u00dcNCHEN.my_host.example/token", "https://xn--mnchen-3ya.my_host.example/token"},
+		{"https://MY_HOST.EXAMPLE/token", "https://my_host.example/token"},
+		{"https://My_Host.Example/token", "https://my_host.example/token"},
+	} {
+		if !SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are the same authority", pair[0], pair[1])
+		}
+	}
+
+	// Still distinct, which is what the mapping buys: "İ" is not "i".
+	for _, pair := range [][2]string{
+		{"https://\u0130.my_host.example/token", "https://i.my_host.example/token"},
+		{"https://\u0130_host.example/token", "https://i_host.example/token"},
+		{"https://xn--i-9bb.my_host.example/token", "https://i.my_host.example/token"},
+	} {
+		if SameHTU(pair[0], pair[1]) {
+			t.Fatalf("%q and %q are different authorities", pair[0], pair[1])
+		}
+	}
+}

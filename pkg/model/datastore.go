@@ -10,6 +10,34 @@ type CompleteDocument struct {
 	Meta               *MetaData      `json:"meta,omitempty" bson:"meta" validate:"required"`
 	IdentityMappingIDs []string       `json:"identity_mapping_ids,omitempty" bson:"identity_mapping_ids" validate:"required,min=1"`
 	DocumentData       map[string]any `json:"document_data,omitempty" bson:"document_data" validate:"required"`
+
+	// PresentedClaims names the top-level claims of DocumentData whose
+	// value came from a VERIFIED presentation rather than from the
+	// datastore, so issuance can keep them authoritative through the
+	// derivations it runs.
+	//
+	// It travels INSIDE the document because it describes that document.
+	// Carried beside it - on the authorization context - it was a second
+	// write that could interleave with this one: two direct-post requests
+	// matching different auth scopes could leave one request's document
+	// paired with the other's provenance, and a verified claim unpinned.
+	// One write cannot disagree with itself.
+	//
+	// Tagged for JSON, which is what the cache actually uses. The
+	// Mongo-backed cache serialises through MongoCache.marshalEntry, and
+	// that calls json.Marshal - so a bson tag does nothing for it and
+	// json:"-" dropped this field entirely under HA, leaving issuance
+	// with no pinned claims and a derivation free to replace a verified
+	// birth date. That is the THIRD time this provenance was lost on the
+	// HA path alone; it is tagged for the encoder in use, not the one
+	// the collection name suggests.
+	//
+	// omitempty, and set only on the cached copy a verification
+	// produces: a document read from the datastore never carries it, and
+	// the handlers that return a CompleteDocument return stored ones.
+	// The user lookup reads DocumentData and never returns the document
+	// itself. So it survives the cache without appearing in a response.
+	PresentedClaims []string `json:"presented_claims,omitempty" bson:"presented_claims,omitempty"`
 }
 
 // DocumentList is a generic type for document list

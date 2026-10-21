@@ -178,17 +178,39 @@ var ErrClientNotFound = errors.New("client not found in config")
 // was configured instead. These errors are for operators: the caller logs
 // them and returns its own generic message to the client.
 func (c *Clients) Allow(clientID, redirectURI, scope string) (*Client, error) {
+	return c.allow(clientID, redirectURI, scope, true)
+}
+
+// AllowWithoutRedirect is Allow for a flow that has no redirect at all.
+//
+// The Authorization Challenge Endpoint is browserless: there is nowhere
+// to send the user back to, and draft-ietf-oauth-first-party-apps makes
+// redirect_uri optional on its request. Validating the client through
+// Allow therefore refused a perfectly ordinary registered wallet - one
+// that simply has no callback - with invalid_client, and the only way
+// past it was a wallet attestation the deployment may not use.
+//
+// A redirect_uri the caller DOES send is still matched: this only drops
+// the requirement, never the check. An empty one is the browserless case;
+// a wrong one is a wrong one on any endpoint.
+func (c *Clients) AllowWithoutRedirect(clientID, redirectURI, scope string) (*Client, error) {
+	return c.allow(clientID, redirectURI, scope, redirectURI != "")
+}
+
+func (c *Clients) allow(clientID, redirectURI, scope string, requireRedirect bool) (*Client, error) {
 	client, ok := (*c)[clientID]
 	if !ok || client == nil {
 		return nil, ErrClientNotFound
 	}
 
-	if len(client.RedirectURIs) == 0 {
-		return nil, fmt.Errorf("client %q has no redirect_uri configured", clientID)
-	}
-	if !client.RedirectURIs.Contains(redirectURI) {
-		return nil, fmt.Errorf("redirect_uri %q does not match any of the %d URIs configured for client %q (allowed: %s)",
-			redirectURI, len(client.RedirectURIs), clientID, strings.Join(client.RedirectURIs, ", "))
+	if requireRedirect {
+		if len(client.RedirectURIs) == 0 {
+			return nil, fmt.Errorf("client %q has no redirect_uri configured", clientID)
+		}
+		if !client.RedirectURIs.Contains(redirectURI) {
+			return nil, fmt.Errorf("redirect_uri %q does not match any of the %d URIs configured for client %q (allowed: %s)",
+				redirectURI, len(client.RedirectURIs), clientID, strings.Join(client.RedirectURIs, ", "))
+		}
 	}
 
 	if !slices.Contains(client.Scopes, scope) {
