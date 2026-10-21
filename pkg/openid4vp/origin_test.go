@@ -1,6 +1,7 @@
 package openid4vp
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,34 @@ func TestCanonicalOrigin(t *testing.T) {
 		{name: "a path, which is not part of an origin", in: "https://issuer.example/op/par?x=1#f", want: "https://issuer.example"},
 		{name: "an IPv6 literal keeps its brackets", in: "https://[2001:DB8::1]:8443", want: "https://[2001:db8::1]:8443"},
 		{name: "an IPv6 literal on the default port", in: "https://[2001:db8::1]:443", want: "https://[2001:db8::1]"},
+
+		// RFC 5952 is what a browser serialises an address with, and the
+		// same address has many valid spellings. Lowercasing alone left
+		// the expanded and zero-padded forms unmatchable against the
+		// Origin a browser reports for the very same host.
+		{name: "a fully expanded IPv6 literal", in: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]", want: "https://[2001:db8::1]"},
+		{name: "a zero-padded IPv6 literal", in: "https://[2001:0DB8::0001]:8443", want: "https://[2001:db8::1]:8443"},
+		{name: "an IPv6 loopback written the long way", in: "https://[0:0:0:0:0:0:0:1]", want: "https://[::1]"},
+		// The WHATWG URL Standard's IPv6 serializer has no IPv4-mapped
+		// case: eight hexadecimal pieces, always. Both spellings of the
+		// same address therefore come back as the one a browser emits.
+		{name: "an IPv4-mapped IPv6 literal written with dots", in: "https://[::ffff:192.0.2.1]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-mapped IPv6 literal written in hex", in: "https://[::FFFF:C000:201]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-embedded address that is not mapped", in: "https://[64:ff9b::192.0.2.33]", want: "https://[64:ff9b::c000:221]"},
+
+		// A port is a number, not a string. A browser parses it and emits
+		// the decimal form, so a leading zero neither survives nor stops
+		// a default port from being dropped.
+		{name: "a zero-padded default port", in: "https://issuer.example:0443", want: "https://issuer.example"},
+		{name: "a zero-padded non-default port", in: "https://issuer.example:008443", want: "https://issuer.example:8443"},
+		{name: "a zero-padded default port on http", in: "http://issuer.example:00080/op", want: "http://issuer.example"},
+		{name: "port zero is a port", in: "https://issuer.example:0", want: "https://issuer.example:0"},
+
+		{name: "an IPv4 address written in full", in: "http://127.0.0.1", want: "http://127.0.0.1"},
+
+		// And a host that merely CONTAINS digits is still a name.
+		{name: "a hostname with numeric labels", in: "https://1.example.com", want: "https://1.example.com"},
+		{name: "a hostname ending in a non-numeric label", in: "https://127.0.0.1x", want: "https://127.0.0.1x"},
 
 		// An internationalized host. A browser's URL parser runs UTS #46
 		// ToASCII, so the Origin it reports is the A-label form; a
@@ -96,6 +125,8 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 		{name: "no host", in: "https:///op/par"},
 		{name: "not a URL at all", in: "://"},
 		{name: "a punycode label that decodes to nothing valid", in: "https://xn--a.example"},
+		{name: "something bracketed that is not an address", in: "https://[2001:db8::zz]"},
+		{name: "a port outside the range a port can take", in: "https://issuer.example:70000"},
 
 		// url.Parse gives these a non-empty Host and an empty Hostname,
 		// so a check on Host alone let them through and returned
@@ -157,6 +188,42 @@ func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
 		}
 	}
 
+	// Mixed width is one host, not two. The numeric check asks about the
+	// LAST label, and fullwidth digits are not ASCII digits, so checking
+	// before the mapping made acceptance depend on the width of the final
+	// character alone: "１２７.0.0.1" was refused while "１２７.0.0.１" and
+	// "１２７.０.０.１" were accepted. A browser reports the same origin for
+	// all three, which is what makes the refusal wrong rather than merely
+	// inconsistent - these are public URLs that could not produce an
+	// expected_origin or a presentation audience at all.
+	for _, rawURL := range []string{
+		"https://１２７.0.0.1",
+		"https://１２７.0.0.１",
+		"https://１２７.０.０.１",
+		"https://127.0.0.１",
+		"https://1２７.0.0.1",
+	} {
+		got, err := CanonicalOrigin(rawURL)
+		if err != nil {
+			t.Fatalf("CanonicalOrigin(%q): %v", rawURL, err)
+		}
+		if got != "https://127.0.0.1" {
+			t.Fatalf("CanonicalOrigin(%q) = %q, want https://127.0.0.1", rawURL, got)
+		}
+	}
+
+	// And the mixed-width spellings of a host a browser REWRITES are still
+	// refused, so mapping first did not turn the check off.
+	for _, rawURL := range []string{
+		"https://１２７.1",
+		"https://127.１",
+		"https://０x７f.1",
+	} {
+		if origin, err := CanonicalOrigin(rawURL); err == nil {
+			t.Fatalf("%q must be refused, got %q", rawURL, origin)
+		}
+	}
+
 	// And a host that maps to a CANONICAL dotted quad is still accepted:
 	// the refusal is of spellings a browser rewrites, not of addresses.
 	for _, tc := range []struct{ rawURL, want string }{
@@ -189,4 +256,28 @@ func TestCanonicalOriginRechecksNumericHostsAfterMapping(t *testing.T) {
 			t.Fatalf("CanonicalOrigin(%q) = %q, want %q", tc.rawURL, got, tc.want)
 		}
 	}
+}
+
+// serializeIPv6 reimplements a serializer net/netip already has, so the
+// two are held to each other everywhere they are supposed to agree -
+// which is everywhere except the IPv4-mapped case the URL Standard does
+// not have. Without this the hand-written compression could drift and
+// only the handful of cases spelled out above would notice.
+func TestSerializeIPv6AgreesWithNetipExceptWhereItMustNot(t *testing.T) {
+	for _, in := range []string{
+		"::", "::1", "2001:db8::1", "2001:db8:0:0:1:0:0:1",
+		"fe80::1", "ff02::2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+		"64:ff9b::c000:221", "0:1:0:0:0:0:0:8", "1:0:0:2:0:0:0:3",
+	} {
+		addr, err := netip.ParseAddr(in)
+		require.NoError(t, err)
+		require.False(t, addr.Is4In6(), "%s is the case the two deliberately differ on", in)
+		assert.Equal(t, addr.String(), serializeIPv6(addr), "disagreed on %s", in)
+	}
+
+	// And the one case they must differ on.
+	mapped, err := netip.ParseAddr("::ffff:192.0.2.1")
+	require.NoError(t, err)
+	assert.Equal(t, "::ffff:192.0.2.1", mapped.String(), "netip renders the dotted tail")
+	assert.Equal(t, "::ffff:c000:201", serializeIPv6(mapped), "a browser renders eight hex pieces")
 }

@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -232,7 +233,7 @@ func TestGet_NoSearchFields(t *testing.T) {
 	result, err := cache.Get(ctx, query)
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "query must have at least one search field")
+	assert.Contains(t, err.Error(), "no searchable field set on the query")
 }
 
 func TestGet_NotFound(t *testing.T) {
@@ -901,4 +902,79 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Get hands out the pointer this cache holds, and returns before the
+// caller is finished with it. So a store method that writes through that
+// pointer races every reader already holding one - and the mutex does not
+// help, because the reader is not calling the store any more.
+//
+// /authorize is exactly such a reader: it fetches the context, reads
+// ExpiresAt, and two overlapping authorization requests put that read and
+// ExtendExpiry's write on the same field. Run under -race, this fails if
+// either writer mutates in place.
+func TestMemoryStoreWritersDoNotMutateHandedOutDocuments(t *testing.T) {
+	store := NewMemoryStore(5 * time.Minute)
+	ctx := context.Background()
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID:  "race-session",
+		RequestURI: "https://example.com/race",
+		Code:       "race-code",
+		ExpiresAt:  time.Now().Add(time.Minute).Unix(),
+	}))
+
+	held, err := store.GetByID(ctx, "race-session")
+	require.NoError(t, err)
+
+	var start, finished sync.WaitGroup
+	start.Add(1)
+	finished.Add(3)
+
+	// A reader holding the pointer, as /authorize does. The values are
+	// accumulated rather than discarded so the reads actually happen -
+	// a bare `_ = held.ExpiresAt` can be optimised away, and then the
+	// test proves nothing.
+	var observed int64
+	go func() {
+		defer finished.Done()
+		start.Wait()
+		for range 20000 {
+			observed += held.ExpiresAt
+			if held.AuthProvider != "" {
+				observed++
+			}
+		}
+	}()
+
+	go func() {
+		defer finished.Done()
+		start.Wait()
+		for i := range 20000 {
+			_ = store.ExtendExpiry(ctx, &AuthorizationContext{SessionID: "race-session"},
+				time.Now().Add(time.Duration(i+2)*time.Minute).Unix())
+		}
+	}()
+
+	go func() {
+		defer finished.Done()
+		start.Wait()
+		for range 20000 {
+			_ = store.SetAuthProvider(ctx, "race-session", AuthProviderFields{
+				AuthProvider:    "openid4vp",
+				AuthenticSource: "source",
+			})
+		}
+	}()
+
+	start.Done()
+	finished.Wait()
+
+	// The writes still took effect on the stored document, so copying has
+	// not quietly turned them into no-ops.
+	stored, err := store.GetByID(ctx, "race-session")
+	require.NoError(t, err)
+	assert.Equal(t, "openid4vp", stored.AuthProvider)
+	assert.Greater(t, stored.ExpiresAt, held.ExpiresAt)
+	_ = observed
 }

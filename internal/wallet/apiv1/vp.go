@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
-	crypto_sha256 "crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -339,11 +339,16 @@ func (c *Client) createKeyBindingJWT(nonce, audience, sdJWT string, transactionD
 	signingMethod, alg := jose.GetSigningMethodFromKey(c.signingKey)
 	_ = alg
 
+	sdHash, err := computeSDHash(sdJWT)
+	if err != nil {
+		return "", err
+	}
+
 	body := jwtv5.MapClaims{
 		"nonce":   nonce,
 		"aud":     audience,
 		"iat":     time.Now().Unix(),
-		"sd_hash": computeSDHash(sdJWT),
+		"sd_hash": sdHash,
 	}
 
 	// Include transaction_data_hashes when transaction data is present per OpenID4VP §8.4
@@ -368,9 +373,40 @@ func (c *Client) createKeyBindingJWT(nonce, audience, sdJWT string, transactionD
 	return signed, nil
 }
 
-func computeSDHash(sdJWT string) string {
-	h := crypto_sha256.Sum256([]byte(sdJWT))
-	return base64.RawURLEncoding.EncodeToString(h[:])
+// computeSDHash hashes the presented SD-JWT under the credential's own
+// _sd_alg (SD-JWT VC §4.3.1), sha-256 when the issuer named none.
+func computeSDHash(sdJWT string) (string, error) {
+	alg := "sha-256"
+	if payload, ok := issuerPayload(sdJWT); ok {
+		if named, _ := payload["_sd_alg"].(string); named != "" {
+			alg = named
+		}
+	}
+	hasher, err := sdjwtvc.HashFromAlgorithm(alg)
+	if err != nil {
+		return "", fmt.Errorf("computing sd_hash: %w", err)
+	}
+	hasher.Write([]byte(sdJWT))
+	return base64.RawURLEncoding.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// issuerPayload decodes the payload of the issuer-signed JWT at the front
+// of an SD-JWT, without verifying it.
+func issuerPayload(raw string) (map[string]any, bool) {
+	jwtPart, _, _ := strings.Cut(raw, "~")
+	segments := strings.Split(jwtPart, ".")
+	if len(segments) != 3 {
+		return nil, false
+	}
+	body, err := base64.RawURLEncoding.DecodeString(segments[1])
+	if err != nil {
+		return nil, false
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, false
+	}
+	return payload, true
 }
 
 // sendVPResponse sends the VP token to the verifier

@@ -29,6 +29,10 @@ type parAPI struct {
 	calls int
 }
 
+func (p *parAPI) PrepareIssuance(context.Context, *apiv1.PrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
+	return nil, nil
+}
+
 func (p *parAPI) OAuthAuthorizationChallenge(context.Context, *apiv1.AuthorizationChallengeRequest) (*apiv1.AuthorizationChallengeResponse, error) {
 	return nil, nil
 }
