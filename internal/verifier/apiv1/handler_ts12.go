@@ -175,22 +175,29 @@ func (c *Client) issuedResponseModes() []string {
 	return modes
 }
 
+// invalidTransactionData refuses a wallet response as a structured 400; an
+// unstructured error would have its status guessed from its text (401/404).
+func invalidTransactionData(format string, args ...any) *oauth2.OAuthError {
+	return &oauth2.OAuthError{
+		ErrorCode:        openid4vp.ErrorInvalidTransactionData,
+		ErrorDescription: fmt.Sprintf(format, args...),
+		HTTPStatus:       http.StatusBadRequest,
+	}
+}
+
 // claimJTI records a presented jti, refusing a repeat. With no replay cache it
 // refuses: jti uniqueness cannot be honoured, so the presentation cannot be.
 func (c *Client) claimJTI(ctx context.Context, jti string) error {
-	refuse := func(format string, args ...any) error {
-		return &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf(format, args...)}
-	}
 	if c.cacheService == nil || c.cacheService.UsedJTI == nil {
-		return refuse("cannot verify jti freshness: no replay store configured")
+		return invalidTransactionData("cannot verify jti freshness: no replay store configured")
 	}
 	// Atomic: a concurrent second submission of the same KB-JWT loses SetNX.
 	fresh, err := c.cacheService.UsedJTI.SetNX(ctx, jti, true)
 	if err != nil {
-		return refuse("cannot verify jti freshness: %v", err)
+		return invalidTransactionData("cannot verify jti freshness: %v", err)
 	}
 	if !fresh {
-		return refuse("jti has been used before")
+		return invalidTransactionData("jti has been used before")
 	}
 	return nil
 }
@@ -200,22 +207,19 @@ func (c *Client) claimJTI(ctx context.Context, jti string) error {
 // found for this session (for example the DCQL is not available on this
 // replica) the type cannot be compared and the presentation is refused.
 func (c *Client) checkBoundCredentialType(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string, claims map[string]any) error {
-	refuse := func(format string, args ...any) error {
-		return &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf(format, args...)}
-	}
 	query, ok := c.requestedQueryExact(authCtx, scopeQueryIDs, scope)
 	if !ok {
-		return refuse("cannot compare the credential type: the request's credential query is not available")
+		return invalidTransactionData("cannot compare the credential type: the request's credential query is not available")
 	}
 	if len(query.Meta.VCTValues) == 0 {
-		return refuse("cannot compare the credential type: the request named no vct_values")
+		return invalidTransactionData("cannot compare the credential type: the request named no vct_values")
 	}
 	vct, _ := claims["vct"].(string)
 	if vct == "" {
-		return refuse("credential has no vct")
+		return invalidTransactionData("credential has no vct")
 	}
 	if !slices.Contains(query.Meta.VCTValues, vct) {
-		return refuse("credential vct %q is not one the request asked for", vct)
+		return invalidTransactionData("credential vct %q is not one the request asked for", vct)
 	}
 	return nil
 }

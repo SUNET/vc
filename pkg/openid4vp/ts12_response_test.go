@@ -338,7 +338,7 @@ func TestTS12Response_JTIAndResponseMode(t *testing.T) {
 // A reused validator must not carry the previous presentation's jti.
 //
 // PresentedJTI is an output, and the caller CLAIMS a non-empty one in a
-// JTIStore after issuer authentication - a state change that refuses any
+// replay store after issuer authentication - a state change that refuses any
 // later presentation reusing that jti. So a stale value is not a cosmetic
 // leak: validate an SCA presentation, then reuse the validator for an
 // unrelated one that sets no jti, and the caller claims the first jti a

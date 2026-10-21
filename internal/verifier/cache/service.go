@@ -42,8 +42,8 @@ type Service struct {
 	Credential             Cache[[]sdjwtvc.CredentialCache]
 	EphemeralEncryptionKey Cache[jwk.Key]
 	RequestObject          Cache[*openid4vp.RequestObject]
-	// UsedJTI records the jti of every accepted-or-attempted EC TS12 SCA
-	// presentation so the same KB-JWT cannot be submitted twice.
+	// UsedJTI records the jti of every accepted EC TS12 SCA presentation so
+	// the same KB-JWT cannot be submitted twice.
 	UsedJTI Cache[bool]
 
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.

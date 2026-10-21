@@ -79,8 +79,8 @@ type VPTokenValidator struct {
 
 	// PresentedJTI is an output: after a successful Validate of an EC TS12
 	// SCA presentation it holds the KB-JWT jti. It is empty when no SCA entry
-	// applied. The caller must claim it in a JTIStore after issuer
-	// authentication and treat a non-empty value it cannot claim as a refusal.
+	// applied. The caller must record it in a replay store after issuer
+	// authentication and treat a value already recorded as a refusal.
 	PresentedJTI string
 
 	// MaxKeyBindingAge bounds how old a Key Binding JWT's iat may be.
@@ -94,7 +94,7 @@ func (v *VPTokenValidator) Validate(vpToken string) error {
 	// before anything can read it.
 	//
 	// It is written only when an SCA entry applies, and the caller claims
-	// a non-empty value in a JTIStore - a state change that refuses the
+	// a non-empty value in a replay store - a state change that refuses the
 	// presentation if the value was already claimed. A validator reused
 	// for a second presentation that is not an SCA one would otherwise
 	// still carry the first jti, and the caller would claim it a second

@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/SUNET/vc/internal/verifier/notify"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -130,6 +132,7 @@ func TestVerificationDirectPost_TS12Payment(t *testing.T) {
 			err := r.post(kb)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), openid4vp.ErrorInvalidTransactionData)
+			assert.Equal(t, http.StatusBadRequest, httphelpers.StatusCode(t.Context(), err))
 		})
 	}
 
@@ -255,6 +258,38 @@ func TestVerificationDirectPost_TS12ScopedToTheBoundCredential(t *testing.T) {
 	err := answer(r, nil)
 	require.Error(t, err, "the bound credential must carry the hashes even if the other one does not")
 	assert.Contains(t, err.Error(), openid4vp.ErrorInvalidTransactionData)
+}
+
+// A response refused after the SCA credential passed must not use up its jti.
+func TestVerificationDirectPost_TS12LaterRefusalDoesNotBurnTheJTI(t *testing.T) {
+	dcql := scaDCQL("sca")
+	dcql.Credentials = append(dcql.Credentials, openid4vp.CredentialQuery{
+		ID: "age", Format: openid4vp.FormatSDJWTVC, Meta: openid4vp.MetaQuery{VCTValues: []string{"https://example.com/age"}},
+	})
+	p := testPayment()
+	p.CredentialID = "sca"
+	r := newTS12RigFor(t, dcql, p)
+
+	ctx := t.Context()
+	authCtx, err := r.client.cacheService.AuthContext.GetByID(ctx, r.sessID)
+	require.NoError(t, err)
+	sca := r.kbClaims("later-refusal-jti")
+	sca["_vct"] = "https://psp.example/sca"
+	scaTok := createTestSDJWTWithKBClaims(t, r.key, map[string]any{"given_name": "Ada"}, nil, authCtx.Nonce, authCtx.ClientID, sca)
+	// The second credential fails its own nonce check, after the SCA one passed.
+	ageTok := createTestSDJWTWithKBClaims(t, r.key, map[string]any{"given_name": "Ada"}, nil, "wrong-nonce", authCtx.ClientID, nil)
+	body, err := json.Marshal(openid4vp.VPResponse{VPToken: map[string][]string{"sca": {scaTok}, "age": {ageTok}}, State: authCtx.State})
+	require.NoError(t, err)
+	_, pub, err := r.client.ephemeralEncryptionKey(ctx, authCtx.EphemeralEncryptionKeyID)
+	require.NoError(t, err)
+	enc, err := jwe.Encrypt(body, jwe.WithKey(jwa.ECDH_ES(), pub), jwe.WithContentEncryption(jwa.A256GCM()))
+	require.NoError(t, err)
+	_, err = r.client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(enc)})
+	require.Error(t, err)
+
+	fresh, err := r.client.cacheService.UsedJTI.SetNX(ctx, "later-refusal-jti", true)
+	require.NoError(t, err)
+	assert.True(t, fresh, "the jti of a refused response must still be unclaimed")
 }
 
 type denyAllEvaluator struct{}
