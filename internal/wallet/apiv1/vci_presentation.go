@@ -1,7 +1,9 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
+	"crypto"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -487,10 +489,14 @@ func optionIsAnswerable(option []string, answerable map[string][]*credential.Sto
 // query not being satisfiable rather than silently replaced.
 func (c *Client) presentableCredentials(vci *config.VCIScenario) ([]*credential.StoredCredential, error) {
 	if vci.PresentCredential == "" {
+		holder, err := c.holderThumbprint()
+		if err != nil {
+			return nil, err
+		}
 		now := time.Now()
 		var valid []*credential.StoredCredential
 		for _, cred := range c.store.List() {
-			if credentialValidAt(cred, now) {
+			if credentialValidAt(cred, now) && boundToHolder(cred, holder) {
 				valid = append(valid, cred)
 			}
 		}
@@ -501,6 +507,44 @@ func (c *Client) presentableCredentials(vci *config.VCIScenario) ([]*credential.
 		return nil, fmt.Errorf("credential %q named by present_credential is not in this wallet", vci.PresentCredential)
 	}
 	return []*credential.StoredCredential{cred}, nil
+}
+
+// holderThumbprint is the RFC 7638 thumbprint of the key this wallet signs
+// Key Binding JWTs with.
+func (c *Client) holderThumbprint() ([]byte, error) {
+	signer, ok := c.signingKey.(crypto.Signer)
+	if !ok {
+		return nil, fmt.Errorf("wallet signing key %T has no public key", c.signingKey)
+	}
+	key, err := jwk.Import(signer.Public())
+	if err != nil {
+		return nil, fmt.Errorf("importing the wallet public key: %w", err)
+	}
+	return key.Thumbprint(crypto.SHA256)
+}
+
+// boundToHolder reports whether an SD-JWT credential's cnf.jwk is this
+// wallet's key, so a Key Binding JWT it signs will verify. A credential
+// that is not a JWT here (an mdoc) is left to the format checks.
+func boundToHolder(cred *credential.StoredCredential, holder []byte) bool {
+	if !strings.Contains(cred.RawCredential, "~") {
+		return true
+	}
+	payload, ok := issuerPayload(cred.RawCredential)
+	if !ok {
+		return false
+	}
+	cnf, _ := payload["cnf"].(map[string]any)
+	raw, err := json.Marshal(cnf["jwk"])
+	if err != nil || cnf["jwk"] == nil {
+		return false
+	}
+	key, err := jwk.ParseKey(raw)
+	if err != nil {
+		return false
+	}
+	thumbprint, err := key.Thumbprint(crypto.SHA256)
+	return err == nil && bytes.Equal(thumbprint, holder)
 }
 
 // credentialValidAt reports whether a JWT-based credential's exp and nbf
@@ -526,12 +570,16 @@ func credentialValidAt(cred *credential.StoredCredential, now time.Time) bool {
 // Each match is a copy whose RawCredential is reduced to the disclosures
 // the query asks for (§6.4.1), so the key-binding hash covers only what is
 // presented. A credential this wallet cannot reduce - anything but an
-// SD-JWT - does not match a claim-constrained query, which leaves any
-// credential-set alternative usable.
+// SD-JWT - does not match a claim-constrained query, and an mdoc never
+// matches because buildVPToken cannot build a DeviceResponse; either way a
+// credential-set alternative stays usable.
 func matchingCredentials(candidates []*credential.StoredCredential, query openid4vp.CredentialQuery) []*credential.StoredCredential {
 	var matched []*credential.StoredCredential
 	for _, cred := range candidates {
 		if query.Format != "" && normalisedFormat(cred.Format) != normalisedFormat(query.Format) {
+			continue
+		}
+		if isMdocFormat(cred.Format) || isMdocFormat(query.Format) {
 			continue
 		}
 		if !credentialTypeMatches(cred, query) {
@@ -550,6 +598,10 @@ func matchingCredentials(candidates []*credential.StoredCredential, query openid
 		matched = append(matched, &presented)
 	}
 	return matched
+}
+
+func isMdocFormat(format string) bool {
+	return format == openid4vp.FormatMsoMdoc || format == openid4vp.FormatMsoMdocZk
 }
 
 // normalisedFormat folds the two spellings of SD-JWT VC together.

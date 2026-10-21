@@ -291,3 +291,22 @@ func TestApplyDerivations_HolderContainerKeepsProvenance(t *testing.T) {
 		t.Errorf("a holder-supplied container must stay marked, got %v", err)
 	}
 }
+
+// A reformatting primitive that creates a container the holder never
+// supplied makes that container generated, so reading it is a
+// configuration fault even though its leaf is holder data.
+func TestApplyDerivations_ContainerCreatedByReformatIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Trim: &primitives.TrimArgs{Input: "birthdate_raw", Output: "identity.birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "identity", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"birthdate_raw": "1990-01-01"}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain feeding a map into age")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a container no holder supplied must not be reported as invalid holder input: %v", err)
+	}
+}

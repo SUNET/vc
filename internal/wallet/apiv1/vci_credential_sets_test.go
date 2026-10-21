@@ -174,6 +174,36 @@ func TestAuthorizationServerFor(t *testing.T) {
 		assert.Equal(t, "https://issuer.example", got)
 	})
 
+	// With no authorization_servers the issuer is its own, so an offer
+	// naming the issuer names the advertised default.
+	t.Run("the issuer named explicitly when it advertises none", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state":         "handle",
+				"authorization_server": "https://issuer.example",
+			},
+		})
+
+		got, err := flow.authorizationServerFor(&openid4vci.CredentialIssuerMetadataParameters{}, "https://issuer.example")
+		require.NoError(t, err)
+		assert.Equal(t, "https://issuer.example", got)
+	})
+
+	t.Run("another server is refused when the issuer advertises none", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state":         "handle",
+				"authorization_server": "https://attacker.example",
+			},
+		})
+
+		_, err := flow.authorizationServerFor(&openid4vci.CredentialIssuerMetadataParameters{}, "https://issuer.example")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "attacker.example")
+	})
+
 	// The offer arrives as a QR code, so it is the least trustworthy input
 	// in this flow. Following it to a server the Issuer never vouched for
 	// is how a wallet is talked into sending a handle, and then a DPoP

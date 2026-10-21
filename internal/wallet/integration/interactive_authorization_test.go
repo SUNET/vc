@@ -370,6 +370,7 @@ func TestVCI_InteractiveAuthorization_RejectsAForeignHolderBinding(t *testing.T)
 	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	env.wallet.Store().Add(&credential.StoredCredential{
+		ID:            "foreign",
 		RawCredential: createMockSDJWTWithVCT(t, iaRequestedVCT, &other.PublicKey),
 		Format:        "dc+sd-jwt",
 		VCT:           iaRequestedVCT,
@@ -384,6 +385,9 @@ func TestVCI_InteractiveAuthorization_RejectsAForeignHolderBinding(t *testing.T)
 			Scope:                       "pid",
 			UseInteractiveAuthorization: true,
 			CredentialConfigurationID:   "test_credential",
+			// Named, so automatic holder-binding filtering does not skip it
+			// and the mock's own check is what rejects it.
+			PresentCredential: "foreign",
 		},
 	})
 
@@ -1077,5 +1081,43 @@ func TestVCI_InteractiveAuthorization_RefusesToPresentWithoutAuthSession(t *test
 	require.Len(t, requests, 1, "nothing is sent after a challenge that cannot be continued")
 	for _, step := range result.Steps {
 		assert.NotEqual(t, "openid4vp_presentation", step.Name, "no presentation may be built")
+	}
+}
+
+// Automatic selection skips a credential bound to another key, so a usable
+// credential for the same query is presented whatever order the store
+// lists them in.
+func TestVCI_InteractiveAuthorization_SkipsAForeignBoundCredential(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	env.wallet.Store().Add(&credential.StoredCredential{
+		ID:            "foreign",
+		RawCredential: createMockSDJWTWithVCT(t, iaRequestedVCT, &other.PublicKey),
+		Format:        "dc+sd-jwt",
+		VCT:           iaRequestedVCT,
+	})
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-mixed-holder",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	// Map iteration is random, so several runs would expose an
+	// order-dependent pick.
+	for range 5 {
+		result, err := env.wallet.RunScenario(t.Context(), "ia-mixed-holder")
+		require.NoError(t, err)
+		require.True(t, result.Success, "scenario failed: %s", result.Error)
 	}
 }

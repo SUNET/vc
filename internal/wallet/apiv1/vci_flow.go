@@ -204,6 +204,11 @@ func (f *vciFlow) authorizationServerFor(metadata *openid4vci.CredentialIssuerMe
 	// server while redeeming the pre-authorized code sends that code to a
 	// token endpoint it is not a secret for.
 	if named := f.authorizationServerByGrant[f.selectedGrant()]; named != "" {
+		// With no authorization_servers the issuer is its own (OpenID4VCI
+		// 1.0 §12.2.4), so naming it is naming the advertised default.
+		if len(advertised) == 0 && named == issuerURL {
+			return named, nil
+		}
 		if !slices.Contains(advertised, named) {
 			return "", fmt.Errorf(
 				"the credential offer's %s grant names authorization server %q, which the issuer does not advertise (it advertises %v)",

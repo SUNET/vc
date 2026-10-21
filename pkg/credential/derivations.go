@@ -47,9 +47,11 @@ func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now t
 	return out, nil
 }
 
-// recordProvenance tags every leaf in derived, and every container derived
-// newly creates in existing, with isGenerated. Containers that already
-// existed keep their provenance, since they still hold the earlier values.
+// recordProvenance tags every leaf in derived with isGenerated. Every
+// container derived newly creates in existing is generated whatever its
+// leaves are, since the holder never supplied that map. Containers that
+// already existed keep their provenance, since they still hold the
+// earlier values.
 func recordProvenance(generated map[string]bool, existing, derived map[string]any, prefix string, isGenerated bool) {
 	for k, v := range derived {
 		path := prefix + k
@@ -60,7 +62,7 @@ func recordProvenance(generated map[string]bool, existing, derived map[string]an
 		}
 		prior, priorIsMap := existing[k].(map[string]any)
 		if !priorIsMap {
-			generated[path] = isGenerated
+			generated[path] = true
 		}
 		recordProvenance(generated, prior, sub, path+".", isGenerated)
 	}

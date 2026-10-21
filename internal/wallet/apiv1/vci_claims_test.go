@@ -157,15 +157,34 @@ func TestMatchingCredentials_ClaimConstraintsDecideAnswerability(t *testing.T) {
 	assert.Equal(t, map[string]bool{"b": true}, selected)
 }
 
-// A claim-constrained query cannot be answered by a credential this wallet
-// cannot reduce.
-func TestMatchingCredentials_NonSDJWTWithClaimsDoesNotMatch(t *testing.T) {
-	candidates := []*credential.StoredCredential{{Format: "mso_mdoc", RawCredential: "o2d2ZXJzaW9u"}}
-	q := openid4vp.CredentialQuery{ID: "m", Format: "mso_mdoc", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("org.iso.18013.5.1", "family_name")}}}
-	assert.Empty(t, matchingCredentials(candidates, q))
+// This wallet cannot build an mdoc DeviceResponse, so an mdoc never
+// matches - with or without claims - and a credential-set alternative it
+// can present is chosen instead.
+func TestMatchingCredentials_MdocNeverMatches(t *testing.T) {
+	mdoc := []*credential.StoredCredential{{Format: "mso_mdoc", VCT: "org.iso.18013.5.1.mDL", RawCredential: "o2d2ZXJzaW9u"}}
+	withClaims := openid4vp.CredentialQuery{ID: "mdl", Format: "mso_mdoc", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("org.iso.18013.5.1", "family_name")}}}
+	assert.Empty(t, matchingCredentials(mdoc, withClaims))
 
-	q.Claims = nil
-	assert.Len(t, matchingCredentials(candidates, q), 1)
+	unconstrained := openid4vp.CredentialQuery{ID: "mdl", Format: "mso_mdoc", Meta: openid4vp.MetaQuery{DoctypeValue: "org.iso.18013.5.1.mDL"}}
+	assert.Empty(t, matchingCredentials(mdoc, unconstrained), "a doctype match alone does not make an mdoc presentable")
+
+	raw, _ := testSDJWT(t)
+	sdjwt := []*credential.StoredCredential{{Format: "dc+sd-jwt", VCT: "urn:test", RawCredential: raw}}
+	pid := openid4vp.CredentialQuery{ID: "pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:test"}}}
+
+	pool := append(mdoc, sdjwt...)
+	answerable := map[string][]*credential.StoredCredential{}
+	for _, q := range []openid4vp.CredentialQuery{unconstrained, pid} {
+		if m := matchingCredentials(pool, q); len(m) > 0 {
+			answerable[q.ID] = m
+		}
+	}
+	selected, err := selectCredentialQueries(&openid4vp.DCQL{
+		Credentials:    []openid4vp.CredentialQuery{unconstrained, pid},
+		CredentialSets: []openid4vp.CredentialSetQuery{{Options: [][]string{{"mdl"}, {"pid"}}}},
+	}, answerable)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"pid": true}, selected, "the preferred mdoc option must yield to the SD-JWT one")
 }
 
 // An array element whose disclosure is absent - not held, or a decoy - has
