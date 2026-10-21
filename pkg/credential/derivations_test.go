@@ -226,3 +226,36 @@ func TestApplyDerivations_InvalidHolderInputAfterEarlierDerivationIsHolderFault(
 		t.Errorf("a future birthdate from the holder must stay marked, got %v", err)
 	}
 }
+
+// A holder value normalised by an earlier derivation is still the holder's
+// data: a future birthdate reaching age through yyyymmdd_to_iso stays marked.
+func TestApplyDerivations_InvalidHolderInputThroughNormalisationIsHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: "birthdate_raw", Output: "birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{"birthdate_raw": "20990101"}, now)
+	if !errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a future birthdate normalised from the holder's raw value must stay marked, got %v", err)
+	}
+}
+
+// Reformatting a generated value does not make it holder data.
+func TestApplyDerivations_ReformattedGeneratedInputIsNotHolderFault(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	list := []primitives.Derivation{
+		{Random: &primitives.RandomArgs{Output: "token", Format: "uuid"}},
+		{Trim: &primitives.TrimArgs{Input: "token", Output: "birthdate"}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: "birthdate", Thresholds: []int{18}}},
+	}
+
+	_, err := ApplyDerivations(list, map[string]any{}, now)
+	if err == nil {
+		t.Fatal("expected an error for a chain feeding a uuid into age")
+	}
+	if errors.Is(err, primitives.ErrInvalidClaimInput) {
+		t.Errorf("a generated value must not be reported as invalid holder input: %v", err)
+	}
+}
