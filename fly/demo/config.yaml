@@ -133,16 +133,9 @@ verifier:
             - path: ["attestation_legal_category"]
             - path: ["trust_anchor"]
             - path: ["cryptographically_bound_to"]
+            - path: ["volumeOfLearning"]
             - path: ["dateOfBirth"]
-            - path: ["placeOfBirth"]
-            - path: ["citizenshipCountry"]
-            - path: ["nationalID"]
-            - path: ["registeredAddress"]
             - path: ["mail"]
-            - path: ["nationalQualificationsFrameworkLevel"]
-            - path: ["educationLevelDescriptor"]
-            - path: ["awardingBodyAddress"]
-            - path: ["additionalNote"]
     "PID Age Over 18":
       credentials:
         pid:
