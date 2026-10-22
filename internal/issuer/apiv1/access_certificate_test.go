@@ -46,7 +46,6 @@ func writeWRPACKeyPair(t *testing.T) (*pki.KeyConfig, string) {
 		},
 		NotBefore: time.Now().Add(-time.Hour),
 		NotAfter:  time.Now().Add(24 * time.Hour),
-		// nonRepudiation (contentCommitment) is required by the WRPAC profile.
 		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
 		URIs:     []*url.URL{contact},
 		DNSNames: []string{"issuer.example.com"},
