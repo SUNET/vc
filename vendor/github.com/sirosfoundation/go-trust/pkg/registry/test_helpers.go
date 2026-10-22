@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 )
@@ -97,4 +98,35 @@ func createTestRequest() *authzen.EvaluationRequest {
 			Key:  []interface{}{"dummy-cert"},
 		},
 	}
+}
+
+// CheckRequiredVerificationMethodsEnforcement is a shared conformance check for
+// DID registries. newMethod builds a verification method of the registry's own
+// type with the given `type` string; check must evaluate the registry's policy
+// constraints for a DID document holding exactly those methods, with ctx as the
+// request context, and return the denial (nil when allowed). It returns an
+// error describing the first case the registry gets wrong.
+func CheckRequiredVerificationMethodsEnforcement[M any](newMethod func(typ string) M, check func(ctx map[string]interface{}, methods []M) *authzen.EvaluationResponse) error {
+	methods := []M{newMethod("JsonWebKey2020"), newMethod("Multikey")}
+	cases := []struct {
+		name     string
+		required []string
+		deny     bool
+	}{
+		{"all present", []string{"JsonWebKey2020", "Multikey"}, false},
+		{"missing type", []string{"Ed25519VerificationKey2020"}, true},
+		{"partially present", []string{"JsonWebKey2020", "Ed25519VerificationKey2020"}, true},
+		{"unset", nil, false},
+	}
+	for _, c := range cases {
+		ctx := map[string]interface{}{}
+		if c.required != nil {
+			ctx["required_verification_methods"] = c.required
+		}
+		resp := check(ctx, methods)
+		if denied := resp != nil && !resp.Decision; denied != c.deny {
+			return fmt.Errorf("%s: deny=%v, want %v", c.name, denied, c.deny)
+		}
+	}
+	return nil
 }
