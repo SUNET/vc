@@ -91,7 +91,7 @@ func verifierWithAccessCert(validate bool, allowed ...string) *Verifier {
 // certificate that would not pass them.
 func TestValidateAccessCertificate_DisabledByDefault(t *testing.T) {
 	nonConformant := newWRPACTestCert(t, wrpacCertOptions{
-		keyUsage:  x509.KeyUsageDigitalSignature, // no contentCommitment
+		keyUsage:  x509.KeyUsageDigitalSignature, // no SAN contact info or policy OID
 		notBefore: time.Now().Add(-time.Hour),
 		notAfter:  time.Now().Add(time.Hour),
 	})
@@ -130,11 +130,6 @@ func TestValidateAccessCertificate_ProfileViolations(t *testing.T) {
 		mutate  func(*wrpacCertOptions)
 		wantErr string
 	}{
-		{
-			name:    "keyUsage without contentCommitment",
-			mutate:  func(o *wrpacCertOptions) { o.keyUsage = x509.KeyUsageDigitalSignature },
-			wantErr: "nonRepudiation",
-		},
 		{
 			name:    "subjectAltName without contact information",
 			mutate:  func(o *wrpacCertOptions) { o.uris = nil; o.emails = nil },

@@ -324,6 +324,12 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		return
 	}
 
+	// Verifier identifiers the policy enables. Registries read it through
+	// VerifierIDTypesEnabled; absent means the member is not returned.
+	if len(policyCtx.Policy.Constraints.ReturnVerifierIDs) > 0 {
+		req.Context[authzen.VerifierIDsPolicyContextKey] = policyCtx.Policy.Constraints.ReturnVerifierIDs
+	}
+
 	// Apply OIDF constraints
 	if policyCtx.Policy.OIDFed != nil {
 		oidfed := policyCtx.Policy.OIDFed
@@ -472,6 +478,11 @@ var clientSuppliableContextKeys = map[string]bool{
 
 	// Informational / audit
 	"purpose": true, // presentation purpose
+
+	// verifier_id_type only ever narrows the verifier_ids the policy enabled
+	// to one type; it cannot enable a type (return_verifier_ids is a policy
+	// control, set only by applyPolicyToRequest).
+	authzen.VerifierIDHintContextKey: true,
 
 	// signing_time is the eMRTD document signing time (RFC 3339) at which the
 	// DSC/CSCA validity is evaluated (ICAO 9303 Part 12). It is data about

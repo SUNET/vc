@@ -348,6 +348,7 @@ func (m *RegistryManager) evaluateAll(ctx context.Context, req *authzen.Evaluati
 	var allResults []map[string]interface{}
 	decision := false
 	registriesMatched := []string{}
+	var positive []*authzen.EvaluationResponse
 
 	for r := range results {
 		resultInfo := map[string]interface{}{
@@ -362,6 +363,7 @@ func (m *RegistryManager) evaluateAll(ctx context.Context, req *authzen.Evaluati
 			if r.response.Decision {
 				decision = true
 				registriesMatched = append(registriesMatched, r.registry)
+				positive = append(positive, r.response)
 			}
 			if r.response.Context != nil && r.response.Context.Reason != nil {
 				resultInfo["reason"] = r.response.Context.Reason
@@ -381,10 +383,12 @@ func (m *RegistryManager) evaluateAll(ctx context.Context, req *authzen.Evaluati
 	} else {
 		promoteSingleAllowAdmin(reason, registriesMatched)
 	}
-	return &authzen.EvaluationResponse{
+	resp := &authzen.EvaluationResponse{
 		Decision: decision,
 		Context:  &authzen.EvaluationResponseContext{Reason: reason},
-	}, nil
+	}
+	mergeVerifierIDs(resp, positive)
+	return resp, nil
 }
 
 // evaluateBestMatch queries all registries and returns the one with highest confidence.
@@ -764,6 +768,7 @@ func (m *RegistryManager) evaluateAllFiltered(ctx context.Context, req *authzen.
 	var allResults []map[string]interface{}
 	decision := false
 	registriesMatched := []string{}
+	var positive []*authzen.EvaluationResponse
 
 	for r := range results {
 		resultInfo := map[string]interface{}{
@@ -778,6 +783,7 @@ func (m *RegistryManager) evaluateAllFiltered(ctx context.Context, req *authzen.
 			if r.response.Decision {
 				decision = true
 				registriesMatched = append(registriesMatched, r.registry)
+				positive = append(positive, r.response)
 			}
 			if r.response.Context != nil && r.response.Context.Reason != nil {
 				resultInfo["reason"] = r.response.Context.Reason
@@ -801,10 +807,12 @@ func (m *RegistryManager) evaluateAllFiltered(ctx context.Context, req *authzen.
 		reason["policy"] = policyCtx.Policy.Name
 	}
 
-	return &authzen.EvaluationResponse{
+	resp := &authzen.EvaluationResponse{
 		Decision: decision,
 		Context: &authzen.EvaluationResponseContext{
 			Reason: reason,
 		},
-	}, nil
+	}
+	mergeVerifierIDs(resp, positive)
+	return resp, nil
 }
