@@ -32,6 +32,14 @@ primary_region = "arn"
   secret_name = "SAML_SP_KEY"
 
 [[files]]
+  guest_path = "/pki/credential_encryption.pem"
+  secret_name = "CREDENTIAL_ENCRYPTION_KEY"
+
+[[files]]
+  guest_path = "/pki/nym_auth_seed.key"
+  secret_name = "NYM_AUTH_SEED"
+
+[[files]]
   guest_path = "/bootstrapping/diploma.json.gz"
   local_path = "fly/demo/bootstrapping/diploma.json.gz"
 
