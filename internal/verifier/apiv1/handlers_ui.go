@@ -878,20 +878,55 @@ func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (act
 // client can retry instead of latching onto a bogus "pending" and
 // never reconciling the lost completion.
 func (c *Client) CompletedResponseCode(ctx context.Context, sessionID string) (string, error) {
+	outcome, err := c.SessionOutcome(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	return outcome.ResponseCode, nil
+}
+
+// SessionOutcome is what a polling UI needs to stop polling: the
+// response code of a completed session, or the error of a declined one.
+//
+// The two used to be one value, and only one of them existed. A wallet
+// that answered with an Authorization Error Response - a user pressing
+// "no", which OpenID4VP 1.0 section 8.5 calls access_denied - left the
+// session with no response code and no other way to say so, and
+// /ui/completion reports a missing response code as "pending". The UI
+// then polled until the cache evicted the context, and the relying
+// party never learned of a decision the user had already made.
+type SessionOutcome struct {
+	// ResponseCode is set when the wallet presented.
+	ResponseCode string
+	// Error and ErrorDescription are set when it refused. The
+	// description is the wallet's own text and is shown to an operator,
+	// never acted on.
+	Error            string
+	ErrorDescription string
+}
+
+// Declined reports whether the wallet answered with an error.
+func (o SessionOutcome) Declined() bool { return o.Error != "" }
+
+func (c *Client) SessionOutcome(ctx context.Context, sessionID string) (SessionOutcome, error) {
 	if sessionID == "" {
-		return "", nil
+		return SessionOutcome{}, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
-			return "", nil
+			return SessionOutcome{}, nil
 		}
-		return "", err
+		return SessionOutcome{}, err
 	}
 	if authCtx == nil {
-		return "", nil
+		return SessionOutcome{}, nil
 	}
-	return authCtx.VerifierResponseCode, nil
+	return SessionOutcome{
+		ResponseCode:     authCtx.VerifierResponseCode,
+		Error:            authCtx.Error,
+		ErrorDescription: authCtx.ErrorDescription,
+	}, nil
 }
 
 // UIResumeStatus names the possible outcomes of a /ui/resume call.

@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -75,6 +77,29 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 type VerificationDirectPostRequest struct {
 	Response string `json:"response"  form:"response"`
+
+	// Error, ErrorDescription and State carry an Authorization Error
+	// Response - the Wallet answering the request with a refusal
+	// instead of a presentation.
+	//
+	// OpenID4VP 1.0 section 8.3.1: "If a Wallet is unable to generate an
+	// encrypted response, it MAY send an error response without
+	// encryption as per Section 8.2." So a PLAIN error form is
+	// conformant even when the request asked for direct_post.jwt, and
+	// section 8.2's own example is exactly these three parameters
+	// posted as a form.
+	//
+	// Section 5.6 says both successful and error responses SHOULD use
+	// the supplied Response Mode, so an error may also arrive encrypted
+	// inside Response. Both are accepted; see directPostError.
+	//
+	// Until these existed a decline bound to an empty struct and the
+	// handler went looking for a JWE header in "", which failed as
+	// "unexpected end of JSON input" - a 500 for the one outcome that
+	// is not an error at all, with the session left pending forever.
+	Error            string `json:"error,omitempty" form:"error"`
+	ErrorDescription string `json:"error_description,omitempty" form:"error_description"`
+	State            string `json:"state,omitempty" form:"state"`
 	// DCAPI marks a response returned inside a navigator.credentials.get
 	// call and forwarded here by the verifier's own page, rather than POSTed
 	// by a wallet reached through request_uri. The two bind their mdoc
@@ -100,8 +125,91 @@ type VerificationDirectPostResponse struct {
 	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
+// directPostError records an Authorization Error Response and ends the
+// session.
+//
+// The point is the ENDING. A declined request is an outcome the relying
+// party is entitled to, and before this the only thing that happened was
+// a log line: the session stayed pending until the cache evicted it, so
+// a user who pressed "no" left the verifier waiting for an answer they
+// had already given.
+//
+// state is validated against a live session (OpenID4VP 1.0 section
+// 14.3.2: the Verifier SHOULD check that state corresponds to a recent
+// Authorization Request). An unknown state is refused rather than
+// ignored - accepting one would let anyone who can reach response_uri
+// end a session they know nothing about, and silently ignoring one
+// would leave the real session pending while answering 200.
+//
+// Nothing of the wallet's text is echoed back to the caller: the reply
+// carries only the redirect, and the error reaches the operator through
+// the session, not through this response body.
+func (c *Client) directPostError(ctx context.Context, code, description, state string) (*VerificationDirectPostResponse, error) {
+	if state == "" {
+		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
+			"an error response must carry the state of the request it answers", http.StatusBadRequest)
+	}
+
+	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{State: state})
+	if err != nil || authCtx == nil {
+		// Deliberately the same answer as a state that never existed:
+		// whether a given state is live is not something this endpoint
+		// should confirm to an unauthenticated caller.
+		c.log.Warn("direct_post error response for an unknown state", "error", code)
+		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
+			"state does not correspond to a request this verifier is waiting for", http.StatusBadRequest)
+	}
+
+	if sessionExpired(authCtx) {
+		c.log.Info("direct_post error response for an expired session", "state", state, "error", code)
+		return nil, ErrSessionExpired
+	}
+
+	c.log.Warn("the wallet returned an error response instead of a presentation",
+		"state", state, "error", code, "session_id", authCtx.SessionID)
+
+	authCtx.Status = cache.SessionStatusError
+	authCtx.Error = code
+	authCtx.ErrorDescription = description
+	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+		c.log.Error(err, "failed to record the wallet's error response", "state", state)
+		return nil, err
+	}
+
+	// The same nudge a presentation sends, so a waiting UI learns now
+	// rather than on its next poll. The browser is told the outcome, not
+	// the wallet's prose.
+	c.notify.Submit(authCtx.SessionID, map[string]string{"error": code})
+
+	// OpenID4VP 1.0 section 8.2 allows the Response URI to return
+	// redirect_uri for an error response, and the engine reads it back
+	// (go-wallet-backend internal/engine/oid4vp.go submitErrorResponse),
+	// so a same-device decline can still land the user somewhere.
+	// Omitted here: where a declined flow should send the browser is a
+	// verifier UX decision, and inventing one would send users to a page
+	// nobody designed. 200 with an empty object is what the engine
+	// already tolerates.
+	return &VerificationDirectPostResponse{}, nil
+}
+
 func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDirectPostRequest) (*VerificationDirectPostResponse, error) {
 	c.log.Debug("Verification direct-post")
+
+	// A refusal, before anything looks for a JWE. An error response
+	// carries no `response`, so every step below it - the KID, the
+	// ephemeral key, the decryption - is looking for something that was
+	// never sent.
+	if req.Error != "" && req.Response == "" {
+		return c.directPostError(ctx, req.Error, req.ErrorDescription, req.State)
+	}
+
+	// Neither a presentation nor an error is a malformed request, and
+	// it is the caller's to fix. It used to reach GetKID and come back
+	// as a 500.
+	if req.Response == "" {
+		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
+			"the response carries neither a presentation nor an error", http.StatusBadRequest)
+	}
 
 	// Extract KID from JWE header
 	kid, err := req.GetKID()
@@ -124,6 +232,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if err != nil {
 		c.log.Error(err, "failed to decrypt JWE")
 		return nil, err
+	}
+
+	// An error response returned the way section 5.6 says it SHOULD be -
+	// "Both successful and error responses SHOULD be returned using the
+	// supplied Response Mode" - so for direct_post.jwt it arrives
+	// encrypted, inside the same envelope a presentation would use.
+	//
+	// Checked before the presentation parse rather than after it fails,
+	// because an error response legitimately has no vp_token and would
+	// otherwise be reported as a malformed presentation.
+	var encryptedError struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+		State            string `json:"state"`
+	}
+	if err := json.Unmarshal(decryptedJWE, &encryptedError); err == nil && encryptedError.Error != "" {
+		return c.directPostError(ctx, encryptedError.Error, encryptedError.ErrorDescription, encryptedError.State)
 	}
 
 	// Parse response parameters using openid4vp

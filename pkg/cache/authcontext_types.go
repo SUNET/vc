@@ -226,11 +226,27 @@ type AuthorizationContext struct {
 	PresentationSubmission any            `json:"presentation_submission,omitempty" bson:"presentation_submission,omitempty"`
 
 	// OpenID4VP fields (wallet interaction)
-	EphemeralEncryptionKeyID string          `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
-	VerifierResponseCode     string          `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
-	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
-	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
-	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	EphemeralEncryptionKeyID string `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
+	VerifierResponseCode     string `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// Error and ErrorDescription record an Authorization Error Response
+	// the Wallet returned instead of a presentation - most often
+	// access_denied, which OpenID4VP 1.0 section 8.5 defines as covering
+	// a lack of End-User consent.
+	//
+	// Recorded rather than merely logged, because a declined request is
+	// an OUTCOME. Without it the session has no terminal state at all:
+	// /ui/completion reports pending until the cache evicts the context,
+	// so the relying party waits for an answer the user already gave.
+	//
+	// ErrorDescription is the Wallet's own text and is bounded and
+	// printable-checked like every other field here: it crosses from a
+	// wallet into a verifier's UI.
+	Error              string          `json:"error,omitempty" bson:"error,omitempty" validate:"omitempty,max=64,printascii"`
+	ErrorDescription   string          `json:"error_description,omitempty" bson:"error_description,omitempty" validate:"omitempty,max=512"`
+	RequestObjectID    string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
+	RequestObjectNonce string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
+	DCQLQuery          *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//
