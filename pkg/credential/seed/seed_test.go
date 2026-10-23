@@ -7,12 +7,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -287,22 +284,6 @@ func TestShortSeedsAreRefused(t *testing.T) {
 		}
 		assert.Len(t, got, want)
 	}
-}
-
-// The configuration must refuse the same lengths the constructor does.
-//
-// They are two separate gates - config validation runs at startup over
-// the YAML, NewDeriver runs when the source is built - and a deployment
-// that passes validation and then fails to start is a worse outcome than
-// one that is told which field is wrong. The tag carried min=1, so
-// seed_bytes: 1 validated cleanly and only the constructor would have
-// stopped it, had it stopped it.
-func TestSeedBytesValidationMatchesTheConstructor(t *testing.T) {
-	tag := reflect.TypeOf(model.SeedSource{})
-	field, ok := tag.FieldByName("SeedBytes")
-	require.True(t, ok)
-	assert.Equal(t, fmt.Sprintf("omitempty,min=%d,max=%d", MinSeedBytes, MaxSeedBytes), field.Tag.Get("validate"),
-		"configuration validation and NewDeriver must refuse the same seed lengths")
 }
 
 // The secret is copied in, so a caller reusing or zeroing its buffer

@@ -1,6 +1,6 @@
 // seed_recover reproduces a subject's seed, its commitment, and the
-// pseudonym a Verifier reported, from the same configuration the issuer
-// runs on.
+// pseudonym a Verifier reported, from the secret of the issuer's hkdf
+// opening (a hash_commitment derivation).
 //
 // This is what the issuer-known seed model exists for. A Verifier that
 // has a pseudonym it wants remapped to a person hands it over; the issuer
@@ -9,9 +9,9 @@
 // a function of the secret and the subject identifier, so the answer can
 // be reproduced at any later date.
 //
-// It reads the issuer's own config file and secret, so it has to run
-// where those are - which is the intended restriction, not an
-// inconvenience: whoever can run this can link any pseudonym to a person.
+// It reads the issuer's own secret, so it has to run where that is - which
+// is the intended restriction, not an inconvenience: whoever can run this
+// can link any pseudonym to a person.
 package main
 
 import (
@@ -25,12 +25,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/credential/seed"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/nymauth"
-
-	"github.com/goccy/go-yaml"
 )
 
 func main() {
@@ -42,10 +39,8 @@ func main() {
 
 func run() error {
 	var (
-		configPath      = flag.String("config", "", "path to the issuer config YAML (required)")
-		sourceName      = flag.String("seed", "", "name of the seed source in issuer.seeds (required)")
+		secretPath      = flag.String("secret-path", "", "the secret_path of the hkdf opening (required)")
 		subjects        subjectList
-		derivContext    = flag.String("context", "", "the derivation context, if the credential configuration sets one")
 		pseudonymConfig = flag.String("pseudonym-config", "", "nym_auth pseudonym configuration to compute, e.g. known-offender-matching-ssc")
 		verifierID      = flag.String("verifier-id", "", "the verifier_id EXACTLY as the Verifier publishes it: bare (verifier.example) for an x509_san_dns Verifier, or semantic_id:<identifier> for a semantic one - never the prefixed client_id")
 		verifierContext = flag.String("verifier-context", "", "verifier_context, required for account-recovery-ssc")
@@ -54,7 +49,7 @@ func run() error {
 		showSeed        = flag.Bool("show-seed", false, "also print the seed itself")
 	)
 	flag.Var(&subjects, "subject",
-		"a subject identifier; repeat IN ORDER for a configuration that derives from several (required)")
+		"an hkdf input value; repeat IN ORDER for an opening derived from several (required)")
 	flag.Parse()
 
 	// Whether -expect was GIVEN, not whether it has a value. The two
@@ -68,16 +63,16 @@ func run() error {
 		}
 	})
 
-	if err := validateInvocation(*configPath, *sourceName, subjects, expectSet, *expect, *pseudonymConfig); err != nil {
+	if err := validateInvocation(*secretPath, subjects, expectSet, *expect, *pseudonymConfig); err != nil {
 		return err
 	}
 
-	source, err := loadSeedSource(*configPath, *sourceName)
+	deriver, err := (&primitives.HKDFOpeningArgs{SecretPath: *secretPath}).Deriver()
 	if err != nil {
 		return err
 	}
 
-	seedValue, err := source.Seed(context.Background(), []string(subjects), *derivContext)
+	seedValue, err := deriver.Seed(context.Background(), []string(subjects), "")
 	if err != nil {
 		return err
 	}
@@ -135,12 +130,10 @@ func run() error {
 // so every path that exits 0 without having compared anything is a false
 // accusation waiting to happen. Both -expect guards exist for that one
 // reason.
-func validateInvocation(configPath, sourceName string, subjects []string, expectSet bool, expect, pseudonymConfig string) error {
+func validateInvocation(secretPath string, subjects []string, expectSet bool, expect, pseudonymConfig string) error {
 	switch {
-	case configPath == "":
-		return errors.New("-config is required")
-	case sourceName == "":
-		return errors.New("-seed is required")
+	case secretPath == "":
+		return errors.New("-secret-path is required")
 	case len(subjects) == 0:
 		return errors.New("-subject is required (repeat it, in order, when several identifiers are configured)")
 	case expectSet && strings.TrimSpace(expect) == "":
@@ -214,62 +207,4 @@ func computePseudonym(config string, seedValue []byte, verifierID, verifierConte
 	default:
 		return nil, fmt.Errorf("unknown pseudonym configuration %q", config)
 	}
-}
-
-// loadSeedSource reads the issuer's configuration and builds the named
-// source exactly as the issuer does, so that what this prints is what the
-// issuer wrote and not an approximation of it.
-func loadSeedSource(configPath, name string) (seed.Source, error) {
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg := &model.Cfg{}
-	if err := yaml.Unmarshal(raw, cfg); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", configPath, err)
-	}
-
-	// The secrets file, the same way the issuer reads it.
-	//
-	// Without this the recommended setup - the derivation secret in the
-	// secrets file rather than inline - lets issuance work and makes
-	// RECOVERY fail, reporting that the source sets neither secret_path
-	// nor secret. That is the worst place for this tool to break: the
-	// whole reason the issuer keeps a derivation secret is that a seed
-	// can be reproduced later, and this is what does the reproducing.
-	//
-	// Through configuration.LoadSecrets rather than a local reader, so
-	// the permission check on the secrets file is the issuer's own and
-	// the precedence between the two sources cannot drift from it.
-	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
-		secrets, err := configuration.LoadSecrets(cfg.Common.SecretFilePath, cfg.Common.SkipSecretsPermCheck)
-		if err != nil {
-			return nil, fmt.Errorf("loading the secrets file named by %s: %w", configPath, err)
-		}
-		cfg.ApplySecrets(secrets)
-	}
-
-	if cfg.APIGW == nil || len(cfg.APIGW.Seeds) == 0 {
-		return nil, fmt.Errorf("%s configures no apigw.seeds", configPath)
-	}
-
-	src, ok := cfg.APIGW.Seeds[name]
-	if !ok || src == nil {
-		named := make([]string, 0, len(cfg.APIGW.Seeds))
-		for k := range cfg.APIGW.Seeds {
-			named = append(named, k)
-		}
-		return nil, fmt.Errorf("no seed source %q; %s has %s", name, configPath, strings.Join(named, ", "))
-	}
-	if src.Model != model.SeedModelDerived {
-		return nil, fmt.Errorf("seed source %q has model %q; only %q derives a reproducible seed",
-			name, src.Model, model.SeedModelDerived)
-	}
-
-	secret, err := seedSecret(src)
-	if err != nil {
-		return nil, err
-	}
-	return seed.NewDeriver(secret, src.SeedBytes)
 }

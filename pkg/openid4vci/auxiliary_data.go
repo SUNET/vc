@@ -21,25 +21,25 @@ const AuxiliaryDataTypeHashCommitment = "hash_commitment"
 // Type are those of hash_commitment.
 type AuxiliaryDataEntry struct {
 	// Type is the Auxiliary Data Type.
-	Type string `json:"type"`
+	Type string `json:"type" yaml:"type" doc_example:"\"hash_commitment\""`
 
 	// Alg is the hash function of a hash_commitment.
-	Alg string `json:"alg,omitempty"`
+	Alg string `json:"alg,omitempty" yaml:"alg" doc_example:"\"sha-256\""`
 
 	// Path is the claims path pointer of the claim that holds the
 	// commitment.
-	Path []string `json:"path,omitempty"`
+	Path []string `json:"path,omitempty" yaml:"path" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
 
 	// Opening is the base64url secret, in an entry the Credential Issuer
 	// sends. It is a Secret Value.
-	Opening string `json:"opening,omitempty"`
+	Opening string `json:"opening,omitempty" yaml:"opening,omitempty"`
 
 	// Commitment is the base64url commitment, in an entry the Wallet
 	// sends.
-	Commitment string `json:"commitment,omitempty"`
+	Commitment string `json:"commitment,omitempty" yaml:"commitment,omitempty"`
 
 	// Required, in a to_issuer entry, means the Wallet must send it.
-	Required bool `json:"required,omitempty"`
+	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
 }
 
 // AuxiliaryDataSupported is the auxiliary_data_supported parameter of a

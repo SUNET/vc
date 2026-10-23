@@ -360,16 +360,17 @@ apigw:
     presentation:
       scopes:
         eduid_age_verification:
-          from_scope: "eduid"
-          required_claims:
-            birthdate: []
-            assurance_level:
-              - "http://www.swamid.se/policy/assurance/al2"
-              - "http://www.swamid.se/policy/assurance/al3"
-          derivations:
-            - age_over_thresholds:
-                input: "birthdate"
-                thresholds: [13, 15, 18, 21, 65]
+          from:
+            eduid:
+              required_claims:
+                birthdate: []
+                assurance_level:
+                  - "http://www.swamid.se/policy/assurance/al2"
+                  - "http://www.swamid.se/policy/assurance/al3"
+              derivations:
+                - age_over_thresholds:
+                    input: "birthdate"
+                    thresholds: [13, 15, 18, 21, 65]
           expiry_duration: "8760h"
           defaults:
             issuing_authority: "SUNET"

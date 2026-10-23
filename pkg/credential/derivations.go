@@ -64,6 +64,10 @@ func ApplyDerivationsPinned(list []primitives.Derivation, claims map[string]any,
 	// a computing primitive, or a reformatting of such output.
 	generated := map[string]bool{}
 	for i, d := range list {
+		if d.HashCommitment != nil {
+			// Its opening comes from HashCommitmentArgs.NewOpening.
+			continue
+		}
 		derived, err := d.Apply(working, now)
 		if err != nil {
 			if errors.Is(err, primitives.ErrInvalidClaimInput) && generated[d.InputClaim()] {

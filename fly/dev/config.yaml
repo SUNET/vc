@@ -379,33 +379,35 @@ apigw:
     presentation:
       scopes:
         eduid_age_verification:
-          from_scope: "eduid"
-          # Every key must be present on the presented eduid; a populated
-          # allow-list is an exact-match one-of on the string value.
-          required_claims:
-            birthdate: []
-            assurance_level:
-              - "http://www.swamid.se/policy/assurance/al2"
-              - "http://www.swamid.se/policy/assurance/al3"
-          derivations:
-            - age_over_thresholds:
-                input: "birthdate"
-                thresholds: [13, 15, 18, 21, 65]
+          from:
+            eduid:
+              # Every key must be present on the presented eduid; a populated
+              # allow-list is an exact-match one-of on the string value.
+              required_claims:
+                birthdate: []
+                assurance_level:
+                  - "http://www.swamid.se/policy/assurance/al2"
+                  - "http://www.swamid.se/policy/assurance/al3"
+              derivations:
+                - age_over_thresholds:
+                    input: "birthdate"
+                    thresholds: [13, 15, 18, 21, 65]
           expiry_duration: "8760h"
           defaults:
             issuing_authority: "SUNET"
             issuing_country: "SE"
         #eduid_age_verification_zk:
-        #  from_scope: "eduid"
-        #  required_claims:
-        #    birthdate: []
-        #    assurance_level:
-        #      - "http://www.swamid.se/policy/assurance/al2"
-        #      - "http://www.swamid.se/policy/assurance/al3"
-        #  derivations:
-        #    - age_over_thresholds:
-        #        input: "birthdate"
-        #        thresholds: [13, 15, 18, 21, 65]
+        #  from:
+        #    eduid:
+        #      required_claims:
+        #        birthdate: []
+        #        assurance_level:
+        #          - "http://www.swamid.se/policy/assurance/al2"
+        #          - "http://www.swamid.se/policy/assurance/al3"
+        #      derivations:
+        #        - age_over_thresholds:
+        #            input: "birthdate"
+        #            thresholds: [13, 15, 18, 21, 65]
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-apigw.fly.dev/token"

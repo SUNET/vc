@@ -1082,11 +1082,9 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 				buf.WriteString(fmt.Sprintf("%s  %s\n", prefix, f.Tag.DocExample))
 			default:
 				// A map whose VALUE is a struct needs its fields under the
-				// key, not a scalar beside it. Emitting "<key>: \"<value>\""
-				// for issuer.seeds produced an example that cannot be
-				// loaded at all - the type wants an object with a secret
-				// in it - so anyone copying the documented shape broke
-				// their configuration.
+				// key. Emitting "<key>: \"<value>\"" for it produces an
+				// example that cannot be loaded at all, so anyone copying
+				// the documented shape breaks their configuration.
 				valueDef := reg.Lookup(resolveTypeName(mapType.Value))
 				if valueDef != nil && len(valueDef.Fields) > 0 {
 					buf.WriteString(fmt.Sprintf("%s  %s:\n", prefix, keyPH))
