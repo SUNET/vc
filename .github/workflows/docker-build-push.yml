@@ -173,6 +173,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SERVICE_NAME=${{ matrix.service }}
+            TARGETARCH=${{ matrix.arch }}
             BUILDTAG=${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
             ZK_CRED_BBS_REF=${{ needs.resolve-refs.outputs.bbs_sha }}
             ZK_CRED_LONGFELLOW_REF=${{ needs.resolve-refs.outputs.longfellow_sha }}
