@@ -35,6 +35,23 @@ const encodedCBORTag = 24
 // the two agreed with each other and disagreed with the specification. Both
 // wallet SDKs already emit the conformant shape, which is why they passed
 // proximity interop while this did not.
+// BuildDeviceAuthenticationBytes is buildDeviceAuthenticationBytes for
+// callers outside this package.
+//
+// Exported for the nym_auth verifier, which hashes this structure to
+// derive the circuits' e2 input (nym-auth-circuits SPEC section 3) and
+// must produce the same bytes a wallet signed over. Reusing the builder
+// rather than re-deriving the shape is the point: this build and its
+// verifier once shared the same WRONG shape and agreed with each other
+// while disagreeing with ISO 18013-5, and a second implementation is
+// how that happens again.
+//
+// Pass nil deviceNameSpaces for the empty DeviceNameSpaces the circuits
+// specify.
+func BuildDeviceAuthenticationBytes(sessionTranscript []byte, docType string, deviceNameSpaces []byte) ([]byte, error) {
+	return buildDeviceAuthenticationBytes(sessionTranscript, docType, deviceNameSpaces)
+}
+
 func buildDeviceAuthenticationBytes(sessionTranscript []byte, docType string, deviceNameSpaces []byte) ([]byte, error) {
 	encoder, err := NewCBOREncoder()
 	if err != nil {

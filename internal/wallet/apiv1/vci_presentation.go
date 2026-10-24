@@ -385,7 +385,10 @@ func (c *Client) buildIAVPTokens(ctx context.Context, ro *openid4vp.RequestObjec
 			continue
 		}
 		matched := answerable[query.ID]
-		if !query.Multiple {
+		// AllowsMultiple, not !query.Multiple: the member became a
+		// pointer so an absent one is distinguishable from an explicit
+		// false, and OpenID4VP 1.0 6.1 defaults an absent one to false.
+		if !query.AllowsMultiple() {
 			matched = matched[:1]
 		}
 

@@ -1,0 +1,21 @@
+challenge-vectors.json is vendored verbatim from
+
+    https://github.com/sirosfoundation/zk-cred-vega
+    test-vectors/nymauth/challenge-vectors.json
+
+commit e2c57a30 ("nymauth: refuse non-canonical simple values, and oversized
+Go arguments before they are copied", sirosfoundation/zk-cred-vega#13)
+
+    sha256 697d016b6232249dce9f96b2a20c370bc1f5cd9941ffe59a784e4bb827baad41
+
+zk-cred-longfellow ships the same file byte for byte; either repository is a
+valid source, and they must not diverge.
+
+These vectors are what tells this verifier and the two native provers that
+they agree about what a presentation is bound to. Vendored rather than
+fetched so the test suite does not depend on the network, and the digest is
+pinned in challenge_vectors_test.go.
+
+Re-vendor rather than edit. A local change turns a cross-implementation check
+into a self-consistency one that passes while the verifier and the provers
+disagree - which is the single failure this file exists to prevent.
