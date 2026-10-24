@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { groupPresets, byOrderThenLabel, OTHER_CATEGORY } from "../preset-helpers.js";
+import { dcqlCredentialFromPreset, groupPresets, byOrderThenLabel, OTHER_CATEGORY } from "../preset-helpers.js";
 
 /** @param {string} label @param {object} extra */
 const preset = (label, extra = {}) => [label, { label, ...extra }];
@@ -160,5 +160,56 @@ describe("byOrderThenLabel", () => {
     it("treats a missing order as 0", () => {
         assert.ok(byOrderThenLabel(preset("x"), preset("y", { order: 1 })) < 0);
         assert.ok(byOrderThenLabel(preset("x", { order: -1 }), preset("y")) < 0);
+    });
+});
+
+describe("dcqlCredentialFromPreset", () => {
+    // The metadata endpoint serves `req`; the posted DCQL query names the
+    // same list `_req`. The picker built the query with `req`, which
+    // pkg/openid4vp refuses as req_missing_or_empty - and a zkp_req query
+    // with no list discloses nothing either, so the wallet had nothing to
+    // return and the failure read as a wallet that declined.
+    it("renames the preset's req to the query's _req", () => {
+        const c = dcqlCredentialFromPreset({
+            id: "nym_attestation",
+            format: "zkp_req",
+            meta: { source_format: "mso_mdoc", doctype_value: "eu.europa.ec.eudi.nym_auth.1" },
+            req: [{ fn_id: "pseudonym", return: "nym-123", params: { config: "c", ver: 1, prf: "sha-256" } }],
+        });
+        assert.deepEqual(c._req, [
+            { fn_id: "pseudonym", return: "nym-123", params: { config: "c", ver: 1, prf: "sha-256" } },
+        ]);
+        assert.equal("req" in c, false, "the pre-v0.4 member name must not be posted");
+    });
+
+    // The member is the SAME ARRAY, not a copy. A params value is an input
+    // to a proof: rebuilding it is how a member added later gets dropped.
+    it("passes the list through rather than rebuilding it", () => {
+        const req = [{ fn_id: "age_check", return: "a", params: { ge: "2008-10-10" } }];
+        const c = dcqlCredentialFromPreset({ id: "q", format: "zkp_req", meta: {}, req });
+        assert.equal(c._req, req);
+    });
+
+    // A preset for any other format carries no req, and must not grow one.
+    it("adds no _req to a credential that has none", () => {
+        const c = dcqlCredentialFromPreset({
+            id: "pid", format: "dc+sd-jwt", meta: { vct_values: ["urn:eudi:pid:arf-1.8:1"] },
+            claims: [{ path: ["given_name"] }],
+        });
+        assert.equal("_req" in c, false);
+        assert.equal("req" in c, false);
+        assert.deepEqual(c.claims, [{ path: ["given_name"] }]);
+    });
+
+    // UI-only members stay server-side: validations never belong in a DCQL
+    // query, and label/category are the picker's business.
+    it("carries only the DCQL members", () => {
+        const c = dcqlCredentialFromPreset({
+            id: "q", format: "zkp_req", meta: {},
+            req: [{ fn_id: "pseudonym", return: "n" }],
+            validations: [{ rule: "eq", path: ["a"], value: 1 }],
+            label: "a label",
+        });
+        assert.deepEqual(Object.keys(c).sort(), ["_req", "format", "id", "meta"]);
     });
 });
