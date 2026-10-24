@@ -143,27 +143,21 @@ func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 			return nil, fmt.Errorf("%s: a second circuit is allowed for system %q and configuration %q", where, entry.SystemID, entry.Config)
 		}
 
-		if err := checkCircuitID(entry.HashCircuitID, where, "hash_circuit_id"); err != nil {
+		// The four circuit parameters are LONGFELLOW'S, not nym_auth's.
+		// They describe a Ligero build - two circuit ids and the two
+		// block_enc parameters - and its loader refuses an artifact
+		// that does not match them. Vega has no counterpart: it
+		// derives its verifier key from the R1CS shapes themselves,
+		// so the artifact digest IS the circuit's identity and there
+		// is nothing else to pin.
+		//
+		// So they are required for one system and refused for the
+		// other. Refused rather than ignored, because a Vega entry
+		// carrying them is a Longfellow entry someone copied and
+		// edited, and ignoring them would let it start while naming
+		// parameters nothing will ever check.
+		if err := checkCircuitParams(entry, where); err != nil {
 			return nil, err
-		}
-		if err := checkCircuitID(entry.SigCircuitID, where, "sig_circuit_id"); err != nil {
-			return nil, err
-		}
-		if entry.HashCircuitID == entry.SigCircuitID {
-			return nil, fmt.Errorf("%s: the hash and signature circuit ids are the same, which no real build has", where)
-		}
-		// Both Ligero parameters, and both non-zero. Dropping the
-		// struct tags (they ran whether or not the feature was
-		// enabled) moved every field's check here, and a zero
-		// block_enc is not a default - it is a parameter the loader
-		// compares against its allowed build and refuses, after the
-		// artifact has been read and hashed, with a status code that
-		// says "bad circuit" and not "you left a number out".
-		if entry.BlockEncHash == 0 {
-			return nil, fmt.Errorf("%s: block_enc_hash is zero; it is the hash circuit's Ligero parameter and the loader checks it", where)
-		}
-		if entry.BlockEncSig == 0 {
-			return nil, fmt.Errorf("%s: block_enc_sig is zero; it is the signature circuit's Ligero parameter and the loader checks it", where)
 		}
 		if _, err := hex.DecodeString(entry.ArtifactSHA256); err != nil || len(entry.ArtifactSHA256) != 2*sha256.Size {
 			return nil, fmt.Errorf("%s: artifact_sha256 is not a 64-character hex SHA-256", where)
@@ -197,6 +191,60 @@ func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 		}
 	}
 	return list, nil
+}
+
+// checkCircuitParams applies the per-system rule for the four
+// Longfellow parameters.
+func checkCircuitParams(entry model.NymAuthCircuit, where string) error {
+	switch entry.SystemID {
+	case nymauth.SystemLongfellowNymAuth:
+		if err := checkCircuitID(entry.HashCircuitID, where, "hash_circuit_id"); err != nil {
+			return err
+		}
+		if err := checkCircuitID(entry.SigCircuitID, where, "sig_circuit_id"); err != nil {
+			return err
+		}
+		if entry.HashCircuitID == entry.SigCircuitID {
+			return fmt.Errorf("%s: the hash and signature circuit ids are the same, which no real build has", where)
+		}
+		// Both Ligero parameters, and both non-zero. Dropping the
+		// struct tags (they ran whether or not the feature was
+		// enabled) moved every field's check here, and a zero
+		// block_enc is not a default - it is a parameter the loader
+		// compares against its allowed build and refuses, after the
+		// artifact has been read and hashed, with a status code that
+		// says "bad circuit" and not "you left a number out".
+		if entry.BlockEncHash == 0 {
+			return fmt.Errorf("%s: block_enc_hash is zero; it is the hash circuit's Ligero parameter and the loader checks it", where)
+		}
+		if entry.BlockEncSig == 0 {
+			return fmt.Errorf("%s: block_enc_sig is zero; it is the signature circuit's Ligero parameter and the loader checks it", where)
+		}
+		return nil
+
+	case nymauth.SystemVegaNymAuth:
+		for _, named := range []struct {
+			what string
+			set  bool
+		}{
+			{"hash_circuit_id", entry.HashCircuitID != ""},
+			{"sig_circuit_id", entry.SigCircuitID != ""},
+			{"block_enc_hash", entry.BlockEncHash != 0},
+			{"block_enc_sig", entry.BlockEncSig != 0},
+		} {
+			if named.set {
+				return fmt.Errorf("%s: %s is a Longfellow parameter and this entry is %s; a Vega circuit is identified by its shapes digest alone, so nothing would ever check it",
+					where, named.what, entry.SystemID)
+			}
+		}
+		return nil
+
+	default:
+		// Unreachable: CheckSystemID ran first. Here so a system
+		// added to that list without a rule here is a refusal rather
+		// than an entry whose parameters nothing checks.
+		return fmt.Errorf("%s: no circuit-parameter rule for system %q", where, entry.SystemID)
+	}
 }
 
 func checkCircuitID(value, where, what string) error {

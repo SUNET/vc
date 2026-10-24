@@ -141,13 +141,20 @@ type NymAuthCircuit struct {
 
 	// HashCircuitID and SigCircuitID are the descriptor's circuit ids,
 	// hex as the catalog writes them.
-	HashCircuitID string `yaml:"hash_circuit_id" doc_example:"\"5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729\""`
-	SigCircuitID  string `yaml:"sig_circuit_id" doc_example:"\"00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb\""`
+	//
+	// LONGFELLOW ONLY, with the two block_enc parameters below: they
+	// describe a Ligero build, and its loader refuses an artifact that
+	// does not match them. Required for a Longfellow entry and refused
+	// on a Vega one, which has no counterpart - Vega derives its
+	// verifier key from the R1CS shapes, so the artifact digest is the
+	// circuit's whole identity.
+	HashCircuitID string `yaml:"hash_circuit_id,omitempty" doc_example:"\"5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729\""`
+	SigCircuitID  string `yaml:"sig_circuit_id,omitempty" doc_example:"\"00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb\""`
 
 	// BlockEncHash and BlockEncSig are the Ligero block_enc parameters
-	// of the two circuits.
-	BlockEncHash uint32 `yaml:"block_enc_hash" doc_example:"6983"`
-	BlockEncSig  uint32 `yaml:"block_enc_sig" doc_example:"4679"`
+	// of the two circuits. Longfellow only, as above.
+	BlockEncHash uint32 `yaml:"block_enc_hash,omitempty" doc_example:"6983"`
+	BlockEncSig  uint32 `yaml:"block_enc_sig,omitempty" doc_example:"4679"`
 
 	// ArtifactPath is a local file holding the DECOMPRESSED circuit
 	// artifact. Mutually exclusive with ArtifactID.
