@@ -623,7 +623,7 @@ Each list entry under a scope's `derivations` field is keyed by primitive name (
 | `swamid_highest_assurance_level` | `object` | SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.                                                                                                                                                 | -       | -       | No       |
 | `random`                         | `object` | Random writes a freshly generated random value to a claim the source data did not supply - a document identifier, typically. The only primitive here that reads nothing and is not a pure function of its input; see RandomArgs for where the value is generated and how long it lives. | -       | -       | No       |
 | `copy`                           | `object` | Copy writes an input claim's value, of any type, under another claim name.                                                                                                                                                                                                              | -       | -       | No       |
-| `hash_commitment`                | `object` | HashCommitment fulfils a to_wallet hash_commitment entry of the credential's auxiliary_data.                                                                                                                                                                                            | -       | -       | No       |
+| `hash_commitment`                | `object` | A hash_commitment entry of the credential's auxiliary_data.                                                                                                                                                                                                                             | -       | -       | No       |
 
 ### `age_over_thresholds`
 
@@ -759,10 +759,11 @@ an enforced one.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment`, `<scope>.derivations[].hash_commitment`
 
-| Field     | Type       | Description                                            | Example                                   | Default | Required |
-| --------- | ---------- | ------------------------------------------------------ | ----------------------------------------- | ------- | -------- |
-| `path`    | `[]string` | Claims path pointer of the to_wallet entry it fulfils. | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
-| `opening` | `object`   | Opening produces the opening.                          | -                                         | -       | Yes      |
+| Field     | Type       | Description                                                                                           | Example                                   | Default | Required |
+| --------- | ---------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `path`    | `[]string` | Claims path pointer of the entry.                                                                     | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
+| `opening` | `object`   | Opening produces the opening of a to_wallet entry. The wallet holds the opening of a to_issuer entry. | -                                         | -       | No       |
+| `unique`  | `object`   | The key the commitment is unique per.                                                                 | -                                         | -       | No       |
 
 ### `opening`
 
@@ -794,6 +795,17 @@ input claims.
 | Field   | Type  | Description     | Example | Default | Required |
 | ------- | ----- | --------------- | ------- | ------- | -------- |
 | `bytes` | `int` | Opening length. | `16`    | -       | Yes      |
+
+### `unique`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.unique`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.unique`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.unique`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.unique`
+
+The issuer accepts one commitment per value of key, until an operator
+resets it.
+
+| Field | Type    | Description                                                                               | Example                                     | Default | Required |
+| ----- | ------- | ----------------------------------------------------------------------------------------- | ------------------------------------------- | ------- | -------- |
+| `key` | `array` | Claims path pointers of the credential. An empty list makes one commitment for the entry. | `[["eu.europa.ec.eudi.nym_auth.1", "ssc"]]` | -       | Yes      |
 
 ### `import`
 
@@ -2397,10 +2409,11 @@ Copy writes an input claim's value, of any type, under another claim name.
 
 > **Path:** `<scope>.derivations[].hash_commitment`
 
-HashCommitment fulfils a to_wallet hash_commitment entry of the credential's auxiliary_data.
+A hash_commitment entry of the credential's auxiliary_data.
 
-| Field     | Type       | Description                                            | Example                                   | Default | Required |
-| --------- | ---------- | ------------------------------------------------------ | ----------------------------------------- | ------- | -------- |
-| `path`    | `[]string` | Claims path pointer of the to_wallet entry it fulfils. | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
-| `opening` | `object`   | Opening produces the opening.                          | -                                         | -       | Yes      |
+| Field     | Type       | Description                                                                                           | Example                                   | Default | Required |
+| --------- | ---------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `path`    | `[]string` | Claims path pointer of the entry.                                                                     | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
+| `opening` | `object`   | Opening produces the opening of a to_wallet entry. The wallet holds the opening of a to_issuer entry. | -                                         | -       | No       |
+| `unique`  | `object`   | The key the commitment is unique per.                                                                 | -                                         | -       | No       |
 

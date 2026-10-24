@@ -37,8 +37,19 @@ func claimMandatory(meta *model.CredentialMetadata, path []string) bool {
 		claim, ok := mddlElement(meta.MDDL, path)
 		return ok && claim.Mandatory
 	}
-	claim, ok := vctmClaim(meta.GetVCTM(), path)
+	claim, ok := meta.GetVCTM().ClaimAt(path)
 	return ok && claim.Mandatory
+}
+
+// claimDeclared reports whether the type metadata declares a claim at
+// path.
+func claimDeclared(meta *model.CredentialMetadata, path []string) bool {
+	if meta.Format == openid4vp.FormatMsoMdoc {
+		_, ok := mddlElement(meta.MDDL, path)
+		return ok
+	}
+	_, ok := meta.GetVCTM().ClaimAt(path)
+	return ok
 }
 
 // checkMDocCommitmentClaim accepts an element of the MDDL that holds the
@@ -83,7 +94,7 @@ func checkSDJWTCommitmentClaim(vctm *sdjwtvc.VCTM, path []string) error {
 	if err := checkSDJWTClaimName(path); err != nil {
 		return err
 	}
-	claim, ok := vctmClaim(vctm, path)
+	claim, ok := vctm.ClaimAt(path)
 	switch {
 	case !ok:
 		return fmt.Errorf("the VCTM declares no claim at path %q", path)
@@ -91,7 +102,7 @@ func checkSDJWTCommitmentClaim(vctm *sdjwtvc.VCTM, path []string) error {
 		return fmt.Errorf("the VCTM declares path %q with sd %q; a commitment needs sd \"always\", so the holder can withhold it", path, claim.SD)
 	}
 	for _, other := range vctm.Claims {
-		if len(other.Path) > len(path) && claimPathHasPrefix(other.Path, path) {
+		if len(other.Path) > len(path) && sdjwtvc.ClaimPathHasPrefix(other.Path, path) {
 			return fmt.Errorf("the VCTM declares a claim beneath path %q, where the commitment is a string", path)
 		}
 	}
@@ -111,30 +122,4 @@ func checkSDJWTClaimName(path []string) error {
 		}
 	}
 	return nil
-}
-
-// vctmClaim returns the claim the VCTM declares at path.
-func vctmClaim(vctm *sdjwtvc.VCTM, path []string) (sdjwtvc.Claim, bool) {
-	if vctm == nil {
-		return sdjwtvc.Claim{}, false
-	}
-	for _, claim := range vctm.Claims {
-		if len(claim.Path) == len(path) && claimPathHasPrefix(claim.Path, path) {
-			return claim, true
-		}
-	}
-	return sdjwtvc.Claim{}, false
-}
-
-// claimPathHasPrefix reports whether a VCTM claim path starts with prefix.
-func claimPathHasPrefix(claimPath []*string, prefix []string) bool {
-	if len(claimPath) < len(prefix) {
-		return false
-	}
-	for i, segment := range prefix {
-		if claimPath[i] == nil || *claimPath[i] != segment {
-			return false
-		}
-	}
-	return true
 }

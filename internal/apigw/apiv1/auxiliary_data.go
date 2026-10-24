@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/model"
@@ -37,7 +39,7 @@ func (c *Client) sourceDerivations(scope string, authContext *cache.Authorizatio
 // the document data, and returns it re-encoded with the to_wallet entries
 // that carry their openings.
 func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
-	supported := c.scopeAuxiliaryData(scope)
+	supported := c.cfg.GetCredentialMetadata(scope).AuxiliaryDataSupported()
 	commitments, err := walletCommitments(supported.ToIssuer, fromWallet)
 	if err != nil {
 		return nil, nil, err
@@ -56,21 +58,14 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	if err := writeCommitments(doc, commitments); err != nil {
 		return nil, nil, err
 	}
+	if err := c.recordUniqueCommitments(ctx, scope, derivations, doc); err != nil {
+		return nil, nil, err
+	}
 	out, err := json.Marshal(doc.claims)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
 	return out, toWallet, nil
-}
-
-// scopeAuxiliaryData returns the auxiliary_data of scope's credential
-// metadata, empty for a credential without it.
-func (c *Client) scopeAuxiliaryData(scope string) openid4vci.AuxiliaryDataSupported {
-	meta := c.cfg.GetCredentialMetadata(scope)
-	if meta == nil || meta.AuxiliaryData == nil {
-		return openid4vci.AuxiliaryDataSupported{}
-	}
-	return *meta.AuxiliaryData
 }
 
 // deliverOpenings fulfils each to_wallet entry with the source's
@@ -103,8 +98,92 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 	return delivered, nil
 }
 
+// recordUniqueCommitments keeps one commitment per key value for each entry
+// that its hash_commitment derivation makes unique (section 6.4, step 5).
+// doc carries the commitments and the key parts.
+func (c *Client) recordUniqueCommitments(ctx context.Context, scope string, derivations []primitives.Derivation, doc *commitmentDocument) error {
+	for _, d := range derivations {
+		hc := d.HashCommitment
+		if hc == nil || hc.Unique == nil {
+			continue
+		}
+		commitment, present := doc.writtenAt(hc.Path)
+		if !present {
+			// An optional to_issuer entry the wallet did not send.
+			continue
+		}
+		if err := c.acceptUniqueCommitment(ctx, scope, hc, commitment, doc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// acceptUniqueCommitment records commitment for the key value doc carries,
+// and refuses it when another commitment is on record for that value.
+func (c *Client) acceptUniqueCommitment(ctx context.Context, scope string, hc *primitives.HashCommitmentArgs, commitment []byte, doc *commitmentDocument) error {
+	texts, err := keyTexts(doc, hc.Unique.Key)
+	if err != nil {
+		return fmt.Errorf("scope %q: %w", scope, err)
+	}
+	keyHash, err := uniqueKeyHash(hc.Unique.Key, texts)
+	if err != nil {
+		return err
+	}
+	stored, err := c.uniqueCommitmentStore.Accept(ctx, db.UniqueCommitmentKey{Scope: scope, Path: hc.Path, KeyHash: keyHash}, commitment, time.Now())
+	if err != nil {
+		return fmt.Errorf("scope %q: %w", scope, err)
+	}
+	if !bytes.Equal(stored, commitment) {
+		return &openid4vci.Error{
+			Err:              openid4vci.ErrAuxiliaryDataConflict,
+			ErrorDescription: fmt.Sprintf("auxiliary_data: another commitment for %q is on record; an operator-approved reset replaces it", hc.Path),
+		}
+	}
+	return nil
+}
+
+// keyTexts returns the text of each key part's value in doc.
+func keyTexts(doc *commitmentDocument, key [][]string) ([]string, error) {
+	texts := make([]string, 0, len(key))
+	for _, part := range key {
+		value, present := doc.claim(part)
+		if !present {
+			return nil, fmt.Errorf("the credential carries no value at unique key part %q", part)
+		}
+		text, err := keyText(value)
+		if err != nil {
+			return nil, fmt.Errorf("unique key part %q: %w", part, err)
+		}
+		texts = append(texts, text)
+	}
+	return texts, nil
+}
+
+// keyText is a key part's value as an operator enters it: a string as it
+// is, any other value as JSON.
+func keyText(value any) (string, error) {
+	if text, ok := value.(string); ok {
+		return text, nil
+	}
+	encoded, err := json.Marshal(value)
+	return string(encoded), err
+}
+
+// uniqueKeyHash is the record key of a key value: SHA-256 of the key's
+// paths and the texts of their values, JSON-encoded. Each key of an entry
+// has its own records.
+func uniqueKeyHash(key [][]string, texts []string) ([]byte, error) {
+	encoded, err := json.Marshal([]any{key, texts})
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(encoded)
+	return sum[:], nil
+}
+
 // writeCommitments writes each commitment the wallet sent at its path.
-func writeCommitments(doc *commitmentDocument, commitments []walletCommitment) error {
+func writeCommitments(doc *commitmentDocument, commitments []pathCommitment) error {
 	for _, commitment := range commitments {
 		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value); err != nil {
 			return err
@@ -152,6 +231,8 @@ func (c commitmentCarrier) claimText(encoding string, commitment []byte) (string
 type commitmentDocument struct {
 	commitmentCarrier
 	claims map[string]any
+	// written holds the commitments set on the document.
+	written []pathCommitment
 }
 
 func newCommitmentDocument(format string, documentData []byte) (*commitmentDocument, error) {
@@ -180,7 +261,17 @@ func (d *commitmentDocument) setCommitment(path []string, encoding string, commi
 		return fmt.Errorf("the document data already carries a value at %q", path)
 	}
 	parent[key] = text
+	d.written = append(d.written, pathCommitment{path: path, encoding: encoding, value: commitment})
 	return nil
+}
+
+// writtenAt returns the commitment set on the document at path.
+func (d *commitmentDocument) writtenAt(path []string) ([]byte, bool) {
+	i := slices.IndexFunc(d.written, func(w pathCommitment) bool { return slices.Equal(w.path, path) })
+	if i < 0 {
+		return nil, false
+	}
+	return d.written[i].value, true
 }
 
 // parent returns the object that holds the claim at path, and the claim's
@@ -204,6 +295,23 @@ func (d *commitmentDocument) parent(path []string) (map[string]any, string, erro
 		}
 	}
 	return node, key, nil
+}
+
+// claim returns the value of the claim at path.
+func (d *commitmentDocument) claim(path []string) (any, bool) {
+	if d.mdoc {
+		value := d.claims[path[len(path)-1]]
+		return value, value != nil
+	}
+	var node any = d.claims
+	for _, segment := range path {
+		object, ok := node.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		node = object[segment]
+	}
+	return node, node != nil
 }
 
 // decodeDocumentData reads the document, preserving numbers exactly.
@@ -267,10 +375,11 @@ func walletAuxiliaryData(req *openid4vci.CredentialRequest) ([]openid4vci.Auxili
 	return agreed, nil
 }
 
-// walletCommitment is the commitment the wallet sent for a to_issuer entry.
-type walletCommitment struct {
+// pathCommitment is a commitment, the claims path the credential carries
+// it at, and how that claim represents it.
+type pathCommitment struct {
 	path []string
-	// encoding is how the to_issuer entry's claim represents it.
+	// encoding is the entry's encoding of the commitment.
 	encoding string
 	value    []byte
 }
@@ -278,8 +387,8 @@ type walletCommitment struct {
 // walletCommitments checks the wallet's entries against the to_issuer
 // entries: each entry matches a to_issuer entry, and the wallet sends
 // every required one.
-func walletCommitments(toIssuer, fromWallet []openid4vci.AuxiliaryDataEntry) ([]walletCommitment, error) {
-	commitments := make([]walletCommitment, 0, len(fromWallet))
+func walletCommitments(toIssuer, fromWallet []openid4vci.AuxiliaryDataEntry) ([]pathCommitment, error) {
+	commitments := make([]pathCommitment, 0, len(fromWallet))
 	for _, entry := range fromWallet {
 		commitment, err := acceptedCommitment(toIssuer, entry)
 		if err != nil {
@@ -297,21 +406,21 @@ func walletCommitments(toIssuer, fromWallet []openid4vci.AuxiliaryDataEntry) ([]
 
 // acceptedCommitment returns the commitment of a wallet entry that matches
 // the to_issuer entry at its path in type and alg.
-func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4vci.AuxiliaryDataEntry) (walletCommitment, error) {
+func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4vci.AuxiliaryDataEntry) (pathCommitment, error) {
 	want := entryLike(toIssuer, entry)
 	switch {
 	case want == nil:
-		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("to_issuer of this credential lists no entry for %q", entry.Path))
+		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("to_issuer of this credential lists no entry for %q", entry.Path))
 	case entry.Alg != want.Alg:
-		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q must use alg %s", entry.Path, want.Alg))
+		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q must use alg %s", entry.Path, want.Alg))
 	case entry.Opening != "" || entry.Encoding != "" || entry.Required:
-		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q carries only type, alg, path and commitment", entry.Path))
+		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q carries only type, alg, path and commitment", entry.Path))
 	}
 	value, err := base64.RawURLEncoding.DecodeString(entry.Commitment)
 	if err != nil || len(value) != sha256.Size {
-		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the commitment for %q must be a base64url sha-256 hash", entry.Path))
+		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the commitment for %q must be a base64url sha-256 hash", entry.Path))
 	}
-	return walletCommitment{path: entry.Path, encoding: want.Encoding, value: value}, nil
+	return pathCommitment{path: entry.Path, encoding: want.Encoding, value: value}, nil
 }
 
 // entryLike returns the entry of entries with the type and path of like.

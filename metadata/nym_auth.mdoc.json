@@ -19,11 +19,13 @@
       },
       "ssc": {
         "mandatory": true,
-        "value_type": "bstr"
+        "value_type": "bstr",
+        "display": [{ "locale": "en-US", "name": "Secret seed commitment" }]
       },
       "psc": {
         "mandatory": false,
-        "value_type": "bstr"
+        "value_type": "bstr",
+        "display": [{ "locale": "en-US", "name": "Private seed commitment" }]
       }
     }
   }

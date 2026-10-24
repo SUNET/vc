@@ -407,6 +407,11 @@ apigw:
                         secret_path: "/pki/nym_auth_seed.key"
                         inputs: [issuing_country, personal_administrative_number]
                         bytes: 16
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, psc]
+                    unique:
+                      key:
+                        - [eu.europa.ec.eudi.nym_auth.1, ssc]
             pid_mdoc:
               required_claims:
                 eu.europa.ec.eudi.pid.1.birth_date: []
@@ -421,6 +426,11 @@ apigw:
                         secret_path: "/pki/nym_auth_seed.key"
                         inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
                         bytes: 16
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, psc]
+                    unique:
+                      key:
+                        - [eu.europa.ec.eudi.nym_auth.1, ssc]
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-demo-apigw.fly.dev/token"

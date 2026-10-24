@@ -1562,6 +1562,25 @@ type APIAuth struct {
 	RulesFile string `yaml:"rules_file,omitempty"`
 }
 
+// AuxiliaryDataSupported returns the credential's auxiliary_data, empty for a
+// credential without it.
+func (m *CredentialMetadata) AuxiliaryDataSupported() openid4vci.AuxiliaryDataSupported {
+	if m == nil || m.AuxiliaryData == nil {
+		return openid4vci.AuxiliaryDataSupported{}
+	}
+	return *m.AuxiliaryData
+}
+
+// Enabled reports whether a caller reaching the admin API has to be
+// anybody in particular.
+//
+// Only the two Bearer modes count. An admin session does not: it is
+// granted anonymously when OIDC is absent, so requiring one would be a
+// check that passes for everyone.
+func (a APIAuth) Enabled() bool {
+	return a.JWKS.Enable || a.OIDC.Enable
+}
+
 // APIAuthJWKS holds the configuration for static JWKS Bearer token authentication
 type APIAuthJWKS struct {
 	// Enable enables static JWKS Bearer token authentication
