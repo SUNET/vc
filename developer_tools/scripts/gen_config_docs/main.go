@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -725,18 +726,12 @@ func fenceEdge(extra []string, opening bool) []string {
 }
 
 // structDescription renders a struct's doc comment as the section preamble.
-//
-// Lines reflow as markdown, EXCEPT inside a ``` fenced block, where the
-// indentation is the content - a YAML example flattened to column zero is not
-// an example of anything. See IssuancePolicy, whose policy has to be shown as
-// rules and query_template together to be a configuration at all.
 func structDescription(def *StructDef) string {
 	if def == nil || def.Doc == "" {
 		return ""
 	}
-	lines := strings.Split(def.Doc, "\n")
-	first := strings.TrimSpace(lines[0])
-	cleaned := cleanFieldDesc(first, def.Name)
+	summary, rest := docSummary(def.Doc)
+	cleaned := cleanFieldDesc(summary, def.Name)
 	if cleaned == "" {
 		return ""
 	}
@@ -744,61 +739,74 @@ func structDescription(def *StructDef) string {
 	if !strings.HasSuffix(cleaned, ".") {
 		cleaned += "."
 	}
-	var extra []string
-	pastBlank := false
-	inFence, skipBlank := false, false
-	for _, raw := range lines[1:] {
-		l := strings.TrimSpace(raw)
-		// Inside a fenced block the indentation IS the content, so the
-		// line is taken as written. Go doc comments indent an example by
-		// one tab; that tab is the comment's, not the example's.
-		if strings.HasPrefix(l, "```") {
-			inFence = !inFence
-			pastBlank = true
-			extra = append(fenceEdge(extra, inFence), l)
-			skipBlank = inFence
-			continue
-		}
-		if inFence {
-			if skipBlank && l == "" {
-				continue
-			}
-			skipBlank = false
-			extra = append(extra, strings.TrimPrefix(raw, "\t"))
-			continue
-		}
-		if l == "" {
-			pastBlank = true
-			if len(extra) > 0 {
-				extra = append(extra, "")
-			}
-			continue
-		}
-		if pastBlank || len(extra) > 0 {
-			extra = append(extra, l)
-		}
-	}
-	if len(extra) > 0 {
-		cleaned += "\n\n" + strings.Join(extra, "\n")
+	if body := docBody(rest); body != "" {
+		cleaned += "\n\n" + body
 	}
 	return cleaned
 }
 
+// structDescriptionExtra renders a struct's doc comment after its first
+// sentence.
 func structDescriptionExtra(def *StructDef) string {
 	if def == nil || def.Doc == "" {
 		return ""
 	}
-	lines := strings.Split(def.Doc, "\n")
-	if len(lines) <= 1 {
-		return ""
+	_, rest := docSummary(def.Doc)
+	return docBody(rest)
+}
+
+// docSummary splits a doc comment into its first sentence and the lines
+// after it. The sentence ends where go/doc's Synopsis ends it: at a period
+// followed by white space and not preceded by exactly one capital letter, or
+// at the end of the first paragraph. A letter between two periods, as in
+// "e.g.", ends no sentence either. The sentence can wrap over several lines.
+func docSummary(doc string) (string, []string) {
+	lines := strings.Split(doc, "\n")
+	end := slices.IndexFunc(lines, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		return trimmed == "" || strings.HasPrefix(trimmed, "```")
+	})
+	if end < 0 {
+		end = len(lines)
 	}
-	var extra []string
+	paragraph := strings.Join(lines[:end], "\n")
+	cut := firstSentenceEnd(paragraph)
+	rest := lines[end:]
+	if tail := strings.TrimSpace(paragraph[cut:]); tail != "" {
+		rest = append(strings.Split(tail, "\n"), rest...)
+	}
+	return strings.Join(strings.Fields(paragraph[:cut]), " "), rest
+}
+
+// firstSentenceEnd returns the index in s where its first sentence ends.
+func firstSentenceEnd(s string) int {
+	var ppp, pp, p rune
+	for i, q := range s {
+		initial := unicode.IsUpper(pp) && !unicode.IsUpper(ppp)
+		abbreviation := unicode.IsLetter(pp) && ppp == '.'
+		if unicode.IsSpace(q) && p == '.' && !initial && !abbreviation {
+			return i
+		}
+		ppp, pp, p = pp, p, q
+	}
+	return len(s)
+}
+
+// docBody renders doc comment lines as markdown. Lines reflow, EXCEPT inside
+// a ``` fenced block, where the indentation is the content - a YAML example
+// flattened to column zero is not an example of anything. See
+// IssuancePolicy, whose policy has to be shown as rules and query_template
+// together to be a configuration at all.
+func docBody(lines []string) string {
+	var body []string
 	inFence, skipBlank := false, false
-	for _, raw := range lines[1:] {
+	for _, raw := range lines {
 		l := strings.TrimSpace(raw)
+		// Go doc comments indent an example by one tab; that tab is the
+		// comment's, not the example's.
 		if strings.HasPrefix(l, "```") {
 			inFence = !inFence
-			extra = append(fenceEdge(extra, inFence), l)
+			body = append(fenceEdge(body, inFence), l)
 			skipBlank = inFence
 			continue
 		}
@@ -807,18 +815,18 @@ func structDescriptionExtra(def *StructDef) string {
 				continue
 			}
 			skipBlank = false
-			extra = append(extra, strings.TrimPrefix(raw, "\t"))
+			body = append(body, strings.TrimPrefix(raw, "\t"))
 			continue
 		}
 		if l == "" {
-			if len(extra) > 0 {
-				extra = append(extra, "")
+			if len(body) > 0 {
+				body = append(body, "")
 			}
 			continue
 		}
-		extra = append(extra, l)
+		body = append(body, l)
 	}
-	return strings.TrimSpace(strings.Join(extra, "\n"))
+	return strings.TrimSpace(strings.Join(body, "\n"))
 }
 
 // knownTerms maps Go identifier fragments to their desired snake_case output.

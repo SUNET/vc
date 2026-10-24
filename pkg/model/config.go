@@ -514,7 +514,7 @@ type OIDCRPDynamicRegistrationConfig struct {
 // values define how each attribute maps to a credential claim.
 type AttributeMapping map[string]AttributeConfig
 
-// AttributeConfig defines how a single external attribute maps to a credential claim
+// AttributeConfig defines how a single external attribute maps to a credential claim.
 // Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys.
 // AttributeConfig is a pure rename + presence step. Any value transformation
 // (canonicalisation, case folding, date reformatting, etc.) is expressed as
@@ -1606,9 +1606,9 @@ type SupportedCredentialConfig struct {
 	Scopes []string `yaml:"scopes" validate:"required"`
 }
 
-// APIAuth configures authentication for the API route group (datastore, identity mapping, admin UI)
-// JWKS and OIDC are mutually exclusive
-// If neither is enabled, no authentication is applied (open access)
+// APIAuth configures authentication for the API route group (datastore, identity mapping, admin UI).
+// JWKS and OIDC are mutually exclusive.
+// If neither is enabled, no authentication is applied (open access).
 //
 // When Rules (and/or RulesFile) are configured, each authenticated request is
 // checked against a SPOCP engine. A query of the form
