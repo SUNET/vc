@@ -28,6 +28,7 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 		Enable:     true,
 		VerifierID: "verifier.example",
 		Circuits: model.NymAuthCircuits{Allow: []model.NymAuthCircuit{{
+			SystemID:       nymauth.SystemLongfellowNymAuth,
 			Config:         nymauth.ConfigKnownOffenderMatchingSSC,
 			HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
 			SigCircuitID:   "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb",

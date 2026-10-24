@@ -84,6 +84,26 @@ type NymAuthCircuits struct {
 // circuit that will not load, which is the right failure: the
 // alternative is loading whatever was served.
 type NymAuthCircuit struct {
+	// SystemID is the proof system this build belongs to, named by
+	// the catalog alias a presentation states in zkp_req's
+	// "system_id" - "urn:circuits:longfellow:nym_auth:v1" or
+	// "urn:circuits:vega:nym_auth:v1".
+	//
+	// First-class and REQUIRED, beside Config, because the two
+	// together are what selects a build. One verifier may allow both
+	// systems for the same pseudonym configuration - that is the
+	// point of naming it - and an entry that did not say which system
+	// it is would be an artifact handed to whichever circuit library
+	// happened to be asked for it.
+	//
+	// It does not change the pseudonym. The domain separator is built
+	// from Config alone ("nym_auth/v1/" + config), so the same subject
+	// under the same configuration has the same pseudonym whichever
+	// system proved it; the system decides only how the proof is
+	// checked. That is what makes it safe for the holder to choose
+	// between the systems a Verifier offers.
+	SystemID string `yaml:"system_id" doc_example:"\"urn:circuits:longfellow:nym_auth:v1\""`
+
 	// Config is the pseudonym configuration this build implements -
 	// "known-offender-matching-ssc" or "known-offender-matching-psc".
 	//
