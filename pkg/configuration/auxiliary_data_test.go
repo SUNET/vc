@@ -41,7 +41,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 				Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{
 					"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 						Path: ssc,
-						Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
+						Opening: &primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
 							SecretPath: secretPath, Inputs: []string{"personal_administrative_number"},
 						}},
 					}}}},
@@ -54,6 +54,16 @@ func TestCheckAuxiliaryData(t *testing.T) {
 	}
 	derivation := func(c *model.Cfg) *primitives.HashCommitmentArgs {
 		return c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"].Derivations[0].HashCommitment
+	}
+	psc := []string{ssc[0], "psc"}
+	// withPSC makes psc a to_issuer entry and configures it in the pid
+	// source scope.
+	withPSC := func(c *model.Cfg, hc primitives.HashCommitmentArgs) *primitives.HashCommitmentArgs {
+		c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}}
+		pid := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"]
+		pid.Derivations = append(pid.Derivations, primitives.Derivation{HashCommitment: &hc})
+		c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = pid
+		return &hc
 	}
 
 	require.NoError(t, checkAuxiliaryData(base(), "apigw"))
@@ -71,6 +81,31 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		assert.False(t, toIssuer[1].Required, "opt is optional")
 	})
 
+	t.Run("unique is optional, with a key of any length, on either direction", func(t *testing.T) {
+		for name, mutate := range map[string]func(*model.Cfg){
+			"a to_issuer entry without a derivation": func(c *model.Cfg) {
+				c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}}
+			},
+			"a to_issuer derivation without unique": func(c *model.Cfg) { withPSC(c, primitives.HashCommitmentArgs{Path: psc}) },
+			"one commitment for the entry": func(c *model.Cfg) {
+				withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{}}})
+			},
+			"unique per another entry": func(c *model.Cfg) {
+				withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{ssc}}})
+			},
+			"unique per a composite key": func(c *model.Cfg) {
+				withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{ssc, {ssc[0], "birth_date"}}}})
+			},
+			"a unique to_wallet entry": func(c *model.Cfg) {
+				derivation(c).Unique = &primitives.UniqueArgs{Key: [][]string{{ssc[0], "birth_date"}}}
+			},
+		} {
+			cfg := base()
+			mutate(cfg)
+			require.NoError(t, checkAuxiliaryData(cfg, "apigw"), name)
+		}
+	})
+
 	for name, tc := range map[string]struct {
 		mutate func(*model.Cfg)
 		want   string
@@ -86,15 +121,31 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"an unfulfilled to_wallet entry": {func(c *model.Cfg) {
 			c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = model.PresentedCredential{}
 		}, "no hash_commitment derivation fulfils"},
-		"a derivation for a path outside to_wallet": {func(c *model.Cfg) {
+		"a derivation for a path outside auxiliary_data": {func(c *model.Cfg) {
 			derivation(c).Path = []string{ssc[0], "birth_date"}
-		}, "is no to_wallet entry"},
+		}, "is no auxiliary_data entry"},
 		"an unreadable secret": {func(c *model.Cfg) {
 			derivation(c).Opening.HKDF.SecretPath = filepath.Join(t.TempDir(), "absent")
 		}, "opening: hkdf: reading the opening secret"},
 		"an opening with two generators": {func(c *model.Cfg) {
 			derivation(c).Opening.Random = &primitives.RandomOpeningArgs{}
 		}, "exactly one of hkdf and random"},
+		"a to_wallet entry without an opening": {func(c *model.Cfg) {
+			derivation(c).Opening = nil
+		}, "is a to_wallet entry, which takes an opening"},
+		"a to_issuer entry with an opening": {func(c *model.Cfg) {
+			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Opening: &primitives.OpeningArgs{Random: &primitives.RandomOpeningArgs{}}})
+		}, "is a to_issuer entry, whose opening the wallet holds"},
+		"an entry configured twice": {func(c *model.Cfg) {
+			withPSC(c, primitives.HashCommitmentArgs{Path: psc})
+			withPSC(c, primitives.HashCommitmentArgs{Path: psc})
+		}, "is configured twice"},
+		"a key part outside the MDDL": {func(c *model.Cfg) {
+			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{{ssc[0], "nope"}}}})
+		}, "the MDDL declares no element at key part"},
+		"a key part that is the entry itself": {func(c *model.Cfg) {
+			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{psc}}})
+		}, "is the entry itself, which every commitment matches"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base()

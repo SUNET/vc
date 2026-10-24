@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential/primitives"
+	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
@@ -35,7 +38,7 @@ func (c *Client) sourceDerivations(scope string, authContext *cache.Authorizatio
 // the document data, and returns it re-encoded with the to_wallet entries
 // that carry their openings.
 func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
-	supported := c.scopeAuxiliaryData(scope)
+	supported := c.cfg.GetCredentialMetadata(scope).AuxiliaryDataSupported()
 	commitments, err := walletCommitments(supported.ToIssuer, fromWallet)
 	if err != nil {
 		return nil, nil, err
@@ -54,6 +57,9 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	if err := writeCommitments(doc, commitments); err != nil {
 		return nil, nil, err
 	}
+	if err := c.recordUniqueCommitments(ctx, scope, derivations, doc); err != nil {
+		return nil, nil, err
+	}
 	out, err := json.Marshal(doc)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
@@ -61,22 +67,12 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	return out, toWallet, nil
 }
 
-// scopeAuxiliaryData returns the auxiliary_data of scope's credential
-// metadata, empty for a credential without it.
-func (c *Client) scopeAuxiliaryData(scope string) openid4vci.AuxiliaryDataSupported {
-	meta := c.cfg.GetCredentialMetadata(scope)
-	if meta == nil || meta.AuxiliaryData == nil {
-		return openid4vci.AuxiliaryDataSupported{}
-	}
-	return *meta.AuxiliaryData
-}
-
 // deliverOpenings fulfils each to_wallet entry with the source's
 // hash_commitment derivation, and returns the entries with their openings.
 func deliverOpenings(ctx context.Context, doc map[string]any, entries []openid4vci.AuxiliaryDataEntry, derivations []primitives.Derivation, sourceClaims map[string]any) ([]openid4vci.AuxiliaryDataEntry, error) {
 	delivered := make([]openid4vci.AuxiliaryDataEntry, 0, len(entries))
 	for _, entry := range entries {
-		hc := hashCommitmentFor(derivations, entry.Path)
+		hc := primitives.HashCommitmentFor(derivations, entry.Path)
 		if hc == nil {
 			return nil, fmt.Errorf("no hash_commitment derivation fulfils to_wallet path %q", entry.Path)
 		}
@@ -84,14 +80,121 @@ func deliverOpenings(ctx context.Context, doc map[string]any, entries []openid4v
 		if err != nil {
 			return nil, fmt.Errorf("to_wallet path %q: %w", entry.Path, err)
 		}
-		commitment := sha256.Sum256(opening)
-		if err := setCommitment(doc, entry.Path, commitment[:]); err != nil {
+		commitment, err := seed.Commit(entry.Alg, opening)
+		if err != nil {
+			return nil, err
+		}
+		if err := setCommitment(doc, entry.Path, commitment); err != nil {
 			return nil, err
 		}
 		entry.Opening = base64.RawURLEncoding.EncodeToString(opening)
 		delivered = append(delivered, entry)
 	}
 	return delivered, nil
+}
+
+// recordUniqueCommitments keeps one commitment per key value for each entry
+// that its hash_commitment derivation makes unique (section 6.4, step 5).
+// doc carries the commitments and the key parts.
+func (c *Client) recordUniqueCommitments(ctx context.Context, scope string, derivations []primitives.Derivation, doc map[string]any) error {
+	for _, d := range derivations {
+		hc := d.HashCommitment
+		if hc == nil || hc.Unique == nil {
+			continue
+		}
+		commitment, present, err := documentCommitment(doc, hc.Path)
+		if err != nil {
+			return fmt.Errorf("scope %q: %w", scope, err)
+		}
+		if !present {
+			// An optional to_issuer entry the wallet did not send.
+			continue
+		}
+		if err := c.acceptUniqueCommitment(ctx, scope, hc, commitment, doc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// acceptUniqueCommitment records commitment for the key value doc carries,
+// and refuses it when another commitment is on record for that value.
+func (c *Client) acceptUniqueCommitment(ctx context.Context, scope string, hc *primitives.HashCommitmentArgs, commitment []byte, doc map[string]any) error {
+	texts, err := keyTexts(doc, hc.Unique.Key)
+	if err != nil {
+		return fmt.Errorf("scope %q: %w", scope, err)
+	}
+	keyHash, err := uniqueKeyHash(hc.Unique.Key, texts)
+	if err != nil {
+		return err
+	}
+	stored, err := c.uniqueCommitmentStore.Accept(ctx, db.UniqueCommitmentKey{Scope: scope, Path: hc.Path, KeyHash: keyHash}, commitment, time.Now())
+	if err != nil {
+		return fmt.Errorf("scope %q: %w", scope, err)
+	}
+	if !bytes.Equal(stored, commitment) {
+		return &openid4vci.Error{
+			Err:              openid4vci.ErrAuxiliaryDataConflict,
+			ErrorDescription: fmt.Sprintf("auxiliary_data: another commitment for %q is on record; an operator-approved reset replaces it", hc.Path),
+		}
+	}
+	return nil
+}
+
+// keyTexts returns the text of each key part's value in doc.
+func keyTexts(doc map[string]any, key [][]string) ([]string, error) {
+	texts := make([]string, 0, len(key))
+	for _, part := range key {
+		value, present := doc[part[len(part)-1]]
+		if !present || value == nil {
+			return nil, fmt.Errorf("the credential carries no value at unique key part %q", part)
+		}
+		text, err := keyText(value)
+		if err != nil {
+			return nil, fmt.Errorf("unique key part %q: %w", part, err)
+		}
+		texts = append(texts, text)
+	}
+	return texts, nil
+}
+
+// keyText is a key part's value as an operator enters it: a string as it
+// is, any other value as JSON.
+func keyText(value any) (string, error) {
+	if text, ok := value.(string); ok {
+		return text, nil
+	}
+	encoded, err := json.Marshal(value)
+	return string(encoded), err
+}
+
+// uniqueKeyHash is the record key of a key value: SHA-256 of the key's
+// paths and the texts of their values, JSON-encoded. Each key of an entry
+// has its own records.
+func uniqueKeyHash(key [][]string, texts []string) ([]byte, error) {
+	encoded, err := json.Marshal([]any{key, texts})
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(encoded)
+	return sum[:], nil
+}
+
+// documentCommitment returns the commitment doc carries at path.
+func documentCommitment(doc map[string]any, path []string) ([]byte, bool, error) {
+	value, present := doc[path[len(path)-1]]
+	if !present || value == nil {
+		return nil, false, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return nil, false, fmt.Errorf("the commitment at %q is no string", path)
+	}
+	commitment, err := base64.StdEncoding.DecodeString(text)
+	if err != nil {
+		return nil, false, fmt.Errorf("the commitment at %q: %w", path, err)
+	}
+	return commitment, true, nil
 }
 
 // writeCommitments writes each commitment the wallet sent at its path.
@@ -104,16 +207,6 @@ func writeCommitments(doc map[string]any, commitments []walletCommitment) error 
 	return nil
 }
 
-// hashCommitmentFor returns the hash_commitment derivation for path.
-func hashCommitmentFor(derivations []primitives.Derivation, path []string) *primitives.HashCommitmentArgs {
-	for _, d := range derivations {
-		if d.HashCommitment != nil && slices.Equal(d.HashCommitment.Path, path) {
-			return d.HashCommitment
-		}
-	}
-	return nil
-}
-
 // setCommitment writes a commitment at the mso_mdoc element path names, as
 // the standard base64 a bstr element is decoded from.
 func setCommitment(doc map[string]any, path []string, commitment []byte) error {
@@ -121,8 +214,14 @@ func setCommitment(doc map[string]any, path []string, commitment []byte) error {
 	if existing, present := doc[element]; present && existing != nil {
 		return fmt.Errorf("the document data already carries a value for %q", element)
 	}
-	doc[element] = base64.StdEncoding.EncodeToString(commitment)
+	doc[element] = commitmentText(commitment)
 	return nil
+}
+
+// commitmentText is a commitment as the document data carries it: the
+// standard base64 a bstr element is decoded from.
+func commitmentText(commitment []byte) string {
+	return base64.StdEncoding.EncodeToString(commitment)
 }
 
 // decodeDocumentData reads the document, preserving numbers exactly.

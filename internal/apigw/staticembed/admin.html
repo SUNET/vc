@@ -86,6 +86,7 @@
             </div>
             <a class="nav-link" :class="{'active': view === 'datastore'}" @click="switchView('datastore'); sidebarOpen = false">Datastore</a>
             <a class="nav-link" :class="{'active': view === 'identity'}" @click="switchView('identity'); sidebarOpen = false">Identity Mapping</a>
+            <a class="nav-link" x-show="uniqueCommitmentEntries.length > 0" :class="{'active': view === 'commitments'}" @click="switchView('commitments'); sidebarOpen = false">Unique Commitments</a>
             <a class="nav-link logout" @click="logout()">Logout</a>
         </nav>
 
@@ -442,6 +443,61 @@
                             </div>
                         </div>
                     </template>
+                </div>
+            </template>
+
+            <!-- Unique Commitments View -->
+            <template x-if="view === 'commitments' && uniqueCommitmentEntries.length > 0">
+                <div>
+                    <h2 class="h4 mb-3">Unique Commitments</h2>
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title">Reset a commitment</h5>
+                            <p class="card-text small text-muted">The issuer keeps one commitment per key value for each entry below, and refuses a different one. Once you have re-identified the person, a reset lets the next issuance record a new commitment. Enter each identifier or value exactly as the credential carries it.</p>
+                            <template x-if="unrestricted">
+                                <div class="alert alert-warning small">A reset is recorded with the operator who approved it, and this admin UI runs without authentication. Configure <code>apigw.api_server.api_auth.oidc</code> to reset commitments.</div>
+                            </template>
+                            <form @submit.prevent="resetCommitment()">
+                                <div class="mb-3">
+                                    <label class="form-label" for="hc-entry">Entry</label>
+                                    <select id="hc-entry" class="form-select" x-model.number="hc.entry" @change="clearKeyValues(); hc.result = null">
+                                        <template x-for="(e, i) in uniqueCommitmentEntries" :key="i">
+                                            <option :value="i" x-text="e.scope + ': ' + e.path.join(' / ') + ', ' + keyLabel(e)"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <template x-for="(part, k) in uniqueCommitmentEntries[hc.entry].key" :key="hc.entry + '-' + k">
+                                    <div>
+                                        <template x-if="part.inputs">
+                                            <div>
+                                                <template x-for="(claims, j) in part.inputs" :key="hc.entry + '-' + k + '-' + j">
+                                                    <div class="mb-3">
+                                                        <label class="form-label" :for="'hc-key-' + k + '-' + j" x-text="claims.join(' / ')"></label>
+                                                        <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required autocomplete="off">
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <template x-if="!part.inputs">
+                                            <div class="mb-3">
+                                                <label class="form-label" :for="'hc-key-' + k" x-text="part.path.join(' / ')"></label>
+                                                <input class="form-control" :id="'hc-key-' + k" x-model="hc.values[k]" required autocomplete="off">
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <div class="mb-3">
+                                    <label class="form-label" for="hc-evidence">Evidence reference</label>
+                                    <input id="hc-evidence" class="form-control" x-model="hc.evidence" required maxlength="256" autocomplete="off">
+                                    <div class="form-text">The reference of the re-identification record. The reset is stored with it, and one reference resets one commitment.</div>
+                                </div>
+                                <button class="btn btn-danger" type="submit" :disabled="unrestricted || hc.busy">Reset</button>
+                            </form>
+                            <template x-if="hc.result">
+                                <div class="alert mt-3 mb-0" :class="hc.result.ok ? 'alert-success' : 'alert-danger'" x-text="hc.result.message"></div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </template>
 
