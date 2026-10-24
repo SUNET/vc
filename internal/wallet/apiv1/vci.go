@@ -342,7 +342,7 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 
 	// Step 6: Credential request
 	step = StepResult{Name: "credential_request", StartedAt: time.Now()}
-	credResp, err := c.requestCredential(ctx, metadata.CredentialEndpoint, accessToken, tokenType, cNonce, credentialConfigID, vci)
+	credResp, err := c.requestCredential(ctx, metadata.CredentialEndpoint, metadata.CredentialIssuer, accessToken, tokenType, cNonce, credentialConfigID, vci)
 	step.CompletedAt = time.Now()
 	if err != nil {
 		step.Error = err.Error()
@@ -736,14 +736,30 @@ func (c *Client) tokenRequestAuthCode(ctx context.Context, tokenEndpoint, code s
 	return &tokenResp, nil
 }
 
-func (c *Client) requestCredential(ctx context.Context, credentialEndpoint, accessToken, tokenType, cNonce, credentialConfigID string, vci *config.VCIScenario) (*openid4vci.CredentialResponse, error) {
+// requestCredential posts the Credential Request.
+//
+// credentialIssuer is the Credential Issuer IDENTIFIER, which is what
+// the proof JWT's `aud` has to be - a different value from
+// credentialEndpoint, which is where the request is posted. Both are
+// parameters because passing one where the other belongs is exactly the
+// mistake this signature exists to make visible.
+func (c *Client) requestCredential(ctx context.Context, credentialEndpoint, credentialIssuer, accessToken, tokenType, cNonce, credentialConfigID string, vci *config.VCIScenario) (*openid4vci.CredentialResponse, error) {
 	body := map[string]any{}
 	if credentialConfigID != "" {
 		body["credential_configuration_id"] = credentialConfigID
 	}
 
 	if vci.ProofType != "none" {
-		proofJWT, err := c.createProofJWT(ctx, credentialEndpoint, cNonce)
+		if credentialIssuer == "" {
+			// Refused rather than defaulted to the endpoint. The
+			// endpoint is what was being sent, and the issuer answered
+			// "aud claim does not match expected audience" - a message
+			// that says nothing about which value was wrong. A missing
+			// credential_issuer is malformed metadata; say so here,
+			// where it is still obvious what happened.
+			return nil, fmt.Errorf("the issuer metadata declares no credential_issuer, so the proof JWT has no audience to name")
+		}
+		proofJWT, err := c.createProofJWT(ctx, credentialIssuer, cNonce)
 		if err != nil {
 			return nil, fmt.Errorf("creating proof JWT: %w", err)
 		}
@@ -891,6 +907,13 @@ func (c *Client) sendNotification(ctx context.Context, notificationEndpoint, acc
 
 // ---------- Crypto helpers ----------
 
+// createProofJWT builds the OpenID4VCI proof of possession.
+//
+// audience is the Credential Issuer Identifier, which is what
+// OpenID4VCI Appendix F.1 fixes `aud` as - see ProofJWTClaims.Aud. It is
+// NOT the credential endpoint URL; an issuer verifying the proof
+// compares against its own identifier, so the endpoint produces "aud
+// claim does not match expected audience" and no issuance completes.
 func (c *Client) createProofJWT(ctx context.Context, audience, cNonce string) (string, error) {
 	_, alg := jose.GetSigningMethodFromKey(c.signingKey)
 

@@ -552,7 +552,7 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 
 	// Step 5: Credential request with DPoP
 	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
-	credResp := doCredentialRequest(t, credEndpoint, tokenResp.AccessToken, tokenResp.CNonce,
+	credResp := doCredentialRequest(t, credEndpoint, issuerMeta.CredentialIssuer, tokenResp.AccessToken, tokenResp.CNonce,
 		"pid", signingKey)
 	require.NotEmpty(t, credResp.Credentials, "must receive at least one credential")
 	t.Logf("credentials_received=%d notification_id=%s", len(credResp.Credentials), credResp.NotificationID)
@@ -897,7 +897,10 @@ func TestStack_VCI_Credential_NoDPoP(t *testing.T) {
 	require.NotEmpty(t, tokenResp.AccessToken)
 
 	// Build credential request body
-	proofJWT := walletflow.ProofJWT(t, rewriteInternalToPublic(issuerMeta.CredentialEndpoint),
+	// The Credential Issuer IDENTIFIER, not the credential endpoint:
+	// OpenID4VCI fixes the proof JWT's aud as the identifier, and the
+	// issuer compares against its own.
+	proofJWT := walletflow.ProofJWT(t, issuerMeta.CredentialIssuer,
 		tokenResp.CNonce, oauthClientID, signingKey)
 	reqBody, _ := json.Marshal(map[string]any{
 		"credential_configuration_id": "pid",
@@ -1063,7 +1066,7 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	require.NotEmpty(t, tokenResp.AccessToken)
 
 	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
-	credResp := doCredentialRequest(t, credEndpoint, tokenResp.AccessToken, tokenResp.CNonce,
+	credResp := doCredentialRequest(t, credEndpoint, issuerMeta.CredentialIssuer, tokenResp.AccessToken, tokenResp.CNonce,
 		"pid", signingKey)
 	require.NotEmpty(t, credResp.Credentials, "VCI must issue credential")
 	realCredential := credResp.Credentials[0].Credential
@@ -1327,10 +1330,17 @@ func doTokenRequest(t *testing.T, tokenEndpoint, code, codeVerifier string, sign
 	return tokenResp
 }
 
-func doCredentialRequest(t *testing.T, credEndpoint, accessToken, cNonce, credConfigID string, signingKey *ecdsa.PrivateKey) openid4vci.CredentialResponse {
+// doCredentialRequest posts a Credential Request.
+//
+// audience is the Credential Issuer Identifier, which is what the proof
+// JWT's aud has to be - a different value from credEndpoint, which is
+// where the request is posted. A separate parameter, and not derived
+// from credEndpoint, because deriving it is how this came to send the
+// endpoint in the first place.
+func doCredentialRequest(t *testing.T, credEndpoint, audience, accessToken, cNonce, credConfigID string, signingKey *ecdsa.PrivateKey) openid4vci.CredentialResponse {
 	t.Helper()
 
-	proofJWT := walletflow.ProofJWT(t, rewriteInternalToPublic(credEndpoint), cNonce, oauthClientID, signingKey)
+	proofJWT := walletflow.ProofJWT(t, audience, cNonce, oauthClientID, signingKey)
 
 	reqBody := map[string]any{
 		"credential_configuration_id": credConfigID,
