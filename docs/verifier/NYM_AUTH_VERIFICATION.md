@@ -368,13 +368,20 @@ verifying against a T the prover did not use cannot succeed, and would
 report the wrong reason when it failed. The refusal names the observed
 deviation and the limit, because the next question is always "by how much".
 
-What the window does **not** do is check credential status. The proof
-checks the MSO's validity period at T, and the window bounds how far T may
-be from now — so a credential that has been revoked but has not expired
-still produces a proof this verifier accepts. Bounding the age shortens
-the interval in which that is possible; it does not close it, and no
-revocation check runs on this path. Nor is the window replay protection:
-the nonce in the transcript is what binds a proof to one request.
+Be precise about what that buys, because it is narrower than it looks.
+The circuit checks the MSO's validity period **at T**, so what the window
+prevents is a holder choosing a T inside an expired credential's validity
+period: backdating past expiry. That is the whole of it.
+
+It does **nothing** about revocation, and tightening it does not help. A
+holder sends `proof_time = now` with every request, which is inside any
+window you configure, so a credential that has been revoked but has not
+expired keeps producing proofs this verifier accepts for as long as its
+MSO is valid — `proof_time_max_age_seconds` does not shorten that period
+by a second. **No credential-status check runs on this path at all.**
+
+Nor is the window replay protection: the nonce in the transcript is what
+binds a proof to one request.
 
 Only the exact form is accepted. A fractional second, a numeric offset, a
 lower-case `t` or `z`, or a date that does not exist are all refused —
