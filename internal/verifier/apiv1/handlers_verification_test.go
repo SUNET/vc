@@ -582,6 +582,13 @@ func createTestSDJWT(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any,
 // (disclosures not referenced in the _sd array). These should be ignored during validation.
 func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, decoys map[string]any, nonce, audience string) string {
 	t.Helper()
+	return createTestSDJWTWithKBClaims(t, key, claims, decoys, nonce, audience, nil)
+}
+
+// createTestSDJWTWithKBClaims is createTestSDJWTWithDecoys with extra claims
+// merged into the Key Binding JWT (transaction_data_hashes, amr, jti, ...).
+func createTestSDJWTWithKBClaims(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, decoys map[string]any, nonce, audience string, extraKB map[string]any) string {
+	t.Helper()
 
 	// Build selective disclosures: [salt, claim_name, value]
 	// and compute their hashes for the _sd array
@@ -616,10 +623,15 @@ func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[s
 		"y":   base64.RawURLEncoding.EncodeToString(keyY),
 	}
 
+	// "_vct" is a test-only override of the credential type, not a KB claim.
+	vct := "urn:test:credential"
+	if v, ok := extraKB["_vct"].(string); ok {
+		vct = v
+	}
 	issuerClaims := jwt.MapClaims{
 		"iss": "https://issuer.example.com",
 		"iat": time.Now().Unix(),
-		"vct": "urn:test:credential",
+		"vct": vct,
 		"_sd": sdHashes,
 		// The holder this credential was issued to. These fixtures use
 		// one key for issuer and holder, so naming it here is what makes
@@ -650,6 +662,11 @@ func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[s
 		// covers any presentation of the same credential, with whatever
 		// disclosures the sender picked.
 		"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:]),
+	}
+	for k, v := range extraKB {
+		if k != "_vct" {
+			kbClaims[k] = v
+		}
 	}
 	kbToken := jwt.NewWithClaims(jwt.SigningMethodES256, kbClaims)
 	kbToken.Header["typ"] = "kb+jwt"

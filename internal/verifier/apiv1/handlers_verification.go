@@ -224,6 +224,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	defaultAllowed := c.defaultTokenAllowed(authCtx, scopeQueryIDs, credentialScopes)
 
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
+	var answeredTransactionQueries []string
 
 	for _, scope := range credentialScopes {
 		vpTokens, err := c.vpTokensForScope(authCtx, scopeQueryIDs, defaultAllowed, vpResponse, scope)
@@ -293,6 +294,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 		}
 
+		// transaction_data: the entries bound to this credential query must be
+		// answered by an SD-JWT VC (EC TS12 v1.0.1 covers nothing else, and
+		// OpenID4VP's transaction_data_hashes is defined only for it here).
+		// Any other format could not have committed to the transaction, so
+		// it is refused rather than accepted without the check.
+		scopeQueryID := queryIDForScopeIn(scopeQueryIDs, scope)
+		if len(authCtx.TransactionData) > 0 {
+			bound, err := openid4vp.TransactionDataForCredential(authCtx.TransactionData, scopeQueryID)
+			if err != nil {
+				c.log.Error(err, "session transaction_data is unreadable", "scope", scope)
+				return nil, &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: "session transaction_data is unreadable"}
+			}
+			if len(bound) > 0 {
+				if format != FormatSDJWT {
+					c.log.Error(nil, "transaction_data answered by a format that cannot carry it", "scope", scope, "format", format)
+					return nil, &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: fmt.Sprintf("transaction_data requires an SD-JWT VC presentation for %q", scopeQueryID)}
+				}
+				answeredTransactionQueries = append(answeredTransactionQueries, scopeQueryID)
+			}
+		}
+
 		switch format {
 		case FormatSDJWT:
 			// SD-JWT: Use VPTokenValidator for format validation, then evaluateIssuerTrust for sig+trust
@@ -301,6 +323,11 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				ClientID:        authCtx.ClientID,
 				ValidateFormat:  false, // We do real signature verification in evaluateIssuerTrust
 				CheckRevocation: false,
+			}
+			if len(authCtx.TransactionData) > 0 {
+				validator.TransactionData = authCtx.TransactionData
+				validator.CredentialQueryID = scopeQueryID
+				validator.ResponseModes = authCtx.TransactionDataResponseModes
 			}
 
 			if err := validator.Validate(responseParams.VPToken); err != nil {
@@ -322,6 +349,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			if err != nil {
 				c.log.Error(err, "failed to parse sd-jwt credential", "scope", scope)
 				return nil, err
+			}
+
+			// A credential that answers a transaction_data-bound query must be
+			// of the type that query names: the amr and other TS12 claims are
+			// the wallet's own words, and nothing else ties them to an SCA
+			// attestation. Trust evaluation does not enforce the requested vct.
+			if slices.Contains(answeredTransactionQueries, scopeQueryID) {
+				if err := c.checkBoundCredentialType(authCtx, scopeQueryIDs, scope, parsed.Claims); err != nil {
+					c.log.Error(err, "credential does not match the transaction_data-bound query", "scope", scope)
+					return nil, err
+				}
+			}
+
+			// Last, now that the issuer and the credential are authenticated:
+			// record the jti. Doing it earlier would let a fabricated
+			// credential reserve chosen jti values in the shared cache.
+			if validator.PresentedJTI != "" {
+				if err := c.claimJTI(ctx, validator.PresentedJTI); err != nil {
+					c.log.Error(err, "jti not accepted", "scope", scope)
+					return nil, err
+				}
 			}
 
 			c.log.Debug("Parsed SD-JWT credential",
@@ -788,6 +836,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 					c.log.Info("combined presentation binding issues detected (warn mode)", "confidence", bindingResult.HighestConfidence, "err", bindingResult.Err())
 				}
 			}
+		}
+	}
+
+	// Every transaction_data entry must have been committed to by a credential
+	// that answered a query it references. An entry whose credential was not
+	// presented (an optional query the wallet skipped) has not been authorized.
+	if len(authCtx.TransactionData) > 0 {
+		uncovered, err := openid4vp.UncoveredTransactionData(authCtx.TransactionData, answeredTransactionQueries)
+		if err != nil || len(uncovered) > 0 {
+			c.log.Error(err, "transaction_data not covered by any presented credential", "uncovered", len(uncovered))
+			return nil, &openid4vp.ErrorResponse{ErrorCode: openid4vp.ErrorInvalidTransactionData, ErrorDescription: "transaction_data not authorized by any presented credential"}
 		}
 	}
 
