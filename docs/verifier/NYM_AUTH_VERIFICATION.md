@@ -234,8 +234,11 @@ else.
 at startup, where you can still do something about it. It is the same set
 of rules the shared conformance vectors state, so a preset that passes it
 is one the other implementations agree is satisfiable — with one deliberate
-exception: `known-offender-matching-psc` is refused here while no circuit
-in the allowlist can prove it.
+exception: `known-offender-matching-psc` is refused **whatever the allowlist
+says**. A psc is a commitment the holder already knows, and nothing yet
+specifies how a Verifier conveys one to a wallet, so a preset naming it
+cannot be sent even by a deployment that has the circuit. Adding one does
+not lift the refusal; a specified mechanism would.
 
 An age check is a second item in the same preset, not a second preset:
 
@@ -359,12 +362,19 @@ recommendations rather than protocol constants — the tolerance is yours —
 but a deployment that has not thought about it should behave the way other
 implementations assume.
 
-Without a window a holder could replay a proof made long ago, against a
-credential since revoked, or one made with a clock set forward. Outside it
-is **refused, never clamped**: verifying against a T the prover did not use
-cannot succeed, and would report the wrong reason when it failed. The
-refusal names the observed deviation and the limit, because the next
-question is always "by how much".
+Without a window a holder could replay a proof made long ago, or one made
+with a clock set forward. Outside it is **refused, never clamped**:
+verifying against a T the prover did not use cannot succeed, and would
+report the wrong reason when it failed. The refusal names the observed
+deviation and the limit, because the next question is always "by how much".
+
+What the window does **not** do is check credential status. The proof
+checks the MSO's validity period at T, and the window bounds how far T may
+be from now — so a credential that has been revoked but has not expired
+still produces a proof this verifier accepts. Bounding the age shortens
+the interval in which that is possible; it does not close it, and no
+revocation check runs on this path. Nor is the window replay protection:
+the nonce in the transcript is what binds a proof to one request.
 
 Only the exact form is accepted. A fractional second, a numeric offset, a
 lower-case `t` or `z`, or a date that does not exist are all refused —
@@ -420,16 +430,38 @@ takes a null reader-key thumbprint for exactly that case.
 | `the handover for this channel is pending shared vectors` | a delivery channel with no defined transcript |
 | `starts with neither` | `verifier_id` is not one of the two forms v0.4 defines |
 | `is the pre-v0.4 name` | configuration still says `circuit_zk` / `circuit_id_values` / `circuit_proof_system_values` |
-| `takes exactly 1` | `issuer_key_set` has more than one certificate for the Longfellow system |
-| `proof_time is ... in the future` / `... old` | the prover's clock is outside the tolerance window |
+| `takes exactly 1` | `issuer_key_set` carries more than the Document Signer certificate (both systems take exactly one) |
+| `is outside this verifier's window` | the prover's `proof_time` is beyond the skew or the max age; the detail names both limits |
 | `proof_time_form` / `proof_time_not_tdate` | `proof_time` is not the exact 20-byte tag-0 form |
-| `response refused: <reason_code>` | the presentation's shape; the code is the shared conformance vocabulary |
+| `zkp_req_*` / a matcher reason code | the presentation itself — see below, where these are **codes**, not message text |
 
-The last one is worth expanding: a refused `zkp_req` response names a
-**stable reason code**, not message text, because the Rust matcher, the
-Kotlin and Swift SDKs and this verifier all name the same failure the same
-way. If a wallet and this verifier disagree about a response, the code is
-what to compare across the two.
+The last row is a different kind of entry from the ones above it, and is
+worth expanding. The rows above are text you can grep a startup log for. A
+refused presentation is not text at all: it comes back to the wallet as
+HTTP 400 whose `title` is a **stable reason code** and whose `details` is
+the human sentence, and it is logged here at warn level with `scope=`,
+`code=` and `detail=` as separate structured fields, under a message
+naming the step that refused it (`zkp_req presentation refused`,
+`zkp_req proof_time refused`, `zkp_req proof did not verify`, ...). So
+grep the `code`, not the sentence — the sentence is free to be reworded
+and the code is not.
+
+The vocabulary is shared: this path's own codes are `zkp_req_no_presentation`,
+`zkp_req_proof_time_missing`, `zkp_req_proof_time_out_of_range`,
+`zkp_req_wrong_channel`, `zkp_req_issuer_key_set_empty`,
+`zkp_req_issuer_key_set_size`, `zkp_req_issuer_key_not_a_certificate`,
+`zkp_req_issuer_not_trusted`, `zkp_req_issuer_key_wrong_curve`,
+`zkp_req_issuer_key_not_ecdsa`, `zkp_req_proof_did_not_verify`,
+`zkp_req_no_pseudonym_for_handle` and `zkp_req_nothing_checked`, and a
+response refused on its **shape** carries the shared matcher's own reason
+code unchanged — the Rust matcher, the Kotlin and Swift SDKs and this
+verifier all name that failure the same way. If a wallet and this verifier
+disagree about a response, the code is what to compare across the two.
+
+A verifier that is misconfigured, or built without the `zknative` tag, is
+deliberately **not** in this vocabulary: it has not refused a presentation,
+it cannot judge one, so those stay 5xx and unclassified rather than telling
+a wallet author its presentation is bad when the fault is ours.
 
 ## What this does not do
 

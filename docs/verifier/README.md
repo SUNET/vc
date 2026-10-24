@@ -70,7 +70,7 @@ The verifier verifies credentials that were previously issued by VC issuers and 
 ✅ QR code generation  
 ✅ Deep link support  
 ✅ DCQL (Digital Credentials Query Language) support
-✅ `circuit_zk` nym_auth pseudonym proofs — needs the `zknative` build and a
+✅ `zkp_req` nym_auth pseudonym proofs — needs the `zknative` build and a
 PDP; see [NYM_AUTH_VERIFICATION.md](NYM_AUTH_VERIFICATION.md)
 
 ### Security Features
