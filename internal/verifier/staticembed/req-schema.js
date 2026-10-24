@@ -44,13 +44,13 @@ export const reqSchema = v.pipe(
                     item !== null &&
                     typeof item === "object" &&
                     !Array.isArray(item) &&
-                    typeof item.id === "string" &&
+                    typeof item.fn_id === "string" &&
                     typeof item.return === "string" &&
                     (item.params === undefined ||
                         (typeof item.params === "object" &&
                             item.params !== null &&
                             !Array.isArray(item.params))),
             ),
-        "req must be an array of {id, return, params?} items",
+        "req must be an array of {fn_id, return, params?} items",
     ),
 );

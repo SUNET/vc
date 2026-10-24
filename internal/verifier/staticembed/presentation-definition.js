@@ -6,7 +6,7 @@ import {
     getBestSupportedProtocol,
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
-import { groupPresets } from "./preset-helpers.js";
+import { dcqlCredentialFromPreset, groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
 import { reqSchema } from "./req-schema.js";
@@ -182,10 +182,16 @@ const dcqlQueryCredentialSchema = v.object({
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
-    // The same schema as the metadata one above, and the same reason:
-    // this is the query that is actually posted, so a parameter dropped
-    // here never reaches the wallet at all.
-    req: v.optional(reqSchema),
+    // _req, with the underscore, and the same schema as the metadata one
+    // above. This is the query that is actually POSTED, and CredentialQuery
+    // names the member "_req" (pkg/openid4vp/dcql.go) - the metadata
+    // endpoint's own "req" is a different name for the same list, on a
+    // different wire. Declaring "req" here let v.object strip the member on
+    // its way out, so a correctly configured preset posted a zkp_req query
+    // that asked for nothing - and such a query discloses nothing either,
+    // so the wallet had no reason to return anything at all, which reads as
+    // a wallet fault.
+    _req: v.optional(reqSchema),
 });
 
 const credentialSetQuerySchema = v.object({
@@ -657,13 +663,7 @@ Alpine.data("app", () => ({
 
         // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
         const dcqlInput = {
-            credentials: (preset.credentials || []).map((/** @type {any} */ cred) => {
-                /** @type {any} */
-                const c = { id: cred.id, format: cred.format, meta: cred.meta };
-                if (cred.claims) c.claims = cred.claims;
-                if (cred.req) c.req = cred.req;
-                return c;
-            }),
+            credentials: (preset.credentials || []).map(dcqlCredentialFromPreset),
         };
 
         const result = v.safeParse(dcqlQuerySchema, dcqlInput);
