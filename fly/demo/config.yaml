@@ -406,6 +406,7 @@ apigw:
                       hkdf:
                         secret_path: "/pki/nym_auth_seed.key"
                         inputs: [issuing_country, personal_administrative_number]
+                        bytes: 16
             pid_mdoc:
               required_claims:
                 eu.europa.ec.eudi.pid.1.birth_date: []
@@ -419,6 +420,7 @@ apigw:
                       hkdf:
                         secret_path: "/pki/nym_auth_seed.key"
                         inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
+                        bytes: 16
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-demo-apigw.fly.dev/token"

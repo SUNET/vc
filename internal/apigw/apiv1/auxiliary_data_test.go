@@ -20,11 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// nym_auth as the demo configures it: the opening is the seed
-// pkg/credential/seed derives from the presented identifiers, the issued
-// ssc is its SHA-256, and psc is the wallet's commitment when the wallet
-// sends one.
-func TestNymAuthAuxiliaryData(t *testing.T) {
+// With nym_auth as the example: the issuer derives ssc's opening from the
+// presented identifiers and writes its SHA-256, and writes psc as the
+// wallet sends it.
+func TestAuxiliaryData(t *testing.T) {
 	schema := &mdoc.MDDLSchema{Claims: map[string]mdoc.NamespaceClaims{"eu.europa.ec.eudi.nym_auth.1": {
 		"birth_date": {Mandatory: true, ValueType: "full-date"},
 		"ssc":        {Mandatory: true, ValueType: "bstr"},
@@ -61,7 +60,7 @@ func TestNymAuthAuxiliaryData(t *testing.T) {
 	}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 		Path:    ssc,
-		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: inputs}},
+		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: inputs, Bytes: 16}},
 	}}}
 
 	walletPSC := sha256.Sum256([]byte("the wallet's private seed"))
@@ -83,11 +82,11 @@ func TestNymAuthAuxiliaryData(t *testing.T) {
 	assert.Equal(t, ssc, toWallet[0].Path)
 	opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
 	require.NoError(t, err)
-	deriver, err := seed.NewDeriver(secret, seed.DefaultSeedBytes)
+	deriver, err := seed.NewDeriver(secret, 16)
 	require.NoError(t, err)
 	want, err := deriver.Seed(t.Context(), []string{"SE", "pan-200"}, "")
 	require.NoError(t, err)
-	assert.Equal(t, want, opening, "the opening is the seed seed_recover reproduces")
+	assert.Equal(t, want, opening, "the opening is the hkdf seed of the identifiers")
 	commitment := sha256.Sum256(opening)
 	assert.Equal(t, base64.StdEncoding.EncodeToString(commitment[:]), doc["ssc"], "the opening opens ssc")
 	assert.Equal(t, base64.StdEncoding.EncodeToString(walletPSC[:]), doc["psc"])

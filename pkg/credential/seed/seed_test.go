@@ -21,42 +21,37 @@ var testSecret = bytes.Repeat([]byte("s"), MinSecretBytes)
 
 func mustDeriver(t *testing.T) *Deriver {
 	t.Helper()
-	d, err := NewDeriver(testSecret, 0)
+	d, err := NewDeriver(testSecret, MinSeedBytes)
 	require.NoError(t, err)
 	return d
 }
 
 // The commitment is the only value in this package with a published
-// vector: the nym_auth circuit specification's seed/ssc pair. If Commit
+// vector: the nym_auth circuit specification's seed and commitment. If Commit
 // ever disagrees with it, every credential this issuer writes is one no
 // circuit can open.
 func TestCommitMatchesThePublishedVector(t *testing.T) {
 	seedValue, err := hex.DecodeString("4a8f9c1d2e3f4a5b6c7d8e9f0a1b2c3d")
 	require.NoError(t, err)
-	require.Len(t, seedValue, DefaultSeedBytes)
 
 	commitment, err := Commit(CommitSHA256, seedValue)
 	require.NoError(t, err)
 	assert.Equal(t,
 		"d424c7068cf26ed1a2c899d095f18b390f2f63897d704ed08c410a9368c345ae",
 		hex.EncodeToString(commitment))
-
-	// An unnamed function is the registered one, so a configuration that
-	// omits it is not a configuration that writes a different commitment.
-	defaulted, err := Commit("", seedValue)
-	require.NoError(t, err)
-	assert.Equal(t, commitment, defaulted)
 }
 
 // An unknown digest must not fall back. A commitment written under the
 // wrong function is one nothing can ever open, and it is signed before
 // anyone finds out.
 func TestCommitRefusesAnUnknownFunction(t *testing.T) {
-	_, err := Commit("sha3-256", bytes.Repeat([]byte("x"), DefaultSeedBytes))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown commitment function")
+	for _, fn := range []string{"", "sha3-256"} {
+		_, err := Commit(fn, bytes.Repeat([]byte("x"), MinSeedBytes))
+		require.Error(t, err, fn)
+		assert.Contains(t, err.Error(), "unknown commitment function", fn)
+	}
 
-	_, err = CommitmentBytes("sha3-256")
+	_, err := CommitmentBytes("sha3-256")
 	assert.Error(t, err, "and the length of a function that does not exist is not 32")
 
 	n, err := CommitmentBytes(CommitSHA256)
@@ -70,8 +65,8 @@ func TestCommitRefusesAnUnknownFunction(t *testing.T) {
 // the derivation is consistent with ITSELF and nothing more: changing the
 // label, the field order, the length-prefix width, the hash or the HKDF
 // parameters would leave every one of those tests passing while giving
-// every subject a new seed - and therefore a new pseudonym - with no copy
-// of the old ones anywhere, because nothing is stored.
+// every subject a new seed with no copy of the old ones anywhere, because
+// nothing is stored.
 //
 // These values were computed from the construction in Deriver.Seed's doc
 // comment by a separate implementation, not captured from this one. If
@@ -88,15 +83,15 @@ func TestDerivationGoldenVectors(t *testing.T) {
 		commitment string
 	}{
 		{
-			name:       "the default length, no context",
-			seedBytes:  0, // DefaultSeedBytes
+			name:       "16 bytes, no context",
+			seedBytes:  16,
 			subject:    "198001011234",
 			seed:       "19304fa467cdcfd8ee8ccad8524fbb6a",
 			commitment: "5914935f1d59f0ed167cf4cb4a260fb5169d782c9cf65d16df5dd204d9bda37f",
 		},
 		{
 			name:       "a context, which must change everything",
-			seedBytes:  0,
+			seedBytes:  16,
 			context:    "population-a",
 			subject:    "198001011234",
 			seed:       "0fad2375d7ad6975b276e46b9ea900e9",
@@ -128,13 +123,13 @@ func TestDerivationGoldenVectors(t *testing.T) {
 
 // One subject, one seed - the property the whole mechanism rests on. A
 // seed that varied per call, per credential type or per format would make
-// a pseudonym unrepeatable and remapping impossible.
+// anything derived from it unrepeatable.
 func TestSeedIsStablePerSubject(t *testing.T) {
 	d := mustDeriver(t)
 
 	first, err := d.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
-	require.Len(t, first, DefaultSeedBytes)
+	require.Len(t, first, MinSeedBytes)
 
 	for range 5 {
 		again, err := d.Seed(t.Context(), []string{"subject-1"}, "")
@@ -144,7 +139,7 @@ func TestSeedIsStablePerSubject(t *testing.T) {
 
 	// A second Deriver over the same secret is the same deployment after a
 	// restart, and must agree.
-	other, err := NewDeriver(testSecret, 0)
+	other, err := NewDeriver(testSecret, MinSeedBytes)
 	require.NoError(t, err)
 	restarted, err := other.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
@@ -174,7 +169,7 @@ func TestSeedSeparatesWhatItShould(t *testing.T) {
 	record("subject-1 in context b", "subject-1", "b")
 
 	// A different secret is a different deployment.
-	otherSecret, err := NewDeriver(bytes.Repeat([]byte("t"), MinSecretBytes), 0)
+	otherSecret, err := NewDeriver(bytes.Repeat([]byte("t"), MinSecretBytes), MinSeedBytes)
 	require.NoError(t, err)
 	fromOther, err := otherSecret.Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
@@ -200,7 +195,7 @@ func TestContextAndSubjectCannotBeConfused(t *testing.T) {
 
 // An empty subject identifier is the case where a deployment's identity
 // resolution has failed. Deriving over "" would give every such subject
-// one shared seed, and therefore one shared pseudonym.
+// one shared seed.
 func TestSeedRefusesAnEmptySubject(t *testing.T) {
 	d := mustDeriver(t)
 	_, err := d.Seed(t.Context(), []string{""}, "")
@@ -216,7 +211,7 @@ func TestNewDeriverRefusesAnUnusableSecret(t *testing.T) {
 		{name: "one byte short", secret: bytes.Repeat([]byte("s"), MinSecretBytes-1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewDeriver(tc.secret, 0)
+			_, err := NewDeriver(tc.secret, MinSeedBytes)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "shorter than")
 			assert.NotContains(t, err.Error(), fmt.Sprint(len(tc.secret)),
@@ -226,10 +221,6 @@ func TestNewDeriverRefusesAnUnusableSecret(t *testing.T) {
 }
 
 func TestNewDeriverSeedLength(t *testing.T) {
-	d, err := NewDeriver(testSecret, 0)
-	require.NoError(t, err)
-	assert.Equal(t, DefaultSeedBytes, d.SeedBytes(), "0 means the default")
-
 	d32, err := NewDeriver(testSecret, 32)
 	require.NoError(t, err)
 	s, err := d32.Seed(t.Context(), []string{"subject-1"}, "")
@@ -244,10 +235,10 @@ func TestNewDeriverSeedLength(t *testing.T) {
 	// derivation's is a trap for whoever reads this next.
 	short, err := mustDeriver(t).Seed(t.Context(), []string{"subject-1"}, "")
 	require.NoError(t, err)
-	assert.NotEqual(t, short, s[:DefaultSeedBytes],
+	assert.NotEqual(t, short, s[:MinSeedBytes],
 		"the declared seed length must be part of the derivation, not just its output size")
 
-	for _, bad := range []int{-1, MaxSeedBytes + 1} {
+	for _, bad := range []int{-1, 0, MaxSeedBytes + 1} {
 		_, err := NewDeriver(testSecret, bad)
 		assert.Error(t, err, "seed length %d must be refused", bad)
 	}
@@ -255,13 +246,13 @@ func TestNewDeriverSeedLength(t *testing.T) {
 
 // A seed shorter than the minimum is refused, however strong the secret.
 //
-// The seed is the OPENING of a published commitment, ssc = SHA256(seed),
-// so its length is a search space and not a key length: at seed_bytes 1
-// there are 256 possible seeds, and anyone who sees the commitment tries
-// all of them. The same ceiling limits how many subjects can hold
-// distinct seeds at all, so past 256 subjects two people share a
-// pseudonym. Neither consequence depends on the derivation secret, which
-// is why a 32-byte secret does not rescue a 1-byte seed.
+// The seed is the OPENING of a published commitment, so its length is a
+// search space and not a key length: at seed_bytes 1 there are 256
+// possible seeds, and anyone who sees the commitment tries all of them.
+// The same ceiling limits how many subjects can hold distinct seeds at
+// all, so past 256 subjects two subjects share a seed. Neither consequence
+// depends on the derivation secret, which is why a 32-byte secret does not
+// rescue a 1-byte seed.
 func TestShortSeedsAreRefused(t *testing.T) {
 	for _, bad := range []int{1, 2, 8, MinSeedBytes - 1} {
 		_, err := NewDeriver(testSecret, bad)
@@ -269,20 +260,12 @@ func TestShortSeedsAreRefused(t *testing.T) {
 		assert.Contains(t, err.Error(), "outside")
 	}
 
-	// The floor is the default, so nothing that took the default is
-	// refused by it.
-	require.Equal(t, DefaultSeedBytes, MinSeedBytes,
-		"raising the floor above the default would refuse the rulebook's own length")
-	for _, ok := range []int{0, MinSeedBytes, 32, MaxSeedBytes} {
+	for _, ok := range []int{MinSeedBytes, 32, MaxSeedBytes} {
 		d, err := NewDeriver(testSecret, ok)
 		require.NoErrorf(t, err, "seed length %d must still be accepted", ok)
 		got, err := d.Seed(t.Context(), []string{"subject-1"}, "")
 		require.NoError(t, err)
-		want := ok
-		if ok == 0 {
-			want = DefaultSeedBytes
-		}
-		assert.Len(t, got, want)
+		assert.Len(t, got, ok)
 	}
 }
 
@@ -290,7 +273,7 @@ func TestShortSeedsAreRefused(t *testing.T) {
 // cannot silently change every subject's seed afterwards.
 func TestDeriverOwnsItsSecret(t *testing.T) {
 	buf := bytes.Repeat([]byte("s"), MinSecretBytes)
-	d, err := NewDeriver(buf, 0)
+	d, err := NewDeriver(buf, MinSeedBytes)
 	require.NoError(t, err)
 
 	before, err := d.Seed(t.Context(), []string{"subject-1"}, "")
@@ -359,8 +342,7 @@ var _ Source = (*Deriver)(nil)
 // The length prefix is what separates the fields, so a length it cannot
 // hold stops separating them: uint16(90465) is 24929, and
 // ("", "a"x65536+"b"x24929) encoded byte for byte like
-// ("a"x65536, "b"x24929). Same secret, same seed, different subjects -
-// and for nym_auth that is the same pseudonym for two people.
+// ("a"x65536, "b"x24929). Same secret, same seed, different subjects.
 func TestOverlongDerivationFieldsAreRefusedNotTruncated(t *testing.T) {
 	secret := make([]byte, 32)
 	for i := range secret {

@@ -32,8 +32,8 @@ type OpeningArgs struct {
 	Random *RandomOpeningArgs `yaml:"random,omitempty"`
 }
 
-// HKDFOpeningArgs derives a 16-byte opening with HKDF-SHA256 over the
-// ordered input claims.
+// HKDFOpeningArgs derives the opening with HKDF-SHA256 over the ordered
+// input claims.
 type HKDFOpeningArgs struct {
 	// SecretPath is a file holding the secret, base64url, decoding to at
 	// least 32 bytes.
@@ -41,12 +41,14 @@ type HKDFOpeningArgs struct {
 	// Inputs are claims of the source data, each a non-empty string.
 	// Their order is part of the derivation.
 	Inputs []string `yaml:"inputs" validate:"required,min=1,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
+	// Bytes is the opening length.
+	Bytes int `yaml:"bytes" validate:"required,min=16,max=64" doc_example:"16"`
 }
 
 // RandomOpeningArgs draws the opening from crypto/rand.
 type RandomOpeningArgs struct {
-	// Bytes is the opening length. 0 means 16.
-	Bytes int `yaml:"bytes,omitempty" validate:"omitempty,min=16,max=64" doc_example:"16"`
+	// Bytes is the opening length.
+	Bytes int `yaml:"bytes" validate:"required,min=16,max=64" doc_example:"16"`
 }
 
 // Apply implements Applier. The derivation pipeline skips hash_commitment,
@@ -106,7 +108,7 @@ func (a *HKDFOpeningArgs) Deriver() (*seed.Deriver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the opening secret in %s is not base64url: %w", a.SecretPath, err)
 	}
-	return seed.NewDeriver(secret, seed.DefaultSeedBytes)
+	return seed.NewDeriver(secret, a.Bytes)
 }
 
 func (a *HKDFOpeningArgs) open(ctx context.Context, claims map[string]any) ([]byte, error) {
@@ -129,11 +131,7 @@ func (a *HKDFOpeningArgs) open(ctx context.Context, claims map[string]any) ([]by
 }
 
 func (a *RandomOpeningArgs) open(context.Context, map[string]any) ([]byte, error) {
-	n := a.Bytes
-	if n == 0 {
-		n = seed.DefaultSeedBytes
-	}
-	opening := make([]byte, n)
+	opening := make([]byte, a.Bytes)
 	if _, err := rand.Read(opening); err != nil {
 		return nil, err
 	}

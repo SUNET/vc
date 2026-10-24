@@ -3,14 +3,10 @@
 //
 // The shape is the same wherever it is used: a subject has one seed; the
 // credential carries commit(seed) and never the seed. Whoever holds the
-// seed can recompute anything derived from it later - which is what makes
-// a pseudonym built on it remappable to a person, and is the reason the
+// seed can recompute anything derived from it later, which is why the
 // seed is worth as much care as a signing key.
 //
-// Nothing here knows about a credential type or a credential format. The
-// first consumer is the EUDI nym_auth attestation, whose `ssc` element is
-// SHA-256 over a 16-byte seed, but that is a configuration of this package
-// and not a property of it.
+// Nothing here knows about a credential type or a credential format.
 package seed
 
 import (
@@ -28,30 +24,23 @@ import (
 //
 // A derivation secret is not rotatable in any useful sense - every
 // commitment ever written under it is a function of it, so replacing it
-// repseudonymises everyone - which makes "long enough" a decision taken
+// changes every subject's seed - which makes "long enough" a decision taken
 // once and never revisited. 32 bytes is the output size of the hash the
 // derivation runs on; less than that would cap the entropy of every seed
 // below the construction's own strength.
 const MinSecretBytes = 32
 
-// DefaultSeedBytes is the seed length a consumer gets without saying.
-// nym_auth's 16 bytes; a different consumer may ask for more.
-const DefaultSeedBytes = 16
-
 // MinSeedBytes is the shortest seed this package will produce.
 //
 // The seed is the opening of a commitment that is published in a
-// credential: ssc = SHA256(seed). A short seed is therefore not a short
-// key but a small SEARCH SPACE - with seed_bytes 1 there are 256 possible
-// openings, so anyone holding the commitment recovers the seed by trying
-// them, and the derivation secret's strength is irrelevant to that. The
-// same length also bounds how many distinct subjects can have distinct
-// seeds at all: 256 subjects exhaust it, after which two people share a
-// pseudonym.
+// credential. A short seed is therefore not a short key but a small SEARCH
+// SPACE - with seed_bytes 1 there are 256 possible openings, so anyone
+// holding the commitment recovers the seed by trying them, and the
+// derivation secret's strength is irrelevant to that. The same length also
+// bounds how many distinct subjects can have distinct seeds at all: 256
+// subjects exhaust it, after which two subjects share a seed.
 //
-// 16 bytes is the floor because it is also DefaultSeedBytes - the length
-// the nym_auth rulebook specifies - so this refuses only configurations
-// that are weaker than the default, never one that accepted the default.
+// 16 bytes is 128 bits, the strength of the construction's other parts.
 const MinSeedBytes = 16
 
 // MaxSeedBytes bounds what a configuration may ask for. HKDF-SHA256 can
@@ -61,14 +50,14 @@ const MaxSeedBytes = 64
 
 // derivationLabel separates this use of HKDF from any other, and carries a
 // version so that a change to the construction has to be a deliberate new
-// label rather than a silent repseudonymisation of everyone.
+// label rather than a silent change of every subject's seed.
 const derivationLabel = "vc/seed/v1"
 
 // ErrNoSubject is returned for an empty subject identifier.
 //
 // Deriving over "" would give every subject without a resolvable
-// identifier the same seed, and therefore the same pseudonym - the exact
-// opposite of what the identifier is for. It is an error, never a default.
+// identifier the same seed - the exact opposite of what the identifier is
+// for. It is an error, never a default.
 var ErrNoSubject = errors.New("seed: subject identifier is empty")
 
 // Source yields a subject's seed. One subject, one seed: the same
@@ -105,16 +94,12 @@ type Deriver struct {
 type secretKey struct{ bytes []byte }
 
 // NewDeriver returns a Deriver over secret, producing seeds of seedBytes.
-// Pass 0 for DefaultSeedBytes.
 func NewDeriver(secret []byte, seedBytes int) (*Deriver, error) {
 	if len(secret) < MinSecretBytes {
 		// Deliberately does not report the length it got: this runs at
 		// startup, where the error reaches a log, and the length of a
 		// secret is information about the secret.
 		return nil, fmt.Errorf("seed: derivation secret is shorter than the %d-byte minimum", MinSecretBytes)
-	}
-	if seedBytes == 0 {
-		seedBytes = DefaultSeedBytes
 	}
 	if seedBytes < MinSeedBytes || seedBytes > MaxSeedBytes {
 		return nil, fmt.Errorf("seed: seed length %d is outside %d..%d", seedBytes, MinSeedBytes, MaxSeedBytes)
@@ -135,9 +120,9 @@ func NewDeriver(secret []byte, seedBytes int) (*Deriver, error) {
 // national personal number needs its country, a document number needs its
 // scheme. Every entry must be an IMMUTABLE identifier of the subject.
 // This is not a place for attributes - a birth date corrected, or a name
-// changed after marriage, would derive a new seed and therefore a new
-// pseudonym for the same person, which is exactly what the capability
-// exists to prevent. A changed identifier IS a new subject here.
+// changed after marriage, would derive a new seed for the same subject,
+// which is exactly what the derivation exists to prevent. A changed
+// identifier IS a new subject here.
 //
 // context_ separates populations that must not share seeds. It is empty in
 // the ordinary case, because a subject has ONE seed: two credential types
@@ -289,7 +274,7 @@ func Commit(fn string, seedValue []byte) ([]byte, error) {
 		return nil, errors.New("seed: cannot commit to an empty seed")
 	}
 	switch fn {
-	case "", CommitSHA256:
+	case CommitSHA256:
 		sum := sha256.Sum256(seedValue)
 		return sum[:], nil
 	default:
@@ -305,7 +290,7 @@ const CommitSHA256 = "sha-256"
 // commitment, or one arriving from a data source - without computing one.
 func CommitmentBytes(fn string) (int, error) {
 	switch fn {
-	case "", CommitSHA256:
+	case CommitSHA256:
 		return sha256.Size, nil
 	default:
 		return 0, fmt.Errorf("seed: unknown commitment function %q", fn)

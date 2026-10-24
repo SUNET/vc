@@ -778,20 +778,21 @@ is set.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening.hkdf`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening.hkdf`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening.hkdf`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening.hkdf`
 
-ordered input claims.
+input claims.
 
 | Field         | Type       | Description                                                                                | Example                                                 | Default | Required |
 | ------------- | ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------- | -------- |
 | `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                         | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
 | `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
+| `bytes`       | `int`      | Opening length.                                                                            | `16`                                                    | -       | Yes      |
 
 ### `random`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening.random`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening.random`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening.random`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening.random`
 
-| Field   | Type  | Description                 | Example | Default | Required |
-| ------- | ----- | --------------------------- | ------- | ------- | -------- |
-| `bytes` | `int` | Opening length. 0 means 16. | `16`    | -       | No       |
+| Field   | Type  | Description     | Example | Default | Required |
+| ------- | ----- | --------------- | ------- | ------- | -------- |
+| `bytes` | `int` | Opening length. | `16`    | -       | Yes      |
 
 ### `import`
 

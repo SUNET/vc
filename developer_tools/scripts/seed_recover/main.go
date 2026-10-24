@@ -40,6 +40,7 @@ func main() {
 func run() error {
 	var (
 		secretPath      = flag.String("secret-path", "", "the secret_path of the hkdf opening (required)")
+		openingBytes    = flag.Int("bytes", 0, "the bytes of the hkdf opening (required)")
 		subjects        subjectList
 		pseudonymConfig = flag.String("pseudonym-config", "", "nym_auth pseudonym configuration to compute, e.g. known-offender-matching-ssc")
 		verifierID      = flag.String("verifier-id", "", "the verifier_id EXACTLY as the Verifier publishes it: bare (verifier.example) for an x509_san_dns Verifier, or semantic_id:<identifier> for a semantic one - never the prefixed client_id")
@@ -67,7 +68,7 @@ func run() error {
 		return err
 	}
 
-	deriver, err := (&primitives.HKDFOpeningArgs{SecretPath: *secretPath}).Deriver()
+	deriver, err := (&primitives.HKDFOpeningArgs{SecretPath: *secretPath, Bytes: *openingBytes}).Deriver()
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func run() error {
 		return err
 	}
 
-	commitment, err := seed.Commit("", seedValue)
+	commitment, err := seed.Commit(seed.CommitSHA256, seedValue)
 	if err != nil {
 		return err
 	}

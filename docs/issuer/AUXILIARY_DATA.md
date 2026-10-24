@@ -10,8 +10,9 @@ sirosfoundation/nym_auth_rulebook) with the wallet:
 - a `to_issuer` `hash_commitment` puts the commitment the wallet sends in
   its key proofs into the credential.
 
-The EUDI `nym_auth` attestation uses both: `ssc` commits to an opening the
-issuer derives, `psc` to a secret the wallet holds.
+The examples configure the EUDI `nym_auth` attestation, which uses both:
+`ssc` commits to an opening the issuer derives, `psc` to a secret the
+wallet holds.
 
 ## Configuration
 
@@ -58,6 +59,7 @@ apigw:
                       hkdf:
                         secret_path: /pki/nym_auth_seed.key
                         inputs: [issuing_country, personal_administrative_number]
+                        bytes: 16
             pid_mdoc:
               required_claims:
                 eu.europa.ec.eudi.pid.1.birth_date: []
@@ -71,6 +73,7 @@ apigw:
                       hkdf:
                         secret_path: /pki/nym_auth_seed.key
                         inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
+                        bytes: 16
 ```
 
 A `hash_commitment` derivation reads the claims of the source data: the
@@ -93,12 +96,16 @@ proof, where `auxiliary_data` is a property of the Verifiable Presentation
 `opening` sets one of:
 
 - `hkdf` derives the opening from a secret and the ordered `inputs`.
-- `random` draws `bytes` random bytes (default 16).
+- `random` draws random bytes.
+
+Both take `bytes`, the opening length the credential type defines, from 16
+to 64.
 
 ```
-opening = HKDF-SHA256(secret, info = lp("vc/seed/v1") || lp(16)
+opening = HKDF-SHA256(secret, info = lp("vc/seed/v1") || lp(bytes)
                                      || lp("")
-                                     || lp(input_1) || ... || lp(input_n))
+                                     || lp(input_1) || ... || lp(input_n),
+                      length = bytes)
 commitment = SHA-256(opening)
 ```
 
@@ -111,18 +118,17 @@ produces one. `create_pki.sh` writes one to `developer_tools/pki`, and the
 Fly deploy provisions one per environment as the `NYM_AUTH_SEED` secret.
 
 **Back the secret up, and keep it.** Every opening this deployment issues
-is a function of it. A new secret gives every person a new opening, a new
-commitment and new pseudonyms, and the lost secret takes the ability to
-reproduce any earlier opening with it.
+is a function of it. A new secret gives every subject a new opening and a
+new commitment, and the lost secret takes the ability to reproduce any
+earlier opening with it.
 
-## Who can link a pseudonym to a person
+## Who can reproduce an opening
 
-Whoever holds the secret. Known-offender matching and account recovery are
-built on that, and it is also the privacy cost: the secret belongs in a
-dedicated file or secret, restricted to the issuer, and backed up where it
-survives the loss of the host.
+Whoever holds the secret reproduces the opening of any subject from its
+identifiers. The secret belongs in a dedicated file or secret, restricted
+to the issuer, and backed up where it survives the loss of the host.
 
-Every credential issued to a person carries the same commitment. It stays
+Every credential issued to a subject carries the same commitment. It stays
 hidden when a proof is made over it, and it is an equality marker for
 anyone who sees two issued credentials in the clear.
 
@@ -134,7 +140,7 @@ pseudonym a Verifier reported, from the secret of the `hkdf` opening:
 ```
 make build-seed-recover
 
-./bin/seed_recover -secret-path /pki/nym_auth_seed.key \
+./bin/seed_recover -secret-path /pki/nym_auth_seed.key -bytes 16 \
     -subject SE -subject pan-100 \
     -pseudonym-config known-offender-matching-ssc \
     -verifier-id verifier.example \
