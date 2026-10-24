@@ -77,7 +77,7 @@ func (c *Client) verifyCircuitZkPresentation(
 		if err != nil {
 			return nil, err
 		}
-		native, err := c.circuitZkVerifier(ctx, config)
+		native, err := c.circuitZkVerifier(ctx, presentation.SystemID, config)
 		if err != nil {
 			return nil, err
 		}
@@ -135,28 +135,35 @@ func circuitZkConfigOf(item openid4vp.ReqItem) (string, error) {
 	return config, nil
 }
 
-// circuitZkVerifier returns a loaded verifier for a configuration,
-// loading it once.
+// circuitZkVerifier returns a loaded verifier for a proof system and
+// configuration, loading it once.
 //
 // Loading is the expensive step - about 0.15 s and a megabyte of
 // artifact - and the handle holds no interior mutability, so one per
-// configuration is reused across presentations and goroutines.
-func (c *Client) circuitZkVerifier(ctx context.Context, config string) (*verifier.NativeVerifier, error) {
+// build is reused across presentations and goroutines.
+//
+// systemID is the system the PRESENTATION states, already checked
+// against the ones this request offered. It selects the build beside
+// the configuration, and the two together are what the allowlist is
+// keyed by - a verifier may allow both Longfellow and Vega for one
+// configuration, and they are different artifacts.
+func (c *Client) circuitZkVerifier(ctx context.Context, systemID, config string) (*verifier.NativeVerifier, error) {
 	c.nymAuthMu.Lock()
 	defer c.nymAuthMu.Unlock()
 
-	if loaded, ok := c.nymAuthVerifiers[config]; ok {
+	key := nymAuthVerifierKey{systemID: systemID, config: config}
+	if loaded, ok := c.nymAuthVerifiers[key]; ok {
 		return loaded, nil
 	}
 	if c.nymAuthCircuits == nil {
 		return nil, fmt.Errorf("zkp_req: verifier.nym_auth is not enabled")
 	}
 
-	entry, err := c.nymAuthCircuits.Entry(config)
+	entry, err := c.nymAuthCircuits.Entry(systemID, config)
 	if err != nil {
 		return nil, err
 	}
-	artifact, err := c.nymAuthCircuits.Artifact(ctx, config)
+	artifact, err := c.nymAuthCircuits.Artifact(ctx, systemID, config)
 	if err != nil {
 		return nil, err
 	}
@@ -168,14 +175,14 @@ func (c *Client) circuitZkVerifier(ctx context.Context, config string) (*verifie
 		SigCircuitID:  entry.SigCircuitID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("zkp_req: loading the %q circuit: %w", config, err)
+		return nil, fmt.Errorf("zkp_req: loading the %q %q circuit: %w", systemID, config, err)
 	}
 
 	if c.nymAuthVerifiers == nil {
-		c.nymAuthVerifiers = map[string]*verifier.NativeVerifier{}
+		c.nymAuthVerifiers = map[nymAuthVerifierKey]*verifier.NativeVerifier{}
 	}
-	c.nymAuthVerifiers[config] = native
-	c.log.Info("Loaded a nym_auth circuit", "config", config,
+	c.nymAuthVerifiers[key] = native
+	c.log.Info("Loaded a nym_auth circuit", "system_id", systemID, "config", config,
 		"hash_circuit_id", entry.HashCircuitID, "artifact_bytes", entry.Bytes)
 	return native, nil
 }
