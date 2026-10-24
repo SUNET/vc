@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
+	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
 )
@@ -27,7 +31,16 @@ type CredentialQuery struct {
 	Format string `json:"format" yaml:"format" validate:"required"`
 
 	// Multiple OPTIONAL. A boolean which indicates whether multiple Credentials can be returned for this Credential Query. If omitted, the default value is false.
-	Multiple bool `json:"multiple,omitempty" yaml:"multiple,omitempty"`
+	//
+	// A POINTER, for the same reason RequireCryptographicHolderBinding
+	// below is one: with a plain bool, omitempty cannot tell an absent
+	// member from an explicit false, so `"multiple": false` - an
+	// ordinary, valid query - did not encode back to what arrived and
+	// was kept as Raw. That is not a harmless detour: a raw query is
+	// emitted from its original bytes, so augmentDCQLFromVCTM's rewrite
+	// of the shadow Claims was silently discarded and the request went
+	// out with the un-augmented paths.
+	Multiple *bool `json:"multiple,omitempty" yaml:"multiple,omitempty"`
 
 	// Meta REQUIRED. An object defining additional properties requested by the Verifier that apply to the metadata and validity data of the Credential. The properties of this object are defined per Credential Format. Examples of those are in Appendix B.3.5 and Appendix B.2.3. If empty, no specific constraints are placed on the metadata or validity of the requested Credential.
 	Meta MetaQuery `json:"meta" yaml:"meta" validate:"required"`
@@ -43,6 +56,880 @@ type CredentialQuery struct {
 
 	// ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers for elements in claims that specifies which combinations of claims for the Credential are requested. The rules for selecting claims to send are defined in Section 6.4.1.
 	ClaimSet [][]string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required,min=1,dive,required"`
+
+	// Req is the circuit_zk format's list of requested calculations.
+	//
+	// It replaces Claims rather than accompanying it: a circuit_zk
+	// presentation discloses no issuer-signed attribute at all, so every
+	// value a Verifier wants is the output of a function named here. A
+	// query carrying both is one the planner rejects - which this does
+	// not prevent, because sending it is how a wallet gets tested.
+	Req []ReqItem `json:"_req,omitempty" yaml:"_req,omitempty"`
+
+	// Extra carries members this build does not know about, flattened
+	// alongside the known ones.
+	//
+	// The request shape is moving - the nym_auth rulebook, OpenID4VP and
+	// the DC API all - and wallets of several generations will be in the
+	// field at once. Without somewhere to put a member this code has never
+	// heard of, talking to any of them means waiting for a release here.
+	Extra map[string]any `json:"-" yaml:"-"`
+
+	// Raw replaces this query entirely: when set, it is emitted as this
+	// JSON VALUE and every other modelled member is ignored on the wire.
+	//
+	// The value, not the bytes. encoding/json compacts and HTML-escapes
+	// whatever a MarshalJSON returns, so an operator's whitespace is
+	// dropped and a & inside a string is written \u0026 - which no
+	// conformant wallet can tell apart from what was configured, and
+	// which nothing here can prevent short of re-implementing the
+	// request-object encoder. What IS guaranteed is that every member,
+	// its nesting, and every value survives unchanged, including members
+	// this build has never heard of and numeric literals it would
+	// otherwise reformat.
+	//
+	// Extra covers a shape that ADDS members. This covers one that changes
+	// the type of a member already modelled - the rulebook's WIP example
+	// makes "claims" an object where DCQL has an array, and a future
+	// generation could do the same to "_req" or "meta". A per-member
+	// override for each of those is a field this struct grows every time a
+	// specification moves; one raw escape hatch covers all of them and
+	// needs no release here.
+	//
+	// It is deliberately all-or-nothing. A half-raw query would leave an
+	// operator guessing which of the two sources a given member came from.
+	Raw json.RawMessage `json:"-" yaml:"-"`
+}
+
+// MarshalYAML flattens Extra alongside the known members, so a query read
+// from configuration can be written back out whole.
+func (q CredentialQuery) MarshalYAML() (any, error) {
+	// Raw is tagged yaml:"-", so the bridge below would emit only the
+	// modelled shadow - a DIFFERENT query, missing whatever made these
+	// bytes raw in the first place, and missing it silently.
+	if q.Raw != nil {
+		if q.Extra != nil {
+			return nil, fmt.Errorf("credential query: raw and extra are both set, and raw would discard extra")
+		}
+		if !json.Valid(q.Raw) {
+			return nil, fmt.Errorf("credential query: raw is not valid JSON")
+		}
+		// A duplicate member has no YAML representation that keeps both.
+		// This path decodes the bytes to a tree, which collapses them to
+		// the last value - so writing the configuration back out would
+		// emit a DIFFERENT request, and the whole reason such a query is
+		// carried raw is that it must not change. Refused rather than
+		// quietly reduced; the JSON path still carries it.
+		if hasDuplicateMembers(q.Raw) {
+			return nil, fmt.Errorf("credential query: this query names a member more than once, which YAML cannot write without dropping one")
+		}
+		var tree any
+		if err := decodeExact(q.Raw, &tree); err != nil {
+			return nil, fmt.Errorf("credential query: %w", err)
+		}
+		// decodeExact keeps numbers as their literals; this refuses the
+		// ones yaml.v2 would round on the way out, rather than writing a
+		// different number than the one configured.
+		normalised, err := checkYAMLRendersNumbersExactly(tree, "credential query", nil)
+		if err != nil {
+			return nil, err
+		}
+		return normalised, nil
+	}
+	type plain CredentialQuery
+	encoded, err := json.Marshal(plain(q))
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := decodeExact(encoded, &m); err != nil {
+		return nil, err
+	}
+	return mergeExtraYAML(m, q.Extra, declaredJSONKeys(reflect.TypeOf(CredentialQuery{})), "credential query")
+}
+
+// UnmarshalYAML captures every member other than the modelled ones.
+//
+// Without it a presentation request template - which pkg/configuration
+// loads from YAML into an openid4vp.DCQL - could not carry a member this
+// build does not model, which is the whole purpose of Extra.
+//
+// The known members go through a methodless alias so yaml.v2 applies the
+// struct tags and reports a wrong type itself, rather than this coercing
+// one. See the note above ReqItem.UnmarshalYAML for why nothing here
+// passes through JSON on the way.
+func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseDuplicateYAMLKeys(unmarshal, "credential query"); err != nil {
+		return err
+	}
+	type plain CredentialQuery
+	var known plain
+	if err := unmarshal(&known); err != nil {
+		// Same fallback as the JSON decode, for the same reason: a shape
+		// the typed model cannot hold - claims as a mapping, say - is
+		// kept rather than refused. Without it this type would refuse to
+		// read back a query it had just written, since MarshalYAML above
+		// emits exactly such a shape.
+		raw, rawErr := rawFromYAML(unmarshal)
+		if rawErr != nil {
+			return fmt.Errorf("credential query: %w", err)
+		}
+		// On the NORMALISED bytes, which is what will be emitted and
+		// what a wallet will read. A template is as capable of naming a
+		// constraint twice, or in the wrong case, as a JSON request is.
+		if checkErr := checkRawConstraints(raw); checkErr != nil {
+			return checkErr
+		}
+		fallback := CredentialQuery{Raw: raw}
+		if _, invalid := fallback.adoptRawShadowReporting(); len(invalid) > 0 {
+			// A member of the right JSON kind that the model still
+			// rejects is an invalid query, not an unmodelled one. See the
+			// JSON decode.
+			return fmt.Errorf("credential query: %w", err)
+		}
+		*q = fallback
+		return nil
+	}
+	*q = CredentialQuery(known)
+
+	extra, err := yamlExtra(unmarshal, "credential query",
+		"id", "format", "multiple", "meta", "trusted_authorities",
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "_req")
+	if err != nil {
+		return err
+	}
+	q.Extra = extra
+
+	// The same question the JSON decode asks, and for the same reason:
+	// did it decode, or did it keep everything? A template carrying
+	// `req: []`, an item with no `id`, or `params: null` decodes into zero
+	// values that are then re-emitted with members added or removed - and
+	// those are exactly the negative requests an operator configures this
+	// verifier to send.
+	//
+	// Compared on SHAPE rather than value, which is the one difference
+	// from the JSON path. yaml.v2 coerces a scalar to the field's type -
+	// `id: 7` becomes "7" - for every configuration struct in this
+	// repository, and that policy is deliberate; treating it as loss here
+	// would send every template with a numeric-looking scalar down the raw
+	// path and quietly reverse it. Presence, absence and nesting are what
+	// the typed model changes, and what this catches.
+	original, rawErr := rawFromYAML(unmarshal)
+	if rawErr != nil {
+		return rawErr
+	}
+	reencoded, encErr := json.Marshal(*q)
+	if encErr != nil {
+		return encErr
+	}
+	if !jsonShapeEquivalent(original, reencoded) {
+		// The second YAML route to Raw, and the same guard. Missing it
+		// here was the whole of the first fix's incompleteness: a
+		// template with a case-aliased constraint takes THIS path, not
+		// the decode-failure one above.
+		if err := checkRawConstraints(original); err != nil {
+			return err
+		}
+		fallback := CredentialQuery{Raw: original}
+		fallback.adoptRawShadow()
+		*q = fallback
+	}
+	return nil
+}
+
+// jsonShapeEquivalent reports whether two JSON documents have the same
+// members, nesting and array lengths - ignoring scalar types.
+//
+// Scalars are not compared because yaml.v2's coercion is this
+// repository's settled policy, not a loss: `id: 7` arriving as "7" is how
+// every other configuration struct here behaves, and diverging for this
+// one type would be worse than the coercion. What a typed decode DOES
+// lose is structural - an empty array dropped by omitempty, an absent
+// member becoming an empty string, a null becoming nothing at all - and
+// that is what this sees.
+func jsonShapeEquivalent(a, b json.RawMessage) bool {
+	decode := func(data []byte) (any, bool) {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	left, ok := decode(a)
+	if !ok {
+		return false
+	}
+	right, ok := decode(b)
+	if !ok {
+		return false
+	}
+	return sameJSONShape(left, right)
+}
+
+func sameJSONShape(a, b any) bool {
+	switch left := a.(type) {
+	case map[string]any:
+		right, ok := b.(map[string]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for name, value := range left {
+			other, present := right[name]
+			if !present || !sameJSONShape(value, other) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		right, ok := b.([]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for i := range left {
+			if !sameJSONShape(left[i], right[i]) {
+				return false
+			}
+		}
+		return true
+	case nil:
+		// null is a value an operator wrote, not an absence. Dropping it
+		// is the loss this exists to catch, so it only matches null.
+		return b == nil
+	default:
+		// A scalar matches any other scalar: see the doc comment.
+		switch b.(type) {
+		case map[string]any, []any, nil:
+			return false
+		}
+		return true
+	}
+}
+
+// rawFromYAML reads a whole YAML value and returns it as JSON, keeping
+// each numeric scalar's original text.
+//
+// Through yamlValue rather than a plain any, so a decimal does not lose
+// its digits on the way in - see that type. Non-string keys are refused
+// by normaliseYAML rather than coerced, since JSON has no spelling for
+// them.
+func rawFromYAML(unmarshal func(any) error) (json.RawMessage, error) {
+	var tree yamlValue
+	if err := unmarshal(&tree); err != nil {
+		return nil, err
+	}
+	normalised, err := normaliseYAML(tree.value, "credential query")
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalised)
+}
+
+// MarshalJSON flattens Extra alongside the known members.
+//
+// With Extra empty this is byte-identical to the struct encoding it
+// replaces, which TestCredentialQueryEncodingUnchanged pins: every format
+// other than circuit_zk goes through here too, and none of them should be
+// able to tell this method exists.
+func (q CredentialQuery) MarshalJSON() ([]byte, error) {
+	// Returned as-is, which encoding/json then compacts and HTML-escapes
+	// on its way into the enclosing document. See Raw's own comment for
+	// why the guarantee is on the JSON value rather than the bytes.
+	if q.Raw != nil {
+		if q.Extra != nil {
+			return nil, fmt.Errorf("credential query: raw and extra are both set, and raw would discard extra")
+		}
+		if !json.Valid(q.Raw) {
+			return nil, fmt.Errorf("credential query: raw is not valid JSON")
+		}
+		return q.Raw, nil
+	}
+	type plain CredentialQuery // no methods, so no recursion
+	return marshalWithExtra(plain(q), q.Extra, "credential query")
+}
+
+// UnmarshalJSON collects unknown members into Extra.
+func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
+	// A split failure is a decode failure: data that is not an object at
+	// all must reach the escape hatch below exactly as a member of the
+	// wrong kind does, or the fallback stops being total.
+	knownObject, extra, err := splitMembers(data, "credential query",
+		"id", "format", "multiple", "meta", "trusted_authorities",
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "_req")
+	type plain CredentialQuery
+	var known plain
+	if err == nil {
+		err = decodeExact(knownObject, &known)
+	}
+	if err != nil {
+		// A shape the model cannot hold is kept as it stands rather than
+		// refused. Decoding has to be TOTAL for the escape hatch to be
+		// worth anything: a request object is JSON-encoded into the HA
+		// cache and read back by another node, so a raw query with - say -
+		// an object at "claims" would be written out fine and then fail to
+		// load anywhere but the node that built it.
+		//
+		// It also keeps the verifier's own promise. This serialiser does
+		// not repair a request, and refusing to read back something it
+		// just wrote would be a repair by other means.
+		if !json.Valid(data) {
+			return err
+		}
+		// Before anything is kept raw. A typed decode failing is exactly
+		// how a duplicate or case-aliased constraint used to get past
+		// these checks: the shadow still reported the constraint, so
+		// validation passed, while the emitted bytes said something else.
+		if checkErr := checkRawConstraints(data); checkErr != nil {
+			return checkErr
+		}
+		fallback := CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
+		if _, invalid := fallback.adoptRawShadowReporting(); len(invalid) > 0 {
+			// A member of the right JSON kind that the model still
+			// rejects is an ordinary query that is simply invalid, not a
+			// shape this build has never seen. Sending it to Raw would
+			// launder a decode error into a query that validates - the
+			// SD-JWT and mdoc rules read the shadow, and an unreadable
+			// member leaves nothing there to judge.
+			return err
+		}
+		*q = fallback
+		return nil
+	}
+	*q = CredentialQuery(known)
+	q.Extra = extra
+
+	// A decode that SUCCEEDED is not necessarily one that kept
+	// everything. `"_req": []` decodes to an empty slice and is then
+	// dropped by omitempty; an item missing "id" decodes to "" and comes
+	// back as a member that was not there. Those shapes are exactly the
+	// ones a Verifier sends on purpose to see what a wallet does with
+	// them, and the HA cache round trip would quietly repair them.
+	//
+	// So the test is not "did it decode" but "does it encode back to what
+	// arrived". Anything that does not is kept as it stands.
+	if ambiguous := ambiguousConstraintMembers(data); len(ambiguous) > 0 {
+		return &DCQLValidationError{
+			Field: strings.Join(ambiguous, ", "),
+			Message: "named more than once, and JSON decoders disagree about which value wins; " +
+				"a request whose constraint depends on the reader is one this verifier will not sign",
+		}
+	}
+	if hasDuplicateMembers(data) || !q.encodesBackTo(data) {
+		// The same guard on the way in here. A case-aliased member is one
+		// of the things that makes a query fail to encode back, so this
+		// is the path it takes.
+		if err := checkRawConstraints(data); err != nil {
+			return err
+		}
+		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
+		q.adoptRawShadow()
+	}
+	return nil
+}
+
+// ambiguousConstraintMembers names the members that decide what a request
+// is LIMITED TO and appear more than once.
+//
+// A duplicate is a parser differential: encoding/json keeps the last
+// value, other decoders keep the first, and the two disagree about what
+// the document says. For most members that is a curiosity this verifier
+// passes through, because sending a malformed request is how a wallet
+// gets tested. For the members validation reads it is not.
+//
+// {"format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]}} is the
+// shape: Go validates against the LAST meta, finds a constraint, signs
+// and sends - while a first-wins wallet reads an unconstrained SD-JWT
+// request and may return anything it holds. The query arrives at the
+// ingress from a browser, so that is attacker-reachable over-disclosure,
+// reached through the very escape hatch added to preserve malformed
+// requests.
+//
+// So these are refused rather than carried, wherever they come from. A
+// request whose constraint depends on who is reading it is not one to
+// sign on anybody's behalf - and the negative-test cases that matter
+// (the rulebook's own uniqueness rules on req ids and handles) are deeper
+// in the document and still pass through untouched.
+func ambiguousConstraintMembers(data []byte) []string {
+	members, ok := topLevelMemberNames(data)
+	if !ok {
+		return nil
+	}
+
+	var ambiguous []string
+	for _, name := range []string{"format", "meta"} {
+		if members[name] > 1 {
+			ambiguous = append(ambiguous, name)
+		}
+	}
+
+	// And inside meta, where the constraint itself lives. Only the last
+	// one can be read back, which is the same reading validation uses, so
+	// checking it is enough to catch a constraint that differs between
+	// decoders.
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err == nil {
+		if nested, present := envelope["meta"]; present {
+			if inner, ok := topLevelMemberNames(nested); ok {
+				for _, name := range slices.Sorted(maps.Keys(inner)) {
+					if inner[name] > 1 {
+						ambiguous = append(ambiguous, "meta."+name)
+					}
+				}
+			}
+		}
+	}
+	slices.Sort(ambiguous)
+	return slices.Compact(ambiguous)
+}
+
+// aliasedConstraintMembers names the constraint members written in a case
+// that is not the one the wire uses.
+//
+// Go's encoding/json matches field names case-insensitively, so
+// {"meta":{"VCT_VALUES":["urn:x"]}} decodes into MetaQuery.VCTValues and
+// the shadow reports a constraint - while the bytes this verifier signs
+// carry VCT_VALUES, which no conformant wallet reads as vct_values. The
+// request goes out unconstrained and validation believed otherwise.
+//
+// The same reasoning as the duplicate check beside it: a request whose
+// constraint depends on who is reading it is one this verifier will not
+// sign. Refused rather than quietly un-shadowed, because an alias is
+// almost certainly a typo in a configuration, and a request that silently
+// stops constraining anything is the worst way to discover that.
+//
+// Only the members validation reads. Everything else keeps passing
+// through, because sending a shape this build has never seen is the whole
+// point of the raw path.
+func aliasedConstraintMembers(data []byte) []string {
+	var aliased []string
+
+	check := func(prefix string, document []byte, modelled ...string) {
+		names, ok := topLevelMemberNames(document)
+		if !ok {
+			return
+		}
+		for name := range names {
+			for _, want := range modelled {
+				if name != want && strings.EqualFold(name, want) {
+					aliased = append(aliased, prefix+name)
+				}
+			}
+		}
+	}
+
+	check("", data, "format", "meta", "claims")
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err == nil {
+		if nested, present := envelope["meta"]; present {
+			check("meta.", nested, "vct_values", "doctype_value", "type_values", "schema_id_value", "source_format")
+		}
+	}
+
+	slices.Sort(aliased)
+	return slices.Compact(aliased)
+}
+
+// topLevelMemberNames counts how often each member name appears in a JSON
+// object, without descending into it.
+func topLevelMemberNames(data []byte) (map[string]int, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, false
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil, false
+	}
+
+	counts := map[string]int{}
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		text, ok := name.(string)
+		if !ok {
+			return nil, false
+		}
+		counts[text]++
+		if _, err := scanForDuplicateMembers(decoder); err != nil {
+			return nil, false
+		}
+	}
+	return counts, true
+}
+
+// hasDuplicateMembers reports whether any object in data names the same
+// member twice, at any depth.
+//
+// encoding/json keeps the last one, and so does every other decoder in
+// this repository, which makes a duplicate INVISIBLE to the
+// encode-back-to comparison: {"id":"first","id":"last"} re-encodes as
+// just "last" and compares equal to itself. The query is then sent with
+// the duplicate silently removed.
+//
+// Two reasons that is not acceptable here. It is a changed request, and
+// this serialiser does not change requests - a duplicate member is
+// exactly the kind of malformed input a Verifier sends on purpose to see
+// what a wallet does with it. And it is a parser differential: JSON
+// decoders disagree about which value wins, so a request where that
+// matters has to reach the wallet as written rather than as this build
+// happens to read it.
+//
+// Detected rather than refused, because refusing would make the malformed
+// request unsendable, which is the same loss by another route. A query
+// carrying one simply goes down the raw path, where the bytes stand.
+func hasDuplicateMembers(data []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	duplicate, err := scanForDuplicateMembers(decoder)
+	if err != nil {
+		// Malformed, which is not this function's business to report -
+		// the caller has already established the bytes are valid JSON, or
+		// is about to refuse them for being invalid.
+		return false
+	}
+	return duplicate
+}
+
+// scanForDuplicateMembers consumes exactly one JSON value from decoder
+// and reports whether it, or anything inside it, names a member twice.
+//
+// Written as a descent rather than a flat token loop because
+// Decoder.Token reports member names and string values identically; only
+// the structure says which is which.
+func scanForDuplicateMembers(decoder *json.Decoder) (bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return false, err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return false, nil // a scalar, now consumed
+	}
+
+	duplicate := false
+	switch delim {
+	case '{':
+		seen := map[string]bool{}
+		for decoder.More() {
+			name, err := decoder.Token()
+			if err != nil {
+				return false, err
+			}
+			text, ok := name.(string)
+			if !ok {
+				return false, fmt.Errorf("object member name is not a string")
+			}
+			if seen[text] {
+				duplicate = true
+			}
+			seen[text] = true
+
+			inner, err := scanForDuplicateMembers(decoder)
+			if err != nil {
+				return false, err
+			}
+			duplicate = duplicate || inner
+		}
+	case '[':
+		for decoder.More() {
+			inner, err := scanForDuplicateMembers(decoder)
+			if err != nil {
+				return false, err
+			}
+			duplicate = duplicate || inner
+		}
+	default:
+		return false, fmt.Errorf("unexpected delimiter %q", delim)
+	}
+
+	if _, err := decoder.Token(); err != nil { // the closing delimiter
+		return false, err
+	}
+	return duplicate, nil
+}
+
+// encodesBackTo reports whether re-encoding q reproduces data, compared
+// as JSON values rather than as bytes - member order and whitespace are
+// not something this type promises to preserve, and treating them as loss
+// would send every ordinary query down the raw path.
+func (q CredentialQuery) encodesBackTo(data []byte) bool {
+	reencoded, err := json.Marshal(q)
+	if err != nil {
+		return false
+	}
+	return jsonEquivalent(data, reencoded)
+}
+
+// jsonEquivalent compares two JSON documents by value.
+//
+// Numbers are compared as their literals (UseNumber), so a value that
+// re-encoded with different precision counts as changed - which for a
+// req param, an input to a proof, is exactly what it is.
+func jsonEquivalent(a, b []byte) bool {
+	decode := func(data []byte) (any, bool) {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	left, ok := decode(a)
+	if !ok {
+		return false
+	}
+	right, ok := decode(b)
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
+}
+
+// NewRawCredentialQuery builds a query that is sent as exactly these
+// bytes, with every modelled member it can read filled in alongside.
+//
+// This is the supported way to use the escape hatch. Writing
+// CredentialQuery{Raw: ...} by hand compiles and is wrong: Raw is
+// authoritative for the WIRE, and the rest of the stack reads the struct -
+// UIInteraction records ID in the authorization context's scopes and the
+// response path matches a presentation back to it, matching reads
+// Meta.TypeValues, Multiple and RequireCryptographicHolderBinding decide
+// what a response may contain. A hand-built query is therefore sent
+// correctly and then tracked under defaults nobody chose, which fails as
+// a result that cannot be matched rather than as an error.
+//
+// TestRawIsOnlyConstructedThroughTheConstructor keeps that from being
+// advice: production code may not write the literal.
+// checkRawConstraints refuses a raw query whose constraint members this
+// verifier and a wallet would read differently.
+//
+// Shared by the constructor and by both decode fallbacks. The decode
+// paths used to skip it, and that was the hole: an unmodelled member -
+// `"_req": {}` - made the typed decode fail, the query went raw, and the
+// duplicate-meta check never ran. The shadow still reported the last
+// meta's constraint, so validation passed while the request was emitted
+// with BOTH, which a first-wins wallet reads as unconstrained. One
+// function, three callers, no path that reaches Raw without passing here.
+func checkRawConstraints(raw json.RawMessage) error {
+	if ambiguous := ambiguousConstraintMembers(raw); len(ambiguous) > 0 {
+		return fmt.Errorf(
+			"credential query: %s named more than once, and JSON decoders disagree about which value wins",
+			strings.Join(ambiguous, ", "))
+	}
+	if aliased := aliasedConstraintMembers(raw); len(aliased) > 0 {
+		return fmt.Errorf(
+			"credential query: %s differs only in case from the member the wire uses, so this verifier and a wallet would read different constraints",
+			strings.Join(aliased, ", "))
+	}
+	return nil
+}
+
+// UnmarshalTrustedDCQL decodes a query THIS verifier built and stored,
+// rather than one that arrived from a caller.
+//
+// The two cannot use the same decoder, and the asymmetry is deliberate on
+// both sides. Wire ingress refuses a modelled member of the right JSON
+// kind whose value the model rejects - `"doctype_value": 1` - because
+// sending it to Raw would launder a decode error into a query that
+// validates: the SD-JWT and mdoc rules read the shadow, and an
+// unreadable member leaves nothing there to judge. But
+// NewRawCredentialQuery accepts exactly those shapes on purpose, because
+// a conformance harness has to be able to SEND a malformed request to
+// see what a wallet does with it.
+//
+// Put together, a request the escape hatch built could be published and
+// then reload nowhere - not even on the node that built it, once the
+// context had been through the cache. This is the same defect
+// TestMalformedReqSurvivesACacheRoundTrip fixed for req shapes, reaching
+// meta by the other route.
+//
+// What is NOT relaxed: checkRawConstraints still runs, through
+// NewRawCredentialQuery, so a duplicate or case-aliased constraint is
+// still refused on the way back in. The trust here is only that this
+// verifier wrote the bytes, not that they may mean two things.
+func UnmarshalTrustedDCQL(data []byte) (*DCQL, error) {
+	var strict DCQL
+	strictErr := json.Unmarshal(data, &strict)
+	if strictErr == nil {
+		return &strict, nil
+	}
+
+	var outer struct {
+		Credentials    []json.RawMessage    `json:"credentials"`
+		CredentialSets []CredentialSetQuery `json:"credential_sets,omitempty"`
+	}
+	if err := json.Unmarshal(data, &outer); err != nil {
+		// The outer shape is not a DCQL at all, which is a different
+		// problem from a query the model cannot hold. Report the
+		// original failure rather than this one.
+		return nil, strictErr
+	}
+
+	rebuilt := &DCQL{
+		Credentials:    make([]CredentialQuery, 0, len(outer.Credentials)),
+		CredentialSets: outer.CredentialSets,
+	}
+	for i, raw := range outer.Credentials {
+		var query CredentialQuery
+		if err := json.Unmarshal(raw, &query); err == nil {
+			rebuilt.Credentials = append(rebuilt.Credentials, query)
+			continue
+		}
+		built, err := NewRawCredentialQuery(raw)
+		if err != nil {
+			return nil, fmt.Errorf("credential query %d: %w", i, strictErr)
+		}
+		rebuilt.Credentials = append(rebuilt.Credentials, built)
+	}
+	return rebuilt, nil
+}
+
+func NewRawCredentialQuery(raw json.RawMessage) (CredentialQuery, error) {
+	if !json.Valid(raw) {
+		return CredentialQuery{}, fmt.Errorf("credential query: raw is not valid JSON")
+	}
+	// Refused here as well as on the decode paths. A request whose
+	// constraint depends on the reader is not one to sign on anybody's
+	// behalf, and allowing it here would also mean a query that works on
+	// the replica that built it and nowhere else, since the decode paths
+	// refuse to read it back.
+	if err := checkRawConstraints(raw); err != nil {
+		return CredentialQuery{}, err
+	}
+	query := CredentialQuery{Raw: append(json.RawMessage(nil), raw...)}
+	query.adoptRawShadow()
+	return query, nil
+}
+
+// adoptRawShadow fills in every modelled member the raw bytes can be read
+// for, and reports the names of those that are present but unreadable.
+//
+// Raw is authoritative for the WIRE and for nothing else. Plenty of this
+// stack reads the struct: UIInteraction copies ID into the authorization
+// context's scopes and the response path matches a presentation back to
+// it; matching reads Meta.TypeValues; Multiple and
+// RequireCryptographicHolderBinding change what a response is allowed to
+// contain. A query that arrived raw and kept the zero value for those was
+// sent correctly and then judged against defaults nobody chose.
+//
+// Derived from the struct tags rather than written as a list of members,
+// because the list is what goes stale - that is exactly how this started
+// with only id and format. A member added to CredentialQuery is shadowed
+// by the commit that adds it.
+//
+// Best effort per member: one that is absent, or of a shape this build
+// cannot read, is left at its zero value rather than failing the whole
+// decode. A query with a member this code has never seen is the reason
+// these bytes are raw in the first place.
+func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
+	unreadable, _ = q.adoptRawShadowReporting()
+	return unreadable
+}
+
+// adoptRawShadowReporting is adoptRawShadow, also reporting members that
+// are the RIGHT JSON KIND for the model and still failed to decode.
+//
+// That distinction is the whole difference between the escape hatch and a
+// bypass. "claims" as an object is a shape the model does not have - the
+// rulebook's WIP example - and belongs in Raw. "claims" as an ARRAY whose
+// entries the model rejects is an ordinary DCQL query that is simply
+// invalid, and sending it to Raw would launder a decode error into a
+// query that validates: ClaimQuery.UnmarshalJSON refuses an empty path,
+// and such a query used to be refused outright.
+// openItemMembers are members whose ITEMS are deliberately open, so an
+// array this model cannot hold is an unmodelled shape rather than an
+// ordinary invalid query.
+//
+// Only req. A circuit_zk request carries its arguments there, the
+// rulebook is moving, and the vendored conformance set includes negative
+// vectors - a numeric item id, array-valued params - that exist to be
+// SENT. Without this they were accepted by NewRawCredentialQuery and
+// then refused on the way back in: a request object is JSON-encoded into
+// the HA cache and read by another node, so such a request could be
+// published and then not reload anywhere but the node that built it.
+//
+// The other members keep the strict rule. claims, meta and format are
+// what the SD-JWT and mdoc validation reads, and laundering a decode
+// error there into Raw would turn an unreadable constraint into a query
+// that validates because there is nothing left to judge.
+var openItemMembers = map[string]bool{"_req": true}
+
+func (q *CredentialQuery) adoptRawShadowReporting() (unreadable, invalid []string) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(q.Raw, &members); err != nil {
+		return nil, nil // not an object at all; nothing to shadow
+	}
+
+	type plain CredentialQuery // no methods, so no recursion
+	shadow := plain{}
+	value := reflect.ValueOf(&shadow).Elem()
+	structure := value.Type()
+	for i := range structure.NumField() {
+		name, _, _ := strings.Cut(structure.Field(i).Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		encoded, present := members[name]
+		if !present {
+			continue
+		}
+		field := reflect.New(structure.Field(i).Type)
+		if err := json.Unmarshal(encoded, field.Interface()); err != nil {
+			unreadable = append(unreadable, name)
+			if jsonKindMatches(structure.Field(i).Type, encoded) && !openItemMembers[name] {
+				invalid = append(invalid, name)
+			}
+			continue
+		}
+		value.Field(i).Set(field.Elem())
+	}
+
+	raw := q.Raw
+	*q = CredentialQuery(shadow)
+	q.Raw = raw
+	slices.Sort(unreadable)
+	slices.Sort(invalid)
+	return unreadable, invalid
+}
+
+// jsonKindMatches reports whether encoded is the JSON kind that target is
+// modelled as - an array for a slice, an object for a struct or map, and
+// so on.
+//
+// null matches everything, since unmarshalling it is a no-op whatever the
+// destination, and an interface accepts any kind by definition.
+func jsonKindMatches(target reflect.Type, encoded json.RawMessage) bool {
+	trimmed := bytes.TrimLeft(encoded, " \t\r\n")
+	if len(trimmed) == 0 {
+		return false
+	}
+	for target.Kind() == reflect.Pointer {
+		target = target.Elem()
+	}
+	switch target.Kind() {
+	case reflect.Interface:
+		return true
+	case reflect.Slice, reflect.Array:
+		return trimmed[0] == '[' || trimmed[0] == 'n'
+	case reflect.Struct, reflect.Map:
+		return trimmed[0] == '{' || trimmed[0] == 'n'
+	case reflect.String:
+		return trimmed[0] == '"' || trimmed[0] == 'n'
+	case reflect.Bool:
+		return trimmed[0] == 't' || trimmed[0] == 'f' || trimmed[0] == 'n'
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return trimmed[0] == '-' || trimmed[0] == 'n' || (trimmed[0] >= '0' && trimmed[0] <= '9')
+	}
+	return false
 }
 
 type CredentialSetQuery struct {
@@ -60,6 +947,12 @@ func (q CredentialSetQuery) IsRequired() bool {
 		return true
 	}
 	return *q.Required
+}
+
+// AllowsMultiple returns the effective value of Multiple, applying the
+// OpenID4VP 1.0 §6.1 default (false) when the member was omitted.
+func (q CredentialQuery) AllowsMultiple() bool {
+	return q.Multiple != nil && *q.Multiple
 }
 
 // RequiresCryptographicHolderBinding returns the effective value of
@@ -124,6 +1017,17 @@ type MetaQuery struct {
 	// String that specifies an allowed value for the doctype of the requested Verifiable Credential.
 	DoctypeValue string `json:"doctype_value,omitempty" yaml:"doctype_value,omitempty"`
 
+	// SchemaIDValue is the type value for a bbs_cd source format, the
+	// way DoctypeValue is for mso_mdoc. Exactly one of the two
+	// belongs in a zkp_req query's meta, decided by source_format.
+	SchemaIDValue string `json:"schema_id_value,omitempty" yaml:"schema_id_value,omitempty"`
+
+	// SourceFormat is the stored attestation a zkp_req proof is made
+	// over: "mso_mdoc" or "bbs_cd". It decides whether proof_time is
+	// required in the response - every approved mso_mdoc circuit checks
+	// the MSO validity period, so it is required there.
+	SourceFormat string `json:"source_format,omitempty" yaml:"source_format,omitempty"`
+
 	// ZKSystemType for ZK-mdoc format (mso_mdoc_zk) only.
 	// A non-empty array of ZK proof system/circuit variants the Verifier is
 	// willing to accept (e.g. Longfellow circuits for different attribute
@@ -151,6 +1055,80 @@ type VPFormatsSupported struct {
 
 	// MsoMdoc is the configuration for ISO mdoc format (mso_mdoc)
 	MsoMdoc *MsoMdocFormat `json:"mso_mdoc,omitempty" yaml:"mso_mdoc,omitempty"`
+
+	// ZkpReq is the configuration for zero-knowledge circuit
+	// presentations (circuit_zk): which proof systems and circuits a proof
+	// may come from.
+	ZkpReq *ZkpReqFormat `json:"zkp_req,omitempty" yaml:"zkp_req,omitempty"`
+
+	// Extra carries format entries this build does not know about,
+	// flattened alongside the known ones - so a Verifier can offer a
+	// format identifier that postdates this code.
+	Extra map[string]any `json:"-" yaml:"-"`
+}
+
+// MarshalJSON flattens Extra alongside the known format entries.
+func (v VPFormatsSupported) MarshalJSON() ([]byte, error) {
+	type plain VPFormatsSupported
+	return marshalWithExtra(plain(v), v.Extra, "vp_formats_supported")
+}
+
+// UnmarshalJSON collects unknown format entries into Extra.
+func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
+	knownObject, extra, err := splitMembers(data, "vp_formats_supported", "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "zkp_req")
+	if err != nil {
+		return err
+	}
+	type plain VPFormatsSupported
+	var known plain
+	if err := decodeExact(knownObject, &known); err != nil {
+		return err
+	}
+	*v = VPFormatsSupported(known)
+	v.Extra = extra
+	return nil
+}
+
+// MarshalYAML flattens Extra alongside the known format entries.
+//
+// Needed as much as the JSON pair, and arguably more: this is the type
+// verifier.preferred_vp_formats loads into, so the OPERATOR CONFIGURATION
+// path is the one an unknown format identifier has to come in by. With
+// JSON support alone the promise held only for metadata this build
+// constructed itself, which is not where a format that postdates it
+// arrives from.
+func (v VPFormatsSupported) MarshalYAML() (any, error) {
+	type plain VPFormatsSupported
+	encoded, err := json.Marshal(plain(v))
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := decodeExact(encoded, &m); err != nil {
+		return nil, err
+	}
+	return mergeExtraYAML(m, v.Extra, declaredJSONKeys(reflect.TypeOf(VPFormatsSupported{})), "vp_formats_supported")
+}
+
+// UnmarshalYAML captures format entries this build does not model.
+func (v *VPFormatsSupported) UnmarshalYAML(unmarshal func(any) error) error {
+	if err := refuseDuplicateYAMLKeys(unmarshal, "vp_formats_supported"); err != nil {
+		return err
+	}
+	type plain VPFormatsSupported
+	var known plain
+	if err := unmarshal(&known); err != nil {
+		return fmt.Errorf("vp_formats_supported: %w", err)
+	}
+	*v = VPFormatsSupported(known)
+
+	extra, err := yamlExtra(unmarshal, "vp_formats_supported",
+		"ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "zkp_req")
+	if err != nil {
+		return err
+	}
+	v.Extra = extra
+	return nil
 }
 
 // LDPVCFormat defines format-specific parameters for W3C VC Data Integrity (ldp_vc).
@@ -268,7 +1246,14 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 		if bytes.Equal(bytes.TrimSpace(raw.Values), []byte("null")) {
 			return fmt.Errorf(`claim "values" must not be null`)
 		}
-		if err := json.Unmarshal(raw.Values, &values); err != nil {
+		// decodeExact, not json.Unmarshal: it keeps numbers as their
+		// literals. A plain decode makes every value a float64, so a
+		// legitimate 9007199254740993 came back as 9007199254740992 and
+		// was then rejected for being outside the safe integer range -
+		// which made a stored context carrying one UNREADABLE once the
+		// exact JSON copy became the preferred representation. Saved
+		// fine, failed on the way back.
+		if err := decodeExact(raw.Values, &values); err != nil {
 			return fmt.Errorf(`claim "values" must be an array of strings, integers, or booleans: %w`, err)
 		}
 	}
@@ -383,6 +1368,16 @@ func validateClaimValues(values []any, present bool) error {
 	for i, v := range values {
 		switch t := v.(type) {
 		case string, bool, int, int32, int64, uint, uint32, uint64:
+		case json.Number:
+			// Judged AS the literal, with no float64 on the way. The
+			// float arms below stop at 2^53-1 because that is where a
+			// float64 stops being exact; a literal has no such limit, so
+			// imposing one here would be this validator inventing a rule
+			// the specification does not have - and rejecting the very
+			// values the exact-JSON copy exists to preserve.
+			if !isIntegralNumber(t.String()) {
+				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
+			}
 		case float32:
 			if err := checkIntegralFloat(float64(t), i); err != nil {
 				return err
@@ -396,6 +1391,64 @@ func validateClaimValues(values []any, present bool) error {
 		}
 	}
 	return nil
+}
+
+// isIntegralNumber reports whether a JSON number literal denotes an
+// integer - its VALUE, not its spelling.
+//
+// 10, 10.0 and 1e1 are all the integer ten, and a validator that accepts
+// only the first changes what an ordinary SD-JWT or mdoc query may say.
+// An earlier version of this tested the spelling and did exactly that.
+//
+// Decided on the digits rather than by parsing to a number, because
+// parsing is what this exists to avoid: a float64 cannot hold
+// 9007199254740993, and that value is the reason the exact copy exists.
+//
+// A literal is digits x 10^(exp - len(frac)). Shift the point right by
+// that exponent: if it lands at or past the end of the digits the value
+// is an integer, and if it lands inside them the digits it would cut
+// have to be zeros.
+func isIntegralNumber(literal string) bool {
+	mantissa, exponent := literal, 0
+	if i := strings.IndexAny(literal, "eE"); i >= 0 {
+		parsed, err := strconv.Atoi(literal[i+1:])
+		if err != nil {
+			return false
+		}
+		mantissa, exponent = literal[:i], parsed
+	}
+	mantissa = strings.TrimPrefix(strings.TrimPrefix(mantissa, "-"), "+")
+
+	whole, fraction, _ := strings.Cut(mantissa, ".")
+	digits := whole + fraction
+	if digits == "" {
+		return false
+	}
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+	}
+	// Zero is an integer however it is spelled, including 0e-5.
+	if strings.Trim(digits, "0") == "" {
+		return true
+	}
+
+	// A nonzero value whose every significant digit falls to the right of
+	// the point is not an integer. Deciding that on the exponent alone
+	// keeps the arithmetic below away from the ends of the int range: a
+	// literal may carry an exponent as extreme as math.MinInt64, where
+	// negating the shift wraps round to a negative cut that panics the
+	// slice, and subtracting the fraction length wraps the other way and
+	// reports a fraction as integral.
+	if exponent <= len(fraction)-len(digits) {
+		return false
+	}
+	shift := exponent - len(fraction)
+	if shift >= 0 {
+		return true
+	}
+	return strings.Trim(digits[len(digits)+shift:], "0") == ""
 }
 
 func checkIntegralFloat(f float64, i int) error {
@@ -625,6 +1678,67 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // ValidateCredentialQuery validates that a CredentialQuery has the required fields
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
+	// A raw query is judged by its own bytes, not by the empty struct the
+	// failed typed decode left behind.
+	//
+	// The escape hatch is for a member whose SHAPE this build does not
+	// model; it is not a way around the constraint rules, and it is not
+	// specific to one format. Reading format and meta back out of the raw
+	// bytes keeps both true at once: an SD-JWT query with no vct_values is
+	// still refused here even though it arrived raw, and a circuit_zk one
+	// still falls to the permissive default below, as every format this
+	// build does not constrain does.
+	if query.Raw != nil {
+		if !json.Valid(query.Raw) {
+			return &DCQLValidationError{
+				Field:   "raw",
+				Message: "a raw credential query must be valid JSON",
+			}
+		}
+		// An UNREADABLE meta is judged as an EMPTY one, not waved through.
+		//
+		// "Cannot read the constraint" and "there is no constraint" are
+		// the same thing to everyone downstream: either way nothing here
+		// has established what the request is limited to. Returning nil
+		// on the first and refusing the second would let
+		// {"format":"vc+sd-jwt","meta":"not an object"} be signed and
+		// served with no vct_values - the very case this check exists for,
+		// reached by making the member harder to read rather than by
+		// omitting it.
+		//
+		// Substituting the zero value rather than naming the formats that
+		// have rules keeps the two in step by construction: a zero
+		// MetaQuery satisfies no constraint rule in the switch below, and
+		// passes the permissive default exactly where there is no rule to
+		// fail. A format that grows one later is covered without anything
+		// here being updated.
+		// Re-read from the BYTES rather than trusting the struct's
+		// shadow: that is populated by UnmarshalJSON, and a query built in
+		// code - CredentialQuery{Raw: ...}, which is how the escape hatch
+		// is meant to be used directly - carries none of it.
+		shadow := CredentialQuery{Raw: query.Raw}
+		unreadable := shadow.adoptRawShadow()
+		if !json.Valid(query.Raw) || !isJSONObject(query.Raw) {
+			// A credential query that is not an object carries no members
+			// at all, which is the strongest form of "the constraint
+			// cannot be read" rather than a separate case.
+			unreadable = append(unreadable, "meta")
+		}
+		query = shadow
+		query.Raw = nil
+		if slices.Contains(unreadable, "meta") {
+			if err := ValidateCredentialQuery(query); err != nil {
+				// Reported as what it is. "vct_values is required" would
+				// send an operator looking for a member that may well be
+				// in the bytes, inside the meta this could not read.
+				return &DCQLValidationError{
+					Field:   "meta",
+					Message: fmt.Sprintf("meta is a shape this build cannot read, so the %s constraint it would have to satisfy cannot be established: %v", formatOrDefault(query.Format), err),
+				}
+			}
+			return nil
+		}
+	}
 	switch query.Format {
 	// Not FormatJwtVCJson: UIInteraction calls this on the live ingress, and
 	// the rest of the stack refuses that format - nothing issues it and the
@@ -720,6 +1834,23 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// Unknown format - allow but don't validate
 	}
 	return nil
+}
+
+// isJSONObject reports whether data is a JSON object, which is what a
+// credential query has to be before any member can be read from it.
+func isJSONObject(data []byte) bool {
+	var object map[string]json.RawMessage
+	return json.Unmarshal(data, &object) == nil
+}
+
+// formatOrDefault names a format for an error message, spelling out the
+// empty one rather than printing "" - which reads as a missing format
+// when it is in fact the SD-JWT default.
+func formatOrDefault(format string) string {
+	if format == "" {
+		return FormatSDJWTVC + " (the default for an absent format)"
+	}
+	return format
 }
 
 // validateMsoMdocZkQuery validates the ZK-mdoc (mso_mdoc_zk)-specific

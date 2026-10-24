@@ -2,8 +2,11 @@ package openid4vp
 
 import (
 	"context"
+	"encoding"
+	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 )
 
@@ -195,6 +198,385 @@ func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []str
 	return copyDCQL(dcql), slices.Clone(template.GetOIDCScopes()), true
 }
 
+// copyAnyMap deep-copies an opaque JSON tree.
+//
+// Nil in, nil out, so a copied query is indistinguishable from the
+// original.
+//
+// This copied through the encoding, which was tidy and quietly REPAIRED
+// what it copied. A raw leaf is bytes, and re-parsing bytes is not a copy
+// of them: Params{"payload": json.RawMessage(`{"x":1,"x":2}`)} came back
+// as {"x":2}. The original emits both members - that is what a raw leaf is
+// FOR, since a Verifier sends a deliberately malformed request to see what
+// a wallet does with it - so templating one silently changed the request
+// under test. Member order and a number's spelling were lost the same way.
+//
+// So the tree is walked instead, and the containers a JSON tree is made of
+// are copied structurally. Anything else still goes through the encoding,
+// which keeps the original promise: a shape this build does not model is
+// normalised rather than aliased, and the walk does not have to be taught
+// every type a Verifier might configure.
+func copyAnyMap(src map[string]any) map[string]any {
+	return copyAnyMapAt(src, &copyPath{})
+}
+
+// copyPath is the walk's position: how deep it is, and which containers
+// are on the route it took to get there.
+//
+// On the PATH, not merely visited. The same container reached twice by
+// different routes is a DAG, which is legitimate and has to be copied
+// both times; only a container reachable from itself is a cycle.
+//
+// Depth alone was not enough. It bounds stack usage, not total work, so
+// a map holding ITSELF TWICE - m["a"] = m, m["b"] = m - still expanded
+// into a binary tree and burned 2^65 steps before the bound could stop
+// it. Identity stops it at the first repeat.
+type copyPath struct {
+	depth int
+	seen  map[[2]uintptr]bool
+}
+
+// containerKey identifies a container on the path.
+//
+// The length is part of it because two sub-slices of one array share a
+// data pointer: keying on the pointer alone would call a legitimate
+// nested slice a cycle and alias it instead of copying it. A map or a
+// pointer has no length and uses zero.
+func containerKey(pointer uintptr, length int) [2]uintptr {
+	return [2]uintptr{pointer, uintptr(length)}
+}
+
+// enter records a container as being on the active path, reporting false
+// if it already is - which means the walk has come back to it.
+func (p *copyPath) enter(key [2]uintptr) bool {
+	if p.seen[key] {
+		return false
+	}
+	if p.seen == nil {
+		p.seen = make(map[[2]uintptr]bool, 4)
+	}
+	p.seen[key] = true
+	p.depth++
+	return true
+}
+
+func (p *copyPath) leave(key [2]uintptr) {
+	delete(p.seen, key)
+	p.depth--
+}
+
+// maxCopyDepth bounds the walk below.
+//
+// A tree that came off the wire is shallow; a programmatically built one
+// can contain a CYCLE, and the walk followed it until the stack died -
+// a self-referencing field tagged json:"-" is invisible to Marshal, so
+// the value serialises fine and only copying it crashes. Past this depth
+// the value goes to encodeCopy, which keeps it as the bytes it marshals
+// to, and reports the cycle as an error that leaves the original in
+// place. The bound costs nothing in fidelity now that the fallback is
+// byte-exact.
+const maxCopyDepth = 64
+
+func copyAnyMapAt(src map[string]any, path *copyPath) map[string]any {
+	if src == nil {
+		return nil
+	}
+	key := containerKey(reflect.ValueOf(src).Pointer(), 0)
+	if !path.enter(key) {
+		// Already on the path: this map contains itself. Nothing can be
+		// copied faithfully from here, and Marshal refuses such a value
+		// anyway, so the original is left in place.
+		return src
+	}
+	defer path.leave(key)
+
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = copyAnyValueAt(value, path)
+	}
+	return dst
+}
+
+// copyAnyValue deep-copies one node of an opaque JSON tree.
+func copyAnyValue(src any) any {
+	return copyAnyValueAt(src, &copyPath{})
+}
+
+func copyAnyValueAt(src any, path *copyPath) any {
+	if path.depth > maxCopyDepth {
+		return encodeCopy(src)
+	}
+	switch typed := src.(type) {
+	case nil, bool, string, float64, json.Number:
+		// Immutable, so sharing one is not aliasing.
+		return src
+
+	case json.RawMessage:
+		// Bytes, copied as bytes. Everything a raw leaf exists to carry -
+		// a duplicate member, member order, a number written the long way -
+		// survives only if it is never re-parsed.
+		//
+		// Allocated with a length, because appending to a nil slice
+		// returns a NIL one: an empty-but-present raw leaf would come out
+		// nil, and the two do not mean the same thing. An empty one fails
+		// to marshal ("unexpected end of JSON input") while nil marshals
+		// as null, so flattening them turns a request that cannot be sent
+		// into one that quietly says null - the copy repairing what it
+		// copies, which is the thing this whole path exists to stop.
+		if typed == nil {
+			return src
+		}
+		return append(make(json.RawMessage, 0, len(typed)), typed...)
+
+	case map[string]any:
+		return copyAnyMapAt(typed, path)
+
+	case []any:
+		if typed == nil {
+			// A nil slice encodes as null and an empty one as [], so
+			// allocating here would send [] where the query said null.
+			return src
+		}
+		// This branch is a FAST PATH around the reflective walk, and it
+		// was skipping that walk's cycle guard with it: s[0] = s recursed
+		// here without ever recording the slice, so the guards on maps
+		// and on typed slices did nothing and the stack died.
+		key := containerKey(reflect.ValueOf(typed).Pointer(), len(typed))
+		if !path.enter(key) {
+			return src
+		}
+		defer path.leave(key)
+
+		dst := make([]any, len(typed))
+		for i, value := range typed {
+			dst[i] = copyAnyValueAt(value, path)
+		}
+		return dst
+
+	default:
+		return copyTypedContainerAt(src, path)
+	}
+}
+
+// copyTypedContainer copies a map or slice whose element type is concrete,
+// which the cases above cannot name.
+//
+// map[string]json.RawMessage and []json.RawMessage are the ones a caller
+// is likely to build, and sending them through the encoding would re-parse
+// the raw leaves inside them - collapsing a duplicate member exactly as
+// copying the whole tree through the encoding used to. The container is
+// copied by reflection while every element goes back through
+// copyAnyValue, so a raw leaf survives at any depth inside a typed one.
+//
+// Anything that is not a map or a slice, or whose elements will not fit
+// back into it, still goes through the encoding: a shape this build does
+// not model is normalised rather than aliased.
+func copyTypedContainerAt(src any, path *copyPath) any {
+	value := reflect.ValueOf(src)
+	kind := value.Kind()
+
+	// A SCALAR is immutable, so sharing one is not aliasing - and this
+	// has to come first, because sending one through the encoding changes
+	// its TYPE. An int came back as a json.Number, which is not
+	// assignable to int, so the container holding it failed the
+	// assignability check below and was condemned to the encoding whole:
+	// a struct with a Count int beside a raw payload had the payload
+	// collapsed because of the Count. Testing the KIND rather than naming
+	// types also covers a named scalar, say type Count int.
+	switch kind {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128,
+		reflect.String:
+		return src
+	}
+
+	// A value with its OWN MarshalJSON is snapshotted whole. A
+	// structural copy keeps the container's named type, and so keeps that
+	// method, while the elements inside it can come back as different
+	// types - a named map[string]any whose marshaller expects a
+	// time.Time element would find a json.RawMessage there, and
+	// marshalling the copied request would fail. encodeCopy keeps the
+	// bytes the marshaller produced, which is what the request is.
+	if implementsMarshaler(value.Type()) {
+		return encodeCopy(src)
+	}
+
+	// A POINTER to a raw leaf is a raw leaf. *json.RawMessage went
+	// straight to the encoding, where re-parsing collapsed a duplicate
+	// member exactly as it did for the value form - so a template
+	// holding one still had its negative request repaired while the
+	// unpointered spelling beside it was preserved.
+	if kind == reflect.Pointer {
+		if value.IsNil() {
+			return src
+		}
+		key := containerKey(value.Pointer(), 0)
+		if !path.enter(key) {
+			return src // already on the path: a cycle through this pointer
+		}
+		defer path.leave(key)
+
+		copied, ok := copyReflectedAt(value.Elem().Interface(), value.Type().Elem(), path)
+		if !ok {
+			return encodeCopy(src)
+		}
+		pointer := reflect.New(value.Type().Elem())
+		pointer.Elem().Set(copied)
+		return pointer.Interface()
+	}
+
+	// An ARRAY is a slice that cannot grow: the same elements, the same
+	// raw leaves, but reflect.Array is not reflect.Slice, so
+	// [2]json.RawMessage went to the encoding and had its duplicates
+	// collapsed. Arrays are values, so there is no nil to preserve.
+	if kind == reflect.Array {
+		dst := reflect.New(value.Type()).Elem()
+		for i := range value.Len() {
+			copied, ok := copyReflectedAt(value.Index(i).Interface(), value.Type().Elem(), path)
+			if !ok {
+				return encodeCopy(src)
+			}
+			dst.Index(i).Set(copied)
+		}
+		return dst.Interface()
+	}
+
+	if kind != reflect.Map && kind != reflect.Slice {
+		return encodeCopy(src)
+	}
+	if value.IsNil() {
+		return src
+	}
+
+	// Only a STRING key is safe to carry across. Every other key is
+	// copied BY VALUE into the new map, which for a pointer - or anything
+	// holding one - shares what it points at, and a key is part of the
+	// wire representation: a map[*big.Int]string key marshals through
+	// TextMarshaler, so mutating the original integer after the copy
+	// renamed the COPY's member, {"1":"v"} becoming {"999":"v"}.
+	//
+	// The values were walked carefully and the keys were handed over
+	// untouched; a key is as much of the request as a value is.
+	if kind == reflect.Map && value.Type().Key().Kind() != reflect.String {
+		return encodeCopy(src)
+	}
+
+	length := 0
+	if kind == reflect.Slice {
+		length = value.Len()
+	}
+	key := containerKey(value.Pointer(), length)
+	if !path.enter(key) {
+		return src // already on the path: a cycle through this container
+	}
+	defer path.leave(key)
+
+	element := value.Type().Elem()
+	if kind == reflect.Map {
+		dst := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for iter := value.MapRange(); iter.Next(); {
+			copied, ok := copyReflectedAt(iter.Value().Interface(), element, path)
+			if !ok {
+				return encodeCopy(src)
+			}
+			dst.SetMapIndex(iter.Key(), copied)
+		}
+		return dst.Interface()
+	}
+
+	dst := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+	for i := range value.Len() {
+		copied, ok := copyReflectedAt(value.Index(i).Interface(), element, path)
+		if !ok {
+			return encodeCopy(src)
+		}
+		dst.Index(i).Set(copied)
+	}
+	return dst.Interface()
+}
+
+// copyReflected copies one element of a typed container, reporting
+// whether the result fits back into it.
+//
+// A nil interface element is the case worth naming: copyAnyValue returns
+// it unchanged, reflect.ValueOf gives an INVALID Value for it, and
+// treating that as "does not fit" sent the whole container through the
+// encoding - re-parsing every raw leaf sitting beside the nil and
+// collapsing any duplicate member inside them. A named container, say
+// type Object map[string]any, reaches here holding exactly that mix.
+func copyReflectedAt(src any, element reflect.Type, path *copyPath) (reflect.Value, bool) {
+	copied := reflect.ValueOf(copyAnyValueAt(src, path))
+	if !copied.IsValid() {
+		// Nil, which every element type that can hold it has a zero for.
+		if element.Kind() == reflect.Interface {
+			return reflect.Zero(element), true
+		}
+		return reflect.Value{}, false
+	}
+	if !copied.Type().AssignableTo(element) {
+		return reflect.Value{}, false
+	}
+	return copied, true
+}
+
+// A value that serialises ITSELF is snapshotted whole: its output is the
+// request, and what is inside it is none of this walk's business.
+//
+// encoding/json dispatches to more than one interface, and recognising
+// only some of them is what repeatedly let a container through. The ones
+// below are the stdlib's; MarshalJSONTo is matched by NAME because it
+// belongs to encoding/json/v2, which this module reaches through the
+// jsonv2 GOEXPERIMENT rather than by import - naming it keeps this
+// correct whether that experiment is on or off, and snapshotting a type
+// json would NOT have dispatched to costs nothing, since encodeCopy
+// reproduces its bytes either way.
+var marshalerTypes = []reflect.Type{
+	reflect.TypeOf((*json.Marshaler)(nil)).Elem(),
+	reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem(),
+	reflect.TypeOf((*encoding.TextAppender)(nil)).Elem(),
+}
+
+var marshalerMethods = []string{"MarshalJSONTo"}
+
+func implementsMarshaler(t reflect.Type) bool {
+	pointer := reflect.PointerTo(t)
+	for _, marshaler := range marshalerTypes {
+		if t.Implements(marshaler) || pointer.Implements(marshaler) {
+			return true
+		}
+	}
+	for _, name := range marshalerMethods {
+		if _, found := t.MethodByName(name); found {
+			return true
+		}
+		if _, found := pointer.MethodByName(name); found {
+			return true
+		}
+	}
+	return false
+}
+
+// encodeCopy copies through the encoding, normalising a shape this build
+// does not model rather than aliasing it.
+func encodeCopy(src any) any {
+	encoded, err := json.Marshal(src)
+	if err != nil {
+		// Unreachable for a tree that came off the wire or out of
+		// configuration; aliasing the original is better than losing it.
+		return src
+	}
+	// As BYTES, not re-parsed. Re-parsing them was the whole defect: a
+	// duplicate member, member order and a number's spelling are all lost
+	// by a decode, and a value that reaches here is precisely the one
+	// nothing else knows how to preserve. Held as a json.RawMessage the
+	// copy marshals to the same bytes as the original, which is all this
+	// copy has ever needed to guarantee.
+	return json.RawMessage(encoded)
+}
+
 // copyDCQL creates a deep copy of a DCQL query
 func copyDCQL(src *DCQL) *DCQL {
 	if src == nil {
@@ -241,10 +623,14 @@ func copyDCQL(src *DCQL) *DCQL {
 			}
 		}
 		dst.Credentials[i] = CredentialQuery{
-			ID:       cred.ID,
-			Format:   cred.Format,
-			Multiple: cred.Multiple,
-			Meta:     meta,
+			ID:     cred.ID,
+			Format: cred.Format,
+
+			Meta: meta,
+		}
+		if cred.Multiple != nil {
+			v := *cred.Multiple
+			dst.Credentials[i].Multiple = &v
 		}
 		if cred.RequireCryptographicHolderBinding != nil {
 			v := *cred.RequireCryptographicHolderBinding
@@ -273,9 +659,18 @@ func copyDCQL(src *DCQL) *DCQL {
 						pathCopy[k] = &s
 					}
 				}
+				// Through copyAnyValue, not a shallow append. A claim
+				// value is `any`, so it can hold a raw leaf or a
+				// container just as Params can, and appending copies the
+				// SLICE while sharing what its elements point at: a
+				// json.RawMessage here was the original's bytes, so
+				// mutating them changed the copied request.
 				var valuesCopy []any
 				if claim.Values != nil {
-					valuesCopy = append([]any{}, claim.Values...)
+					valuesCopy = make([]any, len(claim.Values))
+					for k, v := range claim.Values {
+						valuesCopy[k] = copyAnyValue(v)
+					}
 				}
 				dst.Credentials[i].Claims[j] = ClaimQuery{
 					ID:     claim.ID,
@@ -283,6 +678,28 @@ func copyDCQL(src *DCQL) *DCQL {
 					Values: valuesCopy,
 				}
 			}
+		}
+
+		// Copy the circuit_zk request. Params and Extra are opaque trees
+		// this package passes through unchanged, so they are deep-copied
+		// through their JSON encoding rather than walked field by field.
+		if len(cred.Req) > 0 {
+			dst.Credentials[i].Req = make([]ReqItem, len(cred.Req))
+			for j, item := range cred.Req {
+				dst.Credentials[i].Req[j] = ReqItem{
+					FnID:   item.FnID,
+					Return: item.Return,
+					Params: copyAnyMap(item.Params),
+					Extra:  copyAnyMap(item.Extra),
+				}
+			}
+		}
+		dst.Credentials[i].Extra = copyAnyMap(cred.Extra)
+		if cred.Raw != nil {
+			// Allocated with a length: appending to a NIL slice returns a
+			// nil one, so an empty-but-present Raw came out absent, and
+			// those do not mean the same thing.
+			dst.Credentials[i].Raw = append(make(json.RawMessage, 0, len(cred.Raw)), cred.Raw...)
 		}
 
 		// Copy claim sets

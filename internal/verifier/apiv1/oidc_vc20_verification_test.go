@@ -644,7 +644,7 @@ func TestVerifyVC20ForOIDCRefusesExtraCredentialsForOneQuery(t *testing.T) {
 	// multiple: true is the wallet's licence to return more than one, and
 	// then it must be accepted.
 	permitted := w3cOIDCSession(nil)
-	permitted.DCQLQuery.Credentials[0].Multiple = true
+	permitted.DCQLQuery.Credentials[0].Multiple = new(true)
 	require.NoError(t, client.verifyVC20ForOIDC(t.Context(), permitted, string(two)))
 }
 
@@ -709,7 +709,7 @@ func TestVerifyVC20ForOIDCDoesNotRelaxOnTheSingleQueryFallback(t *testing.T) {
 
 	t.Run("multiple credentials stay refused", func(t *testing.T) {
 		session := unmapped()
-		session.DCQLQuery.Credentials[0].Multiple = true
+		session.DCQLQuery.Credentials[0].Multiple = new(true)
 
 		// Keyed by "" so the response still COVERS the one credential
 		// scope - otherwise the coverage check refuses it first and this

@@ -41,7 +41,7 @@ const SeedBytes = 16
 // after it and produce a different pseudonym.
 var nullInput = make([]byte, 32)
 
-// Pseudonym computes pseudonym-v1-sha256:
+// Pseudonym computes pseudonym:
 //
 //	pseudonym = SHA256(DST || seed || prover_input || verifier_input)
 //	DST       = "nym_auth/v1/<config>", UTF-8
@@ -141,6 +141,13 @@ const (
 // would accept a caller that is confused about which value it holds, and
 // a caller confused about that is one whose OTHER inputs deserve a second
 // look.
+// CheckVerifierID is checkVerifierID for callers outside this package -
+// the verifier side, which derives verifier_input from the same value
+// and must refuse the same inputs. One rule, one implementation: a
+// second copy is how the issuer and the verifier end up hashing
+// different things and blaming each other's pseudonyms.
+func CheckVerifierID(verifierID string) error { return checkVerifierID(verifierID) }
+
 func checkVerifierID(verifierID string) error {
 	if verifierID == "" {
 		return fmt.Errorf("nymauth: no verifier_id")

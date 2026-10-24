@@ -9,6 +9,7 @@ import {
 import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
+import { reqSchema } from "./req-schema.js";
 import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
@@ -140,6 +141,14 @@ const metadataResponseSchema = v.object({
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
             }))),
+            // req is the circuit_zk format's requested calculations. A
+            // query in that format discloses nothing - every value comes
+            // from a function named here - so a stripped req asks the
+            // wallet for nothing and gets nothing back, which reads as a
+            // wallet fault. Its params are inputs to a proof and are
+            // passed through exactly as configured; see req-schema.js for
+            // why this validates without rebuilding them.
+            req: v.optional(reqSchema),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
                 path: v.array(v.string()),
@@ -173,6 +182,10 @@ const dcqlQueryCredentialSchema = v.object({
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
+    // The same schema as the metadata one above, and the same reason:
+    // this is the query that is actually posted, so a parameter dropped
+    // here never reaches the wallet at all.
+    req: v.optional(reqSchema),
 });
 
 const credentialSetQuerySchema = v.object({
@@ -648,6 +661,7 @@ Alpine.data("app", () => ({
                 /** @type {any} */
                 const c = { id: cred.id, format: cred.format, meta: cred.meta };
                 if (cred.claims) c.claims = cred.claims;
+                if (cred.req) c.req = cred.req;
                 return c;
             }),
         };
