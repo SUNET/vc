@@ -1,0 +1,149 @@
+{
+  "description": "Hash vectors for OID4VP transaction_data (EC TS12 payment SCA), OpenID4x profile Section 3.2.5. `raw` is the base64url string a verifier puts in the request's transaction_data array and `json` is what it decodes to. `hashes` is base64url(HASH(ASCII bytes of raw)) per OID4VP 1.0 Appendix B ('base64url decoding is not performed before hashing'), computed with Python hashlib, independent of any wallet or verifier. `noncanonical` marks entries whose JSON a re-serializer would not reproduce, so hashing a decoded-and-re-encoded object gives a different value. Vectors whose note starts HASH-ONLY have payloads that do NOT satisfy the TS12 payment schema (api/ts12-urn-eudi-sca-payment-1-data-model.json: amount is a number, payee requires name and id, transaction_id 1..36 characters, additionalProperties false); use them only to test hashing. The `conforming_*` vectors satisfy it and can drive end-to-end validation. These are not JSON-RPC conformance vectors and do not use vector-schema.json.",
+  "vectors": [
+    {
+      "name": "sorted_compact",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). keys sorted at every level, no whitespace: the one shape a naive re-serializer reproduces",
+      "json": "{\"credential_ids\":[\"pay\"],\"payload\":{\"amount\":\"49.99\",\"currency\":\"EUR\",\"execution_date\":\"2026-10-06\",\"payee\":{\"id\":\"SE1234567890\",\"name\":\"Shop AB\"},\"transaction_id\":\"tx-0001\"},\"type\":\"urn:eudi:sca:payment:1\"}",
+      "raw": "eyJjcmVkZW50aWFsX2lkcyI6WyJwYXkiXSwicGF5bG9hZCI6eyJhbW91bnQiOiI0OS45OSIsImN1cnJlbmN5IjoiRVVSIiwiZXhlY3V0aW9uX2RhdGUiOiIyMDI2LTEwLTA2IiwicGF5ZWUiOnsiaWQiOiJTRTEyMzQ1Njc4OTAiLCJuYW1lIjoiU2hvcCBBQiJ9LCJ0cmFuc2FjdGlvbl9pZCI6InR4LTAwMDEifSwidHlwZSI6InVybjpldWRpOnNjYTpwYXltZW50OjEifQ",
+      "noncanonical": false,
+      "hashes": {
+        "sha-256": "XEnozbVb0_f-Waw7ZL3mnOtZ8wt4hEH9gI7f6FDPoJw",
+        "sha-384": "WXVN8LVva2ORsW6jNcCHZEl0MHKJwFUx8Fgcsco3k58c90m5gllNCtMzC0rO1PCQ",
+        "sha-512": "vyq6gRMULFC6Ky0-sMCzCz-P-UwZHuCmCIbhxOEV9M-NdfNWQLanqIsKBsPQhKt4XmSHxf_T-oYmwEv45EqYXg"
+      }
+    },
+    {
+      "name": "keys_in_spec_order",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). type first, payload keys unsorted; Go's map re-marshal sorts keys",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"payload\":{\"transaction_id\":\"tx-0001\",\"payee\":{\"name\":\"Shop AB\",\"id\":\"SE1234567890\"},\"amount\":\"49.99\",\"currency\":\"EUR\",\"execution_date\":\"2026-10-06\"}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJwYXlsb2FkIjp7InRyYW5zYWN0aW9uX2lkIjoidHgtMDAwMSIsInBheWVlIjp7Im5hbWUiOiJTaG9wIEFCIiwiaWQiOiJTRTEyMzQ1Njc4OTAifSwiYW1vdW50IjoiNDkuOTkiLCJjdXJyZW5jeSI6IkVVUiIsImV4ZWN1dGlvbl9kYXRlIjoiMjAyNi0xMC0wNiJ9fQ",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "d4up91CnefFMyilR37pBM743RezMNKvBr5-Cc9F_GzY",
+        "sha-384": "y6OQtBXxf4i_U1g5uy3JKxuqy6RZUlyLrUKhyh8Aj1dUHz_ttS5QHh2Q-Chz7c8V",
+        "sha-512": "P08uCUJuuQWRN__C9lNKD_B5nUSLR3HZ6T8hObQeNny_tl19W4soe6G9qz4Elb5LDswfHgI-SPTQ2uodvSnIUw"
+      }
+    },
+    {
+      "name": "pretty_printed",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). indented with newlines; any re-serialization drops the whitespace",
+      "json": "{\n  \"type\": \"urn:eudi:sca:payment:1\",\n  \"credential_ids\": [\n    \"pay\"\n  ],\n  \"payload\": {\n    \"transaction_id\": \"tx-0001\",\n    \"payee\": {\n      \"name\": \"Shop AB\",\n      \"id\": \"SE1234567890\"\n    },\n    \"amount\": \"49.99\",\n    \"currency\": \"EUR\",\n    \"execution_date\": \"2026-10-06\"\n  }\n}",
+      "raw": "ewogICJ0eXBlIjogInVybjpldWRpOnNjYTpwYXltZW50OjEiLAogICJjcmVkZW50aWFsX2lkcyI6IFsKICAgICJwYXkiCiAgXSwKICAicGF5bG9hZCI6IHsKICAgICJ0cmFuc2FjdGlvbl9pZCI6ICJ0eC0wMDAxIiwKICAgICJwYXllZSI6IHsKICAgICAgIm5hbWUiOiAiU2hvcCBBQiIsCiAgICAgICJpZCI6ICJTRTEyMzQ1Njc4OTAiCiAgICB9LAogICAgImFtb3VudCI6ICI0OS45OSIsCiAgICAiY3VycmVuY3kiOiAiRVVSIiwKICAgICJleGVjdXRpb25fZGF0ZSI6ICIyMDI2LTEwLTA2IgogIH0KfQ",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "B0ROp95e_urO6Tlth7uamzos64vOpR9njgNUn-5JKAk",
+        "sha-384": "1X1vuVkqjinBUOd7TOyZ-a4CmH6CREUTTqsak1WK5Q-RH9KbFNbNQJy2c7Vf-KEv",
+        "sha-512": "ef7w0fmziYQLwJjQr64p2TyR7m3TDmhojpro0XbVdA-LOyXjy5qQr_FNP6CND7r0AtcSt5Q3NTCEbOZKJIGTxA"
+      }
+    },
+    {
+      "name": "escaped_unicode_and_slash",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). uses \\uXXXX and \\/ escapes; a re-serializer emits the literal characters instead",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"payload\":{\"transaction_id\":\"tx-0002\",\"payee\":{\"name\":\"\\u00c5kesson \\/ Son\",\"id\":\"SE1\"},\"amount\":\"10.00\",\"currency\":\"SEK\"}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJwYXlsb2FkIjp7InRyYW5zYWN0aW9uX2lkIjoidHgtMDAwMiIsInBheWVlIjp7Im5hbWUiOiJcdTAwYzVrZXNzb24gXC8gU29uIiwiaWQiOiJTRTEifSwiYW1vdW50IjoiMTAuMDAiLCJjdXJyZW5jeSI6IlNFSyJ9fQ",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "WoIXcj6LDcvVcXpugPs57WSBd6W7ZYLq_5lg3o89QTk",
+        "sha-384": "ICddVCtQK_UXazO5cu-vGshtyRJQ6QxIussKYx8QDGD3CSZeMD5XhNhcXlZTQarn",
+        "sha-512": "7l6BRpwNujXDNhFOIQzNpE6sMlUyIYVHHlgX3g13P279Dx6z6JNAMTVKLPH6gRf75U6WgHWwQZ4M56mEvg_JoQ"
+      }
+    },
+    {
+      "name": "html_sensitive_characters",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). contains & < > literally; Go's encoder escapes these to \\u0026 \\u003c \\u003e by default",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"payload\":{\"transaction_id\":\"tx-0003\",\"payee\":{\"name\":\"A&B <Shop>\",\"id\":\"SE2\"},\"amount\":\"1.50\",\"currency\":\"EUR\"}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJwYXlsb2FkIjp7InRyYW5zYWN0aW9uX2lkIjoidHgtMDAwMyIsInBheWVlIjp7Im5hbWUiOiJBJkIgPFNob3A-IiwiaWQiOiJTRTIifSwiYW1vdW50IjoiMS41MCIsImN1cnJlbmN5IjoiRVVSIn19",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "PrK5pZO92AECa1Wk2qct6QRUV36H5bwWIwVuMxLHz_Y",
+        "sha-384": "LDTXp5g8TEe_ohqnUKBBVmQ1_EVOIen9Cw1vw6RLTzeqCmX2QZeM9K-Uv1LMSAw9",
+        "sha-512": "54TNTKwes7k7hAIDFDXQInWb29vV9Zm1AoHbLxFElF5o1plcs9kGm6DFHvHwCLYqN6PQh0zYqYcb_t5_e751ig"
+      }
+    },
+    {
+      "name": "hash_alg_array",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). request member transaction_data_hashes_alg is an ARRAY (OID4VP 1.0 Appendix B)",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"transaction_data_hashes_alg\":[\"sha-256\",\"sha-384\"],\"payload\":{\"transaction_id\":\"tx-0004\",\"amount\":\"5.00\",\"currency\":\"EUR\"}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJ0cmFuc2FjdGlvbl9kYXRhX2hhc2hlc19hbGciOlsic2hhLTI1NiIsInNoYS0zODQiXSwicGF5bG9hZCI6eyJ0cmFuc2FjdGlvbl9pZCI6InR4LTAwMDQiLCJhbW91bnQiOiI1LjAwIiwiY3VycmVuY3kiOiJFVVIifX0",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "FixtHQ2dvNoqD3hsfrtSiMNfKPByvNhhHgTbC8lbOV8",
+        "sha-384": "qSbEEkr8j4qX7WhmTe6Lu2M0BzDC8sbeQyIuXkibs8jUywMith-dSvxax5x8huTG",
+        "sha-512": "wf-V7OgfhoulAcCWmFf71INSA-9eXalpeVzci_lrIW3EVDqLLxVcH33CnPsmRtBVS9hZHswFFukI8Zm5RBcPHw"
+      }
+    },
+    {
+      "name": "hash_alg_string",
+      "note": "HASH-ONLY (the payload does not satisfy the TS12 payment schema: amount is a string, payee id/name may be missing). some verifiers send a bare string; tolerated on input",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"transaction_data_hashes_alg\":\"sha-384\",\"payload\":{\"transaction_id\":\"tx-0005\",\"amount\":\"5.00\",\"currency\":\"EUR\"}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJ0cmFuc2FjdGlvbl9kYXRhX2hhc2hlc19hbGciOiJzaGEtMzg0IiwicGF5bG9hZCI6eyJ0cmFuc2FjdGlvbl9pZCI6InR4LTAwMDUiLCJhbW91bnQiOiI1LjAwIiwiY3VycmVuY3kiOiJFVVIifX0",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "Rj1ByIgYl07MgeHNvdpDoTWrrCoIzvcIw1fIxMYLp7Q",
+        "sha-384": "9ydbtzMSREku2k6fbjEAx3n3DUatc2lPZfZHsE6BTkGp3vTMIgCoaOAUP_S8X-z9",
+        "sha-512": "mioiBJwqWvrHO8JHD8J2ARAExw9fp0K3a3wurTNNuTTlhidnn-XMTbAbUsbhlWayzRyQs3YUSXr-m7MqF7FXPQ"
+      }
+    },
+    {
+      "name": "conforming_compact",
+      "note": "Satisfies the TS12 payment schema (amount is a number). Compact, members in spec order, so a re-serializer that sorts keys differs.",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"payload\":{\"transaction_id\":\"tx-0001\",\"payee\":{\"name\":\"Shop AB\",\"id\":\"SE1234567890\"},\"currency\":\"EUR\",\"amount\":49.99}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJwYXlsb2FkIjp7InRyYW5zYWN0aW9uX2lkIjoidHgtMDAwMSIsInBheWVlIjp7Im5hbWUiOiJTaG9wIEFCIiwiaWQiOiJTRTEyMzQ1Njc4OTAifSwiY3VycmVuY3kiOiJFVVIiLCJhbW91bnQiOjQ5Ljk5fX0",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "_qWdUyyd3BH8uO2DIUJmiGZBEnjv7pGIEKwS0q7Y7Qs",
+        "sha-384": "wIlswFwVR-JIKinCJ_wtmDJkah7Ds4Jrvu_LwLsud40cpdV44tFj4zpEZ6t3Z5P5",
+        "sha-512": "dvHV5VBufzYAN0yA0NK55B6BCpBOB_7kSNKo57dlNQFLqCmspkA0-xlJcRre71G-IWuuEKiGb4AtWXQgKdiU1w"
+      }
+    },
+    {
+      "name": "conforming_pretty_printed",
+      "note": "Satisfies the schema; indented with newlines.",
+      "json": "{\n  \"type\": \"urn:eudi:sca:payment:1\",\n  \"credential_ids\": [\n    \"pay\"\n  ],\n  \"payload\": {\n    \"transaction_id\": \"tx-0002\",\n    \"payee\": {\n      \"name\": \"Shop AB\",\n      \"id\": \"SE1234567890\"\n    },\n    \"currency\": \"EUR\",\n    \"amount\": 10.5\n  }\n}",
+      "raw": "ewogICJ0eXBlIjogInVybjpldWRpOnNjYTpwYXltZW50OjEiLAogICJjcmVkZW50aWFsX2lkcyI6IFsKICAgICJwYXkiCiAgXSwKICAicGF5bG9hZCI6IHsKICAgICJ0cmFuc2FjdGlvbl9pZCI6ICJ0eC0wMDAyIiwKICAgICJwYXllZSI6IHsKICAgICAgIm5hbWUiOiAiU2hvcCBBQiIsCiAgICAgICJpZCI6ICJTRTEyMzQ1Njc4OTAiCiAgICB9LAogICAgImN1cnJlbmN5IjogIkVVUiIsCiAgICAiYW1vdW50IjogMTAuNQogIH0KfQ",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "5O_Bubnqc8kkoXadtnPQl-Z4TXiJtB2sdQPJHw3Q_Lc",
+        "sha-384": "erCHyIrRed2GIcpmD9cr-wloPC6UkzWRxU9eDh2T11BN2zJDuiT3nNW_swEEgMeZ",
+        "sha-512": "aJ4C-AV4BlYbn2tZqmWBfDCwRwKq3VS5YBFGacPIEx4gcqSgOcXZcOR1eEKaGz66SISLaZCsFKBa7t2metk5vw"
+      }
+    },
+    {
+      "name": "conforming_non_canonical_number",
+      "note": "Satisfies the schema; the amount is written 49.990, which any re-serializer prints as 49.99, so the hash differs.",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"payload\":{\"transaction_id\":\"tx-0003\",\"payee\":{\"name\":\"Shop AB\",\"id\":\"SE1234567890\"},\"currency\":\"EUR\",\"amount\":49.990}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJwYXlsb2FkIjp7InRyYW5zYWN0aW9uX2lkIjoidHgtMDAwMyIsInBheWVlIjp7Im5hbWUiOiJTaG9wIEFCIiwiaWQiOiJTRTEyMzQ1Njc4OTAifSwiY3VycmVuY3kiOiJFVVIiLCJhbW91bnQiOjQ5Ljk5MH19",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "uLOIQFDBCJXJu-ZB6JaiKXryLCkJYn2-fIfFB-D8hjo",
+        "sha-384": "MUMKokbmW1YsA1y5Z9ocfUCR-6fDF7RH4l4pdgSPBZUaMdwmbNwAAmvGU1P7pqs-",
+        "sha-512": "IPNLj5Bc4E1IQwONGUMGRdrpbZ8l2S1_Do__Cw8EMc9yyO5WLNUiOgkm-OY9IOOSBJQ3xaGJ2Zog6IPxLXzKag"
+      }
+    },
+    {
+      "name": "conforming_escapes",
+      "note": "Satisfies the schema; uses \\uXXXX and \\/ escapes.",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"payload\":{\"transaction_id\":\"tx-0004\",\"payee\":{\"name\":\"\\u00c5kesson \\/ Son\",\"id\":\"SE0000000001\"},\"currency\":\"SEK\",\"amount\":120}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJwYXlsb2FkIjp7InRyYW5zYWN0aW9uX2lkIjoidHgtMDAwNCIsInBheWVlIjp7Im5hbWUiOiJcdTAwYzVrZXNzb24gXC8gU29uIiwiaWQiOiJTRTAwMDAwMDAwMDEifSwiY3VycmVuY3kiOiJTRUsiLCJhbW91bnQiOjEyMH19",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "OJxDFlJbqD60-2wmxla56PiFF49CpJUnVjB8r6s3KOE",
+        "sha-384": "8WGtWo7cYdWLbPcTtKQmAXIKnN4jCPbo6EXKbZHfXt7cdyBiKuVlCSzZScXpfWRy",
+        "sha-512": "SERuRonzXFXQKtGo2vTeL_G39-_czLhRXEclabvNoYYupN5QSThEllkoFToDOz4O-PFTtVQcsKVrOkglUgct4g"
+      }
+    },
+    {
+      "name": "conforming_hash_alg_array_with_optionals",
+      "note": "Satisfies the schema incl. optional members (pisp, date_time, execution_date as date-time) and lists acceptable hash algorithms (request member, an array).",
+      "json": "{\"type\":\"urn:eudi:sca:payment:1\",\"credential_ids\":[\"pay\"],\"transaction_data_hashes_alg\":[\"sha-256\",\"sha-384\"],\"payload\":{\"transaction_id\":\"tx-0005\",\"date_time\":\"2026-10-06T14:30:00+00:00\",\"payee\":{\"name\":\"Shop AB\",\"id\":\"SE1234567890\",\"website\":\"https://shop.example.com\"},\"pisp\":{\"legal_name\":\"Pay Initiation AB\",\"brand_name\":\"PayInit\",\"domain_name\":\"payinit.example.com\"},\"execution_date\":\"2026-10-07T00:00:00+00:00\",\"currency\":\"EUR\",\"amount\":5,\"amount_estimated\":false,\"sct_inst\":true}}",
+      "raw": "eyJ0eXBlIjoidXJuOmV1ZGk6c2NhOnBheW1lbnQ6MSIsImNyZWRlbnRpYWxfaWRzIjpbInBheSJdLCJ0cmFuc2FjdGlvbl9kYXRhX2hhc2hlc19hbGciOlsic2hhLTI1NiIsInNoYS0zODQiXSwicGF5bG9hZCI6eyJ0cmFuc2FjdGlvbl9pZCI6InR4LTAwMDUiLCJkYXRlX3RpbWUiOiIyMDI2LTEwLTA2VDE0OjMwOjAwKzAwOjAwIiwicGF5ZWUiOnsibmFtZSI6IlNob3AgQUIiLCJpZCI6IlNFMTIzNDU2Nzg5MCIsIndlYnNpdGUiOiJodHRwczovL3Nob3AuZXhhbXBsZS5jb20ifSwicGlzcCI6eyJsZWdhbF9uYW1lIjoiUGF5IEluaXRpYXRpb24gQUIiLCJicmFuZF9uYW1lIjoiUGF5SW5pdCIsImRvbWFpbl9uYW1lIjoicGF5aW5pdC5leGFtcGxlLmNvbSJ9LCJleGVjdXRpb25fZGF0ZSI6IjIwMjYtMTAtMDdUMDA6MDA6MDArMDA6MDAiLCJjdXJyZW5jeSI6IkVVUiIsImFtb3VudCI6NSwiYW1vdW50X2VzdGltYXRlZCI6ZmFsc2UsInNjdF9pbnN0Ijp0cnVlfX0",
+      "noncanonical": true,
+      "hashes": {
+        "sha-256": "LosqUkKKE5QeST4NaRg9i-xCxgjF4lRpSmyAe5MqHrc",
+        "sha-384": "X30kONlhJCIaQzwmslvAmDGaDUHCtgTo_jS207PNSaZldGzvjDKGHPpHXJRjEU-Y",
+        "sha-512": "dMp6iQXXc3QP1ww78fe5LPbJB0V03SvvpSATCcfNP3q5YiGVMOx_TjA_WhCpd7M_Kf16bc_mVewkiW9EA7ZSDQ"
+      }
+    }
+  ]
+}

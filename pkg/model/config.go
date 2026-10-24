@@ -917,6 +917,8 @@ type Verifier struct {
 	DigitalCredentials DigitalCredentialsConfig `yaml:"digital_credentials,omitempty"`
 	// AuthorizationPageCSS holds the authorization page styling configuration
 	AuthorizationPageCSS AuthorizationPageCSSConfig `yaml:"authorization_page_css,omitempty"`
+	// TS12 configures EC TS12 payment SCA (transaction_data) support for the standalone verifier. Off by default.
+	TS12 TS12Config `yaml:"ts12,omitempty"`
 	// CredentialDisplay holds the credential display settings
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
@@ -1507,6 +1509,26 @@ func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string
 		WalletAttestationEnabled:   walletAttestationEnabled,
 		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
+}
+
+// TS12Config configures EC TS12 v1.0.1 payment SCA support in the verifier.
+type TS12Config struct {
+	// Enable lets /ui/interaction accept a "payment" object and send a
+	// urn:eudi:sca:payment:1 transaction_data entry with the request. It also
+	// serves the operator test page at /payment. Intended for test and PSP
+	// verifiers: anyone who can reach /ui/interaction can then start a
+	// payment request, so leave it off on a general-purpose verifier.
+	Enable bool `yaml:"enable" default:"false"`
+
+	// SCAVCTValues are the vct values of the SCA attestation the operator test
+	// page requests by default. Optional; the page lets the operator type one.
+	SCAVCTValues []string `yaml:"sca_vct_values,omitempty"`
+
+	// HashAlgs is the transaction_data_hashes_alg list sent with each payment
+	// request, in order of preference. Default ["sha-256"] (OpenID4VP 1.0
+	// B.3.3.1 requires every implementation to support it; TS12 4.2 makes the
+	// member REQUIRED so it is always sent).
+	HashAlgs []string `yaml:"hash_algs,omitempty" validate:"omitempty,dive,oneof=sha-256 sha-384 sha-512"`
 }
 
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration

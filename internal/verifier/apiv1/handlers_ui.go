@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -427,6 +428,13 @@ type UIInteractionRequest struct {
 	// reload mid-flow does not orphan the wallet's outstanding scan.
 	// Otherwise a fresh session id is minted and returned in the reply.
 	SessionID string `json:"session_id,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// Payment, when set, makes this an EC TS12 payment SCA request: a
+	// urn:eudi:sca:payment:1 transaction_data entry is added to the request
+	// and the response is validated against it. Requires verifier.ts12.enable.
+	// A payment is never served from a reused session: every payment request
+	// is a new transaction.
+	Payment *UIPaymentRequest `json:"payment,omitempty" validate:"omitempty"`
 }
 
 type UIInteractionReply struct {
@@ -460,6 +468,16 @@ type UIInteractionReply struct {
 
 // UIInteraction handles front-end interactions, replying with an Authorization Request that contains a Request URI and DCQL query, the latter for UI to show.
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
+	// A request carrying no query at all, which is not merely invalid:
+	// everything below dereferences it, so this PANICS without the
+	// guard. The HTTP binding skips decoding a body of zero length
+	// entirely - no decode, no validation, no error - so a caller that
+	// sends an empty body arrives here with a zero-valued request and
+	// gets a stack trace and a 500 where a 400 was owed.
+	if req == nil || req.DCQLQuery == nil {
+		return nil, invalidInteractionRequest("dcql_query is required")
+	}
+
 	c.log.Debug("uiInteraction", "dcql_query", req.DCQLQuery)
 
 	// Augment BEFORE the reuse check: the stored request object was
@@ -467,6 +485,12 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// same shape before we can compare them for equality.
 	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
+	// A payment is a new transaction every time, so it never joins a reused
+	// session; tryReuseInFlightSession in turn refuses to hand a payment
+	// session to a request that did not ask for one.
+	if req.Payment != nil {
+		req.SessionID = ""
+	}
 	if reply, ok, err := c.tryReuseInFlightSession(ctx, req); err != nil {
 		return nil, err
 	} else if ok {
@@ -498,15 +522,35 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// scopes, finds none, and reports success for a response that answered
 	// a request asking for nothing. Refused here, where the caller can still
 	// be told what was wrong with its request.
+	//
+	// Both refusals here are STRUCTURED 400s. An unstructured error carries
+	// no status, so the status is inferred from its text - and the text
+	// contains a credential query id the caller chose. One named "token"
+	// answers 401 instead of 400 and loses the description with it.
 	if len(req.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "rejected a UI interaction request whose DCQL asks for no credential at all")
-		return nil, errors.New("dcql_query must request at least one credential")
+		return nil, invalidInteraction(req.Payment != nil, "dcql_query must request at least one credential")
 	}
 
 	for _, credential := range req.DCQLQuery.Credentials {
 		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
 			c.log.Error(err, "rejected an invalid credential query from the UI interaction request", "credential_id", credential.ID, "format", credential.Format)
-			return nil, fmt.Errorf("credential query %q is invalid: %w", credential.ID, err)
+			return nil, invalidInteraction(req.Payment != nil, "credential query %q is invalid: %v", credential.ID, err)
+		}
+	}
+
+	// The entries are encoded once, here, and these exact strings go into the
+	// request object AND the session: OpenID4VP hashes the string as
+	// received, so what we compare the wallet's hashes against must be the
+	// bytes we sent, not a later re-encoding.
+	var transactionData, transactionDataModes []string
+	if req.Payment != nil {
+		transactionDataModes = c.issuedResponseModes()
+		var err error
+		transactionData, err = c.buildPaymentTransactionData(req.Payment, req.DCQLQuery)
+		if err != nil {
+			c.log.Error(err, "rejected a payment request")
+			return nil, err
 		}
 	}
 
@@ -530,13 +574,17 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// which types were asked for, whether holder binding was required.
 		// Without it here the request object cache is the only copy, and the
 		// verification path cannot see what it is checking against.
-		DCQLQuery:  req.DCQLQuery,
-		Code:       "",
-		RequestURI: "",
-		WalletURI:  "",
-		Forfeited:  false,
-		State:      state,
-		ClientID:   uiClientID,
+		DCQLQuery:       req.DCQLQuery,
+		TransactionData: transactionData,
+		// What the request objects below are issued with, kept so the
+		// response is checked against it and not against a later config.
+		TransactionDataResponseModes: transactionDataModes,
+		Code:                         "",
+		RequestURI:                   "",
+		WalletURI:                    "",
+		Forfeited:                    false,
+		State:                        state,
+		ClientID:                     uiClientID,
 		// How long the user has to complete the presentation.
 		//
 		// This was 0, and isSessionActive reads 0 as "never expires" - so
@@ -624,6 +672,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		RedirectURI:      "",
 		Scope:            "",
 		DCQLQuery:        req.DCQLQuery,
+		TransactionData:  transactionData,
 		RequestURIMethod: "",
 		VerifierInfo:     c.registrationCertificate.VerifierInfo(),
 	}
@@ -709,6 +758,11 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 		return nil, false, err
 	}
 	if authCtx == nil {
+		return nil, false, nil
+	}
+	// A payment session belongs to its payment. Serving it to a request that
+	// did not ask for one would present an old transaction as a new request.
+	if len(authCtx.TransactionData) > 0 {
 		return nil, false, nil
 	}
 	if !isReusableAuthContext(authCtx) {
@@ -994,7 +1048,11 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 	if err != nil {
 		return nil, err
 	}
-	if c.cfg.Verifier.DigitalCredentials.Enable {
+	// A payment session records the response modes it was issued with and the
+	// response is checked against them, so a resume must not issue a variant
+	// that was not among them (the DC API switched on since).
+	dcAPIAllowed := len(authCtx.TransactionData) == 0 || slices.Contains(authCtx.TransactionDataResponseModes, openid4vp.ResponseModeDCAPIJWT)
+	if c.cfg.Verifier.DigitalCredentials.Enable && dcAPIAllowed {
 		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
