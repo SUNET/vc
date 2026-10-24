@@ -161,6 +161,9 @@ type CredentialConfigurationsSupported struct {
 	// CredentialMetadata: OPTIONAL. Object containing information relevant to the usage and display of issued Credentials.
 	CredentialMetadata *CredentialMetadata `json:"credential_metadata,omitempty" yaml:"credential_metadata,omitempty"`
 
+	// AuxiliaryDataSupported: OPTIONAL. The Auxiliary Data Entries this configuration is issued with (Credential Auxiliary Data).
+	AuxiliaryDataSupported *AuxiliaryDataSupported `json:"auxiliary_data_supported,omitempty" yaml:"auxiliary_data_supported,omitempty"`
+
 	// --- Format-specific parameters (Appendix A) ---
 
 	// VCT: REQUIRED for dc+sd-jwt format. String designating the type of the Credential, as defined in SD-JWT VC.
@@ -255,6 +258,10 @@ type CredentialMetadata struct {
 
 	// Claims: OPTIONAL. A non-empty array of claims description objects as defined in Appendix B.2.
 	Claims []ClaimDescription `json:"claims,omitempty" yaml:"claims,omitempty"`
+
+	// AuxiliaryData: the Auxiliary Data Entries of a Credential Response (Credential Auxiliary Data).
+	// Set it on a response with CredentialResponse.AddAuxiliaryData.
+	AuxiliaryData []AuxiliaryDataEntry `json:"auxiliary_data,omitempty" yaml:"-"`
 }
 
 // ClaimDescription describes a claim within a Credential for display purposes.
