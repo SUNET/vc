@@ -298,7 +298,7 @@ make build-seed-recover
 ./bin/seed_recover -config /etc/vc/config.yaml -seed primary \
     -subject SE -subject 198001011234 \
     -pseudonym-config known-offender-matching-ssc \
-    -verifier-id verifier.example \
+    -verifier-id x509_san_dns:verifier.example \
     -expect <pseudonym the verifier reported>
 ```
 
@@ -313,40 +313,44 @@ there is nothing to compare against, and exiting 0 regardless would report
 a match for every candidate. The seed itself is printed only with
 `-show-seed`.
 
-`-verifier-id` is the **bare** verifier_id — `verifier.example` — not the
-prefixed Client Identifier and not `client_id` as it appears in the
-request. `verifier_id_type` is agreed out of band between wallet and
-verifier and is not hashed. The rulebook states this with worked digests
-and marks the prefixed form MUST NOT:
+`-verifier-id` is the verifier_id **exactly as the Verifier publishes it**,
+prefix included. Nothing is stripped and nothing is normalised — not case,
+not a trailing dot. `verifier_id_type` is agreed out of band and is not
+hashed.
 
 ```
-SHA256("verifier.example")              = be6a6400…4a41   (MUST)
-SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
+-verifier-id x509_san_dns:verifier.example    # an x509_san_dns Verifier
+-verifier-id semantic_id:age-over-18-check    # a semantic Verifier
 ```
 
-A value carrying `x509_san_dns:` is therefore **refused** rather than
-stripped. Hashing it would succeed and return a pseudonym no Verifier could
-have reported, so the loop would simply never match and the operator would
-conclude the subject is innocent — and stripping it would quietly accept a
-caller that is confused about which value it holds.
-
-**`semantic_id:` is not the same kind of thing, and must NOT be stripped.**
-It looks like a Client Identifier Prefix and is not one: for a semantic
-Verifier the verifier_id *is* the whole string `semantic_id:<identifier>`,
-and that whole string is what is hashed. Pass it exactly as the Verifier
-publishes it.
-
 ```
--verifier-id verifier.example                 # x509_san_dns Verifier: bare, no prefix
--verifier-id semantic_id:age-over-18-check    # semantic Verifier: the marker is part of the value
+SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST)
+SHA256("verifier.example")              = be6a6400…4a41   (the bare DNS name, which is NOT a verifier_id)
 ```
 
-So the rule is not "strip anything before a colon". It is: a Client
-Identifier Prefix is never hashed, and a semantic identifier always is.
-Getting this backwards fails the same silent way as the prefixed form —
-a pseudonym no Verifier reports, a loop that never matches, and a subject
-who looks innocent. The one case refused is a bare `semantic_id:` with
-nothing after it, which names no Verifier at all.
+**This reversed on 2026-10-20.** Until rulebook v0.4 the bare DNS name was
+hashed and the prefixed form refused, so anything written before that date
+says the opposite — including earlier versions of this page. The archive
+circuits settle it: their reference `pseudonym.json` pairs `client_id`
+`x509_san_dns:verifier.example` with `verifier_input` `6eae85a0…`, which is
+the prefixed digest.
+
+The reversal also **simplifies** the rule. This page used to have to explain
+that `semantic_id:` and `x509_san_dns:` look alike and are not the same kind
+of thing — one part of the value, one a Client Identifier Prefix to be
+refused. Under v0.4 they are the same kind of thing: both are part of the
+verifier_id, and both are hashed. There is one rule now, **do not strip
+anything**, and no exception to remember.
+
+Getting it wrong in either direction fails the same silent way: hashing the
+wrong value returns a perfectly well-formed pseudonym that matches nothing,
+the loop reports no match, and the operator concludes the subject is
+innocent. A wrong answer, not an error. A value that is neither form is refused outright, naming both and — when it
+looks like a hostname — the value you probably meant. The bare DNS name was
+the *correct* value until the reversal, so anything written before then
+carries one, and without that refusal it would hash cleanly into a pseudonym
+that matches nothing. The only other values refused are ones naming no
+Verifier at all — an empty string, or a marker with nothing after it.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can

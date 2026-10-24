@@ -1,0 +1,24 @@
+{
+  "description": "2008-03-01..2009-02-27 is 364 days inclusive (no leap day inside): below the minimum.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age",
+        "params": {
+          "ge": "2008-03-01",
+          "le": "2009-02-27"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "age_check_span_too_short"
+  }
+}

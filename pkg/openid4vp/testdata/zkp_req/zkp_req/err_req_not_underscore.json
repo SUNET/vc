@@ -1,0 +1,20 @@
+{
+  "description": "The pre-v0.4 member name `req` is not `_req`: _req is missing.",
+  "query": {
+    "id": "q",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "d"
+    },
+    "req": [
+      {
+        "fn_id": "age_check",
+        "return": "h"
+      }
+    ]
+  },
+  "expect": {
+    "error": "req_missing_or_empty"
+  }
+}
