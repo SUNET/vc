@@ -27,17 +27,22 @@ func artifact(t *testing.T, content string) (path, digest string, size int64) {
 func entryFor(t *testing.T, systemID, config, content string) model.NymAuthCircuit {
 	t.Helper()
 	path, digest, size := artifact(t, content)
-	return model.NymAuthCircuit{
+	entry := model.NymAuthCircuit{
 		SystemID:       systemID,
 		Config:         config,
-		HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
-		SigCircuitID:   "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb",
-		BlockEncHash:   6983,
-		BlockEncSig:    4679,
 		ArtifactPath:   path,
 		ArtifactSHA256: digest,
 		ArtifactBytes:  size,
 	}
+	if systemID == nymauth.SystemLongfellowNymAuth {
+		// The four Ligero parameters belong to Longfellow alone; a
+		// Vega entry carrying them is refused.
+		entry.HashCircuitID = "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729"
+		entry.SigCircuitID = "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb"
+		entry.BlockEncHash = 6983
+		entry.BlockEncSig = 4679
+	}
+	return entry
 }
 
 func TestAllowlistResolvesAndCaches(t *testing.T) {
@@ -273,4 +278,60 @@ func TestPreloadChecksEveryAllowedSystem(t *testing.T) {
 	err = fresh.Preload(t.Context())
 	require.Error(t, err)
 	assert.ErrorContains(t, err, nymauth.SystemVegaNymAuth)
+}
+
+// The four Ligero parameters describe a Longfellow build. Vega derives
+// its verifier key from the shapes, so its artifact digest is the
+// circuit's whole identity and there is nothing else to pin - and an
+// entry that names them anyway is a copied Longfellow entry, refused
+// rather than started with parameters nothing will check.
+func TestAllowlistAppliesCircuitParametersPerSystem(t *testing.T) {
+	t.Run("Longfellow needs them", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*model.NymAuthCircuit)
+			want   string
+		}{
+			{"no hash_circuit_id", func(e *model.NymAuthCircuit) { e.HashCircuitID = "" }, "hash_circuit_id is empty"},
+			{"no block_enc_sig", func(e *model.NymAuthCircuit) { e.BlockEncSig = 0 }, "block_enc_sig is zero"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				entry := entryFor(t, nymauth.SystemLongfellowNymAuth, nymauth.ConfigKnownOffenderMatchingSSC, "a circuit")
+				tc.mutate(&entry)
+				_, err := NewAllowlist(model.NymAuthCircuits{Allow: []model.NymAuthCircuit{entry}})
+				assert.ErrorContains(t, err, tc.want)
+			})
+		}
+	})
+
+	t.Run("Vega refuses them", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*model.NymAuthCircuit)
+			want   string
+		}{
+			{"a hash_circuit_id", func(e *model.NymAuthCircuit) { e.HashCircuitID = "5f8c75ae" }, "hash_circuit_id is a Longfellow parameter"},
+			{"a sig_circuit_id", func(e *model.NymAuthCircuit) { e.SigCircuitID = "00513797" }, "sig_circuit_id is a Longfellow parameter"},
+			{"a block_enc_hash", func(e *model.NymAuthCircuit) { e.BlockEncHash = 6983 }, "block_enc_hash is a Longfellow parameter"},
+			{"a block_enc_sig", func(e *model.NymAuthCircuit) { e.BlockEncSig = 4679 }, "block_enc_sig is a Longfellow parameter"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				entry := entryFor(t, nymauth.SystemVegaNymAuth, nymauth.ConfigKnownOffenderMatchingSSC, "a circuit")
+				tc.mutate(&entry)
+				_, err := NewAllowlist(model.NymAuthCircuits{Allow: []model.NymAuthCircuit{entry}})
+				assert.ErrorContains(t, err, tc.want)
+			})
+		}
+	})
+
+	t.Run("a Vega entry with none of them is accepted", func(t *testing.T) {
+		entry := entryFor(t, nymauth.SystemVegaNymAuth, nymauth.ConfigKnownOffenderMatchingSSC, "the vega shapes")
+		require.Empty(t, entry.HashCircuitID, "the fixture must not supply Longfellow parameters for Vega")
+		list, err := NewAllowlist(model.NymAuthCircuits{Allow: []model.NymAuthCircuit{entry}})
+		require.NoError(t, err)
+
+		got, err := list.Artifact(t.Context(), nymauth.SystemVegaNymAuth, nymauth.ConfigKnownOffenderMatchingSSC)
+		require.NoError(t, err)
+		assert.Equal(t, "the vega shapes", string(got))
+	})
 }
