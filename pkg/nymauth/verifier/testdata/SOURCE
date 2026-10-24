@@ -1,0 +1,28 @@
+challenge-vectors.json is vendored verbatim from
+
+    https://github.com/sirosfoundation/zk-cred-vega
+    test-vectors/nymauth/challenge-vectors.json
+
+commit 8e7be172e9010e8b47f3192f046d5f990f602790, which is main and the
+v0.0.7 tag (the squash merge of sirosfoundation/zk-cred-vega#13, carrying the
+redirect handover vectors added by #14)
+
+    sha256 611f6ba601034c37cefddb91422bcafd648c93b181e5eab730305ff46101cb6a
+
+The digest is unchanged from the pre-merge pin this replaced (#14's branch
+head 274ed845), so the merge moved the provenance and not the bytes.
+
+zk-cred-longfellow ships this file too, and the two are now BYTE-IDENTICAL:
+zk-cred-longfellow 495d704eb1f7167f3f66717c133d2e1ec5e2127d (the merge of its
+#14) carries the same sha256 611f6ba6..., redirect arrays included.
+
+They were NOT identical for a while - Longfellow carried the pre-redirect
+version - and nothing noticed, because the staged copy was placed beside the
+vendored one and never compared. TestVendoredVectorsAgreeWithLongfellow (a
+zknative test, since Longfellow's copy only exists in that build) now compares
+them in full. It allowed the gap explicitly while it lasted and asserted the
+exemption would expire; it did, and the comparison is total.
+
+Re-vendor rather than edit. A local change turns a cross-implementation check
+into a self-consistency one that passes while the verifier and the provers
+disagree - which is the single failure this file exists to prevent.
