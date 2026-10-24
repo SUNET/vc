@@ -59,15 +59,16 @@ type Client struct {
 	// the allowlist is ever loaded.
 	nymAuthCircuits *circuits.Allowlist
 
-	// nymAuthVerifiers caches one loaded circuit handle per pseudonym
-	// configuration. Loading is the expensive step - about 0.15 s and
-	// a megabyte of artifact - and the handle holds no interior
-	// mutability, so one per configuration is reused across
+	// nymAuthVerifiers caches one loaded circuit handle per build -
+	// proof system AND pseudonym configuration, which is what the
+	// allowlist is keyed by. Loading is the expensive step - about
+	// 0.15 s and a megabyte of artifact - and the handle holds no
+	// interior mutability, so one per build is reused across
 	// presentations and goroutines.
 	//
 	// Populated only in a build with the "zknative" tag; the default
 	// build cannot construct one and refuses before it would try.
-	nymAuthVerifiers map[string]*verifier.NativeVerifier
+	nymAuthVerifiers map[nymAuthVerifierKey]*verifier.NativeVerifier
 	nymAuthMu        sync.Mutex
 
 	// registrationCertificate is the Registrar-issued WRPRC presented to
@@ -140,7 +141,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		if err != nil {
 			return nil, err
 		}
-		c.log.Info("nym_auth verification enabled", "configs", c.nymAuthCircuits.Configs())
+		c.log.Info("nym_auth verification enabled", "allowed", c.nymAuthCircuits.Allowed())
 	}
 
 	// Load PKI signing key and chain for request object signing and OIDC
@@ -895,4 +896,15 @@ type jwksKeyResolverAdapter struct {
 func (a jwksKeyResolverAdapter) ResolveKey(ctx context.Context, issuer string, keyID string) (any, error) {
 	key, _, err := a.resolver.ResolveKeyByKID(ctx, issuer, keyID)
 	return key, err
+}
+
+// nymAuthVerifierKey identifies a loaded nym_auth circuit handle: the
+// proof system a presentation states, and the pseudonym configuration
+// this Verifier asked for.
+//
+// Here rather than in the zknative-tagged file because the Client
+// struct above names it, and that struct is in every build.
+type nymAuthVerifierKey struct {
+	systemID string
+	config   string
 }
