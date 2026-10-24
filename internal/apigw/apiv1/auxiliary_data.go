@@ -14,6 +14,7 @@ import (
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 // Credential Auxiliary Data
@@ -43,7 +44,7 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	if len(supported.ToWallet) == 0 && len(commitments) == 0 {
 		return documentData, nil, nil
 	}
-	doc, err := decodeDocumentData(documentData)
+	doc, err := newCommitmentDocument(c.cfg.GetCredentialMetadata(scope).Format, documentData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
@@ -54,7 +55,7 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	if err := writeCommitments(doc, commitments); err != nil {
 		return nil, nil, err
 	}
-	out, err := json.Marshal(doc)
+	out, err := json.Marshal(doc.claims)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
@@ -73,7 +74,7 @@ func (c *Client) scopeAuxiliaryData(scope string) openid4vci.AuxiliaryDataSuppor
 
 // deliverOpenings fulfils each to_wallet entry with the source's
 // hash_commitment derivation, and returns the entries with their openings.
-func deliverOpenings(ctx context.Context, doc map[string]any, entries []openid4vci.AuxiliaryDataEntry, derivations []primitives.Derivation, sourceClaims map[string]any) ([]openid4vci.AuxiliaryDataEntry, error) {
+func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []openid4vci.AuxiliaryDataEntry, derivations []primitives.Derivation, sourceClaims map[string]any) ([]openid4vci.AuxiliaryDataEntry, error) {
 	delivered := make([]openid4vci.AuxiliaryDataEntry, 0, len(entries))
 	for _, entry := range entries {
 		hc := primitives.HashCommitmentFor(derivations, entry.Path)
@@ -85,7 +86,7 @@ func deliverOpenings(ctx context.Context, doc map[string]any, entries []openid4v
 			return nil, fmt.Errorf("to_wallet path %q: %w", entry.Path, err)
 		}
 		commitment := sha256.Sum256(opening)
-		if err := setCommitment(doc, entry.Path, commitment[:]); err != nil {
+		if err := doc.setCommitment(entry.Path, commitment[:]); err != nil {
 			return nil, err
 		}
 		entry.Opening = base64.RawURLEncoding.EncodeToString(opening)
@@ -95,24 +96,75 @@ func deliverOpenings(ctx context.Context, doc map[string]any, entries []openid4v
 }
 
 // writeCommitments writes each commitment the wallet sent at its path.
-func writeCommitments(doc map[string]any, commitments []walletCommitment) error {
+func writeCommitments(doc *commitmentDocument, commitments []walletCommitment) error {
 	for _, commitment := range commitments {
-		if err := setCommitment(doc, commitment.path, commitment.value); err != nil {
+		if err := doc.setCommitment(commitment.path, commitment.value); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// setCommitment writes a commitment at the mso_mdoc element path names, as
-// the standard base64 a bstr element is decoded from.
-func setCommitment(doc map[string]any, path []string, commitment []byte) error {
-	element := path[len(path)-1]
-	if existing, present := doc[element]; present && existing != nil {
-		return fmt.Errorf("the document data already carries a value for %q", element)
+// commitmentDocument is a credential's document data, with the way its
+// format carries a hash commitment.
+type commitmentDocument struct {
+	claims map[string]any
+	// flat keys a claim by the last segment of its path, as an mso_mdoc
+	// element identifier. A JSON-based credential nests it at its path.
+	flat bool
+	// encoding is the text of a commitment: the standard base64 a bstr
+	// element is decoded from, or base64url in a JSON-based credential.
+	encoding *base64.Encoding
+}
+
+func newCommitmentDocument(format string, documentData []byte) (*commitmentDocument, error) {
+	claims, err := decodeDocumentData(documentData)
+	if err != nil {
+		return nil, err
 	}
-	doc[element] = base64.StdEncoding.EncodeToString(commitment)
+	switch {
+	case format == openid4vp.FormatMsoMdoc:
+		return &commitmentDocument{claims: claims, flat: true, encoding: base64.StdEncoding}, nil
+	case openid4vp.IsSDJWTVCCredentialFormat(format):
+		return &commitmentDocument{claims: claims, encoding: base64.RawURLEncoding}, nil
+	}
+	return nil, fmt.Errorf("a %q credential carries no hash commitment", format)
+}
+
+// setCommitment writes a commitment at path.
+func (d *commitmentDocument) setCommitment(path []string, commitment []byte) error {
+	parent, key, err := d.parent(path)
+	if err != nil {
+		return err
+	}
+	if existing, present := parent[key]; present && existing != nil {
+		return fmt.Errorf("the document data already carries a value at %q", path)
+	}
+	parent[key] = d.encoding.EncodeToString(commitment)
 	return nil
+}
+
+// parent returns the object that holds the claim at path, and the claim's
+// key in it, creating the objects a nested path passes through.
+func (d *commitmentDocument) parent(path []string) (map[string]any, string, error) {
+	key := path[len(path)-1]
+	if d.flat {
+		return d.claims, key, nil
+	}
+	node := d.claims
+	for _, segment := range path[:len(path)-1] {
+		switch child := node[segment].(type) {
+		case map[string]any:
+			node = child
+		case nil:
+			created := map[string]any{}
+			node[segment] = created
+			node = created
+		default:
+			return nil, "", fmt.Errorf("the document data carries no object at %q of %q", segment, path)
+		}
+	}
+	return node, key, nil
 }
 
 // decodeDocumentData reads the document, preserving numbers exactly.

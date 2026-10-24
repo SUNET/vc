@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -132,4 +133,66 @@ func TestAuxiliaryData(t *testing.T) {
 	}}})
 	require.ErrorAs(t, err, &vciErr, "key proofs that disagree are refused")
 	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
+}
+
+// An SD-JWT VC carries each commitment as base64url at its claims path,
+// and the SD-JWT builder turns it into a disclosure the holder can
+// withhold.
+func TestAuxiliaryDataSDJWT(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "secret.key")
+	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
+	ssc, psc := []string{"commitments", "ssc"}, []string{"commitments", "psc"}
+	always := func(path []string) sdjwtvc.Claim {
+		segments := make([]*string, len(path))
+		for i := range path {
+			segments[i] = &path[i]
+		}
+		return sdjwtvc.Claim{Path: segments, SD: "always"}
+	}
+	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{always(ssc), always(psc)}}
+	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+		"example": {Format: "dc+sd-jwt", VCTM: vctm, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+			ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
+			ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}},
+		}},
+	}}}}
+	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+		Path:    ssc,
+		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16}},
+	}}}
+	walletPSC := sha256.Sum256([]byte("the wallet's private seed"))
+	fromWallet := []openid4vci.AuxiliaryDataEntry{{
+		Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(walletPSC[:]),
+	}}
+
+	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations,
+		map[string]any{"personal_administrative_number": "pan-200"}, []byte(`{"given_name":"Alex"}`), fromWallet)
+	require.NoError(t, err)
+	require.Len(t, toWallet, 1)
+	opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
+	require.NoError(t, err)
+	issued := sha256.Sum256(opening)
+	want := map[string]any{
+		"ssc": base64.RawURLEncoding.EncodeToString(issued[:]),
+		"psc": base64.RawURLEncoding.EncodeToString(walletPSC[:]),
+	}
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+	assert.Equal(t, want, doc["commitments"], "each commitment is base64url at its claims path")
+
+	payload, disclosures, err := sdjwtvc.New().MakeCredential(sha256.New(), doc, vctm, 0)
+	require.NoError(t, err)
+	disclosed := map[string]any{}
+	for _, d := range disclosures {
+		raw, err := base64.RawURLEncoding.DecodeString(d)
+		require.NoError(t, err)
+		var parts []any
+		require.NoError(t, json.Unmarshal(raw, &parts))
+		if len(parts) == 3 {
+			disclosed[parts[1].(string)] = parts[2]
+		}
+	}
+	assert.Equal(t, want, disclosed, "the holder can withhold each commitment")
+	assert.NotContains(t, payload["commitments"], "ssc")
+	assert.NotContains(t, payload["commitments"], "psc")
 }

@@ -18,8 +18,17 @@ wallet holds.
 
 `credential_metadata.<scope>.auxiliary_data` is published as the
 configuration's `auxiliary_data_supported`. Each entry is a sha-256
-`hash_commitment` on a `bstr` element of the credential's MDDL. A
-`to_issuer` entry is `required` when its MDDL element is mandatory:
+`hash_commitment` on a claim the credential's type metadata declares:
+
+- in an `mso_mdoc` credential, a `bstr` element of the MDDL, at its
+  namespace and element;
+- in an SD-JWT VC, a claim of the VCTM with `sd: always`, so the holder can
+  withhold it, carrying the commitment base64url-encoded at its claims
+  path. The path stays clear of the claims the SD-JWT builder writes
+  (`iss`, `vct`, `cnf`, `status`, …), and the VCTM declares nothing beneath
+  it.
+
+A `to_issuer` entry is `required` when its claim is mandatory:
 
 ```yaml
 common:

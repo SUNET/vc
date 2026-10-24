@@ -380,7 +380,7 @@ func checkAuxiliaryDataList(meta *model.CredentialMetadata, where string, entrie
 }
 
 // checkHashCommitmentEntry accepts a sha-256 hash_commitment entry whose
-// path names a bstr element of the credential's MDDL.
+// path names a claim the credential's format can carry a commitment in.
 func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.AuxiliaryDataEntry) error {
 	switch {
 	case entry.Type != openid4vci.AuxiliaryDataTypeHashCommitment:
@@ -390,31 +390,20 @@ func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.A
 	case entry.Opening != "" || entry.Commitment != "":
 		return errors.New("metadata carries no opening or commitment")
 	case entry.Required:
-		return errors.New("required comes from the MDDL element's mandatory flag")
-	case meta.Format != openid4vp.FormatMsoMdoc || meta.MDDL == nil:
-		return fmt.Errorf("auxiliary data is implemented for %s credentials with an MDDL", openid4vp.FormatMsoMdoc)
-	case len(entry.Path) != 2:
-		return fmt.Errorf("path %q is a namespace and an element", entry.Path)
+		return errors.New("required comes from the type metadata's mandatory flag")
 	}
-	claim, ok := meta.MDDL.Claims[entry.Path[0]][entry.Path[1]]
-	if !ok {
-		return fmt.Errorf("the MDDL declares no element at path %q", entry.Path)
-	}
-	if claim.ValueType != "bstr" {
-		return fmt.Errorf("path %q is a %s element; a hash commitment is a bstr", entry.Path, claim.ValueType)
-	}
-	return nil
+	return checkCommitmentClaim(meta, entry.Path)
 }
 
 // deriveAuxiliaryDataRequired sets each to_issuer entry's required from the
-// mandatory flag of its MDDL element.
+// mandatory flag the type metadata gives its claim.
 func deriveAuxiliaryDataRequired(cfg *model.Cfg) {
 	for _, meta := range cfg.Common.CredentialMetadata {
-		if meta == nil || meta.AuxiliaryData == nil || meta.MDDL == nil {
+		if meta == nil || meta.AuxiliaryData == nil {
 			continue
 		}
 		for i, entry := range meta.AuxiliaryData.ToIssuer {
-			meta.AuxiliaryData.ToIssuer[i].Required = meta.MDDL.Claims[entry.Path[0]][entry.Path[1]].Mandatory
+			meta.AuxiliaryData.ToIssuer[i].Required = claimMandatory(meta, entry.Path)
 		}
 	}
 }
