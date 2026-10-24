@@ -1,0 +1,25 @@
+{
+  "description": "bbs_cd defines only hashdh-bls12381g1.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "bbs_cd",
+      "schema_id_value": "eu.europa.ec.eudi.nym_auth.bbs.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "nym",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 1,
+          "prf": "sha-256"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "pseudonym_prf_unsupported"
+  }
+}
