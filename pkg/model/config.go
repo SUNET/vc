@@ -849,8 +849,17 @@ type PresetDefinition struct {
 // VerificationPresetScope defines optional overrides for a credential query within a preset.
 type VerificationPresetScope struct {
 	// Claims lists specific claims to request. If empty, all VCTM claims are used.
+	//
+	// Ignored entirely when the effective format is "circuit_zk". Such a
+	// query discloses no issuer-signed attribute at all - every value it
+	// yields is the output of a function named in Req - so neither these
+	// claims nor the VCTM fall-back are attached to it. Listing claims on
+	// a circuit_zk credential is a configuration mistake rather than an
+	// instruction, and is dropped rather than honoured.
 	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
 	// ExcludeClaims lists claims to exclude from the DCQL query.
+	//
+	// Also ignored for "circuit_zk", which carries no claims to exclude.
 	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
 	// Validations are optional rules applied server-side after claims extraction
 	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
@@ -864,6 +873,51 @@ type VerificationPresetScope struct {
 	// DCQL query has no other way to say which proof system/circuit a
 	// verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `yaml:"zk_system_type,omitempty" validate:"omitempty,dive"`
+
+	// Req is the circuit_zk format's list of requested calculations -
+	// required whenever Format is "circuit_zk", since such a query
+	// discloses nothing and every value comes from a function named here.
+	//
+	// A circuit_zk preset needs TWO things to be published: a non-empty
+	// req here, and verifier.preferred_vp_formats.circuit_zk advertising
+	// the format (an empty mapping will do - see that field). Without
+	// either, the preset is omitted and the reason is logged, rather than
+	// a button being offered that asks a wallet for a proof the request
+	// declares no support for.
+	// A worked example is in the "req entry" section below, which renders
+	// as prose rather than as a table cell - an indented one here is
+	// flattened into a single run-on line an operator cannot copy.
+	//
+	// Passed through to the wire as configured. Nothing judges what it
+	// MEANS unless Validate names a profile: this verifier is how wallets
+	// are tested, so a request that breaks a rulebook on purpose has to
+	// be sendable, and the specifications underneath are still moving.
+	//
+	// One transport restriction applies regardless, because it is not a
+	// judgement about the request. The picker builds the query in the
+	// browser and posts it back, where every number is a float64 - so a
+	// numeric param the browser cannot carry exactly (an integer past
+	// 2^53, or past what the shortest round-tripping decimal denotes; a
+	// decimal with more digits than a float64 holds) would reach the
+	// wallet CHANGED. A param is an input to a proof, so a changed one
+	// yields a different pseudonym, and the only symptom is two systems
+	// disagreeing about who someone is.
+	//
+	// Such a credential is omitted from the preset and the reason is
+	// logged, rather than published and quietly altered. Quote the value
+	// as a string if the exact digits are what you mean.
+	Req []openid4vp.ReqItem `yaml:"req,omitempty" validate:"omitempty,dive"`
+
+	// Validate names a profile to check this credential's request against
+	// AT STARTUP. Empty means no checking, which is the default.
+	//
+	// Startup rather than request time, and named rather than a strict
+	// flag. An operator who wants to be told their preset violates the
+	// nym_auth rulebook asks for it by name and is told while they are
+	// still editing configuration; traffic is never validated, because a
+	// circuit_zk request that is not a nym_auth request is not invalid and
+	// this server is not the one to decide.
+	Validate string `yaml:"validate,omitempty" validate:"omitempty,oneof=nym_auth" doc_example:"\"nym_auth\""`
 }
 
 // VerificationPresetClaim defines a claim path to request within a credential.
@@ -905,7 +959,16 @@ type Verifier struct {
 	AccessCertificate *AccessCertificate `yaml:"access_certificate,omitempty"`
 	// RegistrationCertificate points at a Relying Party registration certificate (WRPRC, ETSI TS 119 475) issued to this verifier by a national Registrar, to be presented to wallets in the OpenID4VP verifier_info parameter. vc does not issue these.
 	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
-	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
+	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets.
+	//
+	// Required for a circuit_zk preset. The circuit filter - which proof
+	// systems and circuits this Verifier will accept a proof from - lives
+	// at preferred_vp_formats.circuit_zk and nowhere else, so a preset
+	// using that format is NOT PUBLISHED unless it is set. An empty
+	// `circuit_zk: {}` is a complete answer and means "any circuit"; no
+	// default is supplied, because those identifiers are
+	// deployment-specific and guessing one would pin this Verifier to a
+	// single implementation.
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
@@ -939,6 +1002,12 @@ type Verifier struct {
 	// verification. Only consulted by builds with the "zknative" Go build
 	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+
+	// NymAuth configures verification of nym_auth pseudonym proofs
+	// (the "circuit_zk" presentation format). Off unless enable is
+	// set, and only consulted by builds with the "zknative" Go build
+	// tag - the default build cannot check a proof at all.
+	NymAuth NymAuthVerifier `yaml:"nym_auth,omitempty"`
 	// ZkKeyCache configures the on-disk Vega verifier-key store. Verifier
 	// only: these keys exist to verify a presented proof, and the issuer
 	// never touches one.

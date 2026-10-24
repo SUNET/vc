@@ -6,9 +6,10 @@ import {
     getBestSupportedProtocol,
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
-import { groupPresets } from "./preset-helpers.js";
+import { dcqlCredentialFromPreset, groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
+import { reqSchema } from "./req-schema.js";
 import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
@@ -140,6 +141,14 @@ const metadataResponseSchema = v.object({
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
             }))),
+            // req is the circuit_zk format's requested calculations. A
+            // query in that format discloses nothing - every value comes
+            // from a function named here - so a stripped req asks the
+            // wallet for nothing and gets nothing back, which reads as a
+            // wallet fault. Its params are inputs to a proof and are
+            // passed through exactly as configured; see req-schema.js for
+            // why this validates without rebuilding them.
+            req: v.optional(reqSchema),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
                 path: v.array(v.string()),
@@ -173,6 +182,16 @@ const dcqlQueryCredentialSchema = v.object({
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
+    // _req, with the underscore, and the same schema as the metadata one
+    // above. This is the query that is actually POSTED, and CredentialQuery
+    // names the member "_req" (pkg/openid4vp/dcql.go) - the metadata
+    // endpoint's own "req" is a different name for the same list, on a
+    // different wire. Declaring "req" here let v.object strip the member on
+    // its way out, so a correctly configured preset posted a zkp_req query
+    // that asked for nothing - and such a query discloses nothing either,
+    // so the wallet had no reason to return anything at all, which reads as
+    // a wallet fault.
+    _req: v.optional(reqSchema),
 });
 
 const credentialSetQuerySchema = v.object({
@@ -644,12 +663,7 @@ Alpine.data("app", () => ({
 
         // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
         const dcqlInput = {
-            credentials: (preset.credentials || []).map((/** @type {any} */ cred) => {
-                /** @type {any} */
-                const c = { id: cred.id, format: cred.format, meta: cred.meta };
-                if (cred.claims) c.claims = cred.claims;
-                return c;
-            }),
+            credentials: (preset.credentials || []).map(dcqlCredentialFromPreset),
         };
 
         const result = v.safeParse(dcqlQuerySchema, dcqlInput);
