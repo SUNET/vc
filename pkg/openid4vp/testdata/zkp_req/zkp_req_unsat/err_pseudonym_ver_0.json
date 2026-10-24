@@ -1,0 +1,25 @@
+{
+  "description": "ver 0.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "nym",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 0,
+          "prf": "sha-256"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "pseudonym_ver_unsupported"
+  }
+}

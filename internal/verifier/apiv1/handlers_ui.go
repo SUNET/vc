@@ -67,10 +67,19 @@ type UIPreset struct {
 
 // UIPresetCredential is a credential query within a preset.
 type UIPresetCredential struct {
-	ID          string                      `json:"id"`
-	Format      string                      `json:"format"`
-	Meta        UIPresetMeta                `json:"meta"`
-	Claims      []UIPresetClaim             `json:"claims,omitempty"`
+	ID     string          `json:"id"`
+	Format string          `json:"format"`
+	Meta   UIPresetMeta    `json:"meta"`
+	Claims []UIPresetClaim `json:"claims,omitempty"`
+	// Req is the circuit_zk format's requested calculations, from the
+	// preset's VerificationPresetScope.Req.
+	//
+	// It has to reach the browser. The picker builds the DCQL query here
+	// and posts it back, so a req that stayed server-side would leave the
+	// UI sending a circuit_zk query that asks for nothing - and such a
+	// query discloses nothing either, so the wallet would have no reason
+	// to return anything at all.
+	Req         []openid4vp.ReqItem         `json:"req,omitempty"`
 	Validations []openid4vp.ClaimValidation `json:"validations,omitempty"`
 }
 
@@ -85,6 +94,17 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
+
+	// SourceFormat is the stored attestation a zkp_req proof is made
+	// over, and is set ONLY for a zkp_req request.
+	//
+	// Derived rather than configured: it is the scope's own
+	// credential_metadata format - the credential the wallet actually
+	// holds - and a preset asking for zkp_req is asking for a proof
+	// over that. Making an operator state it twice would let the two
+	// disagree, and the disagreement would surface as a wallet
+	// refusing the request rather than as a configuration error.
+	SourceFormat string `json:"source_format,omitempty"`
 	// TypeValues is the W3C formats' constraint, from credential_type_values
 	// (expanded IRIs) - not the credential_types the issuer metadata uses.
 	TypeValues [][]string `json:"type_values,omitempty"`
@@ -144,7 +164,10 @@ func validZKSystemTypes(specs []openid4vp.ZKSystemTypeSpec) bool {
 // override a scope to a W3C identifier while keeping vct_values.
 func constraintFamily(format string) string {
 	switch format {
-	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+	// circuit_zk is matched on doctype_value too (the nym_auth rulebook's
+	// own examples carry one), so an mdoc scope can be requested as a
+	// circuit proof over the same document.
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk, openid4vp.FormatZkpReq:
 		return "doctype"
 	// Not jwt_vc_json: DCQLMetaQuery refuses it, so calling it family-
 	// compatible here would approve an override the query builder then drops.
@@ -283,6 +306,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				Featured:    model.BoolVal(def.Featured, false),
 				Credentials: make([]UIPresetCredential, 0, len(preset)),
 			}
+			// Set when a credential cannot be requested in a way that
+			// would change what the preset ASKS FOR rather than merely
+			// which of several credentials it collects. A preset is a
+			// named request: publishing "PID + Pseudonym" as PID-only
+			// gives an operator a button that silently does something
+			// else, which is worse than no button.
+			abandonPreset := false
+
 			scopeKeys := make([]string, 0, len(preset))
 			for scope := range preset {
 				scopeKeys = append(scopeKeys, scope)
@@ -341,8 +372,67 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 							"preset", label, "scope", scope)
 						continue
 					}
+					// Same shape of defect for circuit_zk, from the other
+					// direction: the query discloses nothing, so every value
+					// it yields is named in req. With req empty the preset
+					// publishes a button that asks a wallet for nothing and
+					// gets nothing back - which looks like a wallet fault
+					// and is not one.
+					if scopeCfg.Format == openid4vp.FormatZkpReq && len(scopeCfg.Req) == 0 {
+						c.log.Error(nil, "preset omitted from the verifier UI: a circuit_zk credential has no req",
+							"preset", label, "scope", scope)
+						abandonPreset = true
+						break
+					}
+					// req crosses the browser, where every number is a
+					// float64. A param that cannot survive that is a proof
+					// input the wallet would compute over a DIFFERENT value
+					// than the one configured - and the only symptom is two
+					// systems disagreeing about who someone is, with nothing
+					// malformed to point at. Refused here, where the
+					// operator can still fix it.
+					// A circuit_zk query is answered with a PROOF, and
+					// which circuits a verifier will accept one from lives
+					// in client_metadata.vp_formats_supported.circuit_zk -
+					// nowhere else. vpFormatsOrDefault's default names
+					// only dc+sd-jwt and mso_mdoc, so a deployment that
+					// never configured preferred_vp_formats would publish
+					// this preset and then send the query alongside
+					// metadata declaring no support for its format at all.
+					//
+					// No default is invented here. The circuit filter
+					// names proof systems and circuit identifiers that are
+					// deployment-specific, and guessing one would pin this
+					// verifier to whichever implementation happened to be
+					// in front of me. An empty circuit_zk object is a
+					// perfectly good answer - the shared vectors read a
+					// missing filter as "any circuit" - but it has to be
+					// the operator's answer.
+					if scopeCfg.Format == openid4vp.FormatZkpReq &&
+						vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats).ZkpReq == nil {
+						c.log.Error(nil, "preset omitted from the verifier UI: circuit_zk is not advertised in verifier.preferred_vp_formats, so a wallet would be asked for a proof the request declares no support for",
+							"preset", label, "scope", scope)
+						abandonPreset = true
+						break
+					}
+					if err := reqSurvivesTheBrowser(scopeCfg.Req); err != nil {
+						c.log.Error(err, "preset omitted from the verifier UI: a req param cannot survive the browser's JSON round trip",
+							"preset", label, "scope", scope)
+						abandonPreset = true
+						break
+					}
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
+					uiCred.Req = scopeCfg.Req
+					if scopeCfg.Format == openid4vp.FormatZkpReq {
+						// meta.source_format is REQUIRED for zkp_req:
+						// the matcher's planner refuses a meta without
+						// one (invalid_meta), so a request built
+						// without it is one no wallet will answer.
+						// It is the scope's stored format, which is
+						// what uiCred.Format held before the override.
+						uiCred.Meta.SourceFormat = meta.Format
+					}
 				}
 
 				// scopeCfg may be nil (scope with no overrides)
@@ -358,8 +448,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Validations = scopeCfg.Validations
 				}
 
+				// A circuit_zk query carries no claims at all - it discloses
+				// nothing, and req says what it computes. Falling through to
+				// the VCTM list below would attach every claim in the
+				// document to a query whose whole point is to reveal none of
+				// them, and an operator's explicit claims on such a scope
+				// are a configuration mistake worth not silently honouring.
+				if uiCred.Format == openid4vp.FormatZkpReq {
+					claims = nil
+					excludeSet = nil
+				}
+
 				// Resolve claims: use explicit claims, or fall back to VCTM claims
-				if len(claims) == 0 && meta != nil {
+				if len(claims) == 0 && meta != nil && uiCred.Format != openid4vp.FormatZkpReq {
 					if vctm := meta.GetVCTM(); vctm != nil {
 						// First pass: collect all valid paths (including array-element paths with null)
 						var allPaths [][]*string
@@ -399,6 +500,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
+			}
+			// A preset whose circuit_zk credential could not be requested
+			// is not published at all, even when its other credentials
+			// could be. The pseudonym IS what such a preset asks for, so
+			// publishing the rest under the same label is a different
+			// request wearing the configured one's name - and the
+			// configuration reference says the preset is omitted.
+			//
+			// Deliberately unlike the format-family and zk_system_type
+			// drops above, which remove one credential of several that
+			// each stand on their own.
+			if abandonPreset {
+				continue
 			}
 			// An all-dropped preset would ask the wallet for nothing.
 			if len(uiPreset.Credentials) == 0 {
@@ -501,6 +615,31 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	if len(req.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "rejected a UI interaction request whose DCQL asks for no credential at all")
 		return nil, errors.New("dcql_query must request at least one credential")
+	}
+
+	// meta.source_format for every zkp_req query, server-side.
+	//
+	// The preset listing already carries it, but the DCQL arrives
+	// from the browser and a client that rebuilds the query from the
+	// fields it knows would drop a member it has never heard of. The
+	// request would then go to the wallet without source_format, the
+	// matcher's planner would refuse it as invalid_meta, and the
+	// failure would look like a wallet problem.
+	//
+	// Filled from the scope's own credential_metadata - the
+	// credential the wallet holds - and only when absent, so a client
+	// that does send one is not overruled.
+	for i := range req.DCQLQuery.Credentials {
+		credential := &req.DCQLQuery.Credentials[i]
+		if !openid4vp.IsZkpReqFormat(credential.Format) || credential.Meta.SourceFormat != "" {
+			continue
+		}
+		meta, known := c.cfg.Common.CredentialMetadata[credential.ID]
+		if !known || meta == nil || meta.Format == "" {
+			return nil, fmt.Errorf("credential query %q asks for zkp_req but scope %q has no credential_metadata format to use as meta.source_format",
+				credential.ID, credential.ID)
+		}
+		credential.Meta.SourceFormat = meta.Format
 	}
 
 	for _, credential := range req.DCQLQuery.Credentials {
@@ -633,6 +772,19 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		requestObject.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"
 		requestObject.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
 	}
+
+	// The mode the wallet was actually told to use, taken FROM the
+	// object rather than repeated as a constant, so the session and
+	// the request cannot come to disagree.
+	//
+	// This is the REDIRECT object's mode. The DC API copy minted in
+	// dcAPIAuthorizationRequest overrides it with dc_api.jwt, so one
+	// session legitimately serves two modes - and what is recorded
+	// here is the one the link and the QR code carry. The verification
+	// path reads it only for a response that arrived over the redirect
+	// channel; a DC API response is identified by its own flag and
+	// never checked against this field.
+	authorizationContext.ResponseMode = requestObject.ResponseMode
 
 	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {
 		return nil, err
