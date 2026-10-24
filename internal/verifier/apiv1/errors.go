@@ -152,6 +152,22 @@ var (
 		HTTPStatus:       http.StatusBadRequest,
 	}
 
+	// ErrSessionAlreadyAnswered is a presentation for a session that
+	// already reached an outcome - most plainly, one the user declined
+	// a moment earlier, with the wallet's POST still in flight.
+	//
+	// Separate from ErrSessionExpired because it is a different fact
+	// and the wallet should be able to tell them apart: a deadline
+	// passed, versus an answer this session already has. Accepting it
+	// would write a response code onto a session whose Error and
+	// terminal status stay put, so /ui/completion would report
+	// "declined" and /ui/resume "complete" for the same session.
+	ErrSessionAlreadyAnswered = &OAuthError{
+		ErrorCode:        ErrCodeInvalidGrant,
+		ErrorDescription: "The session has already been answered",
+		HTTPStatus:       http.StatusBadRequest,
+	}
+
 	ErrInvalidVP = &OAuthError{
 		ErrorCode:        ErrCodeInvalidRequest,
 		ErrorDescription: "Invalid verifiable presentation",

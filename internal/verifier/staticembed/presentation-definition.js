@@ -10,6 +10,7 @@ import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
 import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
+import { declineFromNotifyMessage, declineDescriptionFromNotifyMessage } from "./notify-decline.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -405,10 +406,13 @@ function clearStoredResponseCode() {
  *
  * @param {string | undefined} sessionID
  * @param {(redirectURI: string) => void} onRedirect
+ * @param {(error: string, description: string) => void} onDeclined Called
+ *   when the wallet refused: the user said no, and nothing further is
+ *   coming.
  * @param {() => void} onExpired Called when the server says the session's
  *   presentation deadline has passed and nothing more will arrive.
  */
-function setupNotifyListener(sessionID, onRedirect, onExpired) {
+function setupNotifyListener(sessionID, onRedirect, onExpired, onDeclined) {
     console.log("Setting up SSE notify listener");
     const notifyURL = new URL("/ui/notify", baseUrl);
     if (sessionID) {
@@ -424,7 +428,19 @@ function setupNotifyListener(sessionID, onRedirect, onExpired) {
         const data = event.data;
         console.log("SSE message received:", data);
 
-        if (!data || typeof data !== "string" || !data.includes("redirect_uri")) {
+        if (!data || typeof data !== "string") {
+            return;
+        }
+        // A refusal arrives as {"error": "..."} and carries no
+        // redirect_uri, so the filter below used to drop it and the page
+        // kept waiting for a wallet that had already answered.
+        if (!data.includes("redirect_uri")) {
+            const declined = declineFromNotifyMessage(data);
+            if (declined) {
+                console.log("Received a decline from SSE:", declined);
+                eventSource.close();
+                onDeclined(declined, declineDescriptionFromNotifyMessage(data));
+            }
             return;
         }
         let redirectURI = "";
@@ -541,6 +557,14 @@ Alpine.data("app", () => ({
      * holds: here there is no result and never will be, and the only way
      * forward is to start a new request. */
     sessionExpired: false,
+
+    /** @type {string} The error the wallet returned when the user refused,
+     * e.g. access_denied. Empty while nothing has been refused. */
+    declinedError: "",
+
+    /** @type {string} The wallet's own description of the refusal, shown
+     * as supporting text. Never acted on. */
+    declinedDescription: "",
 
     async init() {
         await this.lookupCredentialsList();
@@ -764,6 +788,8 @@ Alpine.data("app", () => ({
         this.verificationResult = null;
         this.verificationExpired = false;
         this.sessionExpired = false;
+        this.declinedError = "";
+        this.declinedDescription = "";
         clearStoredSessionID();
         clearStoredResponseCode();
     },
@@ -1037,6 +1063,7 @@ Alpine.data("app", () => ({
                 sessionID,
                 (redirectURI) => { this.handleRedirectURI(redirectURI); },
                 () => { this.handleSessionExpired(); },
+                (error, description) => { this.handleDeclined(error, description); },
             );
             // Close the race between /ui/resume (or sendDcqlQuery) reading
             // "pending" and this SSE subscription becoming live. Firing on
@@ -1087,7 +1114,20 @@ Alpine.data("app", () => ({
             console.error("Failed to reconcile completion", err);
             return;
         }
-        if (!data || data.status !== "complete") return;
+        if (!data) return;
+        if (data.status === "declined") {
+            console.log("Session was declined by the wallet");
+            if (this.notifyEventSource) {
+                this.notifyEventSource.close();
+                this.notifyEventSource = null;
+            }
+            this.handleDeclined(
+                typeof data.error === "string" ? data.error : "access_denied",
+                typeof data.error_description === "string" ? data.error_description : "",
+            );
+            return;
+        }
+        if (data.status !== "complete") return;
         const responseCode = typeof data.response_code === "string" ? data.response_code : "";
         if (!responseCode) return;
         console.log("Reconciled lost SSE completion from /ui/completion");
@@ -1253,6 +1293,24 @@ Alpine.data("app", () => ({
     },
 
     /**
+     * The wallet refused: the user said no. Terminal in exactly the way
+     * an expiry is - there is nothing to resume to - so the stored id
+     * goes and the QR screen is torn down rather than left offering a
+     * code the verifier will now refuse.
+     *
+     * @param {string} error
+     * @param {string} description
+     */
+    handleDeclined(error, description) {
+        this.notifyEventSource = null;
+        clearStoredSessionID();
+        this.presentationDefinition = null;
+        this.redirectUris = null;
+        this.declinedError = error || "access_denied";
+        this.declinedDescription = description || "";
+    },
+
+    /**
      * Re-materialize the QR / wallet-link screen from a /ui/resume reply.
      * credentialsList and credentialAttributes are set to the sentinel
      * empty objects handleSelectPredefinedPresentationDefinition uses, so
@@ -1301,6 +1359,8 @@ Alpine.data("app", () => ({
         this.verificationResult = null;
         this.verificationExpired = false;
         this.sessionExpired = false;
+        this.declinedError = "";
+        this.declinedDescription = "";
         this.dcApiVerified = false;
         this.credentialAttributes = null;
         this.dcqlQuery = null;

@@ -98,7 +98,7 @@ func (s *Service) endpointUICompletion(ctx context.Context, c *gin.Context) (any
 		return nil, nil
 	}
 
-	responseCode, err := s.apiv1.CompletedResponseCode(ctx, sessionID)
+	outcome, err := s.apiv1.SessionOutcome(ctx, sessionID)
 	if err != nil {
 		// A backend error (e.g. transient Mongo outage) must not be
 		// collapsed to "pending" - the browser would stop retrying and
@@ -107,11 +107,23 @@ func (s *Service) endpointUICompletion(ctx context.Context, c *gin.Context) (any
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	if responseCode == "" {
+	// A refusal is terminal. Reported before the response code, which a
+	// declined session does not have: without this the UI reads the
+	// missing code as "pending" and polls until the context is evicted,
+	// so a user who pressed "no" leaves the relying party waiting for an
+	// answer they already gave.
+	if outcome.Declined() {
+		return gin.H{
+			"status":            "declined",
+			"error":             outcome.Error,
+			"error_description": outcome.ErrorDescription,
+		}, nil
+	}
+	if outcome.ResponseCode == "" {
 		c.JSON(http.StatusOK, gin.H{"status": "pending"})
 		return nil, nil
 	}
-	return gin.H{"status": "complete", "response_code": responseCode}, nil
+	return gin.H{"status": "complete", "response_code": outcome.ResponseCode}, nil
 }
 
 // endpointUIResume rebuilds the state of a verifier UI reloaded mid-flow.

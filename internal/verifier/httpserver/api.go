@@ -26,6 +26,7 @@ type Apiv1 interface {
 	UIMetadata(ctx context.Context) (*apiv1.UIMetadataReply, error)
 	IsActiveAuthSession(ctx context.Context, sessionID string) (active bool, expiresAt int64, err error)
 	CompletedResponseCode(ctx context.Context, sessionID string) (string, error)
+	SessionOutcome(ctx context.Context, sessionID string) (apiv1.SessionOutcome, error)
 	UIResume(ctx context.Context, sessionID string) (*apiv1.UIResumeReply, error)
 
 	// OIDC Provider

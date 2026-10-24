@@ -807,6 +807,13 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 	if authCtx.VerifierResponseCode != "" {
 		return false
 	}
+	// A refused session has been answered too. Reusing one would hand a
+	// fresh interaction the state and nonce the user already declined,
+	// and the decline recorded on it would then describe a request
+	// nobody made.
+	if authSessionIsTerminal(authCtx) {
+		return false
+	}
 	if authCtx.ExpiresAt != 0 && authCtx.ExpiresAt <= time.Now().Unix() {
 		return false
 	}
@@ -878,20 +885,55 @@ func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (act
 // client can retry instead of latching onto a bogus "pending" and
 // never reconciling the lost completion.
 func (c *Client) CompletedResponseCode(ctx context.Context, sessionID string) (string, error) {
+	outcome, err := c.SessionOutcome(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	return outcome.ResponseCode, nil
+}
+
+// SessionOutcome is what a polling UI needs to stop polling: the
+// response code of a completed session, or the error of a declined one.
+//
+// The two used to be one value, and only one of them existed. A wallet
+// that answered with an Authorization Error Response - a user pressing
+// "no", which OpenID4VP 1.0 section 8.5 calls access_denied - left the
+// session with no response code and no other way to say so, and
+// /ui/completion reports a missing response code as "pending". The UI
+// then polled until the cache evicted the context, and the relying
+// party never learned of a decision the user had already made.
+type SessionOutcome struct {
+	// ResponseCode is set when the wallet presented.
+	ResponseCode string
+	// Error and ErrorDescription are set when it refused. The
+	// description is the wallet's own text and is shown to an operator,
+	// never acted on.
+	Error            string
+	ErrorDescription string
+}
+
+// Declined reports whether the wallet answered with an error.
+func (o SessionOutcome) Declined() bool { return o.Error != "" }
+
+func (c *Client) SessionOutcome(ctx context.Context, sessionID string) (SessionOutcome, error) {
 	if sessionID == "" {
-		return "", nil
+		return SessionOutcome{}, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
-			return "", nil
+			return SessionOutcome{}, nil
 		}
-		return "", err
+		return SessionOutcome{}, err
 	}
 	if authCtx == nil {
-		return "", nil
+		return SessionOutcome{}, nil
 	}
-	return authCtx.VerifierResponseCode, nil
+	return SessionOutcome{
+		ResponseCode:     authCtx.VerifierResponseCode,
+		Error:            authCtx.Error,
+		ErrorDescription: authCtx.ErrorDescription,
+	}, nil
 }
 
 // UIResumeStatus names the possible outcomes of a /ui/resume call.
@@ -910,6 +952,9 @@ const (
 	// UIResumeExpired means the auth context exists but its request object
 	// has been evicted, so the QR / request_uri is no longer resolvable.
 	UIResumeExpired UIResumeStatus = "expired"
+	// UIResumeDeclined means the wallet refused: the user said no, and
+	// there is nothing left to wait for.
+	UIResumeDeclined UIResumeStatus = "declined"
 )
 
 // UIResumeReply carries one of three alternatives selected by Status:
@@ -930,6 +975,10 @@ type UIResumeReply struct {
 
 	// Complete-only field.
 	ResponseCode string `json:"response_code,omitempty"`
+
+	// Declined-only fields.
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"error_description,omitempty"`
 }
 
 // UIResume reports whether the wallet interaction named by sessionID is
@@ -956,6 +1005,18 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 		return &UIResumeReply{
 			Status:       UIResumeComplete,
 			ResponseCode: authCtx.VerifierResponseCode,
+		}, nil
+	}
+	// A refusal is an outcome, so a reload must not rebuild the QR for
+	// it. Without this a reloaded tab resumed "pending" with the
+	// original QR for a request the user had already declined, and the
+	// two endpoints disagreed: /ui/completion said declined while
+	// /ui/resume offered the code again.
+	if authCtx.Error != "" {
+		return &UIResumeReply{
+			Status:           UIResumeDeclined,
+			Error:            authCtx.Error,
+			ErrorDescription: authCtx.ErrorDescription,
 		}, nil
 	}
 	// Past the presentation deadline there is nothing to resume. Checked
