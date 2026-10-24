@@ -475,10 +475,21 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 	git -C "$(ZK_CRED_VEGA_CHECKOUT)" fetch --depth 1 origin "$(ZK_CRED_VEGA_REF)"
 	git -C "$(ZK_CRED_VEGA_CHECKOUT)" checkout FETCH_HEAD
 	$(MAKE) -C "$(ZK_CRED_VEGA_CHECKOUT)" go-cabi
-	@mkdir -p "$(ZK_CRED_VEGA_STAGE)/include" "$(ZK_CRED_VEGA_STAGE)/lib"
+	@mkdir -p "$(ZK_CRED_VEGA_STAGE)/include" "$(ZK_CRED_VEGA_STAGE)/lib" "$(ZK_CRED_VEGA_STAGE)/test-vectors/nymauth"
+	@# BOTH headers. The crate's own go-cabi target stages the mdoc
+	@# header and the nym_auth one into a single libzk_cred_vega, and
+	@# copying only the first left pkg/nymauth/verifier/zknative_vega
+	@# with no header to compile against.
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
+	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_nymauth_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi"/libzk_cred_vega.* "$(ZK_CRED_VEGA_STAGE)/lib/"
-	@echo "Staged zk-cred-vega's Go C-ABI lib + header in $(ZK_CRED_VEGA_STAGE)"
+	@# The crate's own nym_auth vectors - the published mdoc circuit's
+	@# shapes, a reference proof made against them, and the statement
+	@# that produced it. Staged beside the library, the same way the
+	@# Longfellow ones are, so the fixture and the library it belongs
+	@# to cannot drift apart.
+	cp "$(ZK_CRED_VEGA_CHECKOUT)/test-vectors/nymauth"/* "$(ZK_CRED_VEGA_STAGE)/test-vectors/nymauth/"
+	@echo "Staged zk-cred-vega's Go C-ABI lib + headers + nym_auth vectors in $(ZK_CRED_VEGA_STAGE)"
 
 zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not staged
 	@# build-zkvegaverifyworker and dockerfiles/verifier-zknative both link
