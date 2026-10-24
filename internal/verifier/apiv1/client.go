@@ -62,13 +62,18 @@ type Client struct {
 	// nymAuthVerifiers caches one loaded circuit handle per build -
 	// proof system AND pseudonym configuration, which is what the
 	// allowlist is keyed by. Loading is the expensive step - about
-	// 0.15 s and a megabyte of artifact - and the handle holds no
-	// interior mutability, so one per build is reused across
-	// presentations and goroutines.
+	// 0.15 s and a megabyte of artifact for Longfellow, and for Vega
+	// roughly 12.5 MB of verifier key derived from the shapes - and
+	// neither handle holds any interior mutability, so one per build is
+	// reused across presentations and goroutines.
+	//
+	// The interface, not either concrete verifier: which library opens
+	// an artifact is the allowed entry's system_id, decided when the
+	// handle is loaded, and nothing above that point distinguishes them.
 	//
 	// Populated only in a build with the "zknative" tag; the default
 	// build cannot construct one and refuses before it would try.
-	nymAuthVerifiers map[nymAuthVerifierKey]*verifier.NativeVerifier
+	nymAuthVerifiers map[nymAuthVerifierKey]verifier.Backend
 	nymAuthMu        sync.Mutex
 
 	// registrationCertificate is the Registrar-issued WRPRC presented to

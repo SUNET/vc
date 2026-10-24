@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/SUNET/vc/pkg/nymauth"
 	"github.com/SUNET/vc/pkg/nymauth/circuits"
 	"github.com/SUNET/vc/pkg/nymauth/verifier"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -77,14 +78,14 @@ func (c *Client) verifyCircuitZkPresentation(
 		if err != nil {
 			return nil, err
 		}
-		native, err := c.circuitZkVerifier(ctx, presentation.SystemID, config)
+		backend, err := c.circuitZkVerifier(ctx, presentation.SystemID, config)
 		if err != nil {
 			return nil, err
 		}
 
 		var claimedArray [32]byte
 		copy(claimedArray[:], claimed)
-		pseudonym, err := native.Verify(request, claimedArray, presentation.Proof)
+		pseudonym, err := backend.Verify(request, claimedArray, presentation.Proof)
 		if err != nil {
 			// The proof did not verify against the issuer key the key
 			// set established. Which handle it was is the useful part
@@ -139,15 +140,17 @@ func circuitZkConfigOf(item openid4vp.ReqItem) (string, error) {
 // configuration, loading it once.
 //
 // Loading is the expensive step - about 0.15 s and a megabyte of
-// artifact - and the handle holds no interior mutability, so one per
-// build is reused across presentations and goroutines.
+// artifact for Longfellow, and for Vega roughly 12.5 MB of verifier key
+// derived from the shapes - and neither handle holds any interior
+// mutability, so one per build is reused across presentations and
+// goroutines.
 //
 // systemID is the system the PRESENTATION states, already checked
 // against the ones this request offered. It selects the build beside
 // the configuration, and the two together are what the allowlist is
 // keyed by - a verifier may allow both Longfellow and Vega for one
 // configuration, and they are different artifacts.
-func (c *Client) circuitZkVerifier(ctx context.Context, systemID, config string) (*verifier.NativeVerifier, error) {
+func (c *Client) circuitZkVerifier(ctx context.Context, systemID, config string) (verifier.Backend, error) {
 	c.nymAuthMu.Lock()
 	defer c.nymAuthMu.Unlock()
 
@@ -168,23 +171,56 @@ func (c *Client) circuitZkVerifier(ctx context.Context, systemID, config string)
 		return nil, err
 	}
 
-	native, err := verifier.NewNativeVerifier(artifact, verifier.CircuitParams{
-		BlockEncHash:  entry.BlockEncHash,
-		BlockEncSig:   entry.BlockEncSig,
-		HashCircuitID: entry.HashCircuitID,
-		SigCircuitID:  entry.SigCircuitID,
-	})
+	backend, err := newNymAuthBackend(entry, artifact)
 	if err != nil {
 		return nil, fmt.Errorf("zkp_req: loading the %q %q circuit: %w", systemID, config, err)
 	}
 
 	if c.nymAuthVerifiers == nil {
-		c.nymAuthVerifiers = map[nymAuthVerifierKey]*verifier.NativeVerifier{}
+		c.nymAuthVerifiers = map[nymAuthVerifierKey]verifier.Backend{}
 	}
-	c.nymAuthVerifiers[key] = native
+	c.nymAuthVerifiers[key] = backend
 	c.log.Info("Loaded a nym_auth circuit", "system_id", systemID, "config", config,
-		"hash_circuit_id", entry.HashCircuitID, "artifact_bytes", entry.Bytes)
-	return native, nil
+		"artifact_bytes", entry.Bytes, "artifact_sha256", entry.SHA256)
+	return backend, nil
+}
+
+// newNymAuthBackend builds the verifier that belongs to an allowed
+// entry's proof system.
+//
+// The system decides what loading means, and the two are not alike.
+// Longfellow loads a circuit artifact together with the four Ligero
+// parameters the entry carries. Vega loads R1CS SHAPES and takes no
+// parameters at all: it derives the verifier key from them, so the
+// artifact digest the allowlist already pins is the circuit's whole
+// identity, and there is nothing else for an entry to name. That is
+// why pkg/nymauth/circuits REFUSES a Vega entry that carries Ligero
+// parameters - they would be configuration nothing ever reads.
+//
+// Taken from the ENTRY rather than from the presented system_id. The
+// two are equal here by construction, since the entry was looked up by
+// that key, but the entry is the operator's statement about which
+// library may open this artifact, and that is the right thing to
+// dispatch on.
+func newNymAuthBackend(entry circuits.Entry, artifact []byte) (verifier.Backend, error) {
+	switch entry.SystemID {
+	case nymauth.SystemLongfellowNymAuth:
+		return verifier.NewNativeVerifier(artifact, verifier.CircuitParams{
+			BlockEncHash:  entry.BlockEncHash,
+			BlockEncSig:   entry.BlockEncSig,
+			HashCircuitID: entry.HashCircuitID,
+			SigCircuitID:  entry.SigCircuitID,
+		})
+	case nymauth.SystemVegaNymAuth:
+		return verifier.NewVegaVerifier(artifact)
+	default:
+		// Unreachable: nymauth.CheckSystemID runs when the allowlist is
+		// built, so an entry with any other system never reaches a
+		// loaded Allowlist. Refused rather than left to fall through,
+		// because the alternative to a backend is no verification.
+		return nil, fmt.Errorf("no nym_auth verifier for proof system %q; this build knows %v",
+			entry.SystemID, nymauth.Systems())
+	}
 }
 
 // Compile-time assertion that the allowlist type is the one the
