@@ -67,7 +67,21 @@ RESERVED_TAGS           := latest testing demo dev
 # netgo,osusergo ride along under CGO to bypass glibc NSS.
 ZKNATIVE_TAG            := zknative
 ZK_CRED_LONGFELLOW_REPO ?= https://github.com/sirosfoundation/zk-cred-longfellow.git
-ZK_CRED_LONGFELLOW_REF  ?= main
+# Pinned; bump deliberately. This is main plus the nym_auth commits of
+# that crate's `feat/nymauth-prove` branch, which is what carries
+# include/zk_cred_longfellow_nymauth.h (pkg/nymauth/verifier/zknative
+# needs it, and the staging below requires it). Move this back to a
+# main SHA once that branch lands upstream.
+#
+# This SHA and the vendored challenge vectors move TOGETHER. The
+# vectors are the shared conformance set, and the zknative tests
+# assert that this library refuses exactly what pkg/nymauth/verifier
+# refuses - so a library older than the vectors fails those tests, by
+# design. e09fdcd is the commit that refuses invalid UTF-8 and
+# non-canonical simple values, which is what the current vectors
+# (sha256 697d016b) require; its copy of challenge-vectors.json is
+# byte-identical to the vendored one.
+ZK_CRED_LONGFELLOW_REF  ?= e09fdcd16252c9043e50032c3ae1cc4259ed7d08
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
@@ -163,7 +177,7 @@ help: ## Show this help message
 	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib   (needs cmake; required by verifier build))
 	$(info   make zk-native-lib-vega       - Fetch/build zk-cred-vega's Go C-ABI lib         (needs Rust; required by verifier build))
 	$(info   make test-bbsnative           - Run pkg/bbs's cgo tests                          (requires bbs-native-lib))
-	$(info   make test-zknative            - Run pkg/mdoc's zknative tests                    (requires zk-native-lib zk-native-lib-vega))
+	$(info   make test-zknative            - Run the zknative tests (pkg/mdoc, pkg/nymauth)   (requires zk-native-lib zk-native-lib-vega))
 	$(info )
 	$(info Local dev binaries (native ZK, produced outside the Docker image):)
 	$(info   make build-verifier-zknative  - Build the verifier binary with zknative to ./bin (dynamic-libc, needs LD_LIBRARY_PATH))
@@ -296,9 +310,23 @@ test-pkg: bbs-native-lib-staged ## Test the shared packages under pkg/
 	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
 		$(CGO_ENABLED_DYNAMIC) go test ./pkg/...
 
-test-js: ## Run JS unit tests for staticembed helpers
+test-js: test-js-deps ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
 	@node --test $(APIGW_STATIC)/tests/*.test.js $(VERIFIER_STATIC)/tests/*.test.js
+
+# node_modules is gitignored, so a clean checkout has none - and a test
+# that imports a dependency (req-schema.test.js needs valibot, the
+# library whose behaviour it pins) then fails for a reason that has
+# nothing to do with the code. Installed only when missing, so the common
+# case costs nothing and an offline run of an already-installed tree still
+# works.
+test-js-deps: ## Install the staticembed JS dev dependencies when missing
+	@for dir in $(APIGW_STATIC) $(VERIFIER_STATIC); do \
+		test -f "$$dir/package.json" || continue; \
+		test -d "$$dir/node_modules" && continue; \
+		echo "Installing JS dev dependencies in $$dir"; \
+		(cd "$$dir" && npm install --silent --no-audit --no-fund) || exit 1; \
+	done
 
 # Test targets with build tags
 # The SoftHSM integration tests in pkg/pki and pkg/jose shell out to
@@ -341,10 +369,39 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" fetch --depth 1 origin "$(ZK_CRED_LONGFELLOW_REF)"
 	git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" checkout FETCH_HEAD
 	$(MAKE) -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" go-cabi
-	@mkdir -p "$(ZK_CRED_LONGFELLOW_STAGE)/include" "$(ZK_CRED_LONGFELLOW_STAGE)/lib"
-	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/zk_cred_longfellow_go.h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/"
+	@mkdir -p "$(ZK_CRED_LONGFELLOW_STAGE)/include" "$(ZK_CRED_LONGFELLOW_STAGE)/lib" "$(ZK_CRED_LONGFELLOW_STAGE)/test-vectors/nymauth"
+	@# Both headers, because this repo has two consumers of that crate's
+	@# plain C ABI: pkg/mdoc/zknative (the mdoc ZK/PPID verifier,
+	@# zk_cred_longfellow_go.h) and pkg/nymauth/verifier/zknative (the
+	@# nym_auth verifier, zk_cred_longfellow_nymauth.h). Name the missing
+	@# one rather than letting `cp` report a path: a REF without the
+	@# nym_auth header is the likely cause, and that is not something a
+	@# "No such file or directory" tells the operator.
+	@# `exit 1` here is NOT inside a subshell, and the cp carries its own
+	@# `|| exit 1`, because neither failure stops a `for` loop on its own:
+	@# make takes the recipe line's status from the LAST command, which is
+	@# the loop's final iteration. Written with `|| ( ...; exit 1)` the
+	@# subshell exits, the loop runs on, and a stage missing its first
+	@# header reports success - which is the guard reporting that the
+	@# guard passed.
+	@for h in zk_cred_longfellow_go.h zk_cred_longfellow_nymauth.h; do \
+		if [ ! -f "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" ]; then \
+			echo "zk-cred-longfellow@$(ZK_CRED_LONGFELLOW_REF) staged no $$h." >&2; \
+			echo "Both headers are required. Check that ZK_CRED_LONGFELLOW_REF points at a commit carrying include/$$h." >&2; \
+			exit 1; \
+		fi; \
+		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/" || exit 1; \
+	done
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
-	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
+	@# The nym_auth vectors ship with the crate (the circuit artifact, a
+	@# real proof and the request values that produced it), and
+	@# pkg/nymauth/verifier's zknative test verifies that proof rather
+	@# than only comparing derivations. Staged here, the way
+	@# bbs-native-lib stages emlun_reference.json, so the fixture
+	@# arrives with the library it belongs to instead of being vendored
+	@# into this repo and going stale against it.
+	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/test-vectors/nymauth"/* "$(ZK_CRED_LONGFELLOW_STAGE)/test-vectors/nymauth/"
+	@echo "Staged zk-cred-longfellow's Go C-ABI lib + headers + nym_auth vectors in $(ZK_CRED_LONGFELLOW_STAGE)"
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) go {build,test} -tags $(ZKNATIVE_TAG) ./..."
 
 zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not staged
@@ -354,14 +411,15 @@ zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not
 	@# valid `.so`-only stage. Guard is shared between build-verifier-zknative
 	@# and test-zknative; the message names both so the operator re-runs the
 	@# right one.
-	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || ( \
+	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_nymauth.h" || ( \
 		echo "The 'zknative' build tag was requested but zk-cred-longfellow is not staged." >&2; \
-		echo "Both $(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so and $(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h are required." >&2; \
+		echo "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so and both headers under $(ZK_CRED_LONGFELLOW_STAGE)/include (zk_cred_longfellow_go.h, zk_cred_longfellow_nymauth.h) are required." >&2; \
+		echo "A stage made before the nym_auth header existed has only the first: re-run 'make zk-native-lib' to refresh it." >&2; \
 		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run the requesting target ('make build-verifier-zknative' or 'make test-zknative')." >&2; \
 		exit 1)
 
 zk-native-lib-ensure: _check-native-host ## Stage zk-cred-longfellow only when it's missing (for local build-*)
-	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || $(MAKE) --no-print-directory zk-native-lib
+	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_nymauth.h" || $(MAKE) --no-print-directory zk-native-lib
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
 	@# Header for cgo compile, archive for the static link (pkg/bbs uses -l:libzk_cred_bbs.a).
@@ -434,10 +492,10 @@ zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not 
 zk-native-lib-vega-ensure: _check-native-host ## Stage zk-cred-vega only when it's missing (for local build-*)
 	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || $(MAKE) --no-print-directory zk-native-lib-vega
 
-test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
+test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run the zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
-		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/...
+		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
@@ -574,6 +632,38 @@ build-wallet: bbs-native-lib-ensure ## Build wallet test tool
 		-tags "$(WORKER_BUILD_TAGS)" \
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
+
+# The circuit_zk planner vectors are the shared conformance set, vendored
+# from siros-dc-matcher so the suite does not depend on the network. A
+# vendored snapshot goes stale silently - if the request shape moves, the
+# tests keep passing against the old one - so refreshing is a command
+# rather than a note in a file somebody has to find.
+#
+# MATCHER=/path/to/siros-dc-matcher to point at a different checkout.
+MATCHER ?= ../siros-dc-matcher
+vendor-circuit-zk-vectors: ## Refresh the vendored circuit_zk conformance vectors
+	$(info Refreshing circuit_zk vectors from $(MATCHER))
+	@test -d "$(MATCHER)/crates/siros-dc-matcher-core/tests/vectors/circuit_zk" || \
+		{ echo "no matcher checkout at $(MATCHER); set MATCHER=<path>"; exit 1; }
+# The SOURCE file names a commit as the provenance of these vectors, so the
+# files copied have to BE that commit. Copying from a dirty or
+# partially-untracked working tree records a commit that cannot reproduce
+# them, which is a provenance claim that is simply false - and the vectors
+# are the authority this package settles wire-shape questions against.
+	@cd "$(MATCHER)" && git diff --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has uncommitted changes under tests/vectors/circuit_zk; commit or stash them first"; exit 1; }
+	@cd "$(MATCHER)" && git diff --cached --quiet -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk || \
+		{ echo "$(MATCHER) has staged changes under tests/vectors/circuit_zk; commit them first"; exit 1; }
+	@cd "$(MATCHER)" && test -z "$$(git ls-files --others --exclude-standard -- crates/siros-dc-matcher-core/tests/vectors/circuit_zk)" || \
+		{ echo "$(MATCHER) has untracked files under tests/vectors/circuit_zk; commit or remove them first"; exit 1; }
+	@rm -f pkg/openid4vp/testdata/circuit_zk/*.json
+	@cp "$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/*.json \
+		"$(MATCHER)"/crates/siros-dc-matcher-core/tests/vectors/circuit_zk/README.md \
+		pkg/openid4vp/testdata/circuit_zk/
+	@cd "$(MATCHER)" && git rev-parse HEAD > /dev/null
+	@sed -i.bak "s|^commit .*|commit $$(cd "$(MATCHER)" && git rev-parse HEAD) ($$(cd "$(MATCHER)" && git describe --tags --always))|" \
+		pkg/openid4vp/testdata/circuit_zk/SOURCE && rm -f pkg/openid4vp/testdata/circuit_zk/SOURCE.bak
+	@echo "Vendored $$(ls pkg/openid4vp/testdata/circuit_zk/*.json | wc -l) vectors; review the diff before committing"
 
 # Reads the issuer's own config, so it links the same way the issuer does -
 # pkg/model reaches pkg/bbs, which is cgo.
