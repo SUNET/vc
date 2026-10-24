@@ -692,11 +692,31 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	return reply, nil
 }
 
-// requirePreAuthScope enforces that the scope is registered under
-// data_sources.datastore with auth_provider: preauth. Checking any source is
-// unsafe: a scope may appear under datastore with saml/oidc and separately
-// under another source with preauth, yet this endpoint always mints an offer
-// from the datastore document.
+// requirePreAuthScope enforces that the scope may be minted as a
+// pre-authorized offer: its datastore entry is either auth_provider
+// preauth, or login-gated and explicitly marked allow_preauth_offer.
+//
+// The DATASTORE entry, never "any source". A scope may appear under
+// datastore with saml/oidc and separately under another source with
+// preauth, and this endpoint always mints from the datastore document -
+// so a check that accepted the other source's answer would mint an offer
+// for a document whose own scope entry never permitted it.
+//
+// allow_preauth_offer exists because pre-authorized is a grant type and
+// auth_provider is an identity provider, and a scope that needed both had
+// to be configured twice. Setting it does NOT make the scope
+// pre-authorized: the wallet-initiated PAR/authorize rejection applies to
+// auth_provider preauth and is untouched here, so a wallet starting the
+// flow itself still authenticates exactly as it did.
+//
+// What the flag does remove is the second gate on THIS endpoint. That is
+// safe only where the endpoint has an authenticated principal in front of
+// it, which is not something this handler can establish - with neither
+// JWKS nor OIDC configured the API-auth middleware is a pass-through and
+// the admin session is granted anonymously. So the condition is checked
+// at startup instead, against the configuration that would leave none:
+// pkg/configuration's checkPreAuthOfferExposure. Both halves are needed,
+// and neither is sufficient alone.
 func (c *Client) requirePreAuthScope(scope string) error {
 	entry, ok := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
 	if !ok {
@@ -705,10 +725,10 @@ func (c *Client) requirePreAuthScope(scope string) error {
 			fmt.Sprintf("scope %q is not configured for pre-authorized issuance (no datastore entry)", scope),
 		)
 	}
-	if entry.AuthProvider != model.AuthProviderPreAuth {
+	if entry.AuthProvider != model.AuthProviderPreAuth && !entry.AllowPreAuthOffer {
 		return helpers.NewErrorDetails(
 			"invalid_scope",
-			fmt.Sprintf("scope %q is not configured for pre-authorized issuance (datastore auth_provider must be %q)", scope, model.AuthProviderPreAuth),
+			fmt.Sprintf("scope %q is not configured for pre-authorized issuance (datastore auth_provider must be %q, or the scope must set allow_preauth_offer)", scope, model.AuthProviderPreAuth),
 		)
 	}
 	return nil

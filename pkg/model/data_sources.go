@@ -79,6 +79,28 @@ type DatastoreScope struct {
 	// requests for such a scope are rejected.
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc preauth"`
 
+	// AllowPreAuthOffer lets an operator mint a pre-authorized credential
+	// offer for this scope WITHOUT making the scope pre-authorized.
+	//
+	// auth_provider answers "how does a user authenticate when THEY start
+	// the flow". Whether the issuer may also hand out a pre-authorized
+	// offer is a different question - it is a grant type, not an identity
+	// provider - and conflating the two is why a deployment needing both
+	// has had to configure the same credential twice, once per scope,
+	// which then appears twice in every published list.
+	//
+	// Set this and the scope keeps its auth_provider: a wallet that starts
+	// the flow itself still authenticates exactly as before, and the
+	// rejection of wallet-initiated PAR/authorize for a REAL preauth scope
+	// is untouched. Only the admin mint endpoint changes its mind.
+	//
+	// It is refused at startup on a deployment where that endpoint is not
+	// behind an authenticated principal, because there the flag would be a
+	// login bypass: the credential this scope gates behind a login could
+	// be minted as an offer by anyone who can reach the port. See
+	// pkg/configuration's checkPreAuthOfferExposure.
+	AllowPreAuthOffer bool `yaml:"allow_preauth_offer,omitempty" doc_example:"true"`
+
 	// AuthenticSource names the identity-mapping namespace used to resolve the
 	// authenticated user to an authentic_source_person_id for datastore
 	// identity lookups (oidc, saml, openid4vp). Identity mappings are scoped to
