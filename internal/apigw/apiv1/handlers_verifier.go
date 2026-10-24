@@ -670,7 +670,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	// Guarded on DataSource so a scope shared with datastore/assertion still
 	// follows the source Selector chose.
 	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok && authCtx.DataSource == string(model.DataSourcePresentation) {
-		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, credential); err != nil {
+		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, matchedAuthScope, credential); err != nil {
 			return nil, err
 		}
 		return &issuanceAuthOutcome{Scope: scope, PresentationSourced: true}, nil

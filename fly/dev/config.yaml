@@ -35,12 +35,20 @@ common:
     #eduid_age_verification_zk:
     #  mddl_file_path: "/metadata/eduid_age_verification_zk.mdoc.json"
     #  format: "mso_mdoc"
-    #pid_mdoc:
-    #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
-    #  format: "mso_mdoc"
+    pid_mdoc:
+      mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
+      format: "mso_mdoc"
     mdl:
       mddl_file_path: "/metadata/mdl.mdoc.json"
       format: "mso_mdoc"
+    nym_auth:
+      mddl_file_path: "/metadata/nym_auth.mdoc.json"
+      format: "mso_mdoc"
+      auxiliary_data:
+        to_wallet:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, ssc]}
+        to_issuer:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, psc]}
 
 issuer:
   issuer_url: "https://sunet-vc-apigw.fly.dev"
@@ -62,8 +70,8 @@ issuer:
     valid_duration: 3600
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
   pseudonym_seed: true
-  #mdoc:
-  #  certificate_chain_path: "/pki/signing_ec_chain.pem"
+  mdoc:
+    certificate_chain_path: "/pki/signing_ec_chain.pem"
   #  default_validity: "8760h"
   #  digest_algorithm: "SHA-256"
 
@@ -230,12 +238,16 @@ apigw:
   issuer_metadata:
     authorization_servers:
       - "https://sunet-vc-apigw.fly.dev"
+    credential_encryption:
+      keys:
+        - private_key_path: "/pki/credential_encryption.pem"
   identity_mapping_import:
     file_paths:
       - "/bootstrapping/identity_mappings.json.gz"
     users:
       - "100"
       - "102"
+      - "200"
   auth_providers:
     oidc:
       enable: true
@@ -331,10 +343,11 @@ apigw:
           - "/bootstrapping/pid.json.gz"
           - "/bootstrapping/mdl.json.gz"
           - "/bootstrapping/microcredential.json.gz"
-          #- "/bootstrapping/pid_mdoc.json.gz"
+          - "/bootstrapping/pid_mdoc.json.gz"
         users:
           - "100"
           - "102"
+          - "200"
       scopes:
         pid:
           auth_provider: oidc
@@ -353,6 +366,10 @@ apigw:
             pid:
               auth_claims: ["given_name", "family_name", "birthdate"]
         mdl:
+          auth_provider: oidc
+          authentic_source: "Skatteverket"
+          auth_claims: ["given_name", "family_name", "birthdate"]
+        pid_mdoc:
           auth_provider: oidc
           authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
@@ -379,33 +396,63 @@ apigw:
     presentation:
       scopes:
         eduid_age_verification:
-          from_scope: "eduid"
-          # Every key must be present on the presented eduid; a populated
-          # allow-list is an exact-match one-of on the string value.
-          required_claims:
-            birthdate: []
-            assurance_level:
-              - "http://www.swamid.se/policy/assurance/al2"
-              - "http://www.swamid.se/policy/assurance/al3"
-          derivations:
-            - age_over_thresholds:
-                input: "birthdate"
-                thresholds: [13, 15, 18, 21, 65]
+          from:
+            eduid:
+              # Every key must be present on the presented eduid; a populated
+              # allow-list is an exact-match one-of on the string value.
+              required_claims:
+                birthdate: []
+                assurance_level:
+                  - "http://www.swamid.se/policy/assurance/al2"
+                  - "http://www.swamid.se/policy/assurance/al3"
+              derivations:
+                - age_over_thresholds:
+                    input: "birthdate"
+                    thresholds: [13, 15, 18, 21, 65]
           expiry_duration: "8760h"
           defaults:
             issuing_authority: "SUNET"
             issuing_country: "SE"
         #eduid_age_verification_zk:
-        #  from_scope: "eduid"
-        #  required_claims:
-        #    birthdate: []
-        #    assurance_level:
-        #      - "http://www.swamid.se/policy/assurance/al2"
-        #      - "http://www.swamid.se/policy/assurance/al3"
-        #  derivations:
-        #    - age_over_thresholds:
-        #        input: "birthdate"
-        #        thresholds: [13, 15, 18, 21, 65]
+        #  from:
+        #    eduid:
+        #      required_claims:
+        #        birthdate: []
+        #        assurance_level:
+        #          - "http://www.swamid.se/policy/assurance/al2"
+        #          - "http://www.swamid.se/policy/assurance/al3"
+        #      derivations:
+        #        - age_over_thresholds:
+        #            input: "birthdate"
+        #            thresholds: [13, 15, 18, 21, 65]
+        nym_auth:
+          from:
+            pid:
+              required_claims:
+                birthdate: []
+                issuing_country: []
+                personal_administrative_number: []
+              derivations:
+                - copy: {input: birthdate, output: birth_date}
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf:
+                        secret_path: "/pki/nym_auth_seed.key"
+                        inputs: [issuing_country, personal_administrative_number]
+            pid_mdoc:
+              required_claims:
+                eu.europa.ec.eudi.pid.1.birth_date: []
+                eu.europa.ec.eudi.pid.1.issuing_country: []
+                eu.europa.ec.eudi.pid.1.administrative_number: []
+              derivations:
+                - copy: {input: eu.europa.ec.eudi.pid.1.birth_date, output: birth_date}
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf:
+                        secret_path: "/pki/nym_auth_seed.key"
+                        inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-apigw.fly.dev/token"
@@ -416,7 +463,9 @@ apigw:
           scopes:
             - "pid"
             - "ehic"
+            - "pid_mdoc"
             - "mdl"
+            - "nym_auth"
             - "eduid"
             - "eduid_age_verification"
             - "microcredential"
