@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
-	"github.com/SUNET/vc/pkg/credential/seed"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,9 +57,9 @@ apigw:
 	require.NoError(t, err)
 	issued := cfg.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"].Derivations
 	opening, err := primitives.HashCommitmentFor(issued, []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}).
-		NewOpening(t.Context(), map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-100"})
+		NewOpening(map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-100"})
 	require.NoError(t, err)
-	commitment, err := seed.Commit(seed.CommitSHA256, opening)
+	commitment, err := openid4vci.HashCommitment(openid4vci.HashCommitmentAlgSHA256, opening)
 	require.NoError(t, err)
 	want := hex.EncodeToString(commitment)
 

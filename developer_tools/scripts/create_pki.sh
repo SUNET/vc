@@ -214,9 +214,9 @@ EOF
         openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${PKI_DIR}/credential_encryption.pem"
     fi
 
-    # nym_auth seed derivation secret
+    # Secret of the nym_auth ssc hkdf opening
     if [ ! -f "${PKI_DIR}/nym_auth_seed.key" ]; then
-        echo "Generating nym_auth seed secret..."
+        echo "Generating the nym_auth ssc opening secret..."
         openssl rand 32 | basenc --base64url | tr -d '=' > "${PKI_DIR}/nym_auth_seed.key"
     fi
 }

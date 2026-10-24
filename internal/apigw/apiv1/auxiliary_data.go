@@ -82,12 +82,15 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 		if hc == nil {
 			return nil, fmt.Errorf("no hash_commitment derivation fulfils to_wallet path %q", entry.Path)
 		}
-		opening, err := hc.NewOpening(ctx, sourceClaims)
+		opening, err := hc.NewOpening(sourceClaims)
 		if err != nil {
 			return nil, fmt.Errorf("to_wallet path %q: %w", entry.Path, err)
 		}
-		commitment := sha256.Sum256(opening)
-		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment[:]); err != nil {
+		commitment, err := openid4vci.HashCommitment(entry.Alg, opening)
+		if err != nil {
+			return nil, err
+		}
+		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment); err != nil {
 			return nil, err
 		}
 		entry.Opening = base64.RawURLEncoding.EncodeToString(opening)

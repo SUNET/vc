@@ -1,9 +1,11 @@
 package openid4vci
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,6 +19,30 @@ import (
 // AuxiliaryDataTypeHashCommitment is the Auxiliary Data Type the
 // extension defines.
 const AuxiliaryDataTypeHashCommitment = "hash_commitment"
+
+// HashCommitmentAlgSHA256 is the hash_commitment alg the extension
+// defines.
+const HashCommitmentAlgSHA256 = "sha-256"
+
+// HashCommitment returns the alg hash of an opening.
+func HashCommitment(alg string, opening []byte) ([]byte, error) {
+	if len(opening) == 0 {
+		return nil, errors.New("auxiliary data: the opening is empty")
+	}
+	if _, err := HashCommitmentSize(alg); err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(opening)
+	return sum[:], nil
+}
+
+// HashCommitmentSize returns the output length of alg.
+func HashCommitmentSize(alg string) (int, error) {
+	if alg != HashCommitmentAlgSHA256 {
+		return 0, fmt.Errorf("auxiliary data: alg %q is not %s", alg, HashCommitmentAlgSHA256)
+	}
+	return sha256.Size, nil
+}
 
 // AuxiliaryDataEntry is one Auxiliary Data Entry. Its members other than
 // Type are those of hash_commitment.

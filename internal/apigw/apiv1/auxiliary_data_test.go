@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
-	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -84,11 +83,6 @@ func TestAuxiliaryData(t *testing.T) {
 	assert.Equal(t, ssc, toWallet[0].Path)
 	opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
 	require.NoError(t, err)
-	deriver, err := seed.NewDeriver(secret, 16)
-	require.NoError(t, err)
-	want, err := deriver.Seed(t.Context(), []string{"SE", "pan-200"}, "")
-	require.NoError(t, err)
-	assert.Equal(t, want, opening, "the opening is the hkdf seed of the identifiers")
 	commitment := sha256.Sum256(opening)
 	assert.Equal(t, base64.StdEncoding.EncodeToString(commitment[:]), doc["ssc"], "the opening opens ssc")
 	assert.Equal(t, base64.StdEncoding.EncodeToString(walletPSC[:]), doc["psc"])

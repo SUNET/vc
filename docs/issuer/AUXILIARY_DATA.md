@@ -113,15 +113,15 @@ Both take `bytes`, the opening length the credential type defines, from 16
 to 64.
 
 ```
-opening = HKDF-SHA256(secret, info = lp("vc/seed/v1") || lp(bytes)
-                                     || lp("")
+opening = HKDF-SHA256(secret, info = lp("vc/hash_commitment/hkdf/v1") || lp(bytes)
                                      || lp(input_1) || ... || lp(input_n),
                       length = bytes)
 commitment = SHA-256(opening)
 ```
 
-`lp(x)` is a two-byte big-endian length followed by the bytes. Each input
-is a non-empty string claim of the source data.
+`lp(x)` is a two-byte big-endian length followed by the bytes, `bytes` is
+written in decimal, and the salt is empty. Each input is a non-empty string
+claim of the source data.
 
 The secret file holds the secret **base64url-encoded**, decoding to at
 least 32 bytes. `head -c 32 /dev/urandom | basenc --base64url | tr -d '='`

@@ -104,10 +104,10 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		}, "is no to_wallet entry"},
 		"an unreadable secret": {func(c *model.Cfg) {
 			derivation(c).Opening.HKDF.SecretPath = filepath.Join(t.TempDir(), "absent")
-		}, "opening: hkdf: reading the opening secret"},
+		}, "opening: hkdf: the opening secret"},
 		"an opening without a length": {func(c *model.Cfg) {
 			derivation(c).Opening.HKDF.Bytes = 0
-		}, "seed length 0 is outside"},
+		}, "an opening has 16 to 64 bytes, got 0"},
 		"an opening with two generators": {func(c *model.Cfg) {
 			derivation(c).Opening.Random = &primitives.RandomOpeningArgs{Bytes: 16}
 		}, "exactly one of hkdf and random"},

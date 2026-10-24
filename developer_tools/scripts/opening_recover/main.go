@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
-	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -175,8 +174,8 @@ func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
 	if meta == nil || meta.AuxiliaryData == nil || cfg.APIGW == nil {
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data", scope)
 	}
+	var err error
 	if path == nil {
-		var err error
 		if path, err = onlyHKDFPath(cfg.APIGW.DataSources, scope); err != nil {
 			return nil, err
 		}
@@ -185,24 +184,31 @@ func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
 	if i < 0 {
 		return nil, fmt.Errorf("scope %q has no to_wallet entry %q", scope, path)
 	}
-	openings := hkdfOpenings(cfg.APIGW.DataSources, scope, path)
-	if len(openings) == 0 {
-		return nil, fmt.Errorf("no source scope of %q derives %q with hkdf", scope, path)
+	openings, err := hkdfOpenings(cfg.APIGW.DataSources, scope, path)
+	if err != nil {
+		return nil, err
 	}
 	return &entry{alg: meta.AuxiliaryData.ToWallet[i].Alg, openings: openings}, nil
 }
 
 // hkdfOpenings returns the hkdf opening each source scope of scope
-// configures for path.
-func hkdfOpenings(sources model.DataSources, scope string, path []string) []sourceOpening {
+// configures for path, each one validated.
+func hkdfOpenings(sources model.DataSources, scope string, path []string) ([]sourceOpening, error) {
 	var openings []sourceOpening
 	for _, src := range sources.SourceScopes() {
 		hc := primitives.HashCommitmentFor(src.Derivations, path)
-		if src.Scope == scope && hc != nil && hc.Opening.HKDF != nil {
-			openings = append(openings, sourceOpening{where: src.Where(), hkdf: hc.Opening.HKDF})
+		if src.Scope != scope || hc == nil || hc.Opening.HKDF == nil {
+			continue
 		}
+		if err := hc.Opening.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", src.Where(), err)
+		}
+		openings = append(openings, sourceOpening{where: src.Where(), hkdf: hc.Opening.HKDF})
 	}
-	return openings
+	if len(openings) == 0 {
+		return nil, fmt.Errorf("no source scope of %q derives %q with hkdf", scope, path)
+	}
+	return openings, nil
 }
 
 // onlyHKDFPath returns the path of scope's one hkdf hash_commitment.
@@ -234,7 +240,7 @@ type result struct {
 func (e *entry) reproduce(ctx context.Context, inputs []string) ([]result, error) {
 	var results []result
 	for _, o := range e.openings {
-		opening, err := o.hkdf.OpenValues(ctx, inputs)
+		opening, err := o.hkdf.OpenValues(inputs)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", o.where, err)
 		}
@@ -243,7 +249,7 @@ func (e *entry) reproduce(ctx context.Context, inputs []string) ([]result, error
 			results[i].sources = append(results[i].sources, o.where)
 			continue
 		}
-		commitment, err := seed.Commit(e.alg, opening)
+		commitment, err := openid4vci.HashCommitment(e.alg, opening)
 		if err != nil {
 			return nil, err
 		}

@@ -13,7 +13,6 @@ import (
 	"github.com/SUNET/vc/pkg/issuance"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
-	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -385,8 +384,8 @@ func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.A
 	switch {
 	case entry.Type != openid4vci.AuxiliaryDataTypeHashCommitment:
 		return fmt.Errorf("type %q; this issuer implements %q", entry.Type, openid4vci.AuxiliaryDataTypeHashCommitment)
-	case entry.Alg != seed.CommitSHA256:
-		return fmt.Errorf("alg %q; this issuer implements %q", entry.Alg, seed.CommitSHA256)
+	case entry.Alg != openid4vci.HashCommitmentAlgSHA256:
+		return fmt.Errorf("alg %q; this issuer implements %q", entry.Alg, openid4vci.HashCommitmentAlgSHA256)
 	case entry.Opening != "" || entry.Commitment != "":
 		return errors.New("metadata carries no opening or commitment")
 	case entry.Required:

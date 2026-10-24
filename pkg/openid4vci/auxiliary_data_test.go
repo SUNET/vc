@@ -2,6 +2,7 @@ package openid4vci
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 
@@ -94,4 +95,19 @@ func TestAuxiliaryDataWireShape(t *testing.T) {
 			string(encoded))
 		assert.Empty(t, published.AuxiliaryData, "the published issuer metadata must not receive the opening")
 	})
+}
+
+// A known answer computed with Python's hashlib, and one fixture per
+// refusal.
+func TestHashCommitment(t *testing.T) {
+	opening, err := hex.DecodeString("4a8f9c1d2e3f4a5b6c7d8e9f0a1b2c3d")
+	require.NoError(t, err)
+	commitment, err := HashCommitment(HashCommitmentAlgSHA256, opening)
+	require.NoError(t, err)
+	assert.Equal(t, "d424c7068cf26ed1a2c899d095f18b390f2f63897d704ed08c410a9368c345ae", hex.EncodeToString(commitment))
+
+	_, err = HashCommitment("sha3-256", opening)
+	assert.ErrorContains(t, err, `alg "sha3-256" is not sha-256`)
+	_, err = HashCommitment(HashCommitmentAlgSHA256, nil)
+	assert.ErrorContains(t, err, "the opening is empty")
 }

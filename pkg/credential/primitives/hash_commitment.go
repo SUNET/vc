@@ -1,18 +1,18 @@
 package primitives
 
 import (
-	"context"
+	"crypto/hkdf"
 	"crypto/rand"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/SUNET/vc/pkg/credential/seed"
+	"github.com/SUNET/vc/pkg/base64url"
 )
 
 // HashCommitmentArgs fulfils the to_wallet hash_commitment entry at Path.
@@ -43,13 +43,13 @@ type HKDFOpeningArgs struct {
 	// Their order is part of the derivation.
 	Inputs []string `yaml:"inputs" validate:"required,min=1,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
 	// Bytes is the opening length.
-	Bytes int `yaml:"bytes" validate:"required,min=16,max=64" doc_example:"16"`
+	Bytes int `yaml:"bytes" validate:"required" doc_example:"16"`
 }
 
 // RandomOpeningArgs draws the opening from crypto/rand.
 type RandomOpeningArgs struct {
 	// Bytes is the opening length.
-	Bytes int `yaml:"bytes" validate:"required,min=16,max=64" doc_example:"16"`
+	Bytes int `yaml:"bytes" validate:"required" doc_example:"16"`
 }
 
 // Apply implements Applier. The derivation pipeline skips hash_commitment,
@@ -70,17 +70,17 @@ func HashCommitmentFor(list []Derivation, path []string) *HashCommitmentArgs {
 }
 
 // NewOpening produces the opening from the claims of the source data.
-func (a *HashCommitmentArgs) NewOpening(ctx context.Context, claims map[string]any) ([]byte, error) {
+func (a *HashCommitmentArgs) NewOpening(claims map[string]any) ([]byte, error) {
 	generator, err := a.Opening.generator()
 	if err != nil {
 		return nil, err
 	}
-	return generator.open(ctx, claims)
+	return generator.open(claims)
 }
 
 // openingGenerator produces an opening from the claims of the source data.
 type openingGenerator interface {
-	open(ctx context.Context, claims map[string]any) ([]byte, error)
+	open(claims map[string]any) ([]byte, error)
 }
 
 // generator returns the one generator the opening sets.
@@ -95,35 +95,54 @@ func (o OpeningArgs) generator() (openingGenerator, error) {
 	}
 }
 
+// An opening has 16 to 64 bytes: at least 128 bits.
+const (
+	minOpeningBytes = 16
+	maxOpeningBytes = 64
+)
+
 // Validate checks that the opening can be produced: one generator is set,
-// and an hkdf secret loads.
+// the length is in range, and an hkdf secret loads.
 func (o OpeningArgs) Validate() error {
 	if _, err := o.generator(); err != nil {
 		return err
 	}
+	if n := o.bytes(); n < minOpeningBytes || n > maxOpeningBytes {
+		return fmt.Errorf("an opening has %d to %d bytes, got %d", minOpeningBytes, maxOpeningBytes, n)
+	}
 	if o.HKDF == nil {
 		return nil
 	}
-	if _, err := o.HKDF.Deriver(); err != nil {
+	if _, err := o.HKDF.secret(); err != nil {
 		return fmt.Errorf("hkdf: %w", err)
 	}
 	return nil
 }
 
-// Deriver loads the secret and returns the HKDF deriver it configures.
-func (a *HKDFOpeningArgs) Deriver() (*seed.Deriver, error) {
-	raw, err := os.ReadFile(filepath.Clean(a.SecretPath))
-	if err != nil {
-		return nil, fmt.Errorf("reading the opening secret: %w", err)
+// bytes is the length the set generator produces.
+func (o OpeningArgs) bytes() int {
+	if o.HKDF != nil {
+		return o.HKDF.Bytes
 	}
-	secret, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(string(raw)), "="))
-	if err != nil {
-		return nil, fmt.Errorf("the opening secret in %s is not base64url: %w", a.SecretPath, err)
-	}
-	return seed.NewDeriver(secret, a.Bytes)
+	return o.Random.Bytes
 }
 
-func (a *HKDFOpeningArgs) open(ctx context.Context, claims map[string]any) ([]byte, error) {
+// minHKDFSecretBytes is the output length of SHA-256.
+const minHKDFSecretBytes = sha256.Size
+
+// secret reads the secret file: base64url, at least 32 bytes.
+func (a *HKDFOpeningArgs) secret() ([]byte, error) {
+	secret, err := base64url.ReadFile(a.SecretPath)
+	if err != nil {
+		return nil, fmt.Errorf("the opening secret: %w", err)
+	}
+	if len(secret) < minHKDFSecretBytes {
+		return nil, fmt.Errorf("the opening secret in %s is shorter than %d bytes", a.SecretPath, minHKDFSecretBytes)
+	}
+	return secret, nil
+}
+
+func (a *HKDFOpeningArgs) open(claims map[string]any) ([]byte, error) {
 	values := make([]string, 0, len(a.Inputs))
 	for _, path := range a.Inputs {
 		val, present := lookupClaim(claims, path)
@@ -135,27 +154,46 @@ func (a *HKDFOpeningArgs) open(ctx context.Context, claims map[string]any) ([]by
 		}
 		values = append(values, s)
 	}
-	return a.OpenValues(ctx, values)
+	return a.OpenValues(values)
 }
 
 // OpenValues derives the opening from the values of Inputs, in their order.
-func (a *HKDFOpeningArgs) OpenValues(ctx context.Context, values []string) ([]byte, error) {
+func (a *HKDFOpeningArgs) OpenValues(values []string) ([]byte, error) {
 	if len(values) != len(a.Inputs) {
 		return nil, fmt.Errorf("%w: hkdf takes %d input values, got %d", ErrInvalidClaimInput, len(a.Inputs), len(values))
 	}
+	info := hkdfField(nil, hkdfLabel)
+	info = hkdfField(info, strconv.Itoa(a.Bytes))
 	for i, value := range values {
 		if strings.TrimSpace(value) == "" {
 			return nil, fmt.Errorf("%w: hkdf input %q must be a non-empty string", ErrInvalidClaimInput, a.Inputs[i])
 		}
+		if len(value) > maxHKDFField {
+			// A longer value would wrap its length prefix, and two inputs
+			// would then encode alike.
+			return nil, fmt.Errorf("%w: hkdf input %q is longer than %d bytes", ErrInvalidClaimInput, a.Inputs[i], maxHKDFField)
+		}
+		info = hkdfField(info, value)
 	}
-	deriver, err := a.Deriver()
+	secret, err := a.secret()
 	if err != nil {
 		return nil, err
 	}
-	return deriver.Seed(ctx, values, "")
+	return hkdf.Key(sha256.New, secret, nil, string(info), a.Bytes)
 }
 
-func (a *RandomOpeningArgs) open(context.Context, map[string]any) ([]byte, error) {
+// hkdfLabel separates the hkdf opening from other uses of the secret.
+const hkdfLabel = "vc/hash_commitment/hkdf/v1"
+
+// maxHKDFField is the longest field a two-byte length prefix holds.
+const maxHKDFField = 1<<16 - 1
+
+// hkdfField appends field to info, prefixed with its length.
+func hkdfField(info []byte, field string) []byte {
+	return append(binary.BigEndian.AppendUint16(info, uint16(len(field))), field...)
+}
+
+func (a *RandomOpeningArgs) open(map[string]any) ([]byte, error) {
 	opening := make([]byte, a.Bytes)
 	if _, err := rand.Read(opening); err != nil {
 		return nil, err
