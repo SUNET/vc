@@ -65,6 +65,7 @@
 
 ### Fixed
 
+- **A wrapped classified error now keeps its HTTP status** (#841): `httphelpers.StatusCode` decided the status with a type switch that does not unwrap, while the response body (`NewErrorFromError`) does unwrap. A `*helpers.Error` returned through `%w` therefore carried the right code in the body and a status taken from `inferStatusFromErrorString`'s keyword match over the concatenated message - so a 400 refusal read as 401 when the wrapper said "token" and 404 when it said "missing". No endpoint's status changes today: every existing producer returns its classified error bare, so the defect was latent. It bites the first path that wraps one.
 - **W3C presentation verification picked a proof by accident.** A verifiable
   presentation holds two Data Integrity proofs - the holder's, over the
   presentation, and the embedded credential's, from the issuer - and both
