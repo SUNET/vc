@@ -4,10 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 func presentationDefinitionJS(t *testing.T) string {
@@ -76,28 +79,78 @@ func TestEveryPublishedPresetFieldSurvivesTheBrowserSchema(t *testing.T) {
 // pass the schema and still never reach the wallet - and then has to pass
 // a second schema on the way out.
 //
-// Spelled out rather than derived, because which fields are DCQL-relevant
-// is not something the Go types say: validations deliberately goes no
-// further than the UI.
+// The member is named DIFFERENTLY on the two wires, which is the whole
+// difficulty: /ui/metadata serves UIPresetCredential.Req as "req", and the
+// DCQL query that is posted names the same list CredentialQuery.Req, which
+// is "_req". Both names are taken from the struct tags here rather than
+// written out, because a guard that spells them itself is a guard that can
+// agree with neither side - which is how the picker came to post "req",
+// a member pkg/openid4vp refuses as req_missing_or_empty.
+//
+// Spelled out as to WHICH fields rather than derived, because which ones
+// are DCQL-relevant is not something the Go types say: validations
+// deliberately goes no further than the UI.
 func TestZkpReqReqReachesThePostedQuery(t *testing.T) {
 	js := presentationDefinitionJS(t)
 
-	dcql := between(t, js, "const dcqlQueryCredentialSchema = v.object({", "const credentialSetQuerySchema")
-	require.Contains(t, dcql, "_req:",
-		"the DCQL schema must declare the WIRE member _req, or the query is stripped again on the way out")
+	uiName := jsonName(t, reflect.TypeOf(UIPresetCredential{}), "Req")
+	wireName := jsonName(t, reflect.TypeOf(openid4vp.CredentialQuery{}), "Req")
+	require.NotEqual(t, uiName, wireName,
+		"this test exists because the two wires name the list differently; if they no longer do, simplify it")
 
+	preset := between(t, js, "presets: v.optional(", "/** @typedef")
+	require.True(t, declaresMember(preset, uiName),
+		"the preset schema must declare %q, the name /ui/metadata serves it under", uiName)
+
+	dcql := between(t, js, "const dcqlQueryCredentialSchema = v.object({", "const credentialSetQuerySchema")
+	require.True(t, declaresMember(dcql, wireName),
+		"the DCQL schema must declare %q, or v.object strips the list on the way out", wireName)
+	require.False(t, declaresMember(dcql, uiName),
+		"the DCQL schema declares %q, the metadata name; the posted query's member is %q and %q is refused as req_missing_or_empty",
+		uiName, wireName, uiName)
+
+	// The copy itself. It moved to preset-helpers.js so it could be tested
+	// under `node --test` without Alpine - see dcqlCredentialFromPreset
+	// there and its tests - so what is checked here is that the picker
+	// still goes through it rather than growing a second copy inline.
 	copied := between(t, js, "async handleSelectPredefinedPresentationDefinition(id)", "v.safeParse(dcqlQuerySchema")
-	require.Contains(t, copied, "c._req = cred.req",
-		"the preset-to-query copy must turn the preset's req into the wire's _req, or a zkp_req query asks the wallet for nothing")
+	require.Contains(t, copied, "dcqlCredentialFromPreset",
+		"the preset-to-query copy must go through dcqlCredentialFromPreset, which is the tested one")
+
+	helpers, err := os.ReadFile(filepath.Join("..", "staticembed", "preset-helpers.js"))
+	require.NoError(t, err)
+	require.Containsf(t, string(helpers), "c."+wireName+" = cred."+uiName,
+		"dcqlCredentialFromPreset must map the metadata's %q onto the query's %q", uiName, wireName)
 
 	// The item key, which is the half that broke the live operator UI:
 	// the schema validated `id` while the server published `fn_id`, so
 	// parsing /ui/metadata threw and the page never left its spinner.
+	itemName := jsonName(t, reflect.TypeOf(openid4vp.ReqItem{}), "FnID")
 	source, err := os.ReadFile(filepath.Join("..", "staticembed", "req-schema.js"))
 	require.NoError(t, err)
 	check := between(t, string(source), "export const reqSchema", "\n);")
-	require.Contains(t, check, "item.fn_id",
-		"req-schema.js must check the v0.4 item key fn_id")
+	require.Containsf(t, check, "item."+itemName,
+		"req-schema.js must check the item key %q, which is what ReqItem publishes", itemName)
 	require.NotContains(t, check, "item.id",
 		"req-schema.js still checks the pre-v0.4 item key id, which the server no longer publishes")
+}
+
+// jsonName is a field's wire name, from its json tag.
+func jsonName(t *testing.T, of reflect.Type, field string) string {
+	t.Helper()
+	f, ok := of.FieldByName(field)
+	require.Truef(t, ok, "%s has no field %s; this guard is reading the wrong type", of.Name(), field)
+	name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+	require.NotEmptyf(t, name, "%s.%s has no json name", of.Name(), field)
+	return name
+}
+
+// declaresMember reports whether a valibot object schema declares exactly
+// this member.
+//
+// Exactly, because "_req" CONTAINS "req": a plain substring search is
+// satisfied by the other name and so can never tell the two apart, which
+// is precisely the confusion this file is here to catch.
+func declaresMember(schema, name string) bool {
+	return regexp.MustCompile(`(^|[^\w$])` + regexp.QuoteMeta(name) + `\s*:`).MatchString(schema)
 }

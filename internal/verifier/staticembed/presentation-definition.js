@@ -6,7 +6,7 @@ import {
     getBestSupportedProtocol,
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
-import { groupPresets } from "./preset-helpers.js";
+import { dcqlCredentialFromPreset, groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
 import { reqSchema } from "./req-schema.js";
@@ -677,14 +677,7 @@ Alpine.data("app", () => ({
 
         // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
         const dcqlInput = {
-            credentials: (preset.credentials || []).map((/** @type {any} */ cred) => {
-                /** @type {any} */
-                const c = { id: cred.id, format: cred.format, meta: cred.meta };
-                if (cred.claims) c.claims = cred.claims;
-                // The preset's `req` becomes the wire's `_req` here.
-                if (cred.req) c._req = cred.req;
-                return c;
-            }),
+            credentials: (preset.credentials || []).map(dcqlCredentialFromPreset),
         };
 
         const result = v.safeParse(dcqlQuerySchema, dcqlInput);
