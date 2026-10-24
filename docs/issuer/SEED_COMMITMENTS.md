@@ -298,7 +298,7 @@ make build-seed-recover
 ./bin/seed_recover -config /etc/vc/config.yaml -seed primary \
     -subject SE -subject 198001011234 \
     -pseudonym-config known-offender-matching-ssc \
-    -verifier-id verifier.example \
+    -verifier-id x509_san_dns:verifier.example \
     -expect <pseudonym the verifier reported>
 ```
 
