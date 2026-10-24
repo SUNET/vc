@@ -6,18 +6,26 @@ import (
 
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
-// checkCommitmentClaim accepts a claim the credential's type metadata
-// declares where its format can carry a hash commitment.
-func checkCommitmentClaim(meta *model.CredentialMetadata, path []string) error {
+// checkCommitmentClaim accepts an entry whose claim the credential's type
+// metadata declares, in the representation the entry's encoding names.
+func checkCommitmentClaim(meta *model.CredentialMetadata, entry openid4vci.AuxiliaryDataEntry) error {
+	if entry.Encoding != "" {
+		if _, err := openid4vci.EncodeCommitment(entry.Encoding, nil); err != nil {
+			return err
+		}
+	}
 	switch {
 	case meta.Format == openid4vp.FormatMsoMdoc:
-		return checkMDocCommitmentClaim(meta.MDDL, path)
+		return checkMDocCommitmentClaim(meta.MDDL, entry.Path, entry.Encoding)
+	case openid4vp.IsSDJWTVCCredentialFormat(meta.Format) && entry.Encoding == "":
+		return fmt.Errorf("path %q: an SD-JWT VC claim holds text, so the entry needs an encoding", entry.Path)
 	case openid4vp.IsSDJWTVCCredentialFormat(meta.Format):
-		return checkSDJWTCommitmentClaim(meta.GetVCTM(), path)
+		return checkSDJWTCommitmentClaim(meta.GetVCTM(), entry.Path)
 	}
 	return fmt.Errorf("auxiliary data is implemented for %s and %s credentials", openid4vp.FormatMsoMdoc, openid4vp.FormatSDJWTVC)
 }
@@ -33,8 +41,9 @@ func claimMandatory(meta *model.CredentialMetadata, path []string) bool {
 	return ok && claim.Mandatory
 }
 
-// checkMDocCommitmentClaim accepts a bstr element of the MDDL.
-func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path []string) error {
+// checkMDocCommitmentClaim accepts an element of the MDDL that holds the
+// commitment's bytes as a bstr, or its text in an encoding as a tstr.
+func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path []string, encoding string) error {
 	if len(path) != 2 {
 		return fmt.Errorf("path %q is a namespace and an element", path)
 	}
@@ -42,8 +51,12 @@ func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path []string) error {
 	if !ok {
 		return fmt.Errorf("the MDDL declares no element at path %q", path)
 	}
-	if claim.ValueType != "bstr" {
-		return fmt.Errorf("path %q is a %s element; a hash commitment is a bstr", path, claim.ValueType)
+	want, held := "bstr", "bytes"
+	if encoding != "" {
+		want, held = "tstr", encoding+" text"
+	}
+	if claim.ValueType != want {
+		return fmt.Errorf("path %q is a %s element; a commitment in %s needs a %s element", path, claim.ValueType, held, want)
 	}
 	return nil
 }

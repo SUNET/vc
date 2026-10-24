@@ -285,14 +285,15 @@ credential configuration.
 
 Type are those of hash_commitment.
 
-| Field        | Type       | Description                                                                      | Example                                   | Default | Required |
-| ------------ | ---------- | -------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
-| `type`       | `string`   | Auxiliary Data Type.                                                             | `"hash_commitment"`                       | -       | No       |
-| `alg`        | `string`   | Hash function of a hash_commitment.                                              | `"sha-256"`                               | -       | No       |
-| `path`       | `[]string` | Claims path pointer of the claim that holds the commitment.                      | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | No       |
-| `opening`    | `string`   | Base64url secret, in an entry the Credential Issuer sends. It is a Secret Value. | -                                         | -       | No       |
-| `commitment` | `string`   | Base64url commitment, in an entry the Wallet sends.                              | -                                         | -       | No       |
-| `required`   | `bool`     | Required, in a to_issuer entry, means the Wallet must send it.                   | -                                         | -       | No       |
+| Field        | Type       | Description                                                                                              | Example                                   | Default | Required |
+| ------------ | ---------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `type`       | `string`   | Auxiliary Data Type.                                                                                     | `"hash_commitment"`                       | -       | No       |
+| `alg`        | `string`   | Hash function of a hash_commitment.                                                                      | `"sha-256"`                               | -       | No       |
+| `path`       | `[]string` | Claims path pointer of the claim that holds the commitment.                                              | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | No       |
+| `opening`    | `string`   | Base64url secret, in an entry the Credential Issuer sends. It is a Secret Value.                         | -                                         | -       | No       |
+| `commitment` | `string`   | Base64url commitment, in an entry the Wallet sends.                                                      | -                                         | -       | No       |
+| `required`   | `bool`     | Required, in a to_issuer entry, means the Wallet must send it.                                           | -                                         | -       | No       |
+| `encoding`   | `string`   | How the claim at Path represents the commitment: base64url, base64 or hex text, or the bytes when empty. | `"base64url"`                             | -       | No       |
 
 ### `disclosure_policy`
 

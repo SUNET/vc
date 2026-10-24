@@ -2,6 +2,7 @@ package openid4vci
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -40,6 +41,33 @@ type AuxiliaryDataEntry struct {
 
 	// Required, in a to_issuer entry, means the Wallet must send it.
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+
+	// Encoding is how the claim at Path represents the commitment:
+	// base64url, base64 or hex text, or the bytes when empty.
+	Encoding string `json:"-" yaml:"encoding,omitempty" doc_example:"\"base64url\""`
+}
+
+// The text encodings of AuxiliaryDataEntry.Encoding.
+const (
+	CommitmentEncodingBase64URL = "base64url"
+	CommitmentEncodingBase64    = "base64"
+	CommitmentEncodingHex       = "hex"
+)
+
+// EncodeCommitment writes a commitment in a text encoding of
+// AuxiliaryDataEntry.Encoding: base64url without padding, base64 with
+// padding, or lowercase hex.
+func EncodeCommitment(encoding string, commitment []byte) (string, error) {
+	switch encoding {
+	case CommitmentEncodingBase64URL:
+		return base64.RawURLEncoding.EncodeToString(commitment), nil
+	case CommitmentEncodingBase64:
+		return base64.StdEncoding.EncodeToString(commitment), nil
+	case CommitmentEncodingHex:
+		return hex.EncodeToString(commitment), nil
+	}
+	return "", fmt.Errorf("auxiliary data: encoding %q is none of %s, %s and %s",
+		encoding, CommitmentEncodingBase64URL, CommitmentEncodingBase64, CommitmentEncodingHex)
 }
 
 // AuxiliaryDataSupported is the auxiliary_data_supported parameter of a

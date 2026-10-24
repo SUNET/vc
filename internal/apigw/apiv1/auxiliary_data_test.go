@@ -3,6 +3,7 @@ package apiv1
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -135,9 +136,9 @@ func TestAuxiliaryData(t *testing.T) {
 	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
 }
 
-// An SD-JWT VC carries each commitment as base64url at its claims path,
-// and the SD-JWT builder turns it into a disclosure the holder can
-// withhold.
+// An SD-JWT VC carries each commitment at its claims path, in the
+// encoding its entry configures, and the SD-JWT builder turns it into a
+// disclosure the holder can withhold.
 func TestAuxiliaryDataSDJWT(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "secret.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
@@ -152,8 +153,8 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{always(ssc), always(psc)}}
 	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
 		"example": {Format: "dc+sd-jwt", VCTM: vctm, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
-			ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
-			ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}},
+			ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Encoding: "base64url"}},
+			ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Encoding: "hex"}},
 		}},
 	}}}}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
@@ -174,11 +175,11 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	issued := sha256.Sum256(opening)
 	want := map[string]any{
 		"ssc": base64.RawURLEncoding.EncodeToString(issued[:]),
-		"psc": base64.RawURLEncoding.EncodeToString(walletPSC[:]),
+		"psc": hex.EncodeToString(walletPSC[:]),
 	}
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(out, &doc))
-	assert.Equal(t, want, doc["commitments"], "each commitment is base64url at its claims path")
+	assert.Equal(t, want, doc["commitments"], "each commitment is at its claims path, in its entry's encoding")
 
 	payload, disclosures, err := sdjwtvc.New().MakeCredential(sha256.New(), doc, vctm, 0)
 	require.NoError(t, err)

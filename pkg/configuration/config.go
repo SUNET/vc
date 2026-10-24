@@ -392,7 +392,7 @@ func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.A
 	case entry.Required:
 		return errors.New("required comes from the type metadata's mandatory flag")
 	}
-	return checkCommitmentClaim(meta, entry.Path)
+	return checkCommitmentClaim(meta, entry)
 }
 
 // deriveAuxiliaryDataRequired sets each to_issuer entry's required from the

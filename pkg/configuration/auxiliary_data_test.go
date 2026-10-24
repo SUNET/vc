@@ -62,6 +62,14 @@ func TestCheckAuxiliaryData(t *testing.T) {
 
 	require.NoError(t, checkAuxiliaryData(base(), "apigw"))
 
+	t.Run("a tstr element holds an encoded commitment", func(t *testing.T) {
+		cfg := base()
+		cfg.Common.CredentialMetadata["nym_auth"].MDDL.Claims[ssc[0]]["text"] = mdoc.ClaimMetadata{ValueType: "tstr"}
+		entry(cfg).Path, entry(cfg).Encoding = []string{ssc[0], "text"}, "hex"
+		derivation(cfg).Path = []string{ssc[0], "text"}
+		require.NoError(t, checkAuxiliaryData(cfg, "apigw"))
+	})
+
 	t.Run("required comes from mandatory", func(t *testing.T) {
 		cfg := base()
 		cfg.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{
@@ -79,11 +87,12 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		mutate func(*model.Cfg)
 		want   string
 	}{
-		"an unknown type":      {func(c *model.Cfg) { entry(c).Type = "x" }, `type "x"`},
-		"an unknown alg":       {func(c *model.Cfg) { entry(c).Alg = "sha-512" }, `alg "sha-512"`},
-		"an opening in config": {func(c *model.Cfg) { entry(c).Opening = "AA" }, "carries no opening"},
-		"a non-bstr element":   {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "birth_date"} }, "full-date element"},
-		"an undeclared path":   {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "nope"} }, "declares no element"},
+		"an unknown type":               {func(c *model.Cfg) { entry(c).Type = "x" }, `type "x"`},
+		"an unknown alg":                {func(c *model.Cfg) { entry(c).Alg = "sha-512" }, `alg "sha-512"`},
+		"an opening in config":          {func(c *model.Cfg) { entry(c).Opening = "AA" }, "carries no opening"},
+		"a non-bstr element":            {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "birth_date"} }, "full-date element"},
+		"an undeclared path":            {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "nope"} }, "declares no element"},
+		"an encoding on a bstr element": {func(c *model.Cfg) { entry(c).Encoding = "hex" }, "a commitment in hex text needs a tstr element"},
 		"required set in config": {func(c *model.Cfg) {
 			c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: []string{ssc[0], "psc"}, Required: true}}
 		}, "comes from the type metadata"},
@@ -136,8 +145,8 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 					claim("always", false, ssc...), claim("always", true, psc...), claim("", false, "given_name"),
 				}},
 				AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
-					ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
-					ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}},
+					ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Encoding: "base64url"}},
+					ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Encoding: "hex"}},
 				},
 			}}},
 			APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
@@ -181,6 +190,12 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		"a format without a commitment carrier": {func(c *model.Cfg) {
 			meta(c).Format = "ldp_vc"
 		}, "auxiliary data is implemented for"},
+		"an entry without an encoding": {func(c *model.Cfg) {
+			meta(c).AuxiliaryData.ToIssuer[0].Encoding = ""
+		}, "the entry needs an encoding"},
+		"an unknown encoding": {func(c *model.Cfg) {
+			meta(c).AuxiliaryData.ToIssuer[0].Encoding = "base32"
+		}, `encoding "base32" is none of`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base()

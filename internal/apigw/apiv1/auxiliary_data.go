@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -86,7 +87,7 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 			return nil, fmt.Errorf("to_wallet path %q: %w", entry.Path, err)
 		}
 		commitment := sha256.Sum256(opening)
-		if err := doc.setCommitment(entry.Path, commitment[:]); err != nil {
+		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment[:]); err != nil {
 			return nil, err
 		}
 		entry.Opening = base64.RawURLEncoding.EncodeToString(opening)
@@ -98,41 +99,72 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 // writeCommitments writes each commitment the wallet sent at its path.
 func writeCommitments(doc *commitmentDocument, commitments []walletCommitment) error {
 	for _, commitment := range commitments {
-		if err := doc.setCommitment(commitment.path, commitment.value); err != nil {
+		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// commitmentCarrier is how a credential format carries a commitment in
+// its document data.
+type commitmentCarrier struct {
+	// mdoc keys a claim by its element identifier, and carries bytes as
+	// the standard base64 the mso_mdoc signer decodes into a bstr. A
+	// JSON-based credential nests a claim at its path, and its claims
+	// hold text.
+	mdoc bool
+}
+
+// commitmentCarrierOf returns how a credential format carries a
+// commitment.
+func commitmentCarrierOf(format string) (commitmentCarrier, error) {
+	switch {
+	case format == openid4vp.FormatMsoMdoc:
+		return commitmentCarrier{mdoc: true}, nil
+	case openid4vp.IsSDJWTVCCredentialFormat(format):
+		return commitmentCarrier{}, nil
+	}
+	return commitmentCarrier{}, fmt.Errorf("a %q credential carries no hash commitment", format)
+}
+
+// claimText is a commitment as the claim represents it: text in the
+// entry's encoding, or the bytes.
+func (c commitmentCarrier) claimText(encoding string, commitment []byte) (string, error) {
+	switch {
+	case encoding != "":
+		return openid4vci.EncodeCommitment(encoding, commitment)
+	case c.mdoc:
+		return base64.StdEncoding.EncodeToString(commitment), nil
+	}
+	return "", errors.New("a claim of a JSON-based credential holds text, so the entry needs an encoding")
+}
+
 // commitmentDocument is a credential's document data, with the way its
-// format carries a hash commitment.
+// format carries a commitment.
 type commitmentDocument struct {
+	commitmentCarrier
 	claims map[string]any
-	// flat keys a claim by the last segment of its path, as an mso_mdoc
-	// element identifier. A JSON-based credential nests it at its path.
-	flat bool
-	// encoding is the text of a commitment: the standard base64 a bstr
-	// element is decoded from, or base64url in a JSON-based credential.
-	encoding *base64.Encoding
 }
 
 func newCommitmentDocument(format string, documentData []byte) (*commitmentDocument, error) {
+	carrier, err := commitmentCarrierOf(format)
+	if err != nil {
+		return nil, err
+	}
 	claims, err := decodeDocumentData(documentData)
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case format == openid4vp.FormatMsoMdoc:
-		return &commitmentDocument{claims: claims, flat: true, encoding: base64.StdEncoding}, nil
-	case openid4vp.IsSDJWTVCCredentialFormat(format):
-		return &commitmentDocument{claims: claims, encoding: base64.RawURLEncoding}, nil
-	}
-	return nil, fmt.Errorf("a %q credential carries no hash commitment", format)
+	return &commitmentDocument{commitmentCarrier: carrier, claims: claims}, nil
 }
 
-// setCommitment writes a commitment at path.
-func (d *commitmentDocument) setCommitment(path []string, commitment []byte) error {
+// setCommitment writes a commitment at path, in the entry's encoding.
+func (d *commitmentDocument) setCommitment(path []string, encoding string, commitment []byte) error {
+	text, err := d.claimText(encoding, commitment)
+	if err != nil {
+		return fmt.Errorf("path %q: %w", path, err)
+	}
 	parent, key, err := d.parent(path)
 	if err != nil {
 		return err
@@ -140,7 +172,7 @@ func (d *commitmentDocument) setCommitment(path []string, commitment []byte) err
 	if existing, present := parent[key]; present && existing != nil {
 		return fmt.Errorf("the document data already carries a value at %q", path)
 	}
-	parent[key] = d.encoding.EncodeToString(commitment)
+	parent[key] = text
 	return nil
 }
 
@@ -148,7 +180,7 @@ func (d *commitmentDocument) setCommitment(path []string, commitment []byte) err
 // key in it, creating the objects a nested path passes through.
 func (d *commitmentDocument) parent(path []string) (map[string]any, string, error) {
 	key := path[len(path)-1]
-	if d.flat {
+	if d.mdoc {
 		return d.claims, key, nil
 	}
 	node := d.claims
@@ -230,8 +262,10 @@ func walletAuxiliaryData(req *openid4vci.CredentialRequest) ([]openid4vci.Auxili
 
 // walletCommitment is the commitment the wallet sent for a to_issuer entry.
 type walletCommitment struct {
-	path  []string
-	value []byte
+	path []string
+	// encoding is how the to_issuer entry's claim represents it.
+	encoding string
+	value    []byte
 }
 
 // walletCommitments checks the wallet's entries against the to_issuer
@@ -268,7 +302,7 @@ func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4v
 	if err != nil || len(value) != sha256.Size {
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the commitment for %q must be a base64url sha-256 hash", entry.Path))
 	}
-	return walletCommitment{path: entry.Path, value: value}, nil
+	return walletCommitment{path: entry.Path, encoding: want.Encoding, value: value}, nil
 }
 
 // entryLike returns the entry of entries with the type and path of like.
