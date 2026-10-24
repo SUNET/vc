@@ -465,8 +465,7 @@ func NewValidator() (*validator.Validate, error) {
 			sl.ReportError(cfg.JWKS.Enable, "JWKS", "JWKS", "api_auth_jwks_oidc_exclusive", "")
 		}
 		// Rules require an auth mode
-		hasAuth := cfg.JWKS.Enable || cfg.OIDC.Enable
-		if !hasAuth {
+		if !cfg.Enabled() {
 			if len(cfg.Rules) > 0 {
 				sl.ReportError(cfg.Rules, "Rules", "Rules", "api_auth_rules_require_auth", "")
 			}

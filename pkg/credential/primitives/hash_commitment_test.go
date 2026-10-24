@@ -20,7 +20,7 @@ func TestOpeningInputs(t *testing.T) {
 	path := []string{"ns", "ssc"}
 	list := []Derivation{
 		{Lowercase: &LowercaseArgs{Input: "email"}},
-		{HashCommitment: &HashCommitmentArgs{Path: path, Opening: OpeningArgs{
+		{HashCommitment: &HashCommitmentArgs{Path: path, Opening: &OpeningArgs{
 			HKDF: &HKDFOpeningArgs{SecretPath: "/unused", Inputs: []string{"country", "subject.pan", "absent"}, Bytes: 16},
 		}}},
 	}

@@ -76,7 +76,7 @@ func ApplyDerivationsReplacing(list []primitives.Derivation, claims map[string]a
 	generated := map[string]bool{}
 	for i, d := range list {
 		if d.HashCommitment != nil {
-			// Its opening comes from HashCommitmentArgs.NewOpening.
+			// The Credential Endpoint applies it.
 			continue
 		}
 		derived, err := d.Apply(working, now)

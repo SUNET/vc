@@ -30,6 +30,8 @@ var allTables = []string{
 	"token_status_list_metadata",
 	"credential_subjects",
 	"cache_entries",
+	"unique_commitments",
+	"unique_commitment_resets",
 }
 
 func TestApplySchema_Postgres(t *testing.T) {
@@ -212,10 +214,17 @@ func mustExec(t *testing.T, db *sqlx.DB, query string, args ...any) {
 	require.NoError(t, err, query)
 }
 
+// showCreateTables returns the SHOW CREATE TABLE statement of each table the
+// database holds at its current version, except the migration tool's own.
 func showCreateTables(t *testing.T, db *sqlx.DB) map[string]string {
 	t.Helper()
-	schema := make(map[string]string, len(allTables))
-	for _, table := range allTables {
+	var tables []string
+	require.NoError(t, db.SelectContext(t.Context(), &tables,
+		`SELECT TABLE_NAME FROM information_schema.TABLES
+		 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME <> 'schema_migrations'`))
+	require.NotEmpty(t, tables, "the schema has tables")
+	schema := make(map[string]string, len(tables))
+	for _, table := range tables {
 		var name, statement string
 		require.NoError(t, db.QueryRowContext(t.Context(), "SHOW CREATE TABLE "+table).Scan(&name, &statement))
 		schema[table] = statement

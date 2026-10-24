@@ -12,13 +12,13 @@ import (
 )
 
 // checkOpeningClaims checks the claims of the source data each opening of
-// src reads.
+// src reads. A to_issuer entry has no opening.
 func checkOpeningClaims(src model.SourceScope, meta *model.CredentialMetadata) error {
 	for i, d := range src.Derivations {
-		if d.HashCommitment == nil {
+		if d.HashCommitment == nil || d.HashCommitment.Opening == nil {
 			continue
 		}
-		opening := d.HashCommitment.Opening
+		opening := *d.HashCommitment.Opening
 		generator, inputs, err := opening.Inputs()
 		if err != nil {
 			return fmt.Errorf("%s.derivations[%d].hash_commitment.opening: %w", src.Where(), i, err)

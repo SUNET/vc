@@ -298,6 +298,13 @@ func (u unimplementedApiv1) GetIACAs(context.Context) (*apiv1.GetIACAsResponse, 
 func (u unimplementedApiv1) PrepareIssuance(context.Context, *apiv1.PrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
 	panic("not implemented")
 }
+func (u unimplementedApiv1) ResetUniqueCommitment(context.Context, *apiv1.ResetUniqueCommitmentRequest, string) error {
+	panic("unimplemented")
+}
+
+func (u unimplementedApiv1) LookupUniqueCommitment(context.Context, *apiv1.UniqueCommitmentQuery) (*apiv1.UniqueCommitmentLookup, error) {
+	panic("unimplemented")
+}
 
 func (u unimplementedApiv1) IssuanceStatus(context.Context, *apiv1.IssuanceStatusRequest) (*apiv1.IssuanceStatusReply, error) {
 	panic("not implemented")

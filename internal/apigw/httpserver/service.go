@@ -349,6 +349,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodGet, "/issuance/status", http.StatusOK, s.endpointIssuanceStatus)
 
+	// An operator-approved reset of a subject's to_issuer commitment
+	// (Credential Auxiliary Data).
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/auxiliary_data/lookup", http.StatusOK, s.endpointLookupUniqueCommitment)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/auxiliary_data/reset", http.StatusNoContent, s.endpointResetUniqueCommitment)
+
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")
 	// Rate limiting for datastore endpoints
