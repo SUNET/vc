@@ -198,6 +198,8 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// TODO(masv): no polling, use WebSocket or Server-Sent Events instead
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "poll/:session_id", http.StatusOK, s.endpointPollSession)
 
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "payment", http.StatusOK, s.endpointPaymentPage)
+
 	rgUI := rgOAuthSession.Group("/ui")
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/notify", http.StatusOK, s.endpointUINotify)
