@@ -807,6 +807,13 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 	if authCtx.VerifierResponseCode != "" {
 		return false
 	}
+	// A refused session has been answered too. Reusing one would hand a
+	// fresh interaction the state and nonce the user already declined,
+	// and the decline recorded on it would then describe a request
+	// nobody made.
+	if authSessionIsTerminal(authCtx) {
+		return false
+	}
 	if authCtx.ExpiresAt != 0 && authCtx.ExpiresAt <= time.Now().Unix() {
 		return false
 	}
@@ -945,6 +952,9 @@ const (
 	// UIResumeExpired means the auth context exists but its request object
 	// has been evicted, so the QR / request_uri is no longer resolvable.
 	UIResumeExpired UIResumeStatus = "expired"
+	// UIResumeDeclined means the wallet refused: the user said no, and
+	// there is nothing left to wait for.
+	UIResumeDeclined UIResumeStatus = "declined"
 )
 
 // UIResumeReply carries one of three alternatives selected by Status:
@@ -965,6 +975,10 @@ type UIResumeReply struct {
 
 	// Complete-only field.
 	ResponseCode string `json:"response_code,omitempty"`
+
+	// Declined-only fields.
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"error_description,omitempty"`
 }
 
 // UIResume reports whether the wallet interaction named by sessionID is
@@ -991,6 +1005,18 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 		return &UIResumeReply{
 			Status:       UIResumeComplete,
 			ResponseCode: authCtx.VerifierResponseCode,
+		}, nil
+	}
+	// A refusal is an outcome, so a reload must not rebuild the QR for
+	// it. Without this a reloaded tab resumed "pending" with the
+	// original QR for a request the user had already declined, and the
+	// two endpoints disagreed: /ui/completion said declined while
+	// /ui/resume offered the code again.
+	if authCtx.Error != "" {
+		return &UIResumeReply{
+			Status:           UIResumeDeclined,
+			Error:            authCtx.Error,
+			ErrorDescription: authCtx.ErrorDescription,
 		}, nil
 	}
 	// Past the presentation deadline there is nothing to resume. Checked

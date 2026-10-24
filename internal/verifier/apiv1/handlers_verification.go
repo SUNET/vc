@@ -151,13 +151,23 @@ func (c *Client) directPostError(ctx context.Context, code, description, state s
 	}
 
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{State: state})
-	if err != nil || authCtx == nil {
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments) || (err == nil && authCtx == nil):
 		// Deliberately the same answer as a state that never existed:
 		// whether a given state is live is not something this endpoint
 		// should confirm to an unauthenticated caller.
 		c.log.Warn("direct_post error response for an unknown state", "error", code)
 		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
 			"state does not correspond to a request this verifier is waiting for", http.StatusBadRequest)
+	case err != nil:
+		// A backend that cannot answer is NOT an unknown state. Saying
+		// 400 here would tell a wallet its own request was malformed
+		// during a Mongo outage, and the real session would stay
+		// pending with nobody retrying. 503 is the honest answer and
+		// names no backend detail.
+		c.log.Error(err, "could not look up the session for a direct_post error response", "error", code)
+		return nil, helpers.NewErrorDetailsWithStatus("temporarily_unavailable",
+			"the session could not be looked up; retry", http.StatusServiceUnavailable)
 	}
 
 	if sessionExpired(authCtx) {
@@ -165,16 +175,36 @@ func (c *Client) directPostError(ctx context.Context, code, description, state s
 		return nil, ErrSessionExpired
 	}
 
+	// First outcome wins. Without this a late error overwrites a
+	// completed session while its VerifierResponseCode survives, so
+	// /ui/completion reports "declined" and /ui/resume reports
+	// "complete" for the same session - two answers, both from stored
+	// state, with no way to tell which happened.
+	if authSessionIsTerminal(authCtx) {
+		c.log.Info("direct_post error response for a session that already reached an outcome",
+			"state", state, "error", code, "status", authCtx.Status)
+		return &VerificationDirectPostResponse{}, nil
+	}
+
 	c.log.Warn("the wallet returned an error response instead of a presentation",
 		"state", state, "error", code, "session_id", authCtx.SessionID)
 
-	authCtx.Status = cache.SessionStatusError
-	authCtx.Error = code
-	authCtx.ErrorDescription = description
-	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+	// Mutate a COPY. MemoryStore.Get hands back the stored pointer
+	// itself, and Save validates after these assignments - so a wallet
+	// sending an error_description past the model's 512-byte bound
+	// would fail the save with the live session already carrying the
+	// rejected value and a terminal status, while a Mongo-backed
+	// deployment kept the old one. The description is wallet-controlled
+	// input, which is exactly the kind that finds that edge.
+	updated := *authCtx
+	updated.Status = cache.SessionStatusError
+	updated.Error = code
+	updated.ErrorDescription = description
+	if err := c.cacheService.AuthContext.Save(ctx, &updated); err != nil {
 		c.log.Error(err, "failed to record the wallet's error response", "state", state)
 		return nil, err
 	}
+	authCtx = &updated
 
 	// The same nudge a presentation sends, so a waiting UI learns now
 	// rather than on its next poll. The browser is told the outcome, not
@@ -274,6 +304,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if sessionExpired(authCtx) {
 		c.log.Info("Verification direct post for an expired session", "state", vpResponse.State)
 		return nil, ErrSessionExpired
+	}
+
+	// The other direction of "first outcome wins". A presentation that
+	// lands after the session was answered - the user declined and the
+	// wallet sent anyway, or a response is replayed - would otherwise
+	// write a VerifierResponseCode while Error and the terminal status
+	// stay put, and the two UI endpoints would then disagree about what
+	// happened. Refused rather than ignored: the wallet is handing over
+	// credentials, and a 200 would say they were accepted.
+	if authSessionIsTerminal(authCtx) {
+		c.log.Info("Verification direct post for a session that already reached an outcome",
+			"state", vpResponse.State, "status", authCtx.Status)
+		return nil, ErrSessionAlreadyAnswered
 	}
 
 	// Generate response code
