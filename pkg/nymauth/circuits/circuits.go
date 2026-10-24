@@ -8,8 +8,8 @@
 // zknative build tag.
 //
 // The split is deliberate. The ways to get this wrong - an entry
-// naming the wrong configuration, an artifact that is not the one
-// allowed, two entries claiming one configuration - are all decidable
+// naming the wrong system or configuration, an artifact that is not
+// the one allowed, two entries claiming one of each - are all decidable
 // without a circuit, and a package that needs a 1 MB artifact and a C
 // toolchain to test is one that gets tested less.
 package circuits
@@ -23,22 +23,25 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"sort"
 	"sync"
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/nymauth"
 )
 
-// ErrNoSuchConfig is returned when nothing in the allowlist implements
-// the configuration asked for.
+// ErrNoSuchCircuit is returned when nothing in the allowlist implements
+// the proof system and configuration asked for.
 //
 // A distinct error because it is an ordinary operator state - a
-// Verifier that allows ssc being asked for psc - and not a fault.
-var ErrNoSuchConfig = errors.New("nymauth: no allowed circuit implements this pseudonym configuration")
+// Verifier that allows ssc being asked for psc, or one that allows only
+// Longfellow being handed a Vega presentation - and not a fault.
+var ErrNoSuchCircuit = errors.New("nymauth: no allowed circuit implements this proof system and pseudonym configuration")
 
 // Entry is one resolved allowlist entry: an allowed build, and how to
 // get its bytes.
 type Entry struct {
+	SystemID      string
 	Config        string
 	HashCircuitID string
 	SigCircuitID  string
@@ -54,13 +57,27 @@ type Entry struct {
 	Bytes  int64
 }
 
-// Allowlist is the set of builds a Verifier may load, by
-// configuration.
+// circuitKey is what selects a build: the proof system a presentation
+// states, and the pseudonym configuration this Verifier asked for.
+//
+// Both, because neither alone identifies an artifact. One verifier may
+// allow Longfellow and Vega for the same configuration - that is what
+// lets a wallet choose between them - and the two are different
+// artifacts with different parameters.
+type circuitKey struct {
+	systemID string
+	config   string
+}
+
+func (k circuitKey) String() string { return k.systemID + " " + k.config }
+
+// Allowlist is the set of builds a Verifier may load, by proof system
+// and configuration.
 type Allowlist struct {
-	byConfig map[string]Entry
+	byKey map[circuitKey]Entry
 
 	mu     sync.Mutex
-	loaded map[string][]byte
+	loaded map[circuitKey][]byte
 }
 
 // NewAllowlist checks a configured allowlist and returns it resolved.
@@ -70,7 +87,7 @@ type Allowlist struct {
 // operator would see a refused proof and have no reason to suspect
 // the configuration.
 func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
-	list := &Allowlist{byConfig: make(map[string]Entry, len(cfg.Allow))}
+	list := &Allowlist{byKey: make(map[circuitKey]Entry, len(cfg.Allow))}
 
 	// The sources, here rather than as a struct tag, so a deployment
 	// with nym_auth off is not stopped by a source nothing will read.
@@ -94,6 +111,13 @@ func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 	for i, entry := range cfg.Allow {
 		where := fmt.Sprintf("verifier.nym_auth.circuits.allow[%d]", i)
 
+		if err := nymauth.CheckSystemID(entry.SystemID); err != nil {
+			// The system decides which circuit library checks the
+			// proof. An entry that does not name one this build knows
+			// is an artifact with no verifier to hand it to.
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+
 		switch entry.Config {
 		case nymauth.ConfigKnownOffenderMatchingSSC, nymauth.ConfigKnownOffenderMatchingPSC:
 		default:
@@ -104,13 +128,19 @@ func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 			return nil, fmt.Errorf("%s: %q is not a known-offender-matching configuration", where, entry.Config)
 		}
 
-		if _, clash := list.byConfig[entry.Config]; clash {
-			// Two builds for one configuration. Refused rather than
-			// resolved by order: both claim to implement the same
-			// pseudonym function, only one can be right, and a
-			// verifier picking by position would verify against
-			// whichever the operator happened to write first.
-			return nil, fmt.Errorf("%s: a second circuit is allowed for configuration %q", where, entry.Config)
+		key := circuitKey{systemID: entry.SystemID, config: entry.Config}
+		if _, clash := list.byKey[key]; clash {
+			// Two builds for one system and configuration. Refused
+			// rather than resolved by order: both claim to implement
+			// the same pseudonym function for the same prover, only
+			// one can be right, and a verifier picking by position
+			// would verify against whichever the operator happened to
+			// write first.
+			//
+			// Two entries that differ only in system_id are NOT a
+			// clash - that is a verifier offering both proof systems,
+			// which is the whole reason the key has two parts.
+			return nil, fmt.Errorf("%s: a second circuit is allowed for system %q and configuration %q", where, entry.SystemID, entry.Config)
 		}
 
 		if err := checkCircuitID(entry.HashCircuitID, where, "hash_circuit_id"); err != nil {
@@ -153,7 +183,8 @@ func NewAllowlist(cfg model.NymAuthCircuits) (*Allowlist, error) {
 			return nil, fmt.Errorf("%s: names artifact_id %q but no verifier.nym_auth.circuits.sources are configured", where, entry.ArtifactID)
 		}
 
-		list.byConfig[entry.Config] = Entry{
+		list.byKey[key] = Entry{
+			SystemID:      entry.SystemID,
 			Config:        entry.Config,
 			HashCircuitID: entry.HashCircuitID,
 			SigCircuitID:  entry.SigCircuitID,
@@ -190,32 +221,34 @@ func checkCircuitID(value, where, what string) error {
 // feature that has not arrived. They are refused at load instead, with
 // a message saying so.
 func (a *Allowlist) Preload(ctx context.Context) error {
-	for config, entry := range a.byConfig {
+	for key, entry := range a.byKey {
 		if entry.Path == "" {
 			continue
 		}
-		if _, err := a.Artifact(ctx, config); err != nil {
+		if _, err := a.Artifact(ctx, key.systemID, key.config); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Entry returns the allowed build for a configuration.
-func (a *Allowlist) Entry(config string) (Entry, error) {
-	entry, ok := a.byConfig[config]
+// Entry returns the allowed build for a proof system and configuration.
+func (a *Allowlist) Entry(systemID, config string) (Entry, error) {
+	entry, ok := a.byKey[circuitKey{systemID: systemID, config: config}]
 	if !ok {
-		return Entry{}, fmt.Errorf("%w: %q", ErrNoSuchConfig, config)
+		return Entry{}, fmt.Errorf("%w: %q %q", ErrNoSuchCircuit, systemID, config)
 	}
 	return entry, nil
 }
 
-// Configs names every allowed configuration.
-func (a *Allowlist) Configs() []string {
-	out := make([]string, 0, len(a.byConfig))
-	for config := range a.byConfig {
-		out = append(out, config)
+// Allowed names every allowed build, as "<system_id> <config>", sorted
+// so a startup log reads the same way twice.
+func (a *Allowlist) Allowed() []string {
+	out := make([]string, 0, len(a.byKey))
+	for key := range a.byKey {
+		out = append(out, key.String())
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -232,15 +265,16 @@ func (a *Allowlist) Configs() []string {
 // entry - but it refuses with a status code, and an operator reading
 // "bad circuit" has no way to tell a corrupt download from a wrong
 // digest from a stale path.
-func (a *Allowlist) Artifact(ctx context.Context, config string) ([]byte, error) {
-	entry, err := a.Entry(config)
+func (a *Allowlist) Artifact(ctx context.Context, systemID, config string) ([]byte, error) {
+	entry, err := a.Entry(systemID, config)
 	if err != nil {
 		return nil, err
 	}
+	key := circuitKey{systemID: systemID, config: config}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if cached, ok := a.loaded[config]; ok {
+	if cached, ok := a.loaded[key]; ok {
 		return cached, nil
 	}
 
@@ -249,19 +283,19 @@ func (a *Allowlist) Artifact(ctx context.Context, config string) ([]byte, error)
 		return nil, err
 	}
 	if int64(len(raw)) != entry.Bytes {
-		return nil, fmt.Errorf("nymauth: the circuit artifact for %q is %d bytes; the allowlist says %d",
-			config, len(raw), entry.Bytes)
+		return nil, fmt.Errorf("nymauth: the circuit artifact for %s is %d bytes; the allowlist says %d",
+			key, len(raw), entry.Bytes)
 	}
 	sum := sha256.Sum256(raw)
 	if got := hex.EncodeToString(sum[:]); got != entry.SHA256 {
-		return nil, fmt.Errorf("nymauth: the circuit artifact for %q hashes to %s; the allowlist says %s",
-			config, got, entry.SHA256)
+		return nil, fmt.Errorf("nymauth: the circuit artifact for %s hashes to %s; the allowlist says %s",
+			key, got, entry.SHA256)
 	}
 
 	if a.loaded == nil {
-		a.loaded = map[string][]byte{}
+		a.loaded = map[circuitKey][]byte{}
 	}
-	a.loaded[config] = raw
+	a.loaded[key] = raw
 	return raw, nil
 }
 
@@ -272,13 +306,13 @@ func (a *Allowlist) read(_ context.Context, entry Entry) ([]byte, error) {
 		// better than returning bytes from somewhere unintended: the
 		// published catalog carries no nym_auth descriptors, so there
 		// is nothing to fetch and no shape to fetch it in.
-		return nil, fmt.Errorf("nymauth: circuit %q is configured as catalog id %q, which this build cannot resolve yet; use artifact_path",
-			entry.Config, entry.ID)
+		return nil, fmt.Errorf("nymauth: circuit %q %q is configured as catalog id %q, which this build cannot resolve yet; use artifact_path",
+			entry.SystemID, entry.Config, entry.ID)
 	}
 
 	file, err := os.Open(entry.Path)
 	if err != nil {
-		return nil, fmt.Errorf("nymauth: circuit artifact for %q: %w", entry.Config, err)
+		return nil, fmt.Errorf("nymauth: circuit artifact for %q %q: %w", entry.SystemID, entry.Config, err)
 	}
 	defer file.Close()
 
@@ -287,7 +321,7 @@ func (a *Allowlist) read(_ context.Context, entry Entry) ([]byte, error) {
 	// truncated to the expected size and then hashed.
 	raw, err := io.ReadAll(io.LimitReader(file, entry.Bytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("nymauth: circuit artifact for %q: %w", entry.Config, err)
+		return nil, fmt.Errorf("nymauth: circuit artifact for %q %q: %w", entry.SystemID, entry.Config, err)
 	}
 	return raw, nil
 }
