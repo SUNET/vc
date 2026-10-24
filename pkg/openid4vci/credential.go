@@ -332,6 +332,18 @@ func (p *Proofs) ProofType() string {
 	return ""
 }
 
+// ProofType returns the key proof type of the request: the proof_type of
+// proof, or the one member of proofs.
+func (c *CredentialRequest) ProofType() string {
+	switch {
+	case c.Proof != nil:
+		return c.Proof.ProofType
+	case c.Proofs != nil:
+		return c.Proofs.ProofType()
+	}
+	return ""
+}
+
 // ExtractJWK extracts the holder's public key (JWK) from the proofs.
 // It automatically detects which proof type is present and extracts accordingly:
 // - jwt: from the jwk header of the first JWT
