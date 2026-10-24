@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/nymauth"
@@ -11,60 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// The recommended setup puts the derivation secret in the secrets file,
-// and this tool is what reproduces a seed from it. A loader that read
-// only the main config let ISSUANCE work and made RECOVERY fail - the
-// worst place for this to break, since the whole reason the issuer keeps
-// a derivation secret is that a seed can be reproduced later.
-func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
-	const secret = "c2VjcmV0cy1maWxlLXZhbHVlLWF0LWxlYXN0LTMyLWJ5dGVzLWxvbmc"
-
-	write := func(t *testing.T, dir, name, body string, mode os.FileMode) string {
-		t.Helper()
-		path := filepath.Join(dir, name)
-		require.NoError(t, os.WriteFile(path, []byte(body), mode))
-		return path
-	}
-
-	t.Run("the secret comes from the secrets file", func(t *testing.T) {
-		dir := t.TempDir()
-		secretsPath := write(t, dir, "secrets.yaml",
-			"apigw:\n  seeds:\n    pseudonym:\n      secret: \""+secret+"\"\n", 0o600)
-		configPath := write(t, dir, "config.yaml",
-			"common:\n  secret_file_path: \""+secretsPath+"\"\napigw:\n  seeds:\n    pseudonym:\n      model: derived\n", 0o600)
-
-		source, err := loadSeedSource(configPath, "pseudonym")
-		require.NoError(t, err, "the documented setup must be recoverable")
-		require.NotNil(t, source)
-	})
-
-	// The inline field is gone from the main configuration, so recovery
-	// must refuse rather than quietly reproduce a seed from a value the
-	// ISSUER would not have used. A tool that accepted it here would
-	// hand back seeds the issuer never derived.
-	t.Run("an inline secret in the main config is not a source", func(t *testing.T) {
-		dir := t.TempDir()
-		configPath := write(t, dir, "config.yaml",
-			"apigw:\n  seeds:\n    pseudonym:\n      model: derived\n      secret: \""+secret+"\"\n", 0o600)
-
-		_, err := loadSeedSource(configPath, "pseudonym")
-		require.Error(t, err, "config.yaml is no longer a place the derivation secret can live")
-		assert.Contains(t, err.Error(), "secret_path")
-	})
-
-	t.Run("a secrets file this tool may not read is an error, not a fallback", func(t *testing.T) {
-		dir := t.TempDir()
-		secretsPath := write(t, dir, "secrets.yaml",
-			"apigw:\n  seeds:\n    pseudonym:\n      secret: \""+secret+"\"\n", 0o644)
-		configPath := write(t, dir, "config.yaml",
-			"common:\n  secret_file_path: \""+secretsPath+"\"\napigw:\n  seeds:\n    pseudonym:\n      model: derived\n", 0o600)
-
-		_, err := loadSeedSource(configPath, "pseudonym")
-		require.Error(t, err, "the issuer refuses a world-readable secrets file; recovery must not be laxer")
-		assert.Contains(t, err.Error(), "permissive")
-	})
-}
 
 // psc is refused, because this tool cannot compute it.
 //
@@ -106,41 +50,40 @@ func TestPSCIsRefusedRatherThanComputedFromTheWrongSeed(t *testing.T) {
 // and exited 0 - reporting a match for the first candidate tried, and
 // for every candidate after it.
 func TestAnEmptyExpectationRefusesRatherThanSkippingTheComparison(t *testing.T) {
-	const cfg, src, pc = "/etc/vc/config.yaml", "primary", "known-offender-matching-ssc"
+	const secret, pc = "/pki/nym_auth_seed.key", "known-offender-matching-ssc"
 	subjects := []string{"198001011234"}
 
 	t.Run("given and empty", func(t *testing.T) {
-		err := validateInvocation(cfg, src, subjects, true, "", pc)
+		err := validateInvocation(secret, subjects, true, "", pc)
 		require.Error(t, err, "a comparison was asked for; exiting 0 without one accuses whoever is tried first")
 		assert.Contains(t, err.Error(), "empty value")
 	})
 
 	t.Run("given and whitespace", func(t *testing.T) {
-		err := validateInvocation(cfg, src, subjects, true, "  \t ", pc)
+		err := validateInvocation(secret, subjects, true, "  \t ", pc)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "empty value")
 	})
 
 	t.Run("omitted, which is the output-only mode and stays", func(t *testing.T) {
-		require.NoError(t, validateInvocation(cfg, src, subjects, false, "", pc),
+		require.NoError(t, validateInvocation(secret, subjects, false, "", pc),
 			"printing a pseudonym without comparing it is a legitimate use")
 	})
 
 	t.Run("given without a pseudonym configuration", func(t *testing.T) {
-		err := validateInvocation(cfg, src, subjects, true, "abc", "")
+		err := validateInvocation(secret, subjects, true, "abc", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "-pseudonym-config")
 	})
 
 	t.Run("a real expectation passes", func(t *testing.T) {
-		require.NoError(t, validateInvocation(cfg, src, subjects, true, "9f86d081", pc))
+		require.NoError(t, validateInvocation(secret, subjects, true, "9f86d081", pc))
 	})
 
 	// The required flags still refuse, or the cases above would be
 	// passing against a function that refuses everything.
-	assert.Error(t, validateInvocation("", src, subjects, false, "", ""))
-	assert.Error(t, validateInvocation(cfg, "", subjects, false, "", ""))
-	assert.Error(t, validateInvocation(cfg, src, nil, false, "", ""))
+	assert.Error(t, validateInvocation("", subjects, false, "", ""))
+	assert.Error(t, validateInvocation(secret, nil, false, "", ""))
 }
 
 func TestExpectMustBeAFullLengthDigest(t *testing.T) {

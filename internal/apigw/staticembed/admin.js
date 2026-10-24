@@ -2,6 +2,14 @@
 import Alpine from '/static/alpinejs.esm.min.js';
 
 window.adminApp = function () {
+    /** The message of a failed API response: {"error": {"title", "details"}} or {"error": "..."}. */
+    async function errorMessage(resp) {
+        const body = await resp.json().catch(() => ({}));
+        const err = body.error;
+        if (err && typeof err === 'object') return err.details || err.title || resp.statusText;
+        return err || body.detail || resp.statusText;
+    }
+
     /** Flatten a nested object into dot-notation key-value pairs */
     function flattenObject(obj, prefix) {
         const entries = [];
@@ -60,9 +68,13 @@ window.adminApp = function () {
         preauthScopes: [],
         allowedAuthenticSources: [],
         hasIdentityMapping: false,
+        uniqueCommitmentEntries: [],
         csrfToken: '',
         view: 'datastore',
         sidebarOpen: false,
+
+        // Unique commitment reset state
+        hc: { entry: 0, values: [], evidence: '', busy: false, result: null },
 
         // Datastore state
         ds: {
@@ -180,6 +192,8 @@ window.adminApp = function () {
                     this.preauthScopes = data.preauth_scopes || [];
                     this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
                     this.hasIdentityMapping = data.has_identity_mapping || false;
+                    this.uniqueCommitmentEntries = data.unique_commitment_entries || [];
+                    this.clearKeyValues();
                     this.unrestricted = data.unrestricted || false;
                     this.csrfToken = data.csrf_token || '';
                     this.searchDocuments();
@@ -209,6 +223,52 @@ window.adminApp = function () {
             this.importState.mapResult = null;
             if (v === 'datastore') this.searchDocuments();
             if (v === 'identity') this.searchMappings();
+            if (v === 'commitments') this.hc.result = null;
+        },
+
+        /** Empty value fields for the selected entry: a list per hkdf part, a string per other part. */
+        clearKeyValues() {
+            const entry = this.uniqueCommitmentEntries[this.hc.entry];
+            this.hc.values = entry ? entry.key.map(part => part.inputs ? part.inputs.map(() => '') : '') : [];
+        },
+
+        /** The key of an entry as the entry list names it. */
+        keyLabel(entry) {
+            if (entry.key.length === 0) return 'one commitment for the entry';
+            return 'per ' + entry.key.map(part => part.path.join(' / ')).join(', ');
+        },
+
+        /** Reset the commitment on record for a key value. */
+        async resetCommitment() {
+            const entry = this.uniqueCommitmentEntries[this.hc.entry];
+            if (!confirm('Reset the ' + entry.scope + ' commitment recorded for these values?')) return;
+            this.hc.busy = true;
+            this.hc.result = null;
+            try {
+                const resp = await this.apiFetch('/api/v1/auxiliary_data/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scope: entry.scope,
+                        path: entry.path,
+                        key: entry.key.map((part, k) => part.inputs
+                            ? { path: part.path, inputs: this.hc.values[k].map(v => v.trim()) }
+                            : { path: part.path, value: this.hc.values[k].trim() }),
+                        evidence_ref: this.hc.evidence.trim(),
+                    }),
+                });
+                if (resp.ok) {
+                    this.hc.result = { ok: true, message: 'Reset. The next issuance records a new commitment for these values.' };
+                    this.clearKeyValues();
+                    this.hc.evidence = '';
+                } else {
+                    this.hc.result = { ok: false, message: await errorMessage(resp) };
+                }
+            } catch (e) {
+                this.hc.result = { ok: false, message: e.message };
+            } finally {
+                this.hc.busy = false;
+            }
         },
 
         treeView(entries) { return buildTreeView(entries); },
@@ -321,8 +381,7 @@ window.adminApp = function () {
                 credentials: 'same-origin'
             });
             if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || err.detail || resp.statusText);
+                throw new Error(await errorMessage(resp));
             }
             const result = await resp.json().catch(() => ({}));
             return result.count || 0;
@@ -591,8 +650,7 @@ window.adminApp = function () {
                 credentials: 'same-origin'
             });
             if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || err.detail || resp.statusText);
+                throw new Error(await errorMessage(resp));
             }
             const result = await resp.json().catch(() => ({}));
             return result.count || 0;

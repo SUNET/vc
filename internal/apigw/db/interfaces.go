@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -77,10 +78,45 @@ type DynamicRegistrationStore interface {
 	PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error
 }
 
+// UniqueCommitmentStore holds one commitment per key value for each unique
+// hash_commitment entry of Credential Auxiliary Data (section 6.4, step 5).
+// The database arbitrates between replicas: the first commitment stored for a
+// key is the one every replica reads back.
+type UniqueCommitmentStore interface {
+	// Accept stores commitment for key when key holds none, and returns the
+	// commitment key holds afterwards.
+	Accept(ctx context.Context, key UniqueCommitmentKey, commitment []byte, at time.Time) ([]byte, error)
+	// Reset records the operator approval and removes the commitment key
+	// holds. ErrNoDocuments when key holds none; ErrResetEvidenceUsed when
+	// the approval's evidence reference already reset another commitment.
+	Reset(ctx context.Context, key UniqueCommitmentKey, approval UniqueCommitmentReset) error
+}
+
+// UniqueCommitmentKey names the commitment of one key value for one entry.
+type UniqueCommitmentKey struct {
+	Scope string
+	// Path is the claims path of the entry.
+	Path []string
+	// KeyHash is the hash of the key values.
+	KeyHash []byte
+}
+
+// UniqueCommitmentReset is the operator approval behind a reset.
+type UniqueCommitmentReset struct {
+	ApprovedBy  string
+	EvidenceRef string
+	At          time.Time
+}
+
+// ErrResetEvidenceUsed is returned when an evidence reference already reset
+// an earlier commitment of the same key.
+var ErrResetEvidenceUsed = errors.New("the evidence reference already reset an earlier commitment")
+
 // Ensure concrete types implement the interfaces
 var (
 	_ CredentialOfferStore     = (*CredentialOfferColl)(nil)
 	_ DatastoreStore           = (*DatastoreColl)(nil)
 	_ IdentityMappingStore     = (*IdentityMappingsColl)(nil)
 	_ DynamicRegistrationStore = (*DynamicRegistrationColl)(nil)
+	_ UniqueCommitmentStore    = (*UniqueCommitments)(nil)
 )
