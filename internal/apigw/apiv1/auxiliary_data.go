@@ -76,7 +76,7 @@ func (c *Client) scopeAuxiliaryData(scope string) openid4vci.AuxiliaryDataSuppor
 func deliverOpenings(ctx context.Context, doc map[string]any, entries []openid4vci.AuxiliaryDataEntry, derivations []primitives.Derivation, sourceClaims map[string]any) ([]openid4vci.AuxiliaryDataEntry, error) {
 	delivered := make([]openid4vci.AuxiliaryDataEntry, 0, len(entries))
 	for _, entry := range entries {
-		hc := hashCommitmentFor(derivations, entry.Path)
+		hc := primitives.HashCommitmentFor(derivations, entry.Path)
 		if hc == nil {
 			return nil, fmt.Errorf("no hash_commitment derivation fulfils to_wallet path %q", entry.Path)
 		}
@@ -99,16 +99,6 @@ func writeCommitments(doc map[string]any, commitments []walletCommitment) error 
 	for _, commitment := range commitments {
 		if err := setCommitment(doc, commitment.path, commitment.value); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// hashCommitmentFor returns the hash_commitment derivation for path.
-func hashCommitmentFor(derivations []primitives.Derivation, path []string) *primitives.HashCommitmentArgs {
-	for _, d := range derivations {
-		if d.HashCommitment != nil && slices.Equal(d.HashCommitment.Path, path) {
-			return d.HashCommitment
 		}
 	}
 	return nil

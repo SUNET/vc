@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,6 +56,17 @@ type RandomOpeningArgs struct {
 // whose opening comes from NewOpening.
 func (a *HashCommitmentArgs) Apply(map[string]any, time.Time) (map[string]any, error) {
 	return nil, errors.New("hash_commitment produces its opening through NewOpening")
+}
+
+// HashCommitmentFor returns the hash_commitment derivation of list for
+// path.
+func HashCommitmentFor(list []Derivation, path []string) *HashCommitmentArgs {
+	for _, d := range list {
+		if d.HashCommitment != nil && slices.Equal(d.HashCommitment.Path, path) {
+			return d.HashCommitment
+		}
+	}
+	return nil
 }
 
 // NewOpening produces the opening from the claims of the source data.
@@ -112,22 +124,35 @@ func (a *HKDFOpeningArgs) Deriver() (*seed.Deriver, error) {
 }
 
 func (a *HKDFOpeningArgs) open(ctx context.Context, claims map[string]any) ([]byte, error) {
-	inputs := make([]string, 0, len(a.Inputs))
+	values := make([]string, 0, len(a.Inputs))
 	for _, path := range a.Inputs {
 		val, present := lookupClaim(claims, path)
 		s, ok := val.(string)
-		if !present || !ok || strings.TrimSpace(s) == "" {
+		if !present || !ok {
 			// The value is a personal identifier, so the error names the
 			// claim only.
 			return nil, fmt.Errorf("%w: hkdf input %q must be a non-empty string", ErrInvalidClaimInput, path)
 		}
-		inputs = append(inputs, s)
+		values = append(values, s)
+	}
+	return a.OpenValues(ctx, values)
+}
+
+// OpenValues derives the opening from the values of Inputs, in their order.
+func (a *HKDFOpeningArgs) OpenValues(ctx context.Context, values []string) ([]byte, error) {
+	if len(values) != len(a.Inputs) {
+		return nil, fmt.Errorf("%w: hkdf takes %d input values, got %d", ErrInvalidClaimInput, len(a.Inputs), len(values))
+	}
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return nil, fmt.Errorf("%w: hkdf input %q must be a non-empty string", ErrInvalidClaimInput, a.Inputs[i])
+		}
 	}
 	deriver, err := a.Deriver()
 	if err != nil {
 		return nil, err
 	}
-	return deriver.Seed(ctx, inputs, "")
+	return deriver.Seed(ctx, values, "")
 }
 
 func (a *RandomOpeningArgs) open(context.Context, map[string]any) ([]byte, error) {

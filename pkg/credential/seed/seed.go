@@ -238,8 +238,7 @@ func derivationInfo(fields ...string) (string, error) {
 
 // maxDerivationField is the longest value a 2-byte length prefix can
 // describe. Enforced where the prefix is written, so a caller reaching
-// derivation directly - seed_recover -context, say - cannot slip past a
-// check placed anywhere else.
+// derivation directly cannot slip past a check placed anywhere else.
 const maxDerivationField = 1<<16 - 1
 
 // maxDerivationFields bounds how many identifiers may be listed. A

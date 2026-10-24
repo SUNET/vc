@@ -358,7 +358,7 @@ func TestOverlongDerivationFieldsAreRefusedNotTruncated(t *testing.T) {
 		t.Fatal("an over-long subject must be refused, not truncated into a collision")
 	}
 	if _, err := deriver.Seed(t.Context(), []string{strings.Repeat("b", 24929)}, strings.Repeat("a", 65536)); err == nil {
-		t.Fatal("an over-long context must be refused too; seed_recover takes one directly")
+		t.Fatal("an over-long context must be refused too")
 	}
 
 	// The boundary still derives, so ordinary callers are unaffected.

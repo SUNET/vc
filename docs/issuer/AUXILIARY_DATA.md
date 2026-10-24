@@ -132,69 +132,25 @@ Every credential issued to a subject carries the same commitment. It stays
 hidden when a proof is made over it, and it is an equality marker for
 anyone who sees two issued credentials in the clear.
 
-## Remapping a pseudonym
+## Reproducing an opening
 
-`seed_recover` reproduces a person's opening, its commitment, and the
-pseudonym a Verifier reported, from the secret of the `hkdf` opening:
-
-```
-make build-seed-recover
-
-./bin/seed_recover -secret-path /pki/nym_auth_seed.key -bytes 16 \
-    -subject SE -subject pan-100 \
-    -pseudonym-config known-offender-matching-ssc \
-    -verifier-id verifier.example \
-    -expect <pseudonym the verifier reported>
-```
-
-Repeat `-subject` once per `hkdf` input, **in the configured order**, with
-the value the source data carried.
-
-It exits 0 on a match and 2 on a mismatch, so it can drive a loop over
-candidates. `-expect` requires `-pseudonym-config`. The opening itself is
-printed only with `-show-seed`.
-
-`-verifier-id` is the **bare** verifier_id — `verifier.example` — not the
-prefixed Client Identifier and not `client_id` as it appears in the
-request. `verifier_id_type` is agreed out of band between wallet and
-verifier and is not hashed. The rulebook states this with worked digests
-and marks the prefixed form MUST NOT:
+`opening_recover` reproduces the opening of a `to_wallet` entry, and its
+commitment, from the issuer's config file and a subject's identifiers:
 
 ```
-SHA256("verifier.example")              = be6a6400…4a41   (MUST)
-SHA256("x509_san_dns:verifier.example") = 6eae85a0…6bab   (MUST NOT)
+make build-opening-recover
+
+./bin/opening_recover -config /config.yaml -scope nym_auth \
+    -input SE -input pan-100 \
+    -expect <commitment in hex>
 ```
 
-A value carrying `x509_san_dns:` is therefore **refused** rather than
-stripped. Hashing it would succeed and return a pseudonym no Verifier could
-have reported, so the loop would simply never match and the operator would
-conclude the subject is innocent — and stripping it would quietly accept a
-caller that is confused about which value it holds.
+`-input` takes the values of the `hkdf` inputs, **in the configured order**,
+as the source data carried them. `-path` names the entry as a JSON claims
+path, such as `["eu.europa.ec.eudi.nym_auth.1","ssc"]`, and can be left out
+when the credential has one `hkdf` entry. The tool prints the commitment of
+each source scope, and the opening only with `-show-opening`. With
+`-expect` it exits 0 on a match and 2 on a mismatch, so it can drive a loop
+over candidates.
 
-**`semantic_id:` is not the same kind of thing, and must NOT be stripped.**
-It looks like a Client Identifier Prefix and is not one: for a semantic
-Verifier the verifier_id *is* the whole string `semantic_id:<identifier>`,
-and that whole string is what is hashed. Pass it exactly as the Verifier
-publishes it.
-
-```
--verifier-id verifier.example                 # x509_san_dns Verifier: bare, no prefix
--verifier-id semantic_id:age-over-18-check    # semantic Verifier: the marker is part of the value
-```
-
-So the rule is not "strip anything before a colon". It is: a Client
-Identifier Prefix is never hashed, and a semantic identifier always is.
-Getting this backwards fails the same silent way as the prefixed form —
-a pseudonym no Verifier reports, a loop that never matches, and a subject
-who looks innocent. The one case refused is a bare `semantic_id:` with
-nothing after it, which names no Verifier at all.
-
-It reads the issuer's secret, so it runs where the secret is. Whoever can
-run it can link any pseudonym to a person.
-
-The `nym_auth` pseudonym configurations it implements are
-`known-offender-matching-ssc`, `known-offender-matching-psc`,
-`account-recovery-ssc` and `user-managed-pseudonym-xsite-ssc`. The rulebook
-publishes a vector for the seed/commitment pair and none for a pseudonym,
-so the pseudonym construction is implemented from the specification text
-and has not been checked against a reference output.
+It reads the secret the opening names, so it runs where the secret is.
