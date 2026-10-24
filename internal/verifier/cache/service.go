@@ -106,9 +106,44 @@ func jwkKeyDecoder(data []byte) (jwk.Key, error) {
 // post-processing.
 func requestObjectDecoder(data []byte) (*openid4vp.RequestObject, error) {
 	ro := &openid4vp.RequestObject{}
-	if err := json.Unmarshal(data, ro); err != nil {
+	err := json.Unmarshal(data, ro)
+	if err == nil {
+		return ro, nil
+	}
+
+	// The DCQL may be one the raw escape hatch built, which strict
+	// ingress refuses on purpose - see openid4vp.UnmarshalTrustedDCQL.
+	// These bytes are ours: this verifier encoded the request object
+	// into its own cache, and an HA request_uri lookup reads it back on
+	// another node. Refusing it here meant a request this verifier had
+	// already published could not be delivered to the wallet that was
+	// sent to fetch it.
+	//
+	// Only the query is retried, and only with the ORIGINAL error kept
+	// for every other outcome: a request object that fails to decode for
+	// any other reason must still report what actually went wrong.
+	var envelope map[string]json.RawMessage
+	if envelopeErr := json.Unmarshal(data, &envelope); envelopeErr != nil {
 		return nil, err
 	}
+	rawQuery, ok := envelope["dcql_query"]
+	if !ok {
+		return nil, err
+	}
+	trusted, trustedErr := openid4vp.UnmarshalTrustedDCQL(rawQuery)
+	if trustedErr != nil {
+		return nil, err
+	}
+	delete(envelope, "dcql_query")
+	rest, restErr := json.Marshal(envelope)
+	if restErr != nil {
+		return nil, err
+	}
+	ro = &openid4vp.RequestObject{}
+	if retryErr := json.Unmarshal(rest, ro); retryErr != nil {
+		return nil, err
+	}
+	ro.DCQLQuery = trusted
 	return ro, nil
 }
 

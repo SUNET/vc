@@ -26,19 +26,19 @@ type ClientRegistrationRequest struct {
 	// other grant - registering a client for refresh_token produced a
 	// registration whose grant_types the OP would always refuse, and which
 	// its own discovery document did not advertise (SUNET/vc#756).
-	GrantTypes              []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
-	ResponseTypes           []string `json:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
-	ClientName              string   `json:"client_name,omitempty"`
-	ClientURI               string   `json:"client_uri,omitempty" validate:"omitempty,httpsurl"`
-	LogoURI                 string   `json:"logo_uri,omitempty" validate:"omitempty,httpsurl"`
-	Scope                   string   `json:"scope,omitempty" default:"openid"`
-	Contacts                []string `json:"contacts,omitempty"`
-	TosURI                  string   `json:"tos_uri,omitempty" validate:"omitempty,httpsurl"`
-	PolicyURI               string   `json:"policy_uri,omitempty" validate:"omitempty,httpsurl"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
-	JWKS                    any      `json:"jwks,omitempty"`
-	SoftwareID              string   `json:"software_id,omitempty"`
-	SoftwareVersion         string   `json:"software_version,omitempty"`
+	GrantTypes      []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
+	ResponseTypes   []string `json:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
+	ClientName      string   `json:"client_name,omitempty"`
+	ClientURI       string   `json:"client_uri,omitempty" validate:"omitempty,httpsurl"`
+	LogoURI         string   `json:"logo_uri,omitempty" validate:"omitempty,httpsurl"`
+	Scope           string   `json:"scope,omitempty" default:"openid"`
+	Contacts        []string `json:"contacts,omitempty"`
+	TosURI          string   `json:"tos_uri,omitempty" validate:"omitempty,httpsurl"`
+	PolicyURI       string   `json:"policy_uri,omitempty" validate:"omitempty,httpsurl"`
+	JWKSUri         string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
+	JWKS            any      `json:"jwks,omitempty"`
+	SoftwareID      string   `json:"software_id,omitempty"`
+	SoftwareVersion string   `json:"software_version,omitempty"`
 
 	// OpenID Connect specific
 	ApplicationType         string   `json:"application_type,omitempty" default:"web" validate:"omitempty,oneof=web native"`

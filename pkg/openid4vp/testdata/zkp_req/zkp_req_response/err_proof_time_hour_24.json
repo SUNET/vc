@@ -1,0 +1,50 @@
+{
+  "description": "proof_time is a tdate but not the exact 20-byte form: hour 24.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "nym",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 1,
+          "prf": "sha-256"
+        }
+      },
+      {
+        "fn_id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "zkp_req": {
+        "proof_system_values": [
+          "longfellow-libzk-v1"
+        ],
+        "system_id_values": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      }
+    }
+  },
+  "vp_token": {
+    "nym_attestation": [
+      "pWlzeXN0ZW1faWR4I3VybjpjaXJjdWl0czpsb25nZmVsbG93Om55bV9hdXRoOnYxZXByb29mWCAAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH25pc3N1ZXJfa2V5X3NldIFYRDCCAQoAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_anByb29mX3RpbWXAdDIwMjYtMTAtMjBUMjQ6MDA6MDBaZ3Jlc3VsdHOiY255bVggAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9tYWdlLXJhbmdlLTEyM_U"
+    ]
+  },
+  "expect": {
+    "error": "proof_time_form"
+  }
+}
