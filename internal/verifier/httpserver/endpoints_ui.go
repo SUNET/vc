@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/oauth2"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -21,6 +23,21 @@ func (s *Service) endpointIndex(ctx context.Context, c *gin.Context) (any, error
 
 	c.HTML(http.StatusOK, "presentation-definition.html", nil)
 
+	return nil, nil
+}
+
+// endpointPaymentPage serves the operator test page for EC TS12 payment
+// requests. Not found unless verifier.ts12.enable is set: the page and the
+// "payment" member of /ui/interaction it drives are one feature.
+func (s *Service) endpointPaymentPage(ctx context.Context, c *gin.Context) (any, error) {
+	_, span := s.tracer.Start(ctx, "httpserver:endpointPaymentPage")
+	defer span.End()
+
+	if !s.cfg.Verifier.TS12.Enable {
+		c.AbortWithStatus(http.StatusNotFound)
+		return nil, nil
+	}
+	c.HTML(http.StatusOK, "payment.html", s.cfg.Verifier.TS12)
 	return nil, nil
 }
 
@@ -156,6 +173,21 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 
 	request := &apiv1.UIInteractionRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		// A body of the wrong shape (a payment amount that is a boolean, say)
+		// is the caller's mistake, not a server fault; unwrapped it reaches
+		// the status mapper as an unrecognised error and becomes a 500.
+		//
+		// io.EOF as well as io.ErrUnexpectedEOF: a body that is empty or
+		// only whitespace, with a positive Content-Length, reaches the
+		// decoder and ends there rather than part-way through a value,
+		// so it returns the plain EOF. Two spellings of "the caller sent
+		// no JSON", and only one of them was a 400.
+		var typeErr *json.UnmarshalTypeError
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &typeErr) || errors.As(err, &syntaxErr) ||
+			errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			return nil, &oauth2.OAuthError{ErrorCode: apiv1.ErrCodeInvalidRequest, ErrorDescription: "request body is not valid for this endpoint", HTTPStatus: http.StatusBadRequest, Cause: err}
+		}
 		return nil, err
 	}
 
