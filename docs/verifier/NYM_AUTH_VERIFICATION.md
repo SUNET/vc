@@ -54,7 +54,8 @@ verifier:
     verifier_id: x509_san_dns:verifier.example
     circuits:
       allow:
-        - config: known-offender-matching-ssc
+        - system_id: urn:circuits:longfellow:nym_auth:v1
+          config: known-offender-matching-ssc
           hash_circuit_id: 5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729
           sig_circuit_id: 00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb
           block_enc_hash: 6983
@@ -82,6 +83,27 @@ verifier:
                 ver: 1
                 prf: sha-256
 ```
+
+An allowlist entry names the proof system it belongs to as well as the
+pseudonym configuration, and both are required. `system_id` is the value
+a presentation states — the catalog alias, not the catalog id and not
+the proof-system name — and it is what lets one verifier allow
+Longfellow and Vega for the same configuration:
+
+```yaml
+      allow:
+        - system_id: urn:circuits:longfellow:nym_auth:v1
+          config: known-offender-matching-ssc
+          # ... the Longfellow artifact and its four parameters
+        - system_id: urn:circuits:vega:nym_auth:v1
+          config: known-offender-matching-ssc
+          # ... the Vega artifact
+```
+
+Offer both in `system_id_values` and the wallet chooses between them.
+This Verifier refuses any `system_id` it did not offer, and refuses at
+startup any entry whose `system_id` it does not recognise rather than
+guessing a default.
 
 Five separate things have to be right, and each fails differently. They are
 separate on purpose: each one is a different question, and folding any two
