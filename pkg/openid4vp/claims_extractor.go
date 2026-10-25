@@ -26,7 +26,7 @@ type ClaimsExtractor struct {
 type presentationRequestTemplate interface {
 	GetID() string
 	GetOIDCScopes() []string
-	GetClaimMappings() map[string]string
+	GetClaimMappings() ClaimMappings
 }
 
 // NewClaimsExtractor creates a new claims extractor
@@ -283,80 +283,16 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 	return claims, nil
 }
 
-// MapClaimsToOIDC maps VP claims to OIDC claims using the template's claim mappings
-// claimMappings: Key = VP claim path, Value = OIDC claim name
-// Special mapping "*" : "*" means pass all claims through unchanged
-func (ce *ClaimsExtractor) MapClaimsToOIDC(vpClaims map[string]any, claimMappings map[string]string) (map[string]any, error) {
+// MapClaimsToOIDC maps VP claims to OIDC claims using the template's claim
+// mappings.
+func (ce *ClaimsExtractor) MapClaimsToOIDC(vpClaims map[string]any, claimMappings ClaimMappings) (map[string]any, error) {
 	if vpClaims == nil {
 		return nil, fmt.Errorf("VP claims are nil")
 	}
-	if claimMappings == nil {
-		return nil, fmt.Errorf("claim mappings are nil")
+	if claimMappings.IsZero() {
+		return nil, fmt.Errorf("claim mappings are empty")
 	}
-
-	oidcClaims := make(map[string]any)
-
-	// Check for wildcard mapping first
-	if wildcardTarget, hasWildcard := claimMappings["*"]; hasWildcard && wildcardTarget == "*" {
-		// Map all claims through unchanged
-		for key, value := range vpClaims {
-			// Skip internal SD-JWT claims
-			if !isInternalClaim(key) {
-				oidcClaims[key] = value
-			}
-		}
-		return oidcClaims, nil
-	}
-
-	// Map specific claims according to the mapping
-	for vpPath, oidcName := range claimMappings {
-		if vpPath == "*" {
-			continue // Already handled above
-		}
-
-		value, err := ce.extractNestedClaim(vpClaims, vpPath)
-		if err != nil {
-			// Claim not found - this is acceptable, not all claims may be present
-			continue
-		}
-
-		oidcClaims[oidcName] = value
-	}
-
-	return oidcClaims, nil
-}
-
-// extractNestedClaim extracts a claim value from a nested path
-// Supports paths like "given_name" or "place_of_birth.country"
-func (ce *ClaimsExtractor) extractNestedClaim(claims map[string]any, path string) (any, error) {
-	if path == "" {
-		return nil, fmt.Errorf("empty claim path")
-	}
-
-	// Split path by dots for nested access
-	parts := strings.Split(path, ".")
-
-	current := claims
-	for i, part := range parts {
-		value, ok := current[part]
-		if !ok {
-			return nil, fmt.Errorf("claim '%s' not found at path '%s'", part, path)
-		}
-
-		// If this is the last part, return the value
-		if i == len(parts)-1 {
-			return value, nil
-		}
-
-		// Otherwise, value must be a map to continue traversing
-		nextMap, ok := value.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("claim '%s' is not an object, cannot traverse further in path '%s'", part, path)
-		}
-		current = nextMap
-	}
-
-	return nil, fmt.Errorf("unexpected error extracting claim at path '%s'", path)
+	return claimMappings.MapClaims(vpClaims)
 }
 
 // isInternalClaim checks if a claim is an internal SD-JWT structural claim that should
@@ -381,7 +317,7 @@ func isInternalClaim(key string) bool {
 func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	ctx context.Context,
 	vpToken string,
-	claimMappings map[string]string,
+	claimMappings ClaimMappings,
 ) (map[string]any, error) {
 	vpClaims, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
 	if err != nil {

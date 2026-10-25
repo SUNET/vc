@@ -6,6 +6,7 @@ import (
 
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -15,78 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// TestLookupClaimPath_SDJWTFormat covers the format-aware literal/nested
-// resolution for SD-JWT: a flat dotted key MUST NOT satisfy a required
-// nested path, nested walking succeeds, and plain top-level keys are
-// resolved by direct lookup.
-func TestLookupClaimPath_SDJWTFormat(t *testing.T) {
-	nested := map[string]any{
-		"identity": map[string]any{
-			"birthdate": "1990-01-15",
-		},
-		"vct": "urn:example:1",
-	}
-	v, ok := lookupClaimPath(openid4vp.FormatSDJWTVC, nested, "identity.birthdate")
-	require.True(t, ok)
-	assert.Equal(t, "1990-01-15", v)
-
-	v, ok = lookupClaimPath(openid4vp.FormatSDJWTVC, nested, "vct")
-	require.True(t, ok)
-	assert.Equal(t, "urn:example:1", v)
-
-	flat := map[string]any{"identity.birthdate": "1990-01-15"}
-	_, ok = lookupClaimPath(openid4vp.FormatSDJWTVC, flat, "identity.birthdate")
-	assert.False(t, ok, "SD-JWT lookup must not satisfy a nested path with a flat dotted literal key")
-
-	_, ok = lookupClaimPath(openid4vp.FormatSDJWTVC, nested, "identity.street")
-	assert.False(t, ok)
-}
-
-// TestLookupClaimPath_MDocFormat covers the format-aware literal/nested
-// resolution for mdoc: a namespace-qualified key stored flat is accepted
-// as-is, nested walking also works for primary-namespace short keys.
-func TestLookupClaimPath_MDocFormat(t *testing.T) {
-	flat := map[string]any{
-		"eu.europa.ec.eudi.pid.1.birth_date": "1990-01-15",
-		"birth_date":                         "1990-01-15",
-	}
-	v, ok := lookupClaimPath(openid4vp.FormatMsoMdoc, flat, "eu.europa.ec.eudi.pid.1.birth_date")
-	require.True(t, ok)
-	assert.Equal(t, "1990-01-15", v)
-
-	v, ok = lookupClaimPath(openid4vp.FormatMsoMdoc, flat, "birth_date")
-	require.True(t, ok)
-	assert.Equal(t, "1990-01-15", v)
-
-	// ZK counterpart uses the same literal-first contract.
-	v, ok = lookupClaimPath(openid4vp.FormatMsoMdocZk, flat, "eu.europa.ec.eudi.pid.1.birth_date")
-	require.True(t, ok)
-	assert.Equal(t, "1990-01-15", v)
-}
-
-// TestSetClaimPath_SDJWTFormat verifies that SD-JWT output always nests
-// dotted paths — a flat source literal must not leak into the issued
-// document as a flat literal.
-func TestSetClaimPath_SDJWTFormat(t *testing.T) {
-	src := map[string]any{"identity.given_name": "Alice"}
-	dst := map[string]any{}
-	setClaimPath(openid4vp.FormatSDJWTVC, dst, src, "identity.given_name", "Alice")
-	id, ok := dst["identity"].(map[string]any)
-	require.True(t, ok, "SD-JWT path must materialise as a nested map")
-	assert.Equal(t, "Alice", id["given_name"])
-	_, flat := dst["identity.given_name"]
-	assert.False(t, flat, "SD-JWT path must not leak as a flat literal key")
-}
-
-// TestSetClaimPath_MDocFormat verifies that an mdoc namespace-qualified
-// literal is preserved as-is, while short keys still nest when dotted.
-func TestSetClaimPath_MDocFormat(t *testing.T) {
-	src := map[string]any{"eu.europa.ec.eudi.pid.1.birth_date": "1990"}
-	dst := map[string]any{}
-	setClaimPath(openid4vp.FormatMsoMdoc, dst, src, "eu.europa.ec.eudi.pid.1.birth_date", "1990")
-	assert.Equal(t, "1990", dst["eu.europa.ec.eudi.pid.1.birth_date"])
-}
 
 // TestClaimValueMatches covers scalar strings, []string and []any
 // allow-list membership.
@@ -119,6 +48,10 @@ func TestEnforceScopeCredentialType_SDJWT(t *testing.T) {
 			"eduid": {
 				Format: openid4vp.FormatSDJWTVC,
 				VCTM:   &sdjwtvc.VCTM{VCT: "urn:credential:eduid:1"},
+			},
+			"eduid_age": {
+				Format: openid4vp.FormatSDJWTVC,
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:credential:eduid_age:1"},
 			},
 		}}},
 	}
@@ -175,6 +108,10 @@ func newPresentationTestClient(t *testing.T) *Client {
 				Format: openid4vp.FormatSDJWTVC,
 				VCTM:   &sdjwtvc.VCTM{VCT: "urn:credential:eduid:1"},
 			},
+			"eduid_age": {
+				Format: openid4vp.FormatSDJWTVC,
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:credential:eduid_age:1"},
+			},
 		}}},
 		cacheService: &apigwcache.Service{
 			AuthContext: apigwcache.NewTestMemoryStore(10 * time.Minute),
@@ -202,15 +139,12 @@ func TestFinalisePresentationVerification_Success(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: map[string][]string{
-				"birthdate": nil,
-				"assurance_level": {
-					"http://www.swamid.se/policy/assurance/al3",
-				},
-			},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}, {Path: claimpath.Keys("assurance_level"), Values: []string{
+				"http://www.swamid.se/policy/assurance/al3",
+			}}},
 			Derivations: []primitives.Derivation{
 				{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
-					Input: "birthdate", Thresholds: []int{18},
+					Input: claimpath.Keys("birthdate"), Thresholds: []int{18},
 				}},
 			},
 		}},
@@ -222,7 +156,7 @@ func TestFinalisePresentationVerification_Success(t *testing.T) {
 		"assurance_level": "http://www.swamid.se/policy/assurance/al3",
 	}
 
-	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, "eduid", presented))
+	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "eduid", presented))
 
 	assert.Equal(t, "1990-01-15", authCtx.VerifiedClaims["birthdate"])
 	assert.Equal(t, "http://www.swamid.se/policy/assurance/al3", authCtx.VerifiedClaims["assurance_level"])
@@ -248,10 +182,7 @@ func TestFinalisePresentationVerification_MissingRequiredClaim(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: map[string][]string{
-				"birthdate":       nil,
-				"assurance_level": nil,
-			},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}, {Path: claimpath.Keys("assurance_level")}},
 		}},
 	}
 	presented := map[string]any{
@@ -259,7 +190,7 @@ func TestFinalisePresentationVerification_MissingRequiredClaim(t *testing.T) {
 		"birthdate": "1990-01-15",
 	}
 
-	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, "eduid", presented)
+	err := c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "eduid", presented)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "assurance_level")
 	assert.Contains(t, err.Error(), "not present")
@@ -276,11 +207,9 @@ func TestFinalisePresentationVerification_ScalarAllowList(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: map[string][]string{
-				"assurance_level": {
-					"http://www.swamid.se/policy/assurance/al3",
-				},
-			},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("assurance_level"), Values: []string{
+				"http://www.swamid.se/policy/assurance/al3",
+			}}},
 		}},
 	}
 	presented := map[string]any{
@@ -288,7 +217,7 @@ func TestFinalisePresentationVerification_ScalarAllowList(t *testing.T) {
 		"assurance_level": "http://www.swamid.se/policy/assurance/al1",
 	}
 
-	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, "eduid", presented)
+	err := c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "eduid", presented)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not in allow-list")
 	assert.Nil(t, authCtx.VerifiedClaims)
@@ -303,11 +232,9 @@ func TestFinalisePresentationVerification_ArrayAllowList(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: map[string][]string{
-				"assurance_level": {
-					"http://www.swamid.se/policy/assurance/al3",
-				},
-			},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("assurance_level"), Values: []string{
+				"http://www.swamid.se/policy/assurance/al3",
+			}}},
 		}},
 	}
 	presentedOK := map[string]any{
@@ -317,7 +244,7 @@ func TestFinalisePresentationVerification_ArrayAllowList(t *testing.T) {
 			"http://www.swamid.se/policy/assurance/al3",
 		},
 	}
-	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, "eduid", presentedOK))
+	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "eduid", presentedOK))
 
 	authCtxBad := seedAuthCtx(t, c, "sess-array-bad")
 	presentedBad := map[string]any{
@@ -326,7 +253,7 @@ func TestFinalisePresentationVerification_ArrayAllowList(t *testing.T) {
 			"http://www.swamid.se/policy/assurance/al1",
 		},
 	}
-	err := c.finalisePresentationVerification(t.Context(), authCtxBad, pScope, "eduid", presentedBad)
+	err := c.finalisePresentationVerification(t.Context(), authCtxBad, "eduid_age", pScope, "eduid", presentedBad)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not in allow-list")
 }
@@ -341,7 +268,7 @@ func TestFinalisePresentationVerification_WrongVCT(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: map[string][]string{"birthdate": nil},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}},
 		}},
 	}
 	presented := map[string]any{
@@ -349,7 +276,7 @@ func TestFinalisePresentationVerification_WrongVCT(t *testing.T) {
 		"birthdate": "1990-01-15",
 	}
 
-	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, "eduid", presented)
+	err := c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "eduid", presented)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not match")
 	assert.Nil(t, authCtx.VerifiedClaims)

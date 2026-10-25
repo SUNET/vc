@@ -1,7 +1,10 @@
 package openid4vci
 
 import (
+	"encoding/json"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,9 +38,9 @@ func TestIdentityMatchRefusalNamesTheRightAlternative(t *testing.T) {
 // Dotted claim paths must not become BSON field names; MongoDB < 5.0
 // refuses "." in them.
 func TestIdentityMatchBSONKeepsDottedPathsOutOfFieldNames(t *testing.T) {
-	m := &IdentityMatch{Claims: map[string]ClaimTest{
-		"org.iso.18013.5.1.family_name": {Equals: "Andersson"},
-		"given_name":                    {Equals: "Anna"},
+	m := &IdentityMatch{Claims: ClaimMatches{
+		{Path: dotted(t, "org.iso.18013.5.1.family_name"), ClaimTest: ClaimTest{Equals: "Andersson"}},
+		{Path: claimpath.Keys("org.iso.18013.5.1", "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}},
 	}}
 
 	data, err := bson.Marshal(struct {
@@ -75,5 +78,33 @@ func TestIdentityMatchBSONReadsTheMapShape(t *testing.T) {
 
 	var got IdentityMatch
 	require.NoError(t, bson.Unmarshal(data, &got))
-	assert.Equal(t, map[string]ClaimTest{"given_name": {Equals: "Anna"}}, got.Claims)
+	assert.Equal(t, ClaimMatches{{Path: dotted(t, "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}}}, got.Claims)
+}
+
+// A caller may send the claims as a list of pointers or dotted names, or
+// in the earlier object form, which reads as dotted names.
+func TestIdentityMatchJSONForms(t *testing.T) {
+	want := ClaimMatches{
+		{Path: dotted(t, "family_name"), ClaimTest: ClaimTest{Equals: "Andersson"}},
+		{Path: dotted(t, "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}},
+	}
+	for name, body := range map[string]string{
+		"object form":       `{"claims": {"given_name": {"equals": "Anna"}, "family_name": {"equals": "Andersson"}}}`,
+		"list, dotted name": `{"claims": [{"path": "family_name", "equals": "Andersson"}, {"path": "given_name", "equals": "Anna"}]}`,
+	} {
+		var got IdentityMatch
+		require.NoError(t, json.Unmarshal([]byte(body), &got), name)
+		assert.Equal(t, want, got.Claims, name)
+	}
+
+	var got IdentityMatch
+	require.NoError(t, json.Unmarshal([]byte(`{"claims": [{"path": ["address", null, 0], "equals": "x"}]}`), &got))
+	assert.Equal(t, claimpath.New(claimpath.Key("address"), claimpath.All(), claimpath.Index(0)), got.Claims[0].Path)
+}
+
+func dotted(t *testing.T, name string) claimpath.Pointer {
+	t.Helper()
+	p, err := claimpath.Dotted(name)
+	require.NoError(t, err)
+	return p
 }

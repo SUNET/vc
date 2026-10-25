@@ -20,10 +20,7 @@ import (
 // authenticated, named by the claims it authenticated them under.
 func portalMatch() *openid4vci.IdentityMatch {
 	return &openid4vci.IdentityMatch{
-		Claims: map[string]openid4vci.ClaimTest{
-			"given_name":  {Equals: "Anna"},
-			"family_name": {Equals: "Andersson"},
-		},
+		Claims: openid4vci.ClaimMatches{{Path: dottedPath("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}}, {Path: dottedPath("family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}},
 	}
 }
 
@@ -81,11 +78,9 @@ func TestPrepareIssuance_RequiresAMatchRule(t *testing.T) {
 	client := newChallengeClient(t)
 
 	for name, match := range map[string]*openid4vci.IdentityMatch{
-		"absent": nil,
-		"empty":  {Claims: map[string]openid4vci.ClaimTest{}},
-		"a claim with no comparison": {Claims: map[string]openid4vci.ClaimTest{
-			"given_name": {},
-		}},
+		"absent":                     nil,
+		"empty":                      {Claims: openid4vci.ClaimMatches{}},
+		"a claim with no comparison": {Claims: openid4vci.ClaimMatches{{Path: dottedPath("given_name"), ClaimTest: openid4vci.ClaimTest{}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
@@ -124,7 +119,7 @@ func TestIssuerInitiated_ChallengeResumesThePreparedIssuance(t *testing.T) {
 	assert.Equal(t, "wallet-1", authCtx.WalletClientID, "the wallet supplies its own identity")
 	assert.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint)
 	require.NotNil(t, authCtx.IdentityMatch, "the caller's rule must survive onto the exchange")
-	assert.Equal(t, []string{"family_name", "given_name"}, authCtx.IdentityMatch.ClaimPaths())
+	assert.Equal(t, portalMatch(), authCtx.IdentityMatch)
 }
 
 // The issuer_state is spent when it is used. It was the Issuer's handle
@@ -276,9 +271,7 @@ func TestIdentityMatch_ResolvesPathsByFormat(t *testing.T) {
 	client := newChallengeClient(t)
 
 	match := &openid4vci.IdentityMatch{
-		Claims: map[string]openid4vci.ClaimTest{
-			"org.iso.18013.5.1.family_name": {Equals: "Andersson"},
-		},
+		Claims: openid4vci.ClaimMatches{{Path: dottedPath("org.iso.18013.5.1.family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}},
 	}
 
 	mdocClaims := map[string]any{"org.iso.18013.5.1.family_name": "Andersson"}
@@ -296,7 +289,7 @@ func TestIdentityMatch_ArrayClaims(t *testing.T) {
 	client := newChallengeClient(t)
 
 	match := &openid4vci.IdentityMatch{
-		Claims: map[string]openid4vci.ClaimTest{"roles": {Equals: "legal_representative"}},
+		Claims: openid4vci.ClaimMatches{{Path: dottedPath("roles"), ClaimTest: openid4vci.ClaimTest{Equals: "legal_representative"}}},
 	}
 
 	require.NoError(t, client.matchPresentedIdentity("dc+sd-jwt",
@@ -453,11 +446,10 @@ func TestIdentityMatch_UnwrapsMDocFullDate(t *testing.T) {
 	require.NoError(t, cbor.Unmarshal(encoded, &decoded))
 	require.IsType(t, cbor.Tag{}, decoded)
 
-	match := &openid4vci.IdentityMatch{Claims: map[string]openid4vci.ClaimTest{
-		"birth_date": {Equals: "1980-01-01"},
-	}}
-	require.NoError(t, client.matchPresentedIdentity("mso_mdoc", map[string]any{"birth_date": decoded}, match))
+	match := &openid4vci.IdentityMatch{Claims: openid4vci.ClaimMatches{{Path: dottedPath("birth_date"), ClaimTest: openid4vci.ClaimTest{Equals: "1980-01-01"}}}}
+	presented := map[string]any{"org.iso.18013.5.1.birth_date": decoded}
+	require.NoError(t, client.matchPresentedIdentity("mso_mdoc", presented, match))
 
-	match.Claims["birth_date"] = openid4vci.ClaimTest{Equals: "1980-01-02"}
-	require.ErrorIs(t, client.matchPresentedIdentity("mso_mdoc", map[string]any{"birth_date": decoded}, match), errIdentityMismatch)
+	match.Claims[0].Equals = "1980-01-02"
+	require.ErrorIs(t, client.matchPresentedIdentity("mso_mdoc", presented, match), errIdentityMismatch)
 }

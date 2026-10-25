@@ -1,9 +1,13 @@
 package openid4vci
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
+	"maps"
+	"slices"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -30,15 +34,27 @@ import (
 // field rather than honoured as a choice. An offer any wallet may complete
 // is the pre-authorized grant, asked for by name.
 type IdentityMatch struct {
-	// Claims maps a claim path on the presented credential to the test it
-	// must pass.
+	// Claims lists the claims of the presented credential, each with the
+	// test it must pass.
 	//
-	// The path is interpreted the way the presented credential's format
-	// interprets it - nested for SD-JWT VC, one literal namespace-
-	// qualified key for mdoc - so a caller writes the same path it would
-	// write anywhere else in this API.
-	Claims map[string]ClaimTest `json:"claims" bson:"claims" validate:"required,min=1"`
+	// A path is a claims path pointer, or a dotted claim name read the way
+	// the presented credential's format reads it - nested for SD-JWT VC,
+	// "<namespace>.<element>" for mdoc - so a caller writes the same path
+	// it would write anywhere else in this API. The earlier form, an
+	// object from dotted claim names to tests, is read too.
+	Claims ClaimMatches `json:"claims" bson:"claims" validate:"required,min=1"`
 }
+
+// ClaimMatch is one claim of the presented credential and the test it
+// must pass.
+type ClaimMatch struct {
+	// Path is the claim.
+	Path claimpath.Pointer
+	ClaimTest
+}
+
+// ClaimMatches is the list of claim matches.
+type ClaimMatches []ClaimMatch
 
 // ClaimTest is how one claim is compared.
 //
@@ -69,27 +85,108 @@ func (m *IdentityMatch) Validate() error {
 		return fmt.Errorf("identity match: no claims to match on; a rule that matches anything is refused - an issuance any wallet may complete is the pre-authorized grant, which is a different request")
 	}
 
-	for _, path := range sortedClaimPaths(m.Claims) {
-		if strings.TrimSpace(path) == "" {
+	for _, claim := range m.Claims {
+		_, pending := claim.Path.Pending()
+		switch {
+		case claim.Path.IsZero():
 			return fmt.Errorf("identity match: a claim path is empty")
-		}
-		if m.Claims[path].Equals == "" {
-			return fmt.Errorf("identity match: claim %q has no comparison; the only one supported is \"equals\", and it may not be empty", path)
+		case !pending && !claim.Path.SelectsOne():
+			return fmt.Errorf("identity match: claim %s selects every element of an array; a match compares one claim", claim.Path)
+		case claim.Equals == "":
+			return fmt.Errorf("identity match: claim %s has no comparison; the only one supported is \"equals\", and it may not be empty", claim.Path)
 		}
 	}
 	return nil
 }
 
-// ClaimPaths returns the paths this rule tests, in a stable order.
-//
-// Sorted so that a log line or an error naming them reads the same way
-// twice, which matters because the usual reason to look at one is that a
-// match failed and two systems disagree about a person.
+// ClaimPaths returns the paths this rule tests, rendered for a log line or
+// an error.
 func (m *IdentityMatch) ClaimPaths() []string {
 	if m == nil {
 		return nil
 	}
-	return sortedClaimPaths(m.Claims)
+	paths := make([]string, 0, len(m.Claims))
+	for _, claim := range m.Claims {
+		paths = append(paths, claim.Path.String())
+	}
+	return paths
+}
+
+// claimMatchWire is a claim match on the wire: the path a claims path
+// pointer array, or a dotted claim name.
+type claimMatchWire struct {
+	Path json.RawMessage `json:"path"`
+	ClaimTest
+}
+
+// MarshalJSON writes the path as an array, or a dotted name as a string.
+func (c ClaimMatch) MarshalJSON() ([]byte, error) {
+	var path []byte
+	var err error
+	if dotted, pending := c.Path.Pending(); pending {
+		path, err = json.Marshal(dotted)
+	} else {
+		path, err = json.Marshal(c.Path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(claimMatchWire{Path: path, ClaimTest: c.ClaimTest})
+}
+
+// UnmarshalJSON reads the path as an array, or a dotted name as a string.
+func (c *ClaimMatch) UnmarshalJSON(data []byte) error {
+	var wire claimMatchWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var dotted string
+	if err := json.Unmarshal(wire.Path, &dotted); err == nil {
+		path, err := claimpath.Dotted(dotted)
+		if err != nil {
+			return err
+		}
+		*c = ClaimMatch{Path: path, ClaimTest: wire.ClaimTest}
+		return nil
+	}
+	*c = ClaimMatch{ClaimTest: wire.ClaimTest}
+	return json.Unmarshal(wire.Path, &c.Path)
+}
+
+// UnmarshalJSON reads the list, or the earlier object from dotted claim
+// names to tests, in name order.
+func (m *ClaimMatches) UnmarshalJSON(data []byte) error {
+	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		var list []ClaimMatch
+		if err := json.Unmarshal(data, &list); err != nil {
+			return fmt.Errorf("identity match: claims is a list of {path, equals} entries: %w", err)
+		}
+		*m = list
+		return nil
+	}
+	var byName map[string]ClaimTest
+	if err := json.Unmarshal(data, &byName); err != nil {
+		return fmt.Errorf("identity match: %w", err)
+	}
+	matches, err := claimMatchesByName(byName)
+	if err != nil {
+		return err
+	}
+	*m = matches
+	return nil
+}
+
+// claimMatchesByName reads the earlier form: tests by dotted claim name.
+func claimMatchesByName(byName map[string]ClaimTest) (ClaimMatches, error) {
+	matches := make(ClaimMatches, 0, len(byName))
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		path, err := claimpath.Dotted(name)
+		if err != nil {
+			return nil, fmt.Errorf("identity match: %w", err)
+		}
+		matches = append(matches, ClaimMatch{Path: path, ClaimTest: byName[name]})
+	}
+	return matches, nil
 }
 
 // identityMatchBSON is the stored shape. Claim paths are values, not field
@@ -98,16 +195,28 @@ type identityMatchBSON struct {
 	Claims []claimEntryBSON `bson:"claims"`
 }
 
+// claimEntryBSON stores the path as an array, or a dotted name as a
+// string.
 type claimEntryBSON struct {
-	Path string    `bson:"path"`
+	Path any       `bson:"path"`
 	Test ClaimTest `bson:"test"`
+}
+
+// claimEntryRawBSON reads a stored entry.
+type claimEntryRawBSON struct {
+	Path bson.RawValue `bson:"path"`
+	Test ClaimTest     `bson:"test"`
 }
 
 // MarshalBSON stores Claims as a list of {path, test} entries.
 func (m IdentityMatch) MarshalBSON() ([]byte, error) {
 	stored := identityMatchBSON{Claims: make([]claimEntryBSON, 0, len(m.Claims))}
-	for _, path := range sortedClaimPaths(m.Claims) {
-		stored.Claims = append(stored.Claims, claimEntryBSON{Path: path, Test: m.Claims[path]})
+	for _, claim := range m.Claims {
+		var path any = claim.Path
+		if dotted, pending := claim.Path.Pending(); pending {
+			path = dotted
+		}
+		stored.Claims = append(stored.Claims, claimEntryBSON{Path: path, Test: claim.ClaimTest})
 	}
 	return bson.Marshal(stored)
 }
@@ -123,25 +232,40 @@ func (m *IdentityMatch) UnmarshalBSON(data []byte) error {
 
 	switch raw.Claims.Type {
 	case bson.TypeArray:
-		var entries []claimEntryBSON
+		var entries []claimEntryRawBSON
 		if err := raw.Claims.Unmarshal(&entries); err != nil {
 			return err
 		}
-		m.Claims = make(map[string]ClaimTest, len(entries))
-		for _, e := range entries {
-			m.Claims[e.Path] = e.Test
-		}
+		return m.readEntries(entries)
 	case bson.TypeEmbeddedDocument:
-		return raw.Claims.Unmarshal(&m.Claims)
+		var byName map[string]ClaimTest
+		if err := raw.Claims.Unmarshal(&byName); err != nil {
+			return err
+		}
+		matches, err := claimMatchesByName(byName)
+		if err != nil {
+			return err
+		}
+		m.Claims = matches
 	}
 	return nil
 }
 
-func sortedClaimPaths(claims map[string]ClaimTest) []string {
-	paths := make([]string, 0, len(claims))
-	for path := range claims {
-		paths = append(paths, path)
+// readEntries reads stored entries: a path stored as an array, or as a
+// dotted name.
+func (m *IdentityMatch) readEntries(entries []claimEntryRawBSON) error {
+	m.Claims = make(ClaimMatches, 0, len(entries))
+	for _, entry := range entries {
+		var path claimpath.Pointer
+		if dotted, ok := entry.Path.StringValueOK(); ok {
+			var err error
+			if path, err = claimpath.Dotted(dotted); err != nil {
+				return err
+			}
+		} else if err := path.UnmarshalBSONValue(byte(entry.Path.Type), entry.Path.Value); err != nil {
+			return err
+		}
+		m.Claims = append(m.Claims, ClaimMatch{Path: path, ClaimTest: entry.Test})
 	}
-	sort.Strings(paths)
-	return paths
+	return nil
 }

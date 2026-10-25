@@ -35,8 +35,8 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	}
 	vpAuth := &model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
-			"pid":   {AuthClaims: []string{"given_name", "family_name"}},
-			"eduid": {AuthClaims: []string{"eduPersonPrincipalName"}},
+			"pid":   {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
+			"eduid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("eduPersonPrincipalName")}},
 		},
 	}
 
@@ -104,8 +104,8 @@ func TestBuildIssuanceAuthDCQLByFormat(t *testing.T) {
 	}
 	vpAuth := &model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
-			"pid_mdoc": {AuthClaims: []string{"family_name"}},
-			"pid":      {AuthClaims: []string{"given_name"}},
+			"pid_mdoc": {AuthClaims: []claimpath.Pointer{claimpath.Keys("family_name")}},
+			"pid":      {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 		},
 	}
 
@@ -132,7 +132,7 @@ func TestBuildIssuanceAuthDCQLByFormat(t *testing.T) {
 func TestBuildIssuanceAuthDCQLRejectsUnusableScope(t *testing.T) {
 	cfg := &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{}}}
 	vpAuth := &model.OpenID4VPCredentialAuth{
-		AuthScopes: map[string]model.AuthScopeEntry{"nosuch": {AuthClaims: []string{"given_name"}}},
+		AuthScopes: map[string]model.AuthScopeEntry{"nosuch": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}}},
 	}
 
 	var dcql *openid4vp.DCQL
@@ -165,7 +165,7 @@ func TestBuildIssuanceAuthDCQLRefusesW3C(t *testing.T) {
 
 	_, err := buildIssuanceAuthDCQL(&model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
-			"diploma": {AuthClaims: []string{"given_name"}},
+			"diploma": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 		},
 	}, cfg)
 	require.Error(t, err, "a W3C auth scope must be refused at build time, not at response time")
@@ -174,7 +174,7 @@ func TestBuildIssuanceAuthDCQLRefusesW3C(t *testing.T) {
 	// An SD-JWT auth scope is unaffected.
 	dcql, err := buildIssuanceAuthDCQL(&model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
-			"pid": {AuthClaims: []string{"given_name"}},
+			"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 		},
 	}, cfg)
 	require.NoError(t, err)

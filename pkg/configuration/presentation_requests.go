@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"gopkg.in/yaml.v2"
@@ -41,11 +43,14 @@ type PresentationRequestTemplate struct {
 	// This defines what credentials and claims to request from the wallet
 	DCQLQuery *openid4vp.DCQL `yaml:"dcql" json:"dcql" validate:"required"`
 
-	// ClaimMappings maps VP claim paths to OIDC claim names
-	// Key: VP claim path (e.g., "given_name" or "place_of_birth.country")
-	// Value: OIDC claim name (e.g., "given_name" or "birth_country")
-	// Special value "*" means map all claims through unchanged
-	ClaimMappings map[string]string `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
+	// ClaimMappings maps claims of the presented credentials to OIDC
+	// claims: a list of {path, claim} entries, such as
+	// {path: [place_of_birth, country], claim: birth_country}, or "*" to
+	// map every claim under its own name. The legacy mapping
+	// {claim: OIDC claim} is read too, with "*": "*" for every claim; a
+	// dotted claim is read as a claim of the credentials the dcql
+	// requests.
+	ClaimMappings openid4vp.ClaimMappings `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
 
 	// Enabled indicates whether this template is active. Absent means
 	// enabled, which is why it is a POINTER: with a plain bool,
@@ -78,8 +83,54 @@ func (t *PresentationRequestTemplate) GetDCQLQuery() *openid4vp.DCQL {
 }
 
 // GetClaimMappings returns the claim mappings (for claims extraction)
-func (t *PresentationRequestTemplate) GetClaimMappings() map[string]string {
+func (t *PresentationRequestTemplate) GetClaimMappings() openid4vp.ClaimMappings {
 	return t.ClaimMappings
+}
+
+// resolveClaimPaths reads the dotted claims of the claim mappings in the
+// shape the dcql's credentials present their claims in, and refuses a
+// claims path pointer of the template still pending.
+func (t *PresentationRequestTemplate) resolveClaimPaths() error {
+	if len(t.ClaimMappings.Mappings) > 0 {
+		shape, err := t.presentedShape()
+		if err != nil {
+			return fmt.Errorf("claim_mappings: %w", err)
+		}
+		if err := t.ClaimMappings.Resolve(shape); err != nil {
+			return err
+		}
+	}
+	return claimpath.CheckResolved(t)
+}
+
+// presentedShape returns the shape the template's credentials present their
+// claims in. Claim mappings read one shape, so the dcql requests either mdoc
+// credentials or JSON-based ones.
+func (t *PresentationRequestTemplate) presentedShape() (claimpath.Shape, error) {
+	if t.DCQLQuery == nil || len(t.DCQLQuery.Credentials) == 0 {
+		return claimpath.Shape{}, errors.New("the dcql requests no credential whose claims the mappings read")
+	}
+	mdoc := isMDocCredential(t.DCQLQuery.Credentials[0].Format)
+	for _, credential := range t.DCQLQuery.Credentials[1:] {
+		if isMDocCredential(credential.Format) != mdoc {
+			return claimpath.Shape{}, errors.New("the dcql requests mdoc and JSON-based credentials, which hold their claims in different shapes; map the claims of one kind per template")
+		}
+	}
+	return openid4vp.PresentedShape(t.DCQLQuery.Credentials[0].Format), nil
+}
+
+func isMDocCredential(format string) bool {
+	return openid4vp.IsMdocFormat(format) || openid4vp.IsMdocZkFormat(format)
+}
+
+// resolveTemplates resolves the claims path pointers of each template.
+func resolveTemplates(templates []*PresentationRequestTemplate) error {
+	for _, template := range templates {
+		if err := template.resolveClaimPaths(); err != nil {
+			return fmt.Errorf("presentation request template %q: %w", template.ID, err)
+		}
+	}
+	return nil
 }
 
 // PresentationRequestConfig holds all presentation request templates
@@ -126,7 +177,29 @@ func LoadPresentationRequests(ctx context.Context, dirPath string) (*Presentatio
 		Templates: make([]*PresentationRequestTemplate, 0),
 	}
 
-	// Read all YAML files in directory
+	files, err := templateFiles(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load each file
+	for _, filePath := range files {
+		templates, err := loadTemplateFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load %s: %w", filePath, err)
+		}
+		config.Templates = append(config.Templates, templates...)
+	}
+
+	if err := config.check(); err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+// templateFiles returns the YAML files of a directory.
+func templateFiles(dirPath string) ([]string, error) {
 	files, err := filepath.Glob(filepath.Join(dirPath, "*.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to glob yaml files: %w", err)
@@ -141,27 +214,7 @@ func LoadPresentationRequests(ctx context.Context, dirPath string) (*Presentatio
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no YAML files found in directory: %s", dirPath)
 	}
-
-	// Load each file
-	for _, filePath := range files {
-		templates, err := loadTemplateFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load %s: %w", filePath, err)
-		}
-		config.Templates = append(config.Templates, templates...)
-	}
-
-	// Validate no duplicate IDs
-	if err := config.validateUniqueIDs(); err != nil {
-		return nil, err
-	}
-
-	// Validate no duplicate scopes (same scope in multiple templates)
-	if err := config.validateNoDuplicateScopes(); err != nil {
-		return nil, err
-	}
-
-	return config, nil
+	return files, nil
 }
 
 // LoadPresentationRequestsFromFile loads presentation request config from a single file
@@ -187,15 +240,23 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
-	// Validate
-	if err := config.validateUniqueIDs(); err != nil {
-		return nil, err
-	}
-	if err := config.validateNoDuplicateScopes(); err != nil {
+	if err := config.check(); err != nil {
 		return nil, err
 	}
 
 	return &config, nil
+}
+
+// check refuses duplicate template IDs and a scope in two templates, then
+// resolves the claims path pointers of each template.
+func (c *PresentationRequestConfig) check() error {
+	if err := c.validateUniqueIDs(); err != nil {
+		return err
+	}
+	if err := c.validateNoDuplicateScopes(); err != nil {
+		return err
+	}
+	return resolveTemplates(c.Templates)
 }
 
 // loadTemplateFile loads templates from a YAML file.

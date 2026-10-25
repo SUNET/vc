@@ -5,8 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 
 	"github.com/google/uuid"
 )
@@ -68,12 +69,10 @@ const (
 // identifier in this system uses, and it is a statistical claim rather than
 // an enforced one.
 type RandomArgs struct {
-	// Output is the target claim name. Supports dot-notation claim paths
-	// (e.g. "identity.document_id") so this primitive can target the same
-	// nested claims that AttributeMapper materialises.
+	// Output is the target claim.
 	//
 	// There is no Input: this primitive reads nothing.
-	Output string `yaml:"output" validate:"required" doc_example:"document_id"`
+	Output claimpath.Pointer `yaml:"output" validate:"required" doc_example:"[\"document_id\"]"`
 
 	// Format selects the shape of the value: "uuid" (the default), "hex" or
 	// "base64url".
@@ -95,23 +94,13 @@ type RandomArgs struct {
 }
 
 // Apply implements Applier.
-func (a *RandomArgs) Apply(claims map[string]any, _ time.Time) (map[string]any, error) {
-	if a.Output == "" {
-		return nil, fmt.Errorf("output is required")
-	}
-
-	// A dotted output whose parent is already a scalar is a configuration
-	// error, and one this primitive has to catch itself. Every other
-	// primitive reads an input first, so it finds nothing and does nothing;
-	// this one generates regardless, and the accumulating merge in
-	// ApplyDerivations would then replace that scalar with a map - losing a
-	// claim the source data did supply.
-	if err := checkOutputParent(claims, a.Output); err != nil {
-		return nil, err
-	}
-
+func (a *RandomArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
 	if !a.Overwrite {
-		if v, present := lookupClaim(claims, a.Output); present && !isBlankClaim(v) {
+		v, present, err := claims.Issued(a.Output)
+		if err != nil {
+			return nil, err
+		}
+		if present && !isBlankClaim(v) {
 			return nil, nil
 		}
 	}
@@ -120,13 +109,7 @@ func (a *RandomArgs) Apply(claims map[string]any, _ time.Time) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-
-	out := map[string]any{}
-	if err := setClaim(out, a.Output, value); err != nil {
-		return nil, err
-	}
-
-	return out, nil
+	return []Write{{Path: a.Output, Value: value}}, nil
 }
 
 // generate produces one value in the configured format. Config validation
@@ -172,33 +155,6 @@ func (a *RandomArgs) generate() (string, error) {
 		return "", fmt.Errorf("unknown format %q; want one of %s, %s, %s",
 			format, RandomFormatUUID, RandomFormatHex, RandomFormatBase64URL)
 	}
-}
-
-// checkOutputParent refuses a dotted output path whose parents are not maps
-// in the claims it is about to be merged into.
-func checkOutputParent(claims map[string]any, path string) error {
-	parts := strings.Split(path, ".")
-	if len(parts) == 1 {
-		return nil
-	}
-
-	var cur any = claims
-	for i, p := range parts[:len(parts)-1] {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return fmt.Errorf("output %q: %s is not a map", path, strings.Join(parts[:i], "."))
-		}
-		v, present := m[p]
-		if !present {
-			return nil
-		}
-		cur = v
-	}
-	if _, ok := cur.(map[string]any); !ok {
-		return fmt.Errorf("output %q: %s is not a map", path, strings.Join(parts[:len(parts)-1], "."))
-	}
-
-	return nil
 }
 
 // isBlankClaim reports whether a claim carries nothing worth keeping. A

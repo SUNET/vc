@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -25,7 +26,7 @@ func newExternalAPIChallengeClient(t *testing.T) *Client {
 			Remote:       "sis",
 			AuthProvider: model.AuthProviderOpenID4VP,
 			AuthScopes: map[string]model.AuthScopeEntry{
-				challengeAuthScope: {AuthClaims: []string{"given_name", "family_name"}},
+				challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
 			},
 		},
 	}}

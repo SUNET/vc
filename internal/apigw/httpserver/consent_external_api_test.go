@@ -80,7 +80,7 @@ func consentExternalAPIEnv(t *testing.T, sis *fakeSIS, withRemote bool, identifi
 	docs := apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute)
 	dataSources, err := datasources.New(t.Context(), remotes, model.ExternalAPIConfig{
 		Scopes: map[string]model.ExternalAPIScope{"sis_enrollment": {Remote: "sis", AuthProvider: model.AuthProviderOIDC}},
-	}, docs, log)
+	}, (&model.Cfg{}).DocumentShape, docs, log)
 	require.NoError(t, err)
 
 	s, engine, rg := newSessionTestEngine(t, noDocsAPI{})

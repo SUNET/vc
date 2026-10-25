@@ -9,6 +9,7 @@ import (
 
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -88,9 +89,9 @@ func TestPrepareIssuance_RefusesAMatchTheRequestWillNeverAskFor(t *testing.T) {
 	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope: challengeScope,
 		IdentityMatch: &openid4vci.IdentityMatch{
-			Claims: map[string]openid4vci.ClaimTest{
+			Claims: openid4vci.ClaimMatches{
 				// Configured auth_claims are given_name and family_name.
-				"personal_administrative_number": {Equals: "198001011234"},
+				{Path: dottedPath("personal_administrative_number"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}},
 			},
 		},
 	})
@@ -108,8 +109,8 @@ func TestPrepareIssuance_AcceptsAMatchOneAuthScopeCanSatisfy(t *testing.T) {
 	client := newChallengeClient(t)
 	scopes := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
 	scopes.AuthScopes = map[string]model.AuthScopeEntry{
-		challengeAuthScope: {AuthClaims: []string{"given_name", "family_name"}},
-		"thin_auth":        {AuthClaims: []string{"given_name"}},
+		challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
+		"thin_auth":        {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 	}
 	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
 	// The second auth scope needs credential metadata like any other: a
@@ -154,8 +155,8 @@ func TestPrepareIssuance_RefusesAScopeThatCannotBeAsked(t *testing.T) {
 		client := newChallengeClient(t)
 		scopes := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
 		scopes.AuthScopes = map[string]model.AuthScopeEntry{
-			challengeAuthScope: {AuthClaims: []string{"given_name", "family_name"}},
-			"unconfigured":     {AuthClaims: []string{"given_name"}},
+			challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
+			"unconfigured":     {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 		}
 		client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
 
@@ -475,8 +476,9 @@ func TestPrepareIssuance_RefusesAScopeWithNoCredentialMetadata(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown_credential_configuration")
 }
 
-// For an mdoc auth scope, auth_claims "family_name" and the qualified
-// "org.iso.18013.5.1.family_name" are the same DCQL path.
+// For an mdoc auth scope, a rule's "family_name" and the qualified
+// "org.iso.18013.5.1.family_name" both name the auth claim
+// ["org.iso.18013.5.1", "family_name"].
 func TestPrepareIssuance_NormalisesMDocClaimPaths(t *testing.T) {
 	client := newChallengeClient(t)
 	client.cfg.Common.CredentialMetadata[challengeAuthScope] = &model.CredentialMetadata{
@@ -485,23 +487,19 @@ func TestPrepareIssuance_NormalisesMDocClaimPaths(t *testing.T) {
 	}
 	scopes := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
 	scopes.AuthScopes = map[string]model.AuthScopeEntry{
-		challengeAuthScope: {AuthClaims: []string{"family_name"}},
+		challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "family_name")}},
 	}
 	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
 
 	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
-		Scope: challengeScope,
-		IdentityMatch: &openid4vci.IdentityMatch{Claims: map[string]openid4vci.ClaimTest{
-			"org.iso.18013.5.1.family_name": {Equals: "Andersson"},
-		}},
+		Scope:         challengeScope,
+		IdentityMatch: &openid4vci.IdentityMatch{Claims: openid4vci.ClaimMatches{{Path: dottedPath("org.iso.18013.5.1.family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}}},
 	})
 	require.NoError(t, err)
 
 	_, err = client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
-		Scope: challengeScope,
-		IdentityMatch: &openid4vci.IdentityMatch{Claims: map[string]openid4vci.ClaimTest{
-			"org.example.ns.family_name": {Equals: "Andersson"},
-		}},
+		Scope:         challengeScope,
+		IdentityMatch: &openid4vci.IdentityMatch{Claims: openid4vci.ClaimMatches{{Path: dottedPath("org.example.ns.family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}}},
 	})
 	require.Error(t, err, "another namespace is a different path")
 }

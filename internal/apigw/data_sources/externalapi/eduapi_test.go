@@ -55,7 +55,7 @@ func requestedScopes(t *testing.T, configured []string) []string {
 		ClientSecret: "secret",
 		Scopes:       configured,
 		Timeout:      5 * time.Second,
-	}, nil,
+	}, nil, (&model.Cfg{}).DocumentShape,
 		pkgcache.NewMemoryCache[map[string]*model.CompleteDocument](time.Hour),
 		pkgcache.NewMemoryCache[string](time.Hour), log)
 	require.NoError(t, err)

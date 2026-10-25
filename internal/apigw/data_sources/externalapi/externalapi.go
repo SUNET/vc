@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -28,7 +29,7 @@ type service struct {
 // HTTP client, per-credential-type mappers from the external_api scopes, the
 // authentic source and the document cache. accept is the Accept header and name
 // scopes the client's logging/errors (e.g. "oeapi").
-func newService(remote model.Remote, scopes map[string]model.ExternalAPIScope, accept, name string, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*service, error) {
+func newService(remote model.Remote, scopes map[string]model.ExternalAPIScope, documentShape func(scope string) (claimpath.Shape, error), accept, name string, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*service, error) {
 	httpClient, err := oauth2client.New(oauth2client.Config{
 		BaseURL:      remote.BaseURL,
 		TokenURL:     remote.TokenURL,
@@ -46,7 +47,11 @@ func newService(remote model.Remote, scopes map[string]model.ExternalAPIScope, a
 
 	mappers := make(map[string]*credential.AttributeMapper, len(scopes))
 	for credType, scope := range scopes {
-		mappers[credType] = credential.NewAttributeMapper(scope.AttributeMapping)
+		shape, err := documentShape(credType)
+		if err != nil {
+			return nil, fmt.Errorf("%s: scope %q: %w", name, credType, err)
+		}
+		mappers[credType] = credential.NewAttributeMapper(scope.AttributeMapping, shape)
 	}
 
 	return &service{

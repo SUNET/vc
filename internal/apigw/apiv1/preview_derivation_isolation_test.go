@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 
@@ -27,8 +28,8 @@ func TestPreviewDerivationsDoNotMutateVerifiedClaims(t *testing.T) {
 	previewData := credential.CloneNestedClaims(verified)
 
 	derived, err := credential.ApplyDerivations([]primitives.Derivation{
-		{Random: &primitives.RandomArgs{Output: "identity.document_id"}},
-	}, verified, time.Now())
+		{Random: &primitives.RandomArgs{Output: claimpath.Keys("identity", "document_id")}},
+	}, verified, time.Now(), nestedShapes)
 	require.NoError(t, err)
 	credential.MergeNestedClaims(previewData, derived)
 
@@ -56,8 +57,8 @@ func TestPreviewDerivationsDoNotMutateVerifiedClaimsForAnyPrimitive(t *testing.T
 	previewData := credential.CloneNestedClaims(verified)
 
 	derived, err := credential.ApplyDerivations([]primitives.Derivation{
-		{Trim: &primitives.TrimArgs{Input: "identity.email", Output: "identity.email_trimmed"}},
-	}, verified, time.Now())
+		{Trim: &primitives.TrimArgs{Input: claimpath.Keys("identity", "email"), Output: claimpath.Keys("identity", "email_trimmed")}},
+	}, verified, time.Now(), nestedShapes)
 	require.NoError(t, err)
 	credential.MergeNestedClaims(previewData, derived)
 

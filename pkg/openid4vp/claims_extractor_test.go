@@ -3,101 +3,26 @@ package openid4vp
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
-func TestClaimsExtractor_ExtractNestedClaim(t *testing.T) {
-	ce := NewClaimsExtractor()
-
-	tests := []struct {
-		name      string
-		claims    map[string]any
-		path      string
-		want      any
-		wantError bool
-	}{
-		{
-			name: "simple claim",
-			claims: map[string]any{
-				"given_name":  "John",
-				"family_name": "Doe",
-			},
-			path: "given_name",
-			want: "John",
-		},
-		{
-			name: "nested claim - one level",
-			claims: map[string]any{
-				"address": map[string]any{
-					"country": "SE",
-					"city":    "Stockholm",
-				},
-			},
-			path: "address.country",
-			want: "SE",
-		},
-		{
-			name: "nested claim - two levels",
-			claims: map[string]any{
-				"place_of_birth": map[string]any{
-					"address": map[string]any{
-						"country": "Sweden",
-					},
-				},
-			},
-			path: "place_of_birth.address.country",
-			want: "Sweden",
-		},
-		{
-			name: "claim not found",
-			claims: map[string]any{
-				"given_name": "John",
-			},
-			path:      "family_name",
-			wantError: true,
-		},
-		{
-			name: "nested path not found",
-			claims: map[string]any{
-				"address": map[string]any{
-					"country": "SE",
-				},
-			},
-			path:      "address.city",
-			wantError: true,
-		},
-		{
-			name: "empty path",
-			claims: map[string]any{
-				"given_name": "John",
-			},
-			path:      "",
-			wantError: true,
-		},
-		{
-			name: "non-object in path",
-			claims: map[string]any{
-				"birthdate": "1990-01-01",
-			},
-			path:      "birthdate.year",
-			wantError: true,
-		},
+// legacyMappings reads claim mappings from their legacy mapping form, as a
+// template file does, for JSON-based claims.
+func legacyMappings(t *testing.T, legacy map[string]string) ClaimMappings {
+	t.Helper()
+	if legacy == nil {
+		return ClaimMappings{}
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ce.extractNestedClaim(tt.claims, tt.path)
-
-			if tt.wantError {
-				assert.Error(t, err)
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	data, err := yaml.Marshal(legacy)
+	require.NoError(t, err)
+	var mappings ClaimMappings
+	require.NoError(t, yaml.Unmarshal(data, &mappings))
+	require.NoError(t, mappings.Resolve(claimpath.Nested()))
+	return mappings
 }
 
 func TestClaimsExtractor_MapClaimsToOIDC(t *testing.T) {
@@ -206,7 +131,7 @@ func TestClaimsExtractor_MapClaimsToOIDC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ce.MapClaimsToOIDC(tt.vpClaims, tt.claimMappings)
+			got, err := ce.MapClaimsToOIDC(tt.vpClaims, legacyMappings(t, tt.claimMappings))
 
 			if tt.wantError {
 				assert.Error(t, err)
@@ -268,7 +193,7 @@ func TestClaimsExtractor_ExtractAndMapClaims_Integration(t *testing.T) {
 			"nationality": "nationality",
 		}
 
-		mapped, err := ce.MapClaimsToOIDC(vpClaims, claimMappings)
+		mapped, err := ce.MapClaimsToOIDC(vpClaims, legacyMappings(t, claimMappings))
 		require.NoError(t, err)
 
 		assert.Equal(t, map[string]any{
@@ -300,7 +225,7 @@ func TestClaimsExtractor_ExtractAndMapClaims_Integration(t *testing.T) {
 			"institution.country": "insurance_country",
 		}
 
-		mapped, err := ce.MapClaimsToOIDC(vpClaims, claimMappings)
+		mapped, err := ce.MapClaimsToOIDC(vpClaims, legacyMappings(t, claimMappings))
 		require.NoError(t, err)
 
 		assert.Equal(t, map[string]any{

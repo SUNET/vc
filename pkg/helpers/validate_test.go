@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -297,8 +298,8 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"eduid": {
 						AuthProvider: model.AuthProviderOpenID4VP,
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid":   {AuthClaims: []string{"given_name"}},
-							"eduid": {AuthClaims: []string{"given_name"}},
+							"pid":   {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
+							"eduid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 				}},
@@ -314,7 +315,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 				}},
@@ -330,7 +331,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name", "birthdate"}, IdentityAttributes: map[string]string{"birthdate": "birth_date"}, DocumentClaims: map[string]string{"birthdate": "birth_date"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("birthdate")}, IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("birthdate"), Attribute: "birth_date"}}, DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("birthdate"), To: claimpath.Keys("birth_date")}}},
 						},
 					},
 				}},
@@ -346,7 +347,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}, IdentityAttributes: map[string]string{"birthdate": "birth_date"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}, IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("birthdate"), Attribute: "birth_date"}}},
 						},
 					},
 				}},
@@ -362,29 +363,13 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"birthdate"}, IdentityAttributes: map[string]string{"birthdate": "dob"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("birthdate")}, IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("birthdate"), Attribute: "dob"}}},
 						},
 					},
 				}},
 			},
 			shouldError:   true,
 			errorContains: "identity_attribute_unknown",
-		},
-		{
-			name: "document_claims with a nested target is rejected",
-			ds: model.DataSources{
-				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"nym_auth": {
-						AuthProvider:    model.AuthProviderOpenID4VP,
-						AuthenticSource: "SUNET",
-						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}, DocumentClaims: map[string]string{"birthdate": "a.b"}},
-						},
-					},
-				}},
-			},
-			shouldError:   true,
-			errorContains: "document_claim_target_must_be_top_level",
 		},
 		{
 			name: "empty datastore passes",
@@ -402,7 +387,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name", "family_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
 						},
 					},
 				}},
@@ -417,7 +402,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"ehic": {
 						AuthProvider: model.AuthProviderOpenID4VP,
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{}},
+							"pid": {AuthClaims: []claimpath.Pointer{}},
 						},
 					},
 				}},
@@ -444,7 +429,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"ehic": {
 						AuthProvider: model.AuthProviderOpenID4VP,
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 						AuthClaims: []string{"given_name"},
 					},
@@ -461,8 +446,8 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid":   {AuthClaims: []string{"given_name", "family_name", "birth_date"}},
-							"eduid": {AuthClaims: []string{"given_name", "family_name", "date_of_birth"}},
+							"pid":   {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name"), claimpath.Keys("birth_date")}},
+							"eduid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name"), claimpath.Keys("date_of_birth")}},
 						},
 					},
 				}},
@@ -489,7 +474,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 						AuthProvider: model.AuthProviderSAML,
 						AuthClaims:   []string{"given_name"},
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 				}},
@@ -543,7 +528,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"eduid": {
 						AuthProvider: model.AuthProviderOpenID4VP,
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 				}},
@@ -582,7 +567,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"micro_credential": {
 						AuthProvider: model.AuthProviderPreAuth,
 						AuthScopes: map[string]model.AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 				}},
@@ -626,21 +611,21 @@ func TestExternalAPIOpenID4VPAuthScopes(t *testing.T) {
 	}{
 		{
 			name: "auth claims alone pass",
-			ds:   card(model.AuthScopeEntry{AuthClaims: []string{"given_name", "family_name", "birthdate"}}),
+			ds:   card(model.AuthScopeEntry{AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name"), claimpath.Keys("birthdate")}}),
 		},
 		{
 			name: "identity_attributes is refused, the person comes from prepare",
 			ds: card(model.AuthScopeEntry{
-				AuthClaims:         []string{"given_name"},
-				IdentityAttributes: map[string]string{"given_name": "given_name"},
+				AuthClaims:         []claimpath.Pointer{claimpath.Keys("given_name")},
+				IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("given_name"), Attribute: "given_name"}},
 			}),
 			errorContains: "external_api_auth_scope_takes_only_auth_claims",
 		},
 		{
 			name: "document_claims is refused",
 			ds: card(model.AuthScopeEntry{
-				AuthClaims:     []string{"given_name"},
-				DocumentClaims: map[string]string{"given_name": "given_name"},
+				AuthClaims:     []claimpath.Pointer{claimpath.Keys("given_name")},
+				DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("given_name"), To: claimpath.Keys("given_name")}},
 			}),
 			errorContains: "external_api_auth_scope_takes_only_auth_claims",
 		},
@@ -657,7 +642,7 @@ func TestExternalAPIOpenID4VPAuthScopes(t *testing.T) {
 				"sis_enrollment": {
 					Remote:       "sis",
 					AuthProvider: model.AuthProviderOIDC,
-					AuthScopes:   map[string]model.AuthScopeEntry{"student_card": {AuthClaims: []string{"x"}}},
+					AuthScopes:   map[string]model.AuthScopeEntry{"student_card": {AuthClaims: []claimpath.Pointer{claimpath.Keys("x")}}},
 				},
 			}}},
 			errorContains: "auth_scopes_only_for_openid4vp",

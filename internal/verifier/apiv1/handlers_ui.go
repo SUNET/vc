@@ -1209,9 +1209,8 @@ func vctmLeafClaims(meta *model.CredentialMetadata) []claimpath.Pointer {
 	all := requestableClaims(vctm)
 	parents := map[string]bool{}
 	for _, p := range all {
-		for n := 1; n < p.Len(); n++ {
-			prefix, _ := p.Prefix(n)
-			parents[prefix.String()] = true
+		for _, ancestor := range p.Ancestors() {
+			parents[ancestor.String()] = true
 		}
 	}
 	var leaves []claimpath.Pointer
@@ -1287,15 +1286,15 @@ func vctmChildPaths(vctm *sdjwtvc.VCTM) map[string]vctmChildren {
 		if _, ok := components[0].KeyName(); !ok {
 			continue
 		}
-		parent, _ := vc.Path.Prefix(1)
-		family := children[parent.String()]
+		parent := claimpath.New(components[0]).String()
+		family := children[parent]
 		family.all = append(family.all, vc.Path)
 		if vc.SD == "never" {
 			family.atomic = true
 		} else {
 			family.independent = append(family.independent, vc.Path)
 		}
-		children[parent.String()] = family
+		children[parent] = family
 	}
 	return children
 }

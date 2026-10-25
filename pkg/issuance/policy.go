@@ -2,10 +2,11 @@ package issuance
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/spocputil"
 
@@ -149,7 +150,10 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 			"the query would carry no claim dimensions, so it cannot decide anything", scope)
 	}
 
-	query, missing := buildQuery(scope, claims, queryTemplate)
+	query, missing, err := buildQuery(scope, claims, queryTemplate)
+	if err != nil {
+		return fmt.Errorf("issuance policy for scope %q: %w", scope, err)
+	}
 
 	// An absent claim is not a wildcard.
 	//
@@ -196,7 +200,7 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 // the information that decides whether it may be asked, and an exported
 // helper that hands back just the S-expression is an invitation to rebuild the
 // hole. Evaluate is the way in.
-func buildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) (sexp.Element, []string) {
+func buildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) (sexp.Element, []string, error) {
 	dims := make([]string, 0, len(queryTemplate)+1)
 	dims = append(dims, scopeDimension)
 	values := map[string]string{scopeDimension: scope}
@@ -204,7 +208,10 @@ func buildQuery(scope string, claims map[string]any, queryTemplate []model.Query
 	var missing []string
 	for _, dim := range queryTemplate {
 		dims = append(dims, dim.Dimension)
-		value, ok := lookupClaim(claims, dim.Claim)
+		value, ok, err := lookupClaim(claims, dim.Claim)
+		if err != nil {
+			return nil, nil, fmt.Errorf("query_template dimension %q: %w", dim.Dimension, err)
+		}
 		if !ok {
 			missing = append(missing, dim.Claim)
 			continue
@@ -212,7 +219,7 @@ func buildQuery(scope string, claims map[string]any, queryTemplate []model.Query
 		values[dim.Dimension] = toStringValue(value)
 	}
 
-	return spocputil.BuildTaggedQuery("credential", dims, values), missing
+	return spocputil.BuildTaggedQuery("credential", dims, values), missing, nil
 }
 
 // lookupClaim resolves a query template's claim path against the OIDC claims.
@@ -222,18 +229,29 @@ func buildQuery(scope string, claims map[string]any, queryTemplate []model.Query
 // dot-notation, which is what the configuration documents and what the
 // callback actually produces: ProcessCallback fills the map via
 // idToken.Claims, so a nested claim arrives as a map under its parent and
-// "identity.given_name" is never a key.
+// "identity.given_name" is never a key. A path the claims do not hold that
+// way is missing, which denies.
 //
 // Worth its own function because the failure was silent. An unresolved
 // dimension is emitted empty, an empty dimension matches a wildcard rule
 // and fails a rule that requires a value - so a policy written against the
 // documented dot-notation would widen or hard-deny with nothing anywhere
 // saying why.
-func lookupClaim(claims map[string]any, path string) (any, bool) {
+func lookupClaim(claims map[string]any, path string) (any, bool, error) {
 	if value, ok := claims[path]; ok {
-		return value, true
+		return value, true, nil
 	}
-	return credential.GetNestedValue(claims, path)
+	pointer, err := claimpath.Nested().Dotted(path)
+	if err != nil {
+		return nil, false, err
+	}
+	value, ok, err := claimpath.Nested().Get(claims, pointer)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		// The token holds another structure where the template reads the
+		// claim, so it does not assert the claim.
+		return nil, false, nil
+	}
+	return value, ok, err
 }
 
 // toStringValue renders a claim value as the atom that goes into one query

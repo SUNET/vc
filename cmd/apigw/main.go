@@ -108,7 +108,7 @@ func main() {
 
 	// Initialize data sources (Edu-API, etc.) before apiv1: presentation-based
 	// issuance auth fetches external_api documents itself.
-	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cfg.APIGW.DataSources.ExternalAPI, cacheService.Document, mainLog)
+	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cfg.APIGW.DataSources.ExternalAPI, cfg.DocumentShape, cacheService.Document, mainLog)
 	if err != nil {
 		panic(err)
 	}

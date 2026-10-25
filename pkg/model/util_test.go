@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -185,7 +186,7 @@ func TestGetOpenID4VPAuth(t *testing.T) {
 							"test": {
 								AuthProvider: AuthProviderOpenID4VP,
 								AuthScopes: map[string]AuthScopeEntry{
-									"openid": {AuthClaims: []string{"sub"}},
+									"openid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("sub")}},
 								},
 							},
 						},
@@ -204,7 +205,7 @@ func TestGetOpenID4VPAuth(t *testing.T) {
 		if !ok {
 			t.Fatal("expected 'openid' key in AuthScopes")
 		}
-		if len(entry.AuthClaims) != 1 || entry.AuthClaims[0] != "sub" {
+		if len(entry.AuthClaims) != 1 || !entry.AuthClaims[0].Equal(claimpath.Keys("sub")) {
 			t.Errorf("unexpected auth claims: %v", entry.AuthClaims)
 		}
 	})

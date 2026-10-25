@@ -40,7 +40,7 @@ func TestAuxiliaryData(t *testing.T) {
 
 	ssc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc")
 	psc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "psc")
-	inputs := []string{"issuing_country", "personal_administrative_number"}
+	inputs := []claimpath.Pointer{claimpath.Keys("issuing_country"), claimpath.Keys("personal_administrative_number")}
 	c := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
@@ -74,7 +74,7 @@ func TestAuxiliaryData(t *testing.T) {
 	document := []byte(`{"birth_date":"2011-06-15"}`)
 	issue := func(pan string, entries []openid4vci.AuxiliaryDataEntry) (map[string]any, []openid4vci.AuxiliaryDataEntry) {
 		source := map[string]any{"issuing_country": "SE", "personal_administrative_number": pan}
-		out, toWallet, err := c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, document, entries)
+		out, toWallet, err := c.applyAuxiliaryData(t.Context(), "nym_auth", derivationSource{derivations, source, claimpath.Nested()}, document, entries)
 		require.NoError(t, err)
 		var doc map[string]any
 		require.NoError(t, json.Unmarshal(out, &doc))
@@ -117,7 +117,7 @@ func TestAuxiliaryData(t *testing.T) {
 		"the wallet sends a required entry": {"psc_required", nil},
 	} {
 		source := map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-200"}
-		_, _, err = c.applyAuxiliaryData(t.Context(), request.scope, derivations, source, document, request.entries)
+		_, _, err = c.applyAuxiliaryData(t.Context(), request.scope, derivationSource{derivations, source, claimpath.Nested()}, document, request.entries)
 		require.ErrorAs(t, err, &vciErr, rule)
 		assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err, rule)
 	}
@@ -126,9 +126,9 @@ func TestAuxiliaryData(t *testing.T) {
 	// stands, a different one is auxiliary_data_conflict.
 	stored := base64.StdEncoding.EncodeToString(walletPSC[:])
 	source := map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-200"}
-	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"`+stored+`"}`), fromWallet)
+	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivationSource{derivations, source, claimpath.Nested()}, []byte(`{"birth_date":"2011-06-15","psc":"`+stored+`"}`), fromWallet)
 	require.NoError(t, err, "the wallet sends the commitment the issuer holds")
-	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"AAAA"}`), fromWallet)
+	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivationSource{derivations, source, claimpath.Nested()}, []byte(`{"birth_date":"2011-06-15","psc":"AAAA"}`), fromWallet)
 	require.ErrorAs(t, err, &vciErr, "the wallet sends another commitment")
 	assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err)
 
@@ -168,15 +168,15 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	}}}}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 		Path:    ssc,
-		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16}},
+		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 16}},
 	}}}
 	walletPSC := sha256.Sum256([]byte("the wallet's private seed"))
 	fromWallet := []openid4vci.AuxiliaryDataEntry{{
 		Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(walletPSC[:]),
 	}}
 
-	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations,
-		map[string]any{"personal_administrative_number": "pan-200"}, []byte(`{"given_name":"Alex"}`), fromWallet)
+	source := derivationSource{derivations, map[string]any{"personal_administrative_number": "pan-200"}, claimpath.Nested()}
+	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", source, []byte(`{"given_name":"Alex"}`), fromWallet)
 	require.NoError(t, err)
 	require.Len(t, toWallet, 1)
 	assert.Equal(t, openid4vci.AuxiliaryDataEntry{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Opening: toWallet[0].Opening},
@@ -210,7 +210,7 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 }
 
 // Nested verified claims reload from a Mongo-backed store as bson.D and
-// bson.A, and a dotted opening input must still resolve in them.
+// bson.A, and an opening input must still reach into them.
 func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	stored, err := bson.Marshal(&cache.AuthorizationContext{
 		DataSource:     string(model.DataSourcePresentation),
@@ -222,19 +222,25 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	require.NoError(t, bson.Unmarshal(stored, &authContext))
 	require.IsType(t, bson.D{}, authContext.VerifiedClaims["subject"], "the premise: the store returns bson.D")
 
-	c := &Client{cfg: &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
-		Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{"pid": {}}}},
-	}}}}}
+	c := &Client{cfg: &model.Cfg{
+		Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+			"nym_auth": {Format: "dc+sd-jwt"}, "pid": {Format: "dc+sd-jwt"},
+		}},
+		APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
+			Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{"pid": {}}}},
+		}}},
+	}}
 
-	_, claims := c.sourceDerivations("nym_auth", &authContext, nil)
+	source, err := c.sourceDerivations("nym_auth", &authContext, nil)
+	require.NoError(t, err)
 	secret := []byte(strings.Repeat("s", 32))
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
-	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"subject.pan"}, Bytes: 16}
+	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("subject", "pan")}, Bytes: 16}
 	hc := primitives.HashCommitmentArgs{Path: claimpath.Keys("commitments", "ssc"), Opening: primitives.OpeningArgs{HKDF: &opening}}
-	_, err = hc.NewOpening(claims)
-	require.NoError(t, err, "subject.pan resolves in the normalised claims")
-	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
+	_, err = hc.NewOpening(source.claims, source.shape)
+	require.NoError(t, err, `["subject","pan"] reaches into the normalised claims`)
+	assert.IsType(t, []any{}, source.claims["subject"].(map[string]any)["list"])
 }
 
 // An opening reads the claims its source supplied. For an assertion that is
@@ -303,11 +309,11 @@ func TestAuxiliaryDataClaimOpening(t *testing.T) {
 	}}}}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 		Path:    ssc,
-		Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: "nym_auth_opening"}},
+		Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Keys("nym_auth_opening")}},
 	}}}
 	const claim = "AAECAwQFBgcICQoLDA0ODw"
 
-	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations, map[string]any{"nym_auth_opening": claim}, []byte(`{}`), nil)
+	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivationSource{derivations, map[string]any{"nym_auth_opening": claim}, claimpath.Nested()}, []byte(`{}`), nil)
 	require.NoError(t, err)
 	require.Len(t, toWallet, 1)
 	assert.Equal(t, claim, toWallet[0].Opening, "the opening is the claim's bytes")
