@@ -346,7 +346,8 @@ provision_apigw_saml_sp_keypair() {
 provision_apigw_nym_auth_secrets() {
     local apigw_app secrets_json value
     apigw_app="$(app_name "apigw")"
-    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null || echo '[]')"
+    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null)" \
+        || die "listing the secrets of $apigw_app failed; provisioning would replace an existing NYM_AUTH_SEED"
     if printf '%s' "$secrets_json" | grep -q '"CREDENTIAL_ENCRYPTION_KEY"'; then
         echo "==> CREDENTIAL_ENCRYPTION_KEY already set for $apigw_app (skipping)"
     else
