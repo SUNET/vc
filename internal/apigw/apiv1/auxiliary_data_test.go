@@ -103,9 +103,6 @@ func TestAuxiliaryData(t *testing.T) {
 		scope   string
 		entries []openid4vci.AuxiliaryDataEntry
 	}{
-		"the entry carries only type, alg, path and commitment": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
-			e.Encoding = "hex"
-		})},
 		"the commitment is a sha-256 hash": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
 			e.Commitment = base64.RawURLEncoding.EncodeToString(walletPSC[:31])
 		})},
@@ -130,6 +127,12 @@ func TestAuxiliaryData(t *testing.T) {
 		proof(`{}`),
 	}}})
 	require.ErrorAs(t, err, &vciErr, "key proofs that disagree are refused")
+	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
+
+	_, err = walletAuxiliaryData(&openid4vci.CredentialRequest{Proofs: &openid4vci.Proofs{JWT: []openid4vci.ProofJWTToken{
+		proof(`{"auxiliary_data":[{"type":"hash_commitment","alg":"sha-256","path":["eu.europa.ec.eudi.nym_auth.1","psc"],"commitment":"JhQM6yeuK84BoGVVSxbLL9HjjeiBERnWHEZSIIMqwd0","required":false}]}`),
+	}}})
+	require.ErrorAs(t, err, &vciErr, "an entry from the wallet carries only type, alg, path and commitment")
 	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
 }
 

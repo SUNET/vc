@@ -304,8 +304,6 @@ func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4v
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("to_issuer of this credential lists no entry for %q", entry.Path))
 	case entry.Alg != want.Alg:
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q must use alg %s", entry.Path, want.Alg))
-	case entry.Opening != "" || entry.Encoding != "" || entry.Required:
-		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q carries only type, alg, path and commitment", entry.Path))
 	}
 	value, err := base64.RawURLEncoding.DecodeString(entry.Commitment)
 	if err != nil || len(value) != sha256.Size {
