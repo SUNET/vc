@@ -81,6 +81,7 @@ apigw:
 
 	for rule, args := range map[string][]string{
 		"-expect has a value":           {"-input", "SE", "-input", "pan-100", "-expect", ""},
+		"-expect has the alg's length":  {"-input", "SE", "-input", "pan-100", "-expect", "00"},
 		"one value per hkdf input":      {"-input", "SE"},
 		"-path names a to_wallet entry": {"-input", "SE", "-input", "pan-100", "-path", `["eu.europa.ec.eudi.nym_auth.1","psc"]`},
 	} {

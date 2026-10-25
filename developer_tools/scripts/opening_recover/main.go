@@ -66,10 +66,19 @@ func run(ctx context.Context, args []string, out io.Writer) (int, error) {
 	if err != nil {
 		return exitError, err
 	}
+	if err := entry.checkExpect(inv.expect); err != nil {
+		return exitError, err
+	}
 	results, err := entry.reproduce(ctx, inv.inputs)
 	if err != nil {
 		return exitError, err
 	}
+	return report(out, inv, results), nil
+}
+
+// report prints each result and returns the exit code of the comparison
+// with -expect.
+func report(out io.Writer, inv *invocation, results []result) int {
 	matched := false
 	for _, r := range results {
 		fmt.Fprintf(out, "sources:    %s\n", strings.Join(r.sources, ", "))
@@ -81,13 +90,13 @@ func run(ctx context.Context, args []string, out io.Writer) (int, error) {
 	}
 	switch {
 	case inv.expect == nil:
-		return exitOK, nil
+		return exitOK
 	case matched:
 		fmt.Fprintln(out, "match:      yes")
-		return exitOK, nil
+		return exitOK
 	default:
 		fmt.Fprintln(out, "match:      no")
-		return exitMismatch, nil
+		return exitMismatch
 	}
 }
 
@@ -226,6 +235,22 @@ func onlyHKDFPath(sources model.DataSources, scope string) ([]string, error) {
 		return nil, fmt.Errorf("scope %q has %d hkdf entries %q; name one with -path", scope, len(paths), paths)
 	}
 	return paths[0], nil
+}
+
+// checkExpect refuses an -expect value whose length no commitment under
+// the entry's alg has.
+func (e *entry) checkExpect(expect []byte) error {
+	if expect == nil {
+		return nil
+	}
+	size, err := openid4vci.HashCommitmentSize(e.alg)
+	if err != nil {
+		return err
+	}
+	if len(expect) != size {
+		return fmt.Errorf("-expect has %d bytes; a %s commitment has %d", len(expect), e.alg, size)
+	}
+	return nil
 }
 
 // result is one opening, with the source scopes that derive it.
