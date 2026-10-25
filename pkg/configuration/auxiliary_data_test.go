@@ -175,6 +175,9 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		"a path the VCTM does not declare": {func(c *model.Cfg) {
 			meta(c).AuxiliaryData.ToIssuer[0].Path = []string{"commitments", "other"}
 		}, "the VCTM declares no claim"},
+		"an empty path": {func(c *model.Cfg) {
+			meta(c).AuxiliaryData.ToIssuer[0].Path = nil
+		}, "the path is empty"},
 		"a claim the holder cannot withhold": {func(c *model.Cfg) {
 			meta(c).VCTM.Claims[1].SD = "allowed"
 		}, `needs sd "always"`},

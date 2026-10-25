@@ -386,6 +386,8 @@ func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.A
 		return fmt.Errorf("type %q; this issuer implements %q", entry.Type, openid4vci.AuxiliaryDataTypeHashCommitment)
 	case entry.Alg != openid4vci.HashCommitmentAlgSHA256:
 		return fmt.Errorf("alg %q; this issuer implements %q", entry.Alg, openid4vci.HashCommitmentAlgSHA256)
+	case len(entry.Path) == 0:
+		return errors.New("the path is empty; it names the claim that holds the commitment")
 	case entry.Opening != "" || entry.Commitment != "":
 		return errors.New("metadata carries no opening or commitment")
 	case entry.Required:
