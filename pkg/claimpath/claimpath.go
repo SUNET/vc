@@ -11,6 +11,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -177,6 +178,14 @@ func (p Pointer) Name() (string, bool) {
 	return p.components[len(p.components)-1].KeyName()
 }
 
+// FirstKey returns the key a resolved pointer starts with.
+func (p Pointer) FirstKey() (string, bool) {
+	if p.dotted != "" || len(p.components) == 0 {
+		return "", false
+	}
+	return p.components[0].KeyName()
+}
+
 // Parent returns the pointer without its last component. A pointer of
 // one component has none.
 func (p Pointer) Parent() (Pointer, bool) {
@@ -262,17 +271,29 @@ func (p Pointer) Append(components ...Component) Pointer {
 	return Pointer{components: append(slices.Clone(p.components), components...), dotted: p.dotted}
 }
 
-// String renders the pointer as its JSON array, or a pending pointer as
-// its quoted dotted string.
+// String renders the pointer as an array, such as ["address","locality"],
+// or a pending pointer as its quoted dotted string.
 func (p Pointer) String() string {
 	if p.dotted != "" {
-		return fmt.Sprintf("%q", p.dotted)
+		return strconv.Quote(p.dotted)
 	}
-	text, err := json.Marshal(p.values())
-	if err != nil {
-		return fmt.Sprintf("%v", p.values())
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, c := range p.components {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		switch c.kind {
+		case keyKind:
+			b.WriteString(strconv.Quote(c.key))
+		case allKind:
+			b.WriteString("null")
+		case indexKind:
+			b.WriteString(strconv.FormatUint(uint64(c.index), 10))
+		}
 	}
-	return string(text)
+	b.WriteByte(']')
+	return b.String()
 }
 
 // values is the pointer as JSON values: string, nil or uint.

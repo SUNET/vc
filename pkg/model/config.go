@@ -3752,11 +3752,7 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, 
 // without a path, or one that starts with null or an index, names nothing.
 func addVCTMClaimNames(names map[string]bool, vctm *sdjwtvc.VCTM) {
 	for _, claim := range vctm.Claims {
-		components, err := claim.Path.Components()
-		if err != nil {
-			continue
-		}
-		if name, ok := components[0].KeyName(); ok {
+		if name, ok := claim.Path.FirstKey(); ok {
 			names[name] = true
 		}
 	}

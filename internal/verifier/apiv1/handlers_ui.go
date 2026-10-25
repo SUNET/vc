@@ -1070,11 +1070,7 @@ func vctmLeafClaims(meta *model.CredentialMetadata) []claimpath.Pointer {
 func requestableClaims(vctm *sdjwtvc.VCTM) []claimpath.Pointer {
 	var paths []claimpath.Pointer
 	for _, vc := range vctm.Claims {
-		components, err := vc.Path.Components()
-		if err != nil {
-			continue
-		}
-		if name, ok := components[0].KeyName(); ok && jwtRegisteredClaim(name) {
+		if name, ok := vc.Path.FirstKey(); ok && jwtRegisteredClaim(name) {
 			continue
 		}
 		paths = append(paths, vc.Path)
@@ -1108,12 +1104,12 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 func vctmChildPaths(vctm *sdjwtvc.VCTM) map[string][]claimpath.Pointer {
 	children := map[string][]claimpath.Pointer{}
 	for _, vc := range vctm.Claims {
-		components, err := vc.Path.Components()
-		if err != nil || len(components) < 2 || components[len(components)-1].IsAll() {
+		last, ok := vc.Path.Last()
+		if !ok || vc.Path.Len() < 2 || last.IsAll() {
 			continue
 		}
-		if _, ok := components[0].KeyName(); ok {
-			parent := claimpath.New(components[0]).String()
+		if key, ok := vc.Path.FirstKey(); ok {
+			parent := claimpath.Keys(key).String()
 			children[parent] = append(children[parent], vc.Path)
 		}
 	}

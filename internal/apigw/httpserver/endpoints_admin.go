@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -133,15 +134,9 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 	if auth := session.Get(adminSessionKey); auth == true {
 		subject, _ := session.Get("admin_subject").(string)
 
-		var allScopes []string
-		scopeTemplates := map[string]any{}
-		if s.cfg.Common != nil {
-			for scope, cm := range s.cfg.Common.CredentialMetadata {
-				allScopes = append(allScopes, scope)
-				if cm != nil && cm.VCTM != nil {
-					scopeTemplates[scope] = buildClaimTemplate(cm.VCTM.Claims)
-				}
-			}
+		allScopes, scopeTemplates, err := s.scopeClaimTemplates()
+		if err != nil {
+			return nil, err
 		}
 
 		// Resolve allowed resources from SPOCP rules.
@@ -223,17 +218,39 @@ func hasIdentityMappingScope(pairs []httphelpers.ResourcePair) bool {
 	return false
 }
 
+// scopeClaimTemplates returns every credential scope, and the claim
+// template of each scope with a VCTM.
+func (s *Service) scopeClaimTemplates() ([]string, map[string]any, error) {
+	var scopes []string
+	templates := map[string]any{}
+	if s.cfg.Common == nil {
+		return scopes, templates, nil
+	}
+	for scope, cm := range s.cfg.Common.CredentialMetadata {
+		scopes = append(scopes, scope)
+		if cm == nil || cm.VCTM == nil {
+			continue
+		}
+		template, err := buildClaimTemplate(cm.VCTM.Claims)
+		if err != nil {
+			return nil, nil, fmt.Errorf("scope %s: %w", scope, err)
+		}
+		templates[scope] = template
+	}
+	return scopes, templates, nil
+}
+
 // buildClaimTemplate creates a nested map from VCTM claims with empty string values
-func buildClaimTemplate(claims []sdjwtvc.Claim) map[string]any {
+func buildClaimTemplate(claims []sdjwtvc.Claim) (map[string]any, error) {
 	result := map[string]any{}
 	for _, claim := range claims {
 		components, err := claim.Path.Components()
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("VCTM claim %s: %w", claim.Path, err)
 		}
 		addTemplateClaim(result, components)
 	}
-	return result
+	return result, nil
 }
 
 // addTemplateClaim adds the keys of one claim path to the template: an

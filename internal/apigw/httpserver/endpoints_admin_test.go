@@ -459,7 +459,6 @@ func TestAdminStatus_ScopeTemplates_NestedPaths(t *testing.T) {
 							{Path: claimpath.Keys(firstName)},
 							{Path: claimpath.Keys(address, street)},
 							{Path: claimpath.Keys(address, city)},
-							{Path: claimpath.Pointer{}},            // empty path — should be skipped
 							{Path: claimpath.New(claimpath.All())}, // nil element — should be skipped
 						},
 					},

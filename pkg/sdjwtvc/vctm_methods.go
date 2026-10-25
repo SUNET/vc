@@ -179,7 +179,7 @@ func (v *VCTM) displays(jp string) bool {
 // presentParent adds a parent claim with its displayed children, keyed by
 // its first path element.
 func (v *VCTM) presentParent(result map[string]any, c Claim, jp string, data map[string]any) {
-	key, ok := firstKey(c.Path)
+	key, ok := c.Path.FirstKey()
 	if !ok {
 		return // no usable key for parent node
 	}
@@ -236,7 +236,7 @@ func (v *VCTM) presentChildren(parentJP string, data map[string]any) (map[string
 // schema ({label,value}).
 func presentLeaf(result map[string]any, c Claim, data map[string]any) {
 	value := walkPath(data, c.Path)
-	key, ok := firstKey(c.Path)
+	key, ok := c.Path.FirstKey()
 	if value == nil || !ok {
 		return
 	}
@@ -247,15 +247,6 @@ func presentLeaf(result map[string]any, c Claim, data map[string]any) {
 		"label": c.Display[0].Label,
 		"value": value,
 	}
-}
-
-// firstKey returns the key a claim path starts with.
-func firstKey(path claimpath.Pointer) (string, bool) {
-	components, err := path.Components()
-	if err != nil {
-		return "", false
-	}
-	return components[0].KeyName()
 }
 
 // SVGValues resolves claims that have an svg_id against document data and
