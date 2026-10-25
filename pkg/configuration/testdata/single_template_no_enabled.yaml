@@ -14,4 +14,4 @@ dcql:
       claims:
         - path: ["name"]
 claim_mappings:
-  name: "name"
+  - {path: [name], claim: name}

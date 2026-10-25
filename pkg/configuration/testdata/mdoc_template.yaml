@@ -17,8 +17,8 @@ templates:
             - path: ["org.iso.18013.5.1", "family_name"]
             - path: ["org.iso.18013.5.1", "given_name"]
     claim_mappings:
-      family_name: "family_name"
-      given_name: "given_name"
+      - {path: [org.iso.18013.5.1, family_name], claim: family_name}
+      - {path: [org.iso.18013.5.1, given_name], claim: given_name}
     enabled: true
 
 default_template: "mdoc_mdl"

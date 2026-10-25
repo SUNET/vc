@@ -20,8 +20,8 @@ templates:
             - path: ["given_name"]
             - path: ["family_name"]
     claim_mappings:
-      given_name: "given_name"
-      family_name: "family_name"
+      - {path: [given_name], claim: given_name}
+      - {path: [family_name], claim: family_name}
     enabled: true
 
   - id: "basic_ehic"
@@ -40,7 +40,7 @@ templates:
           claims:
             - path: ["card_number"]
     claim_mappings:
-      card_number: "ehic_number"
+      - {path: [card_number], claim: ehic_number}
     enabled: true
 
   # Standard OIDC scope template - used to test scope prioritization
@@ -61,7 +61,7 @@ templates:
           claims:
             - path: ["sub"]
     claim_mappings:
-      sub: "subject"
+      - {path: [sub], claim: subject}
     enabled: true
 
 default_template: "basic_pid"

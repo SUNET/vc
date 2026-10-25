@@ -29,9 +29,9 @@ dcql:
 
 # Map VP claims to OIDC UserInfo/IDToken claims
 claim_mappings:
-  given_name: "given_name"
-  family_name: "family_name"
-  birthdate: "birthdate"
-  "place_of_birth.country": "birth_country"
+  - {path: [given_name], claim: given_name}
+  - {path: [family_name], claim: family_name}
+  - {path: [birthdate], claim: birthdate}
+  - {path: [place_of_birth, country], claim: birth_country}
 
 enabled: true

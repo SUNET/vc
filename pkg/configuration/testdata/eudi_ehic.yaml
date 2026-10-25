@@ -29,13 +29,13 @@ dcql:
         - path: ["expiry_date"]
 
 claim_mappings:
-  given_name: "given_name"
-  family_name: "family_name"
-  birthdate: "birthdate"
-  personal_identification_number: "health_id"
-  institution_id: "insurer_id"
-  institution_name: "insurer_name"
-  card_number: "ehic_number"
-  expiry_date: "ehic_expiry"
+  - {path: [given_name], claim: given_name}
+  - {path: [family_name], claim: family_name}
+  - {path: [birthdate], claim: birthdate}
+  - {path: [personal_identification_number], claim: health_id}
+  - {path: [institution_id], claim: insurer_id}
+  - {path: [institution_name], claim: insurer_name}
+  - {path: [card_number], claim: ehic_number}
+  - {path: [expiry_date], claim: ehic_expiry}
 
 enabled: true
