@@ -22,21 +22,49 @@ import (
 // (openid-4-verifiable-credential-issuance-auxiliary-data.md in
 // sirosfoundation/nym_auth_rulebook).
 
+// derivationSource is the derivations of the data source an issuance
+// uses, with the claims they read and the shape that holds those claims.
+type derivationSource struct {
+	derivations []primitives.Derivation
+	claims      map[string]any
+	shape       claimpath.Shape
+}
+
 // sourceDerivations returns the derivations of the data source this
 // issuance uses, and the claims they read: the verified presented claims
 // for a presentation source, the document data otherwise.
-func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, document map[string]any) ([]primitives.Derivation, map[string]any) {
-	if authContext.DataSource == string(model.DataSourcePresentation) {
-		accepted := c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[authContext.PresentedScope]
-		return accepted.Derivations, authContext.VerifiedClaims
+func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, document map[string]any) (derivationSource, error) {
+	src := model.SourceScope{Source: model.DataSourceType(authContext.DataSource), Scope: scope}
+	source := derivationSource{claims: document}
+	if src.Source == model.DataSourcePresentation {
+		src.Presented = authContext.PresentedScope
+		source.derivations = c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[src.Presented].Derivations
+		source.claims = authContext.VerifiedClaims
+	} else {
+		source.derivations = c.cfg.APIGW.DataSources.DerivationsForSource(scope, src.Source)
 	}
-	return c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)), document
+	shapes, err := c.cfg.DerivationShapes(src)
+	if err != nil {
+		return derivationSource{}, err
+	}
+	source.shape = shapes.Source
+	return source, nil
+}
+
+// issueAuxiliaryData applies scope's auxiliary_data with the derivations
+// of the data source this issuance uses.
+func (c *Client) issueAuxiliaryData(ctx context.Context, scope string, authContext *cache.AuthorizationContext, document map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
+	source, err := c.sourceDerivations(scope, authContext, document)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.applyAuxiliaryData(ctx, scope, source, documentData, fromWallet)
 }
 
 // applyAuxiliaryData writes the commitments of scope's auxiliary_data into
 // the document data, and returns it re-encoded with the to_wallet entries
 // that carry their openings.
-func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
+func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, source derivationSource, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
 	supported := c.scopeAuxiliaryData(scope)
 	commitments, err := walletCommitments(supported.ToIssuer, fromWallet)
 	if err != nil {
@@ -49,7 +77,7 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	if err != nil {
 		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
-	toWallet, err := deliverOpenings(ctx, doc, supported.ToWallet, derivations, sourceClaims)
+	toWallet, err := deliverOpenings(ctx, doc, supported.ToWallet, source)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scope %q: %w", scope, err)
 	}
@@ -75,14 +103,14 @@ func (c *Client) scopeAuxiliaryData(scope string) openid4vci.AuxiliaryDataSuppor
 
 // deliverOpenings fulfils each to_wallet entry with the source's
 // hash_commitment derivation, and returns the entries with their openings.
-func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []openid4vci.AuxiliaryDataEntry, derivations []primitives.Derivation, sourceClaims map[string]any) ([]openid4vci.AuxiliaryDataEntry, error) {
+func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []openid4vci.AuxiliaryDataEntry, source derivationSource) ([]openid4vci.AuxiliaryDataEntry, error) {
 	delivered := make([]openid4vci.AuxiliaryDataEntry, 0, len(entries))
 	for _, entry := range entries {
-		hc := primitives.HashCommitmentFor(derivations, entry.Path)
+		hc := primitives.HashCommitmentFor(source.derivations, entry.Path)
 		if hc == nil {
 			return nil, fmt.Errorf("no hash_commitment derivation fulfils to_wallet path %s", entry.Path)
 		}
-		opening, err := hc.NewOpening(sourceClaims)
+		opening, err := hc.NewOpening(source.claims, source.shape)
 		if err != nil {
 			return nil, fmt.Errorf("to_wallet path %s: %w", entry.Path, err)
 		}

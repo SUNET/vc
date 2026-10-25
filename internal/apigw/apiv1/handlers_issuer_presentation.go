@@ -34,20 +34,19 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	// filter below drops anything the target credential does not declare.
 	doc := credential.CloneNestedClaims(authCtx.VerifiedClaims)
 
-	derived, err := credential.ApplyDerivations(accepted.Derivations, authCtx.VerifiedClaims, now)
+	shapes, err := c.cfg.DerivationShapes(model.SourceScope{Source: model.DataSourcePresentation, Scope: scope, Presented: authCtx.PresentedScope})
+	if err != nil {
+		return nil, err
+	}
+	derived, err := credential.ApplyDerivations(accepted.Derivations, authCtx.VerifiedClaims, now, shapes)
 	if err != nil {
 		return nil, err
 	}
 	credential.MergeNestedClaims(doc, derived)
 
-	defaults, err := pScope.ResolveDefaults(now)
-	if err != nil {
-		return nil, err
-	}
-	// Presentation Defaults are documented as claim paths (dot-notation), so
-	// use MergeDefaults to place e.g. "identity.country" under the nested
-	// identity object rather than as a literal top-level key.
-	if err := credential.MergeDefaults(doc, defaults); err != nil {
+	// A default is a claim of the issued document: ["identity", "country"]
+	// goes under the nested identity object.
+	if err := pScope.MergeDefaults(doc, now, shapes.Issued); err != nil {
 		return nil, err
 	}
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
@@ -131,14 +132,12 @@ func TestLoadTemplateFile_InvalidYAML(t *testing.T) {
 
 func newTestTemplate() *PresentationRequestTemplate {
 	return &PresentationRequestTemplate{
-		ID:         "test_id",
-		Name:       "Test",
-		OIDCScopes: []string{"scope1", "scope2"},
-		DCQLQuery:  &openid4vp.DCQL{},
-		ClaimMappings: map[string]string{
-			"a": "b",
-		},
-		Enabled: boolPtr(true),
+		ID:            "test_id",
+		Name:          "Test",
+		OIDCScopes:    []string{"scope1", "scope2"},
+		DCQLQuery:     &openid4vp.DCQL{},
+		ClaimMappings: openid4vp.ClaimMappings{Mappings: []openid4vp.ClaimMapping{{Path: claimpath.Keys("a"), Claim: "b"}}},
+		Enabled:       boolPtr(true),
 	}
 }
 
@@ -167,8 +166,8 @@ func TestGetDCQLQuery(t *testing.T) {
 func TestGetClaimMappings(t *testing.T) {
 	tmpl := newTestTemplate()
 	m := tmpl.GetClaimMappings()
-	if m["a"] != "b" {
-		t.Errorf("GetClaimMappings() = %v, want map[a:b]", m)
+	if len(m.Mappings) != 1 || m.Mappings[0].Claim != "b" {
+		t.Errorf("GetClaimMappings() = %v, want [a]: b", m)
 	}
 }
 
@@ -177,9 +176,9 @@ func TestGetClaimMappings(t *testing.T) {
 func newTestConfig() *PresentationRequestConfig {
 	return &PresentationRequestConfig{
 		Templates: []*PresentationRequestTemplate{
-			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: boolPtr(true), ClaimMappings: map[string]string{"a": "b"}},
-			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: boolPtr(true), ClaimMappings: map[string]string{"c": "d"}},
-			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: boolPtr(false), ClaimMappings: map[string]string{}},
+			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: boolPtr(true), ClaimMappings: openid4vp.ClaimMappings{Mappings: []openid4vp.ClaimMapping{{Path: claimpath.Keys("a"), Claim: "b"}}}},
+			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: boolPtr(true), ClaimMappings: openid4vp.ClaimMappings{Mappings: []openid4vp.ClaimMapping{{Path: claimpath.Keys("c"), Claim: "d"}}}},
+			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: boolPtr(false), ClaimMappings: openid4vp.ClaimMappings{}},
 		},
 		DefaultTemplate: "pid",
 	}

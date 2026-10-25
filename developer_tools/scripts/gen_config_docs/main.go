@@ -422,6 +422,9 @@ func parseStructTag(raw string) TagInfo {
 
 // ---- Display helpers ----
 
+// claimsPathPointer is the Go type of a claims path pointer field.
+const claimsPathPointer = "claimpath.Pointer"
+
 func (r *TypeRegistry) displayType(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -459,26 +462,41 @@ func (r *TypeRegistry) displayType(expr ast.Expr) string {
 	case *ast.StarExpr:
 		return r.displayType(t.X)
 	case *ast.ArrayType:
-		inner := typeExprStr(t.Elt)
-		if inner == "string" {
-			return "`[]string`"
-		}
-		if inner == "int" {
-			return "`[]int`"
-		}
-		return "`array`"
+		return displayArrayType(t)
 	case *ast.MapType:
 		return "`object`"
 	case *ast.SelectorExpr:
-		if t.Sel.Name == "Duration" {
-			return "`duration`"
-		}
-		return "`object`"
+		return displaySelectorType(t)
 	case *ast.StructType:
 		return "`object`"
 	default:
 		return "`string`"
 	}
+}
+
+// displayArrayType returns the display type of a slice field.
+func displayArrayType(t *ast.ArrayType) string {
+	switch typeExprStr(t.Elt) {
+	case "string":
+		return "`[]string`"
+	case claimsPathPointer:
+		return "`[]claims path pointer`"
+	case "int":
+		return "`[]int`"
+	}
+	return "`array`"
+}
+
+// displaySelectorType returns the display type of a field of a type from
+// another package.
+func displaySelectorType(t *ast.SelectorExpr) string {
+	switch {
+	case t.Sel.Name == "Duration":
+		return "`duration`"
+	case typeExprStr(t) == claimsPathPointer:
+		return "`claims path pointer`"
+	}
+	return "`object`"
 }
 
 func determineRequired(tag TagInfo) string {
@@ -1351,28 +1369,42 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 			}
 		}
 
-		// Slice of structs
+		// Slice of structs, or a named slice type of them
 		if !expanded {
-			if at, ok := f.TypeExpr.(*ast.ArrayType); ok {
-				elemName := resolveTypeName(at.Elt)
-				if elemName != "" {
-					if elemDef := reg.LookupInPkg(elemName, def.PkgName); elemDef != nil {
-						qName := elemDef.PkgName + "." + elemDef.Name
-						if !documented[qName] {
-							documented[qName] = true
-							sub := buildStructSubSection(reg, elemDef, childPath+"[]")
-							sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
-							*subs = append(*subs, sub)
-							expandChildren(reg, elemDef, childPath+"[]", subs)
-						} else {
-							recordAdditionalPath(elemDef, childPath+"[]")
-							recordChildPaths(reg, elemDef, childPath+"[]")
-						}
-					}
-				}
-			}
+			expandSliceEntries(reg, def, f, sliceElementName(reg, f.TypeExpr), childPath, subs)
 		}
 	}
+}
+
+// sliceElementName returns the element type of a slice field, written as a
+// slice or as a named slice type.
+func sliceElementName(reg *TypeRegistry, expr ast.Expr) string {
+	if at, ok := expr.(*ast.ArrayType); ok {
+		return resolveTypeName(at.Elt)
+	}
+	return reg.sliceAliases[resolveTypeName(expr)]
+}
+
+// expandSliceEntries documents the struct entries of a slice field.
+func expandSliceEntries(reg *TypeRegistry, def *StructDef, f *FieldDef, elemName, childPath string, subs *[]*SubSection) {
+	if elemName == "" {
+		return
+	}
+	elemDef := reg.LookupInPkg(elemName, def.PkgName)
+	if elemDef == nil {
+		return
+	}
+	qName := elemDef.PkgName + "." + elemDef.Name
+	if documented[qName] {
+		recordAdditionalPath(elemDef, childPath+"[]")
+		recordChildPaths(reg, elemDef, childPath+"[]")
+		return
+	}
+	documented[qName] = true
+	sub := buildStructSubSection(reg, elemDef, childPath+"[]")
+	sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
+	*subs = append(*subs, sub)
+	expandChildren(reg, elemDef, childPath+"[]", subs)
 }
 
 func recordAdditionalPath(def *StructDef, path string) {

@@ -57,8 +57,12 @@ apigw:
 	cfg, err := loadConfig(configPath)
 	require.NoError(t, err)
 	issued := cfg.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"].Derivations
-	opening, err := primitives.HashCommitmentFor(issued, claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc")).
-		NewOpening(map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-100"})
+	hc := primitives.HashCommitmentFor(issued, claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc"))
+	// The issuer reads the dotted inputs as claims of the SD-JWT PID.
+	for i := range hc.Opening.HKDF.Inputs {
+		require.NoError(t, claimpath.Nested().ResolveOne(&hc.Opening.HKDF.Inputs[i]))
+	}
+	opening, err := hc.NewOpening(map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-100"}, claimpath.Nested())
 	require.NoError(t, err)
 	commitment, err := openid4vci.HashCommitment(openid4vci.HashCommitmentAlgSHA256, opening)
 	require.NoError(t, err)

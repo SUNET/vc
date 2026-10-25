@@ -285,15 +285,15 @@ credential configuration.
 
 Type are those of hash_commitment.
 
-| Field        | Type       | Description                                                                                                           | Example                                   | Default | Required |
-| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
-| `type`       | `string`   | Auxiliary Data Type.                                                                                                  | `"hash_commitment"`                       | -       | No       |
-| `alg`        | `string`   | Hash function of a hash_commitment.                                                                                   | `"sha-256"`                               | -       | No       |
-| `path`       | `[]string` | Claims path pointer of the claim that holds the commitment.                                                           | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | No       |
-| `opening`    | `string`   | Base64url secret, in an entry the Credential Issuer sends. It is a Secret Value.                                      | -                                         | -       | No       |
-| `commitment` | `string`   | Base64url commitment, in an entry the Wallet sends.                                                                   | -                                         | -       | No       |
-| `required`   | `bool`     | Required, in a to_issuer entry of metadata, means the Wallet must send it.                                            | -                                         | -       | No       |
-| `encoding`   | `string`   | How the claim at Path represents the commitment, in metadata: base64url, base64 or hex text, or the bytes when empty. | `"base64url"`                             | -       | No       |
+| Field        | Type                  | Description                                                                                                           | Example                                   | Default | Required |
+| ------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `type`       | `string`              | Auxiliary Data Type.                                                                                                  | `"hash_commitment"`                       | -       | No       |
+| `alg`        | `string`              | Hash function of a hash_commitment.                                                                                   | `"sha-256"`                               | -       | No       |
+| `path`       | `claims path pointer` | Claims path pointer of the claim that holds the commitment.                                                           | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | No       |
+| `opening`    | `string`              | Base64url secret, in an entry the Credential Issuer sends. It is a Secret Value.                                      | -                                         | -       | No       |
+| `commitment` | `string`              | Base64url commitment, in an entry the Wallet sends.                                                                   | -                                         | -       | No       |
+| `required`   | `bool`                | Required, in a to_issuer entry of metadata, means the Wallet must send it.                                            | -                                         | -       | No       |
+| `encoding`   | `string`              | How the claim at Path represents the commitment, in metadata: base64url, base64 or hex text, or the bytes when empty. | `"base64url"`                             | -       | No       |
 
 ### `disclosure_policy`
 
@@ -500,11 +500,33 @@ Each key under a data source is a credential type.
 
 Each entry represents one acceptable credential type the wallet can present.
 
-| Field                 | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Example                                 | Default | Required |
-| --------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
-| `auth_claims`         | `[]string` | The identity claims to extract from this credential type.                                                                                                                                                                                                                                                                                                                                                                                                                                      | `[given_name, family_name, birth_date]` | -       | Yes      |
-| `identity_attributes` | `object`   | IdentityAttributes renames an auth claim to the identity-mapping attribute it is matched as (given_name, family_name, birth_date or authentic_source_person_id). Needed when the presented credential spells the attribute differently - an SD-JWT PID's "birthdate", an mdoc claim outside org.iso.18013.5.1 such as "eu.europa.ec.eudi.pid.1.given_name", or a Photo ID's "org.iso.23220.1.given_name_unicode". An auth claim without an entry is matched under its own name, as before.     | -                                       | -       | No       |
-| `document_claims`     | `object`   | DocumentClaims copies claims of the verified presented credential into the issued document: presented claim path -> top-level claim of the issued credential. The copied value overrides the datastore document's own. A full-date target (MDDL value_type full-date) is normalised to "YYYY-MM-DD" whatever the source shape (SD-JWT string, mdoc CBOR tag 1004/0, date-time). Every source claim is added to the DCQL request, and one that is missing from the presentation fails issuance. | -                                       | -       | No       |
+| Field                 | Type                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Example                                       | Default | Required |
+| --------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ------- | -------- |
+| `auth_claims`         | `[]claims path pointer` | The identity claims to extract from this credential type, each a claims path pointer into the presented credential. A dotted string is read as a claim of the presented credential.                                                                                                                                                                                                                                                                                                                                                                                                | `[[given_name], [family_name], [birth_date]]` | -       | Yes      |
+| `identity_attributes` | `array`                 | IdentityAttributes renames an auth claim to the identity-mapping attribute it is matched as (given_name, family_name, birth_date or authentic_source_person_id). Needed when the presented credential names the attribute differently - an SD-JWT PID's "birthdate", or a Photo ID's ["org.iso.23220.1", "given_name_unicode"]. An auth claim without an entry is matched under the key its path ends in. The mapping form {auth claim: attribute} is read too.                                                                                                                    | -                                             | -       | No       |
+| `document_claims`     | `array`                 | DocumentClaims copies claims of the verified presented credential into the issued document: from a claim of the presented credential to a top-level claim of the issued credential. The copied value overrides the datastore document's own. A full-date target (MDDL value_type full-date) is normalised to "YYYY-MM-DD" whatever the source shape (SD-JWT string, mdoc CBOR tag 1004/0, date-time). Every source claim is added to the DCQL request, and one that is missing from the presentation fails issuance. The mapping form {presented claim: issued claim} is read too. | -                                             | -       | No       |
+
+### `identity_attributes` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.auth_scopes.<key>.identity_attributes[]`
+
+matched as.
+
+| Field       | Type                  | Description                                                                                    | Example       | Default | Required |
+| ----------- | --------------------- | ---------------------------------------------------------------------------------------------- | ------------- | ------- | -------- |
+| `path`      | `claims path pointer` | Auth claim.                                                                                    | `[birthdate]` | -       | Yes      |
+| `attribute` | `string`              | Identity-mapping attribute: given_name, family_name, birth_date or authentic_source_person_id. | `birth_date`  | -       | Yes      |
+
+### `document_claims` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.auth_scopes.<key>.document_claims[]`
+
+document.
+
+| Field  | Type                  | Description                               | Example                                      | Default | Required |
+| ------ | --------------------- | ----------------------------------------- | -------------------------------------------- | ------- | -------- |
+| `from` | `claims path pointer` | Claim of the presented credential.        | `[birthdate]`                                | -       | Yes      |
+| `to`   | `claims path pointer` | Top-level claim of the issued credential. | `[eu.europa.ec.eudi.nym_auth.1, birth_date]` | -       | Yes      |
 
 ### `oidc_request_params`
 
@@ -609,7 +631,9 @@ Ordered slices of QueryDimension ensure deterministic query construction.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[]`
 
-Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
+Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: [email] }`). The subsections below catalog the primitives and their parameters.
+
+Every claim a primitive reads or writes is a claims path pointer (OpenID4VP 1.0 section 7). An output is a claim of the issued credential's document. An input is a claim of the source data - the presented credential for a presentation source, the document otherwise - and a claim of the issued document when an earlier derivation of the list writes it or a claim above it. A dotted string is read the same way: an mdoc output names the element its MDDL declares, or a document key it does not declare.
 
 | Field                            | Type     | Description                                                                                                                                                                                                                                                                             | Example | Default | Required |
 | -------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -633,10 +657,10 @@ Emits two boolean claims per threshold: age_over_N (completed years at
 `now`) and over_N_this_year (reaches N at some point in `now`'s calendar
 year, i.e. year(now) - year(birthdate) >= N).
 
-| Field        | Type     | Description                                                                                                          | Example                | Default | Required |
-| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
-| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                                                 | `birthdate`            | -       | Yes      |
-| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
+| Field        | Type                  | Description                                                                                                          | Example                | Default | Required |
+| ------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `claims path pointer` | Birthdate claim (value must be ISO YYYY-MM-DD).                                                                      | `["birthdate"]`        | -       | Yes      |
+| `thresholds` | `[]int`               | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
 
 ### `lowercase`
 
@@ -644,25 +668,25 @@ year, i.e. year(now) - year(birthdate) >= N).
 
 Scalar strings and []string are handled; other types are an error.
 
-| Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
-| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `input` | `string` | Source claim name. Supports dot-notation claim paths (e.g. "identity.email") so this primitive can target the same nested claims that AttributeMapper materialises. | `email` | -       | Yes      |
+| Field   | Type                  | Description   | Example     | Default | Required |
+| ------- | --------------------- | ------------- | ----------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim. | `["email"]` | -       | Yes      |
 
 ### `uppercase`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].uppercase`, `<scope>.derivations[].uppercase`
 
-| Field   | Type     | Description | Example   | Default | Required |
-| ------- | -------- | ----------- | --------- | ------- | -------- |
-| `input` | `string` | Input       | `country` | -       | Yes      |
+| Field   | Type                  | Description | Example       | Default | Required |
+| ------- | --------------------- | ----------- | ------------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["country"]` | -       | Yes      |
 
 ### `trim`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].trim`, `<scope>.derivations[].trim`
 
-| Field   | Type     | Description | Example | Default | Required |
-| ------- | -------- | ----------- | ------- | ------- | -------- |
-| `input` | `string` | Input       | `name`  | -       | Yes      |
+| Field   | Type                  | Description | Example    | Default | Required |
+| ------- | --------------------- | ----------- | ---------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["name"]` | -       | Yes      |
 
 ### `country_alpha2`
 
@@ -670,17 +694,17 @@ Scalar strings and []string are handled; other types are an error.
 
 Unknown inputs pass through unchanged; applied element-wise on []string.
 
-| Field   | Type     | Description | Example         | Default | Required |
-| ------- | -------- | ----------- | --------------- | ------- | -------- |
-| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+| Field   | Type                  | Description | Example             | Default | Required |
+| ------- | --------------------- | ----------- | ------------------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["nationalities"]` | -       | Yes      |
 
 ### `country_alpha3`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].country_alpha3`, `<scope>.derivations[].country_alpha3`
 
-| Field   | Type     | Description | Example         | Default | Required |
-| ------- | -------- | ----------- | --------------- | ------- | -------- |
-| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+| Field   | Type                  | Description | Example             | Default | Required |
+| ------- | --------------------- | ----------- | ------------------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["nationalities"]` | -       | Yes      |
 
 ### `yyyymmdd_to_iso`
 
@@ -688,9 +712,9 @@ Unknown inputs pass through unchanged; applied element-wise on []string.
 
 Impossible calendar dates surface as a hard error.
 
-| Field   | Type     | Description                                              | Example     | Default | Required |
-| ------- | -------- | -------------------------------------------------------- | ----------- | ------- | -------- |
-| `input` | `string` | Source claim name (must be a non-empty YYYYMMDD string). | `birthdate` | -       | Yes      |
+| Field   | Type                  | Description                                         | Example         | Default | Required |
+| ------- | --------------------- | --------------------------------------------------- | --------------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim (must be a non-empty YYYYMMDD string). | `["birthdate"]` | -       | Yes      |
 
 ### `swamid_highest_assurance_level`
 
@@ -700,9 +724,9 @@ swamid_highest_assurance_level primitive. Reduces a multi-valued
 eduPersonAssurance claim to the strongest recognised SWAMID URI; hard
 errors if the input is present but no SWAMID URI is recognised.
 
-| Field   | Type     | Description                               | Example           | Default | Required |
-| ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
-| `input` | `string` | Source claim (string or list of strings). | `assurance_level` | -       | Yes      |
+| Field   | Type                  | Description                               | Example               | Default | Required |
+| ------- | --------------------- | ----------------------------------------- | --------------------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim (string or list of strings). | `["assurance_level"]` | -       | Yes      |
 
 ### `random`
 
@@ -740,29 +764,29 @@ base64url take theirs from crypto/rand. That is the same basis every other
 identifier in this system uses, and it is a statistical claim rather than
 an enforced one.
 
-| Field       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                     | Example       | Default | Required |
-| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------- | -------- |
-| `output`    | `string` | Target claim name. Supports dot-notation claim paths (e.g. "identity.document_id") so this primitive can target the same nested claims that AttributeMapper materialises. There is no Input: this primitive reads nothing.                                                                                                                                                                      | `document_id` | -       | Yes      |
-| `format`    | `string` | Format selects the shape of the value: "uuid" (the default), "hex" or "base64url".                                                                                                                                                                                                                                                                                                              | `uuid`        | -       | No       |
-| `bytes`     | `int`    | How many random bytes back a "hex" or "base64url" value, between 8 and 64. Ignored for "uuid", whose length the format fixes. Defaults to 16.                                                                                                                                                                                                                                                   | `16`          | -       | No       |
-| `overwrite` | `bool`   | Overwrite replaces a value the source data already supplied. False by default, and deliberately: this primitive exists to fill a claim authentication could not provide, and silently replacing a real identifier with a random one is a worse failure than leaving the derivation with nothing to do. Set it only where the claim is meant to be random every time regardless of what arrived. | -             | -       | No       |
+| Field       | Type                  | Description                                                                                                                                                                                                                                                                                                                                                                                     | Example           | Default | Required |
+| ----------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ------- | -------- |
+| `output`    | `claims path pointer` | Target claim. There is no Input: this primitive reads nothing.                                                                                                                                                                                                                                                                                                                                  | `["document_id"]` | -       | Yes      |
+| `format`    | `string`              | Format selects the shape of the value: "uuid" (the default), "hex" or "base64url".                                                                                                                                                                                                                                                                                                              | `uuid`            | -       | No       |
+| `bytes`     | `int`                 | How many random bytes back a "hex" or "base64url" value, between 8 and 64. Ignored for "uuid", whose length the format fixes. Defaults to 16.                                                                                                                                                                                                                                                   | `16`              | -       | No       |
+| `overwrite` | `bool`                | Overwrite replaces a value the source data already supplied. False by default, and deliberately: this primitive exists to fill a claim authentication could not provide, and silently replacing a real identifier with a random one is a worse failure than leaving the derivation with nothing to do. Set it only where the claim is meant to be random every time regardless of what arrived. | -                 | -       | No       |
 
 ### `copy`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].copy`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].copy`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].copy`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].copy`, `<scope>.derivations[].copy`
 
-| Field   | Type     | Description                                                                                                             | Example     | Default | Required |
-| ------- | -------- | ----------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
-| `input` | `string` | Source claim path. Supports dot-notation claim paths and literal dotted keys, such as a namespace-qualified mdoc claim. | `birthdate` | -       | Yes      |
+| Field   | Type                  | Description   | Example         | Default | Required |
+| ------- | --------------------- | ------------- | --------------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim. | `["birthdate"]` | -       | Yes      |
 
 ### `hash_commitment`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment`, `<scope>.derivations[].hash_commitment`
 
-| Field     | Type       | Description                                            | Example                                   | Default | Required |
-| --------- | ---------- | ------------------------------------------------------ | ----------------------------------------- | ------- | -------- |
-| `path`    | `[]string` | Claims path pointer of the to_wallet entry it fulfils. | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
-| `opening` | `object`   | Opening produces the opening.                          | -                                         | -       | Yes      |
+| Field     | Type                  | Description                                            | Example                                   | Default | Required |
+| --------- | --------------------- | ------------------------------------------------------ | ----------------------------------------- | ------- | -------- |
+| `path`    | `claims path pointer` | Claims path pointer of the to_wallet entry it fulfils. | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
+| `opening` | `object`              | Opening produces the opening.                          | -                                         | -       | Yes      |
 
 ### `opening`
 
@@ -781,11 +805,11 @@ is set.
 
 input claims.
 
-| Field         | Type       | Description                                                                                | Example                                                 | Default | Required |
-| ------------- | ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------- | -------- |
-| `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                         | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
-| `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
-| `bytes`       | `int`      | Opening length.                                                                            | `16`                                                    | -       | Yes      |
+| Field         | Type                    | Description                                                                                | Example                                                     | Default | Required |
+| ------------- | ----------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ------- | -------- |
+| `secret_path` | `string`                | File holding the secret, base64url, decoding to at least 32 bytes.                         | `"/pki/nym_auth_seed.key"`                                  | -       | Yes      |
+| `inputs`      | `[]claims path pointer` | Claims of the source data, each a non-empty string. Their order is part of the derivation. | `[["issuing_country"], ["personal_administrative_number"]]` | -       | Yes      |
+| `bytes`       | `int`                   | Opening length.                                                                            | `16`                                                        | -       | Yes      |
 
 ### `random`
 
@@ -824,9 +848,18 @@ The data comes directly from the SAML attributes or OIDC claims.
 | `auth_provider`       | `string` | Auth provider for this credential type (saml or oidc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | -         | -       | Yes      |
 | `oidc_request_params` | `object` | Additional parameters to include in the OIDC authorization request. Used to pass per-request values to the OP - see OIDCRequestParams for where those values come from, and for why they are not a statement about the authentic source. Only meaningful when auth_provider is oidc - there is no authorization request to add parameters to otherwise - and rejected at startup on a scope with any other provider. See validateOIDCOnlyScopeFields.                                                                                                                                                                                          | -         | -       | No       |
 | `issuance_policy`     | `object` | SPOCP rules that must be satisfied by the OIDC claims for credential issuance. If configured, a SPOCP query is built from the returned claims and evaluated against these rules. A query that does not match any rule results in a hard deny. Evaluated in the OIDC callback and nowhere else, so it is rejected at startup on a scope whose auth_provider is not oidc. Accepting it there would be the worst outcome available for a security control: the configuration reads as a gate, validates, starts, and issues every credential through the SAML or pre-authorized path without ever consulting it. See validateOIDCOnlyScopeFields. | -         | -       | No       |
-| `defaults`            | `object` | Claim values injected into the assertion document for credential-level fields the authentication assertion cannot supply (e.g. issuing_authority, issuing_country, date_of_expiry). Merged after attribute_mapping — real attributes always win.                                                                                                                                                                                                                                                                                                                                                                                               | -         | -       | No       |
+| `defaults`            | `array`  | Claim values injected into the assertion document for credential-level fields the authentication assertion cannot supply (e.g. issuing_authority, issuing_country, date_of_expiry). Merged after attribute_mapping — real attributes always win. The mapping form {claim: value} is read too.                                                                                                                                                                                                                                                                                                                                                  | -         | -       | No       |
 | `expiry_duration`     | `string` | ExpiryDuration, if set, computes date_of_expiry at issuance time as now+duration (formatted as ISO YYYY-MM-DD) and overrides any static date_of_expiry in Defaults. Prevents freshly issued credentials from shipping pre-expired when a static date is left un-rotated. Uses Go duration syntax; example: "8760h" for one year.                                                                                                                                                                                                                                                                                                               | `"8760h"` | -       | No       |
 | `derivations`         | `array`  | Generic post-verification steps that compute additional claims from the assertion (see credential.ApplyDerivations).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | -         | -       | No       |
+
+### `defaults` entry
+
+> **Path:** `.apigw.data_sources.assertion.scopes.<credential scope>.defaults[]`, `.apigw.data_sources.presentation.scopes.<credential scope>.defaults[]`
+
+| Field   | Type                  | Description                     | Example             | Default | Required |
+| ------- | --------------------- | ------------------------------- | ------------------- | ------- | -------- |
+| `path`  | `claims path pointer` | Claim of the issued credential. | `[issuing_country]` | -       | Yes      |
+| `value` | `object`              | Claim's value.                  | `SE`                | -       | No       |
 
 ### `external_api`
 
@@ -859,12 +892,12 @@ AttributeConfig is a pure rename + presence step. Any value transformation
 a derivation on the target scope; see the Derivation Primitives catalog
 (pkg/credential/primitives).
 
-| Field      | Type     | Description                                                                                                                                              | Example                 | Default | Required |
-| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
-| `claim`    | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
-| `required` | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
-| `default`  | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
-| `as_array` | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
+| Field      | Type                  | Description                                                                                                                                                                                  | Example                  | Default | Required |
+| ---------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
+| `claim`    | `claims path pointer` | Target claim. A dotted string is read as a claim of the document the mapping writes: split on dots for an auth provider, and as a claim of the scope's credential for an external_api scope. | `[identity, given_name]` | -       | Yes      |
+| `required` | `bool`                | Required indicates if this attribute must be present in the assertion/response                                                                                                               | -                        | `false` | No       |
+| `default`  | `string`              | Optional default value if attribute is missing                                                                                                                                               | -                        | -       | No       |
+| `as_array` | `bool`                | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim).                                     | -                        | -       | No       |
 
 ### `presentation`
 
@@ -884,7 +917,7 @@ another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 | ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------- | -------- |
 | `from`            | `object` | The credentials the wallet may present, keyed by their credential scope (e.g. "eduid"). The wallet presents one of them. The presented credential is verified against the issuer trust chain before its claims are consumed. | -         | -           | Yes      |
 | `auth_provider`   | `string` | Fixed to "openid4vp" for now; kept as a field for symmetry with the other data sources and so future providers can be added without a config-shape change.                                                                   | -         | `openid4vp` | No       |
-| `defaults`        | `object` | Claim values injected into the derived credential document for fields the presented credential does not carry (e.g. issuing_authority, issuing_country).                                                                     | -         | -           | No       |
+| `defaults`        | `array`  | Claim values injected into the derived credential document for fields the presented credential does not carry (e.g. issuing_authority, issuing_country). The mapping form {claim: value} is read too.                        | -         | -           | No       |
 | `expiry_duration` | `string` | ExpiryDuration, if set, computes date_of_expiry at issuance time as now+duration (formatted as ISO YYYY-MM-DD). Same semantics as AssertionScope.ExpiryDuration.                                                             | `"8760h"` | -           | No       |
 
 ### `from` entry
@@ -893,10 +926,19 @@ another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 
 accepts.
 
-| Field             | Type     | Description                                                                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `required_claims` | `object` | A claim path on the presented credential to an allow-list of exact-match values. Empty list = presence-only (any value passes). Populated list = the claim's value must equal one of the listed strings (or, when the claim is an array, at least one array element must match). Every key must be present on the presented credential's verified claims; missing keys fail issuance. | -       | -       | Yes      |
-| `derivations`     | `array`  | Generic post-verification steps that compute additional claims from the presented credential's own claims (see credential.ApplyDerivations).                                                                                                                                                                                                                                          | -       | -       | No       |
+| Field             | Type    | Description                                                                                                                                                                                                                                                                                                      | Example | Default | Required |
+| ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `required_claims` | `array` | The claims of the presented credential that must be present, each with an optional allow-list of exact-match values, in the shape of a DCQL claims query. Every claim must be present on the presented credential's verified claims; a missing one fails issuance. The mapping form {claim: values} is read too. | -       | -       | Yes      |
+| `derivations`     | `array` | Generic post-verification steps that compute additional claims from the presented credential's own claims (see credential.ApplyDerivations).                                                                                                                                                                     | -       | -       | No       |
+
+### `required_claims` entry
+
+> **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.required_claims[]`
+
+| Field    | Type                  | Description                                                                                                                                         | Example                 | Default | Required |
+| -------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
+| `path`   | `claims path pointer` | Claim. A null selects every element of an array, and the claim is present when it selects one.                                                      | `[nationalities, null]` | -       | Yes      |
+| `values` | `[]string`            | Allow-list: empty lets any value pass. Otherwise a selected value must equal one of the listed strings, or, for an array, one of its elements must. | `[SE, NO]`              | -       | No       |
 
 ### `auth_providers`
 
@@ -1909,19 +1951,19 @@ as the human-readable label.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.claims[]`, `.verifier.presets.<preset label>.credentials.<key>.exclude_claims[]`
 
-| Field  | Type       | Description         | Example                                  | Default | Required |
-| ------ | ---------- | ------------------- | ---------------------------------------- | ------- | -------- |
-| `path` | `[]string` | Claim path segments | `["birthdate"], ["address", "locality"]` | -       | Yes      |
+| Field  | Type                  | Description                       | Example                                                           | Default | Required |
+| ------ | --------------------- | --------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
+| `path` | `claims path pointer` | Claims path pointer of the claim. | `["birthdate"], ["address", "locality"], ["nationalities", null]` | -       | Yes      |
 
 ### `validations` entry
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.validations[]`
 
-| Field   | Type       | Description                                     | Example         | Default | Required |
-| ------- | ---------- | ----------------------------------------------- | --------------- | ------- | -------- |
-| `rule`  | `string`   | Validation rule to apply, e.g., "age_over".     | `"age_over"`    | -       | Yes      |
-| `path`  | `[]string` | Claim path to validate, e.g., ["birthdate"].    | `["birthdate"]` | -       | Yes      |
-| `value` | `object`   | Threshold or expected value for the validation. | `18`            | -       | Yes      |
+| Field   | Type                  | Description                                                        | Example         | Default | Required |
+| ------- | --------------------- | ------------------------------------------------------------------ | --------------- | ------- | -------- |
+| `rule`  | `string`              | Validation rule to apply, e.g., "age_over".                        | `"age_over"`    | -       | Yes      |
+| `path`  | `claims path pointer` | Claims path pointer of the claim to validate, e.g., ["birthdate"]. | `["birthdate"]` | -       | Yes      |
+| `value` | `object`              | Threshold or expected value for the validation.                    | `18`            | -       | Yes      |
 
 ### `zk_system_type` entry
 
@@ -2287,7 +2329,9 @@ verifier:
 
 One post-verification claim computation configured on a scope; exactly one field must be set and that field's Apply method runs.
 
-Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
+Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: [email] }`). The subsections below catalog the primitives and their parameters.
+
+Every claim a primitive reads or writes is a claims path pointer (OpenID4VP 1.0 section 7). An output is a claim of the issued credential's document. An input is a claim of the source data - the presented credential for a presentation source, the document otherwise - and a claim of the issued document when an earlier derivation of the list writes it or a claim above it. A dotted string is read the same way: an mdoc output names the element its MDDL declares, or a document key it does not declare.
 
 ### age_over_thresholds
 
@@ -2295,10 +2339,10 @@ Each list entry under a scope's `derivations` field is keyed by primitive name (
 
 AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year).
 
-| Field        | Type     | Description                                                                                                          | Example                | Default | Required |
-| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
-| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                                                 | `birthdate`            | -       | Yes      |
-| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
+| Field        | Type                  | Description                                                                                                          | Example                | Default | Required |
+| ------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `claims path pointer` | Birthdate claim (value must be ISO YYYY-MM-DD).                                                                      | `["birthdate"]`        | -       | Yes      |
+| `thresholds` | `[]int`               | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
 
 ### lowercase
 
@@ -2306,9 +2350,9 @@ AgeOverThresholds emits two boolean claims per configured threshold N from an IS
 
 Lowercase applies strings.ToLower elementwise.
 
-| Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
-| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `input` | `string` | Source claim name. Supports dot-notation claim paths (e.g. "identity.email") so this primitive can target the same nested claims that AttributeMapper materialises. | `email` | -       | Yes      |
+| Field   | Type                  | Description   | Example     | Default | Required |
+| ------- | --------------------- | ------------- | ----------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim. | `["email"]` | -       | Yes      |
 
 ### uppercase
 
@@ -2316,9 +2360,9 @@ Lowercase applies strings.ToLower elementwise.
 
 Uppercase applies strings.ToUpper elementwise.
 
-| Field   | Type     | Description | Example   | Default | Required |
-| ------- | -------- | ----------- | --------- | ------- | -------- |
-| `input` | `string` | Input       | `country` | -       | Yes      |
+| Field   | Type                  | Description | Example       | Default | Required |
+| ------- | --------------------- | ----------- | ------------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["country"]` | -       | Yes      |
 
 ### trim
 
@@ -2326,9 +2370,9 @@ Uppercase applies strings.ToUpper elementwise.
 
 Trim applies strings.TrimSpace elementwise.
 
-| Field   | Type     | Description | Example | Default | Required |
-| ------- | -------- | ----------- | ------- | ------- | -------- |
-| `input` | `string` | Input       | `name`  | -       | Yes      |
+| Field   | Type                  | Description | Example    | Default | Required |
+| ------- | --------------------- | ----------- | ---------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["name"]` | -       | Yes      |
 
 ### country_alpha2
 
@@ -2336,9 +2380,9 @@ Trim applies strings.TrimSpace elementwise.
 
 Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.
 
-| Field   | Type     | Description | Example         | Default | Required |
-| ------- | -------- | ----------- | --------------- | ------- | -------- |
-| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+| Field   | Type                  | Description | Example             | Default | Required |
+| ------- | --------------------- | ----------- | ------------------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["nationalities"]` | -       | Yes      |
 
 ### country_alpha3
 
@@ -2346,9 +2390,9 @@ Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown 
 
 Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.
 
-| Field   | Type     | Description | Example         | Default | Required |
-| ------- | -------- | ----------- | --------------- | ------- | -------- |
-| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+| Field   | Type                  | Description | Example             | Default | Required |
+| ------- | --------------------- | ----------- | ------------------- | ------- | -------- |
+| `input` | `claims path pointer` | Input       | `["nationalities"]` | -       | Yes      |
 
 ### yyyymmdd_to_iso
 
@@ -2356,9 +2400,9 @@ Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown 
 
 YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error.
 
-| Field   | Type     | Description                                              | Example     | Default | Required |
-| ------- | -------- | -------------------------------------------------------- | ----------- | ------- | -------- |
-| `input` | `string` | Source claim name (must be a non-empty YYYYMMDD string). | `birthdate` | -       | Yes      |
+| Field   | Type                  | Description                                         | Example         | Default | Required |
+| ------- | --------------------- | --------------------------------------------------- | --------------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim (must be a non-empty YYYYMMDD string). | `["birthdate"]` | -       | Yes      |
 
 ### swamid_highest_assurance_level
 
@@ -2366,9 +2410,9 @@ YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-d
 
 SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.
 
-| Field   | Type     | Description                               | Example           | Default | Required |
-| ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
-| `input` | `string` | Source claim (string or list of strings). | `assurance_level` | -       | Yes      |
+| Field   | Type                  | Description                               | Example               | Default | Required |
+| ------- | --------------------- | ----------------------------------------- | --------------------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim (string or list of strings). | `["assurance_level"]` | -       | Yes      |
 
 ### random
 
@@ -2376,12 +2420,12 @@ SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to t
 
 Random writes a freshly generated random value to a claim the source data did not supply - a document identifier, typically. The only primitive here that reads nothing and is not a pure function of its input; see RandomArgs for where the value is generated and how long it lives.
 
-| Field       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                     | Example       | Default | Required |
-| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------- | -------- |
-| `output`    | `string` | Target claim name. Supports dot-notation claim paths (e.g. "identity.document_id") so this primitive can target the same nested claims that AttributeMapper materialises. There is no Input: this primitive reads nothing.                                                                                                                                                                      | `document_id` | -       | Yes      |
-| `format`    | `string` | Format selects the shape of the value: "uuid" (the default), "hex" or "base64url".                                                                                                                                                                                                                                                                                                              | `uuid`        | -       | No       |
-| `bytes`     | `int`    | How many random bytes back a "hex" or "base64url" value, between 8 and 64. Ignored for "uuid", whose length the format fixes. Defaults to 16.                                                                                                                                                                                                                                                   | `16`          | -       | No       |
-| `overwrite` | `bool`   | Overwrite replaces a value the source data already supplied. False by default, and deliberately: this primitive exists to fill a claim authentication could not provide, and silently replacing a real identifier with a random one is a worse failure than leaving the derivation with nothing to do. Set it only where the claim is meant to be random every time regardless of what arrived. | -             | -       | No       |
+| Field       | Type                  | Description                                                                                                                                                                                                                                                                                                                                                                                     | Example           | Default | Required |
+| ----------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ------- | -------- |
+| `output`    | `claims path pointer` | Target claim. There is no Input: this primitive reads nothing.                                                                                                                                                                                                                                                                                                                                  | `["document_id"]` | -       | Yes      |
+| `format`    | `string`              | Format selects the shape of the value: "uuid" (the default), "hex" or "base64url".                                                                                                                                                                                                                                                                                                              | `uuid`            | -       | No       |
+| `bytes`     | `int`                 | How many random bytes back a "hex" or "base64url" value, between 8 and 64. Ignored for "uuid", whose length the format fixes. Defaults to 16.                                                                                                                                                                                                                                                   | `16`              | -       | No       |
+| `overwrite` | `bool`                | Overwrite replaces a value the source data already supplied. False by default, and deliberately: this primitive exists to fill a claim authentication could not provide, and silently replacing a real identifier with a random one is a worse failure than leaving the derivation with nothing to do. Set it only where the claim is meant to be random every time regardless of what arrived. | -                 | -       | No       |
 
 ### copy
 
@@ -2389,9 +2433,9 @@ Random writes a freshly generated random value to a claim the source data did no
 
 Copy writes an input claim's value, of any type, under another claim name.
 
-| Field   | Type     | Description                                                                                                             | Example     | Default | Required |
-| ------- | -------- | ----------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
-| `input` | `string` | Source claim path. Supports dot-notation claim paths and literal dotted keys, such as a namespace-qualified mdoc claim. | `birthdate` | -       | Yes      |
+| Field   | Type                  | Description   | Example         | Default | Required |
+| ------- | --------------------- | ------------- | --------------- | ------- | -------- |
+| `input` | `claims path pointer` | Source claim. | `["birthdate"]` | -       | Yes      |
 
 ### hash_commitment
 
@@ -2399,8 +2443,8 @@ Copy writes an input claim's value, of any type, under another claim name.
 
 HashCommitment fulfils a to_wallet hash_commitment entry of the credential's auxiliary_data.
 
-| Field     | Type       | Description                                            | Example                                   | Default | Required |
-| --------- | ---------- | ------------------------------------------------------ | ----------------------------------------- | ------- | -------- |
-| `path`    | `[]string` | Claims path pointer of the to_wallet entry it fulfils. | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
-| `opening` | `object`   | Opening produces the opening.                          | -                                         | -       | Yes      |
+| Field     | Type                  | Description                                            | Example                                   | Default | Required |
+| --------- | --------------------- | ------------------------------------------------------ | ----------------------------------------- | ------- | -------- |
+| `path`    | `claims path pointer` | Claims path pointer of the to_wallet entry it fulfils. | `["eu.europa.ec.eudi.nym_auth.1", "ssc"]` | -       | Yes      |
+| `opening` | `object`              | Opening produces the opening.                          | -                                         | -       | Yes      |
 

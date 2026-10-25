@@ -9,10 +9,10 @@ import (
 
 var pointerType = reflect.TypeFor[Pointer]()
 
-// CheckResolved walks every field a YAML document can set under root, and
-// returns a PendingError for the first pointer still pending. The loader
-// resolves each dotted claim it knows how to read, so a pointer left
-// pending is in a field that takes an array.
+// CheckResolved walks every exported field under root, and returns a
+// PendingError for the first pointer still pending. The loader resolves
+// each dotted claim it knows how to read, so a pointer left pending is in
+// a field that takes an array.
 func CheckResolved(root any) error {
 	w := walker{visited: map[uintptr]bool{}}
 	return w.walk(reflect.ValueOf(root), "")
@@ -101,7 +101,8 @@ func mayHold(t reflect.Type) bool {
 }
 
 // yamlName returns the name YAML gives a field: "" for an inlined one,
-// and false for one YAML does not set.
+// and the lowercase field name for one without a YAML name, such as a field
+// a custom unmarshaler sets. An unexported field is not walked.
 func yamlName(field reflect.StructField) (string, bool) {
 	if !field.IsExported() {
 		return "", false
@@ -109,11 +110,9 @@ func yamlName(field reflect.StructField) (string, bool) {
 	tag := field.Tag.Get("yaml")
 	name, options, _ := strings.Cut(tag, ",")
 	switch {
-	case name == "-":
-		return "", false
 	case slices.Contains(strings.Split(options, ","), "inline"):
 		return "", true
-	case name == "":
+	case name == "" || name == "-":
 		return strings.ToLower(field.Name), true
 	}
 	return name, true

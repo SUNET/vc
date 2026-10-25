@@ -188,12 +188,12 @@ func (c *Client) publishPresentedDocuments(
 	ctx context.Context,
 	sessionID string,
 	documents map[string]*model.CompleteDocument,
-	sourceFormat string,
+	sourceShape claimpath.Shape,
 	credential map[string]any,
 	entry model.AuthScopeEntry,
 	scope, matchedAuthScope string,
 ) error {
-	decorated, err := c.decorateWithPresentedClaims(documents, sourceFormat, credential, entry, scope, matchedAuthScope)
+	decorated, err := c.decorateWithPresentedClaims(documents, sourceShape, credential, entry, scope, matchedAuthScope)
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func (c *Client) publishPresentedDocuments(
 
 func (c *Client) decorateWithPresentedClaims(
 	documents map[string]*model.CompleteDocument,
-	sourceFormat string,
+	sourceShape claimpath.Shape,
 	credential map[string]any,
 	entry model.AuthScopeEntry,
 	scope, matchedAuthScope string,
@@ -211,7 +211,11 @@ func (c *Client) decorateWithPresentedClaims(
 	if len(entry.DocumentClaims) == 0 {
 		return documents, nil
 	}
-	copied, err := presentedDocumentClaims(sourceFormat, credential, entry, c.cfg.GetCredentialMetadata(scope))
+	target := c.cfg.GetCredentialMetadata(scope)
+	if target == nil {
+		return nil, serverFault(fmt.Errorf("scope %q has no credential_metadata to copy presented claims into", scope))
+	}
+	copied, err := presentedDocumentClaims(sourceShape, credential, entry, target)
 	if err != nil {
 		c.log.Error(err, "cannot copy presented claims into the issued document", "matched_auth_scope", matchedAuthScope, "scope", scope)
 		return nil, fmt.Errorf("presented claim copy failed: %w", err)
@@ -671,7 +675,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	// Guarded on DataSource so a scope shared with datastore/assertion still
 	// follows the source Selector chose.
 	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok && authCtx.DataSource == string(model.DataSourcePresentation) {
-		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, matchedAuthScope, credential); err != nil {
+		if err := c.finalisePresentationVerification(ctx, authCtx, scope, pScope, matchedAuthScope, credential); err != nil {
 			return nil, err
 		}
 		return &issuanceAuthOutcome{Scope: scope, PresentationSourced: true}, nil
@@ -687,8 +691,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	if !ok {
 		return nil, serverFault(fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope))
 	}
-	authSourceFormat := c.cfg.GetFormatForScope(matchedAuthScope)
-	identityClaims, err := extractAuthScopeIdentity(authSourceFormat, credential, authScopeEntry)
+	identityClaims, authSourceShape, err := c.authScopeIdentity(matchedAuthScope, credential, authScopeEntry)
 	if err != nil {
 		c.log.Error(err, "required identity claims missing from presented credential", "matched_auth_scope", matchedAuthScope, "scope", scope)
 		return nil, fmt.Errorf("identity extraction failed: %w", err)
@@ -737,7 +740,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	// stored copy of it), and publish the result. Fails closed when a
 	// configured claim is missing.
 	if err := c.publishPresentedDocuments(ctx, authCtx.SessionID, documents,
-		authSourceFormat, credential, authScopeEntry, scope, matchedAuthScope); err != nil {
+		authSourceShape, credential, authScopeEntry, scope, matchedAuthScope); err != nil {
 		return nil, err
 	}
 
@@ -760,24 +763,7 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
 	options := make([][]string, 0, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
-		entry := vpAuth.AuthScopes[authScope]
-		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims)+len(entry.DocumentClaims))
 		format := cfg.GetFormatForScope(authScope)
-		// The claims copied into the issued document have to be disclosed
-		// too, so they are requested alongside the identity claims.
-		requested := slices.Clone(entry.AuthClaims)
-		for _, src := range slices.Sorted(maps.Keys(entry.DocumentClaims)) {
-			if !slices.Contains(requested, src) {
-				requested = append(requested, src)
-			}
-		}
-		for _, claim := range requested {
-			path, err := claimpath.FromKeys(authClaimPathSegments(format, claim))
-			if err != nil {
-				return nil, fmt.Errorf("auth scope %q claim %q: %w", authScope, claim, err)
-			}
-			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{Path: path})
-		}
 		// By format, so an mso_mdoc auth scope is constrained by its doctype
 		// rather than sent out with a vct_values no mdoc credential carries.
 		// An auth scope naming no configured credential resolves to a nil
@@ -812,7 +798,7 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			// presentation that proves nothing about who is presenting is
 			// not an authentication, and this is the flow that decides
 			// whose documents get issued.
-			Claims: scopeClaimQueries,
+			Claims: requestedClaims(vpAuth.AuthScopes[authScope]),
 		})
 		options = append(options, []string{authScope})
 	}
@@ -827,23 +813,20 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 	}, nil
 }
 
-// authClaimPathSegments turns an auth-scope claim into DCQL path segments.
-// For SD-JWT VC a dotted "address.locality" becomes the nested path
-// ["address", "locality"]. For mdoc DCQL requires exactly [namespace,
-// element_identifier] (OpenID4VP 1.0 §6.4.1); a bare element is resolved
-// against the primary ISO 18013-5 namespace and a "<namespace>.<element>"
-// entry is split on the LAST dot so a multi-dot namespace such as
-// "eu.europa.ec.eudi.pid.1" survives as one segment.
-func authClaimPathSegments(format, claim string) []string {
-	switch format {
-	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
-		if idx := strings.LastIndex(claim, "."); idx > 0 && idx < len(claim)-1 {
-			return []string{claim[:idx], claim[idx+1:]}
+// requestedClaims are the claims an auth scope's presentation discloses:
+// the auth claims, and the claims copied into the issued document.
+func requestedClaims(entry model.AuthScopeEntry) []openid4vp.ClaimQuery {
+	queries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims)+len(entry.DocumentClaims))
+	requested := slices.Clone(entry.AuthClaims)
+	for _, claim := range entry.DocumentClaims {
+		if !slices.ContainsFunc(requested, claim.From.Equal) {
+			requested = append(requested, claim.From)
 		}
-		return []string{mdoc.Namespace, claim}
-	default:
-		return strings.Split(claim, ".")
 	}
+	for _, path := range requested {
+		queries = append(queries, openid4vp.ClaimQuery{Path: path})
+	}
+	return queries
 }
 
 // directPostSessionTranscript builds the mdoc SessionTranscript for the

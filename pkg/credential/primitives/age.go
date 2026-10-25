@@ -8,7 +8,11 @@ package primitives
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // AgeOverThresholdsArgs configures the age_over_thresholds primitive.
@@ -16,8 +20,8 @@ import (
 // `now`) and over_N_this_year (reaches N at some point in `now`'s calendar
 // year, i.e. year(now) - year(birthdate) >= N).
 type AgeOverThresholdsArgs struct {
-	// Input is the birthdate claim name (value must be ISO YYYY-MM-DD).
-	Input string `yaml:"input" validate:"required" doc_example:"birthdate"`
+	// Input is the birthdate claim (value must be ISO YYYY-MM-DD).
+	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
 
 	// Thresholds are the ages (in years) to expose. Each N produces
 	// age_over_N and over_N_this_year (booleans). Every entry must be
@@ -26,7 +30,7 @@ type AgeOverThresholdsArgs struct {
 }
 
 // Apply implements Applier.
-func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map[string]any, error) {
+func (a *AgeOverThresholdsArgs) Apply(claims Claims, now time.Time) ([]Write, error) {
 	// Three different situations, and only one of them is the server's.
 	//
 	// A claim that is ABSENT means this derivation names something no
@@ -39,23 +43,50 @@ func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map
 	// so both must reach the caller marked: the empty one through
 	// AgeOverThresholds, which already says so, and the wrong-typed one
 	// here, because it never gets that far.
-	raw, present := claims[a.Input]
+	raw, present, err := claims.Input(a.Input)
+	if err != nil {
+		return nil, err
+	}
 	if !present {
-		return nil, fmt.Errorf("input claim %q is not present on the credential this derivation reads", a.Input)
+		return nil, fmt.Errorf("input claim %s is not present on the credential this derivation reads", a.Input)
 	}
 	bd, ok := raw.(string)
 	if !ok {
-		return nil, fmt.Errorf("%w: input claim %q is %T, not a string", ErrInvalidClaimInput, a.Input, raw)
+		return nil, fmt.Errorf("%w: input claim %s is a %T where a string is expected", ErrInvalidClaimInput, a.Input, raw)
 	}
 	booleans, err := AgeOverThresholds(bd, now, a.Thresholds)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]any, len(booleans))
-	for k, v := range booleans {
-		out[k] = v
+	writes := make([]Write, 0, len(booleans))
+	for _, name := range slices.Sorted(maps.Keys(booleans)) {
+		path, err := claims.Named(name)
+		if err != nil {
+			return nil, err
+		}
+		writes = append(writes, Write{Path: path, Value: booleans[name]})
+	}
+	return writes, nil
+}
+
+// outputs implements ownOutputs: the two claims of each threshold.
+func (a *AgeOverThresholdsArgs) outputs(named func(string) (claimpath.Pointer, error)) ([]claimpath.Pointer, error) {
+	out := make([]claimpath.Pointer, 0, 2*len(a.Thresholds))
+	for _, t := range a.Thresholds {
+		for _, name := range ageClaimNames(t) {
+			path, err := named(name)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, path)
+		}
 	}
 	return out, nil
+}
+
+// ageClaimNames are the claims AgeOverThresholds writes for threshold t.
+func ageClaimNames(t int) [2]string {
+	return [2]string{fmt.Sprintf("age_over_%d", t), fmt.Sprintf("over_%d_this_year", t)}
 }
 
 // ErrInvalidClaimInput marks a derivation that failed because of the
@@ -97,8 +128,9 @@ func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[s
 	}
 	out := make(map[string]bool, 2*len(thresholds))
 	for _, t := range thresholds {
-		out[fmt.Sprintf("age_over_%d", t)] = age >= t
-		out[fmt.Sprintf("over_%d_this_year", t)] = ageThisYear >= t
+		names := ageClaimNames(t)
+		out[names[0]] = age >= t
+		out[names[1]] = ageThisYear >= t
 	}
 	return out, nil
 }

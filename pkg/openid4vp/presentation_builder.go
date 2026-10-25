@@ -368,15 +368,15 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 	return template
 }
 
-// GetClaimMappings is a helper to extract claim mappings from a template
-// Returns nil if the template doesn't implement this method
-func GetClaimMappings(template PresentationRequestTemplate) map[string]string {
+// GetClaimMappings is a helper to extract claim mappings from a template.
+// The mappings are empty when the template doesn't implement this method.
+func GetClaimMappings(template PresentationRequestTemplate) ClaimMappings {
 	if t, ok := template.(interface {
-		GetClaimMappings() map[string]string
+		GetClaimMappings() ClaimMappings
 	}); ok {
 		return t.GetClaimMappings()
 	}
-	return nil
+	return ClaimMappings{}
 }
 
 // ListTemplates returns all templates

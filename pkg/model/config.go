@@ -522,8 +522,11 @@ type AttributeMapping map[string]AttributeConfig
 // a derivation on the target scope; see the Derivation Primitives catalog
 // (pkg/credential/primitives).
 type AttributeConfig struct {
-	// Claim is the target claim name (supports dot-notation for nesting)
-	Claim string `yaml:"claim" validate:"required" doc_example:"\"identity.given_name\""`
+	// Claim is the target claim. A dotted string is read as a claim of
+	// the document the mapping writes: split on dots for an auth
+	// provider, and as a claim of the scope's credential for an
+	// external_api scope.
+	Claim claimpath.Pointer `yaml:"claim" validate:"required" doc_example:"[identity, given_name]"`
 
 	// Required indicates if this attribute must be present in the assertion/response
 	Required bool `yaml:"required" default:"false"`
@@ -2458,8 +2461,8 @@ func (c *Cfg) LookupCredentialSources(scope string) ([]CredentialSource, error) 
 // GetOpenID4VPAuth returns the OpenID4VP authentication config for a credential type, or nil if not found.
 // For a datastore scope with auth_provider=openid4vp, returns its AuthScopes as-is.
 // For a presentation scope, synthesises one AuthScopes entry per credential in
-// the scope's from: the wallet must present one of them, disclosing every key
-// of its RequiredClaims.
+// the scope's from: the wallet must present one of them, disclosing every
+// claim of its RequiredClaims.
 func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 	if c.APIGW == nil {
 		return nil
@@ -2477,12 +2480,7 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 		}
 		authScopes := make(map[string]AuthScopeEntry, len(cred.From))
 		for presented, accepted := range cred.From {
-			claims := make([]string, 0, len(accepted.RequiredClaims))
-			for k := range accepted.RequiredClaims {
-				claims = append(claims, k)
-			}
-			sort.Strings(claims)
-			authScopes[presented] = AuthScopeEntry{AuthClaims: claims}
+			authScopes[presented] = AuthScopeEntry{AuthClaims: accepted.RequiredClaims.Paths()}
 		}
 		return &OpenID4VPCredentialAuth{AuthScopes: authScopes}
 	}

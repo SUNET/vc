@@ -48,7 +48,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 					"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 						Path: ssc,
 						Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-							SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
+							SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 16,
 						}},
 					}}}},
 				}}},
@@ -152,7 +152,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 					"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 						Path: ssc,
 						Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-							SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
+							SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 16,
 						}},
 					}}}},
 				}}},

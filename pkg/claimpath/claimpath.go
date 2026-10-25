@@ -200,6 +200,19 @@ func (p Pointer) Prefix(n int) (Pointer, bool) {
 	return Pointer{components: p.components[:n:n]}, true
 }
 
+// Ancestors returns the pointers of the claims that hold p's claim: each
+// strict prefix of p, shortest first.
+func (p Pointer) Ancestors() []Pointer {
+	if p.dotted != "" || len(p.components) < 2 {
+		return nil
+	}
+	out := make([]Pointer, 0, len(p.components)-1)
+	for n := 1; n < len(p.components); n++ {
+		out = append(out, Pointer{components: p.components[:n:n]})
+	}
+	return out
+}
+
 // KeyPrefix returns the leading keys of the pointer, up to its first null
 // or index.
 func (p Pointer) KeyPrefix() (Pointer, bool) {

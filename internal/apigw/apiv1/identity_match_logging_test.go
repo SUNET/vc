@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -29,10 +30,7 @@ func TestMatchPresentedIdentity_DoesNotLogTheValues(t *testing.T) {
 	c := &Client{log: log}
 
 	match := &openid4vci.IdentityMatch{
-		Claims: map[string]openid4vci.ClaimTest{
-			"given_name":          {Equals: "Anna"},
-			"personal_identifier": {Equals: "198001011234"},
-		},
+		Claims: openid4vci.ClaimMatches{{Path: dottedPath("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}}, {Path: dottedPath("personal_identifier"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}}},
 	}
 	presented := map[string]any{
 		"given_name":          "Bertil",
@@ -60,4 +58,13 @@ func TestMatchPresentedIdentity_DoesNotLogTheValues(t *testing.T) {
 	for _, value := range []string{"Anna", "Bertil", "198001011234", "199912319876"} {
 		assert.NotContains(t, err.Error(), value)
 	}
+}
+
+// dottedPath is a claim path an API caller writes as a dotted name.
+func dottedPath(name string) claimpath.Pointer {
+	p, err := claimpath.Dotted(name)
+	if err != nil {
+		panic(err)
+	}
+	return p
 }

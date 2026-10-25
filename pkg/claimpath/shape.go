@@ -103,6 +103,32 @@ func (s Shape) locateElement(p Pointer) (Pointer, error) {
 	return Pointer{}, fmt.Errorf("claimpath: %s is no [namespace, element] pointer into mdoc document data", p)
 }
 
+// LocateOne is Locate for a pointer that names one claim: it refuses a
+// pointer with null.
+func (s Shape) LocateOne(p Pointer) (Pointer, error) {
+	location, err := s.Locate(p)
+	if err != nil {
+		return Pointer{}, err
+	}
+	if !p.SelectsOne() {
+		return Pointer{}, fmt.Errorf("claimpath: %s selects every element of an array where one claim is named", p)
+	}
+	return location, nil
+}
+
+// ResolveOne reads a pending pointer as a dotted name of the shape, and
+// checks that a set pointer names one claim the shape locates.
+func (s Shape) ResolveOne(p *Pointer) error {
+	if err := p.Resolve(s.Dotted); err != nil {
+		return err
+	}
+	if p.IsZero() {
+		return nil
+	}
+	_, err := s.LocateOne(*p)
+	return err
+}
+
 // Dotted reads a dotted claim name as a pointer into the shape.
 //
 //   - Nested splits it on dots, one key per segment.
@@ -143,7 +169,7 @@ func (s Shape) Dotted(name string) (Pointer, error) {
 
 // Get returns the one claim p names in claims.
 func (s Shape) Get(claims map[string]any, p Pointer) (any, bool, error) {
-	location, err := s.Locate(p)
+	location, err := s.LocateOne(p)
 	if err != nil {
 		return nil, false, err
 	}
@@ -152,7 +178,7 @@ func (s Shape) Get(claims map[string]any, p Pointer) (any, bool, error) {
 
 // Set writes value at the claim p names in claims.
 func (s Shape) Set(claims map[string]any, p Pointer, value any) error {
-	location, err := s.Locate(p)
+	location, err := s.LocateOne(p)
 	if err != nil {
 		return err
 	}

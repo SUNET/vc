@@ -207,15 +207,15 @@ func (v *VCTM) presentChildren(parentJP string, data map[string]any) (map[string
 	children := map[string]any{}
 	var wildcardValue any
 	for _, child := range v.Claims {
-		parent, ok := child.Path.Parent()
-		if len(child.Display) == 0 || !ok || jsonPathOf(parent) != parentJP {
+		parent, hasParent := child.Path.Parent()
+		last, hasLast := child.Path.Last()
+		if len(child.Display) == 0 || !hasParent || !hasLast || jsonPathOf(parent) != parentJP {
 			continue
 		}
 		childValue := walkPath(data, child.Path)
 		if childValue == nil {
 			continue
 		}
-		last, _ := child.Path.Last()
 		if last.IsAll() {
 			// Array wildcard child — remember the resolved value so the
 			// parent can fall back to a leaf entry.
@@ -401,9 +401,8 @@ func segmentName(component claimpath.Component) string {
 // isChildOfDisplayableParent reports whether any strict prefix of path is
 // present in parents (keyed by JSONPath string).
 func isChildOfDisplayableParent(path claimpath.Pointer, parents map[string]bool) bool {
-	for n := 1; n < path.Len(); n++ {
-		prefix, _ := path.Prefix(n)
-		if parents[jsonPathOf(prefix)] {
+	for _, ancestor := range path.Ancestors() {
+		if parents[jsonPathOf(ancestor)] {
 			return true
 		}
 	}

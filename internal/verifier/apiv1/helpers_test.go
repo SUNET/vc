@@ -63,10 +63,20 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 				},
 			},
 		},
-		ClaimMappings: map[string]string{
-			"given_name":  "given_name",
-			"family_name": "family_name",
-		},
+		ClaimMappings: nestedMappings(
+			openid4vp.ClaimMapping{Path: claimpath.Keys("given_name"), Claim: "given_name"},
+			openid4vp.ClaimMapping{Path: claimpath.Keys("family_name"), Claim: "family_name"},
+		),
 		Enabled: boolPtr(true),
 	}
+}
+
+// nestedMappings returns claim mappings of JSON-based claims, resolved as
+// the template loader resolves them.
+func nestedMappings(mappings ...openid4vp.ClaimMapping) openid4vp.ClaimMappings {
+	m := openid4vp.ClaimMappings{Mappings: mappings}
+	if err := m.Resolve(claimpath.Nested()); err != nil {
+		panic(err)
+	}
+	return m
 }

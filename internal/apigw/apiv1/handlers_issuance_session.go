@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -176,13 +177,8 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
 	}
 
-	// A rule naming a claim the request will not ask for can never pass.
-	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
-		return nil, err
-	}
-
-	// And the request itself has to be buildable, which matching claim
-	// NAMES does not establish.
+	// The request has to be buildable, which matching claim NAMES does
+	// not establish.
 	//
 	// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
 	// query and one whose credential metadata is missing, and it is not
@@ -196,6 +192,13 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.Scope)
 		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
 			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.Scope, err), 400)
+	}
+
+	// And a rule naming a claim the request will not ask for can never
+	// pass. Checked against a request that can be built, so every auth
+	// scope has the credential metadata its claims are read by.
+	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
+		return nil, err
 	}
 
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
@@ -289,8 +292,7 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 // is the correct outcome and not this check's business. What this check
 // catches is the rule no presentation at all could satisfy.
 func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.IdentityMatch) error {
-	paths := match.ClaimPaths()
-	if len(paths) == 0 {
+	if len(match.Claims) == 0 {
 		return nil
 	}
 
@@ -300,20 +302,21 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 			fmt.Sprintf("scope %q has no authentication scopes configured, so no claim could be matched on", scope), 400)
 	}
 
-	// Compared in the shape the REQUEST will carry, not the shape the
-	// configuration is written in. For mdoc, buildIssuanceAuthDCQL expands
-	// a bare "family_name" into the namespace-qualified
-	// ["org.iso.18013.5.1", "family_name"] that DCQL requires, so a rule
-	// written the qualified way - the way it has to be written to match an
-	// mdoc's literal key - was being reported as unaskable even though the
-	// request asks for exactly that claim. Putting both sides through
-	// authClaimPathSegments is what makes the comparison about the claim
-	// rather than about how it happened to be spelled.
+	// Compared as the claims path pointers the REQUEST carries. A dotted
+	// rule path is read the way the authentication scope's credential
+	// reads it, so for an mdoc both "family_name" and
+	// "org.iso.18013.5.1.family_name" name the
+	// ["org.iso.18013.5.1", "family_name"] the request asks for, and the
+	// comparison is about the claim rather than how it was spelled.
 	offered := make(map[string][]string, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		claims := vpAuth.AuthScopes[authScope].AuthClaims
-		offered[authScope] = claims
-		if coversAll(c.cfg.GetFormatForScope(authScope), claims, paths) {
+		offered[authScope] = renderPaths(claims)
+		shape, err := c.cfg.PresentedShape(authScope)
+		if err != nil {
+			return err
+		}
+		if coversAll(shape, claims, match.Claims) {
 			return nil
 		}
 	}
@@ -321,20 +324,26 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 	return helpers.NewErrorDetailsWithStatus("invalid_identity_match",
 		fmt.Sprintf("no authentication scope for %q discloses every claim this rule matches on (%s); "+
 			"the authentication scopes offer %v, and the presentation request asks for those and nothing else",
-			scope, strings.Join(paths, ", "), offered), 400)
+			scope, strings.Join(match.ClaimPaths(), ", "), offered), 400)
 }
 
-// coversAll reports whether every path appears in claims, compared as the
-// DCQL path segments buildIssuanceAuthDCQL sends for that format.
-func coversAll(format string, claims, paths []string) bool {
-	asked := make(map[string]struct{}, len(claims))
-	for _, claim := range claims {
-		asked[strings.Join(authClaimPathSegments(format, claim), "\x00")] = struct{}{}
-	}
-	for _, path := range paths {
-		if _, ok := asked[strings.Join(authClaimPathSegments(format, path), "\x00")]; !ok {
+// coversAll reports whether every claim of a rule is one of claims, with a
+// dotted rule path read in shape.
+func coversAll(shape claimpath.Shape, claims []claimpath.Pointer, matches openid4vci.ClaimMatches) bool {
+	for _, match := range matches {
+		path := match.Path
+		if err := path.Resolve(shape.Dotted); err != nil || !slices.ContainsFunc(claims, path.Equal) {
 			return false
 		}
 	}
 	return true
+}
+
+// renderPaths renders claims path pointers for a message.
+func renderPaths(paths []claimpath.Pointer) []string {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, path.String())
+	}
+	return out
 }

@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -33,7 +34,7 @@ import (
 // the two into different HTTP answers, and telling a wallet its
 // presentation was rejected when the datastore was down invites a retry
 // that cannot succeed.
-func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *cache.AuthorizationContext, pScope model.PresentationScope, presentedScope string, presented map[string]any) error {
+func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *cache.AuthorizationContext, scope string, pScope model.PresentationScope, presentedScope string, presented map[string]any) error {
 	accepted, ok := pScope.From[presentedScope]
 	if !ok {
 		return helpers.NewErrorDetailsWithStatus("presentation_scope_mismatch",
@@ -48,15 +49,18 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		return err
 	}
 
-	// Format of presentedScope decides what counts as a valid claim
-	// shape. SD-JWT VC nests dotted paths under real objects, so a literal
-	// top-level "identity.birthdate" key must NOT satisfy the required
-	// nested path "identity.birthdate" — otherwise a wallet could smuggle
-	// a flat key in and have it accepted. mdoc keeps the opposite
-	// convention: namespace-qualified claims live as one literal dotted
-	// key (e.g. "org.iso.18013.5.1.birth_date"), so literal lookup is the
-	// only one that works.
-	verified, err := verifiedClaims(c.cfg.GetFormatForScope(presentedScope), presented, accepted.RequiredClaims)
+	// The format of presentedScope decides the shape the claims are read
+	// in. SD-JWT VC nests a path under real objects, so a literal
+	// top-level "identity.birthdate" key does NOT satisfy the required
+	// path ["identity", "birthdate"] — otherwise a wallet could smuggle a
+	// flat key in and have it accepted. mdoc keeps the opposite
+	// convention: namespace-qualified claims live as one literal key
+	// (e.g. "org.iso.18013.5.1.birth_date").
+	shapes, err := c.cfg.DerivationShapes(model.SourceScope{Source: model.DataSourcePresentation, Scope: scope, Presented: presentedScope})
+	if err != nil {
+		return serverFault(err)
+	}
+	verified, err := verifiedClaims(shapes.Source, presented, accepted.RequiredClaims)
 	if err != nil {
 		return err
 	}
@@ -77,12 +81,12 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// existing nested map, so a shallow copy shares e.g. the "identity"
 	// sub-map with verified - and verified is authCtx.VerifiedClaims, which
 	// was just persisted and which issuance rebuilds the real document from.
-	// A derivation targeting a dotted path would otherwise write its result
+	// A derivation targeting a nested claim would otherwise write its result
 	// into the holder's verified claims. buildPresentationDocument already
 	// clones for the same reason.
 	previewData := credential.CloneNestedClaims(verified)
 	now := time.Now()
-	derived, err := credential.ApplyDerivations(accepted.Derivations, verified, now)
+	derived, err := credential.ApplyDerivations(accepted.Derivations, verified, now, shapes)
 	if err != nil {
 		// Not every derivation failure is ours. A scope deriving age from
 		// a required birthdate gets whatever the credential carried, and a
@@ -99,11 +103,7 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		return serverFault(fmt.Errorf("failed to apply derivations for preview: %w", err))
 	}
 	credential.MergeNestedClaims(previewData, derived)
-	defaults, err := pScope.ResolveDefaults(now)
-	if err != nil {
-		return serverFault(fmt.Errorf("failed to resolve defaults for preview: %w", err))
-	}
-	if err := credential.MergeDefaults(previewData, defaults); err != nil {
+	if err := pScope.MergeDefaults(previewData, now, shapes.Issued); err != nil {
 		return serverFault(fmt.Errorf("failed to merge defaults for preview: %w", err))
 	}
 
@@ -122,105 +122,63 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 // verifiedClaims returns the required claims of a presented credential,
 // each checked against its allow-list, in the shape the presented
 // credential used.
-func verifiedClaims(sourceFormat string, presented map[string]any, required map[string][]string) (map[string]any, error) {
+func verifiedClaims(shape claimpath.Shape, presented map[string]any, required model.RequiredClaims) (map[string]any, error) {
 	verified := make(map[string]any, len(required))
-	for claim, allowed := range required {
-		val, present := lookupClaimPath(sourceFormat, presented, claim)
-		if !present {
-			return nil, helpers.NewErrorDetailsWithStatus("missing_required_claim",
-				fmt.Sprintf("claim %q not present on presented credential", claim),
-				400)
+	for _, claim := range required {
+		if err := verifyRequiredClaim(shape, presented, claim); err != nil {
+			return nil, err
 		}
-		if len(allowed) > 0 && !claimValueMatches(val, allowed) {
-			return nil, helpers.NewErrorDetailsWithStatus("claim_value_not_allowed",
-				fmt.Sprintf("claim %q value not in allow-list", claim),
-				403)
+		if err := copyPresentedClaim(shape, verified, presented, claim.Path); err != nil {
+			return nil, serverFault(err)
 		}
-		// Materialise dotted claim paths as nested map structures so the
-		// downstream VCTM filter (which walks nested maps) can see them
-		// under the same shape the presented credential used. mdoc keeps
-		// its namespace-qualified literal key; SD-JWT always nests.
-		setClaimPath(sourceFormat, verified, presented, claim, val)
 	}
 	return verified, nil
 }
 
-// lookupClaimPath resolves a claim path against a nested claims map in a
-// format-aware way. For mdoc formats (plain or ZK) a literal-key match is
-// tried first so namespace-qualified keys stored as one flat
-// "org.iso.18013.5.1.birth_date" entry resolve to their value, then the
-// path falls back to splitting on "." and walking nested maps. For
-// SD-JWT VC the literal fallback is intentionally skipped so a flat
-// "identity.birthdate" key on the presented credential cannot satisfy a
-// nested path "identity.birthdate" the scope required. Returns the value
-// and true when the path resolves; false when any intermediate segment is
-// missing or is not a map.
-func lookupClaimPath(sourceFormat string, claims map[string]any, path string) (any, bool) {
-	if isMDocLikeFormat(sourceFormat) {
-		if v, ok := claims[path]; ok {
-			return v, true
-		}
+// verifyRequiredClaim refuses a presentation that does not carry a required
+// claim, or none of whose values is in the claim's allow-list.
+func verifyRequiredClaim(shape claimpath.Shape, presented map[string]any, claim model.RequiredClaim) error {
+	values, err := shape.Select(presented, claim.Path)
+	if errors.Is(err, claimpath.ErrNoClaim) || errors.Is(err, claimpath.ErrMismatch) {
+		return helpers.NewErrorDetailsWithStatus("missing_required_claim",
+			fmt.Sprintf("claim %s not present on presented credential", claim.Path),
+			400)
 	}
-	if !strings.Contains(path, ".") {
-		if v, ok := claims[path]; ok {
-			return v, true
-		}
-		return nil, false
+	if err != nil {
+		return serverFault(err)
 	}
-	segments := strings.Split(path, ".")
-	var cur any = claims
-	for _, seg := range segments {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		v, present := m[seg]
-		if !present {
-			return nil, false
-		}
-		cur = v
+	if len(claim.Values) > 0 && !slices.ContainsFunc(values, func(v any) bool { return claimValueMatches(v, claim.Values) }) {
+		return helpers.NewErrorDetailsWithStatus("claim_value_not_allowed",
+			fmt.Sprintf("claim %s value not in allow-list", claim.Path),
+			403)
 	}
-	return cur, true
+	return nil
 }
 
-// setClaimPath writes val at a claim path in dst, mirroring how the path
-// resolved on src in a format-aware way: for mdoc, when src carries the
-// path as a flat literal key (e.g. "org.iso.18013.5.1.birth_date") it is
-// stored literally; otherwise the path is split on "." and intermediate
-// maps are created as needed so multiple required claims sharing a prefix
-// (e.g. "identity.given_name" and "identity.family_name") produce a single
-// nested object rather than overwriting siblings. For SD-JWT the literal
-// shortcut is intentionally skipped so flat dotted keys never leak into
-// the issued document.
-func setClaimPath(sourceFormat string, dst, src map[string]any, path string, val any) {
-	if isMDocLikeFormat(sourceFormat) {
-		if _, ok := src[path]; ok {
-			dst[path] = val
-			return
-		}
+// copyPresentedClaim copies the claim at path, up to its first null or
+// index, from presented into verified, in the same shape. The downstream
+// VCTM filter (which walks nested maps) then sees it under the shape the
+// presented credential used, and a claim's array keeps its positions.
+func copyPresentedClaim(shape claimpath.Shape, verified, presented map[string]any, path claimpath.Pointer) error {
+	keys, ok := path.KeyPrefix()
+	if !ok {
+		return fmt.Errorf("claim %s starts with no key", path)
 	}
-	if !strings.Contains(path, ".") {
-		dst[path] = val
-		return
+	value, present, err := shape.Get(presented, keys)
+	if err != nil {
+		return fmt.Errorf("claim %s: %w", path, err)
 	}
-	segments := strings.Split(path, ".")
-	cur := dst
-	for _, seg := range segments[:len(segments)-1] {
-		next, ok := cur[seg].(map[string]any)
-		if !ok {
-			next = map[string]any{}
-			cur[seg] = next
-		}
-		cur = next
+	if !present {
+		return fmt.Errorf("claim %s: the presentation holds no claim at %s", path, keys)
 	}
-	cur[segments[len(segments)-1]] = val
+	return shape.Set(verified, keys, value)
 }
 
 // isMDocLikeFormat returns true for every DCQL mdoc format variant whose
 // claims are stored as namespace-qualified literal keys. Keeping ZK
 // alongside plain mdoc here matches claims_extractor's own
-// mdocClaimsFromResult / zk_verifier flattening conventions and matches
-// authClaimPathSegments' DCQL-side treatment of both formats.
+// mdocClaimsFromResult / zk_verifier flattening conventions and
+// openid4vp.PresentedShape.
 func isMDocLikeFormat(format string) bool {
 	return format == openid4vp.FormatMsoMdoc || format == openid4vp.FormatMsoMdocZk
 }
@@ -245,8 +203,8 @@ func (c *Client) enforceScopeCredentialType(scope string, presented map[string]a
 	case isMDocFormat(meta.Format):
 		return c.enforceMDocType(scope, meta, presented)
 	case meta.Format == openid4vp.FormatMsoMdocZk:
-		// authClaimPathSegments already produces DCQL paths for
-		// mso_mdoc_zk, but the dispatch below (VPTokenValidator and
+		// openid4vp.PresentedShape already reads mso_mdoc_zk claims, but
+		// the dispatch below (VPTokenValidator and
 		// MDocHandler.VerifyAndExtractBound) has no ZK path yet. Rather
 		// than advertise partial support that fails later with a
 		// confusing error, refuse the configuration here.

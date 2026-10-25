@@ -1,26 +1,25 @@
 package primitives
 
-import "time"
+import (
+	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
+)
 
 // CopyArgs configures the copy primitive.
 type CopyArgs struct {
-	// Input is the source claim path. Supports dot-notation claim paths and
-	// literal dotted keys, such as a namespace-qualified mdoc claim.
-	Input string `yaml:"input" validate:"required" doc_example:"birthdate"`
-	// Output is the target claim path. Supports dot-notation claim paths.
-	Output string `yaml:"output" validate:"required" doc_example:"birth_date"`
+	// Input is the source claim.
+	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
+	// Output is the target claim.
+	Output claimpath.Pointer `yaml:"output" validate:"required" doc_example:"[\"birth_date\"]"`
 }
 
 // Apply implements Applier. It writes the input claim's value, of any type,
 // at Output. An absent input claim is a no-op.
-func (a *CopyArgs) Apply(claims map[string]any, _ time.Time) (map[string]any, error) {
-	val, present := lookupClaim(claims, a.Input)
-	if !present {
-		return nil, nil
-	}
-	result := map[string]any{}
-	if err := setClaim(result, a.Output, val); err != nil {
+func (a *CopyArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
+	val, present, err := claims.Input(a.Input)
+	if err != nil || !present {
 		return nil, err
 	}
-	return result, nil
+	return []Write{{Path: a.Output, Value: val}}, nil
 }

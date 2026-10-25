@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +26,7 @@ func TestHKDFOpening(t *testing.T) {
 	}
 	secretPath := writeSecret(32)
 	opening := func(n, inputs int) *HKDFOpeningArgs {
-		return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]string, inputs), Bytes: n}
+		return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Pointer, inputs), Bytes: n}
 	}
 
 	for _, tc := range []struct {

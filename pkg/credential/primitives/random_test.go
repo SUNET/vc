@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/google/uuid"
 )
 
@@ -15,7 +17,7 @@ var randomNow = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 // with the version and variant bits a v4 must carry. A test that only
 // checked the length would pass on 36 random characters.
 func TestRandomDefaultsToAUUIDv4(t *testing.T) {
-	out, err := (&RandomArgs{Output: "document_id"}).Apply(map[string]any{}, randomNow)
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("document_id")}, map[string]any{}, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -44,7 +46,7 @@ func TestRandomIsDifferentEveryTime(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			seen := map[string]bool{}
 			for range 50 {
-				out, err := (&RandomArgs{Output: "id", Format: format}).Apply(map[string]any{}, randomNow)
+				out, err := apply(&RandomArgs{Output: claimpath.Keys("id"), Format: format}, map[string]any{}, randomNow)
 				if err != nil {
 					t.Fatalf("Apply: %v", err)
 				}
@@ -67,25 +69,25 @@ func TestRandomFormats(t *testing.T) {
 	}{
 		{
 			name:    "hex defaults to 16 bytes",
-			args:    RandomArgs{Output: "id", Format: RandomFormatHex},
+			args:    RandomArgs{Output: claimpath.Keys("id"), Format: RandomFormatHex},
 			decode:  hex.DecodeString,
 			wantLen: defaultRandomBytes,
 		},
 		{
 			name:    "hex honours bytes",
-			args:    RandomArgs{Output: "id", Format: RandomFormatHex, Bytes: 32},
+			args:    RandomArgs{Output: claimpath.Keys("id"), Format: RandomFormatHex, Bytes: 32},
 			decode:  hex.DecodeString,
 			wantLen: 32,
 		},
 		{
 			name:    "base64url defaults to 16 bytes",
-			args:    RandomArgs{Output: "id", Format: RandomFormatBase64URL},
+			args:    RandomArgs{Output: claimpath.Keys("id"), Format: RandomFormatBase64URL},
 			decode:  base64.RawURLEncoding.DecodeString,
 			wantLen: defaultRandomBytes,
 		},
 		{
 			name:    "base64url honours bytes",
-			args:    RandomArgs{Output: "id", Format: RandomFormatBase64URL, Bytes: minRandomBytes},
+			args:    RandomArgs{Output: claimpath.Keys("id"), Format: RandomFormatBase64URL, Bytes: minRandomBytes},
 			decode:  base64.RawURLEncoding.DecodeString,
 			wantLen: minRandomBytes,
 		},
@@ -93,7 +95,7 @@ func TestRandomFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := tt.args.Apply(map[string]any{}, randomNow)
+			out, err := apply(&tt.args, map[string]any{}, randomNow)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -113,7 +115,7 @@ func TestRandomFormats(t *testing.T) {
 func TestRandomLeavesAnExistingValueAlone(t *testing.T) {
 	claims := map[string]any{"document_id": "ABC-123"}
 
-	out, err := (&RandomArgs{Output: "document_id"}).Apply(claims, randomNow)
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("document_id")}, claims, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestRandomTreatsABlankValueAsMissing(t *testing.T) {
 		"empty []string": []string{},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, err := (&RandomArgs{Output: "document_id"}).Apply(
+			out, err := apply(&RandomArgs{Output: claimpath.Keys("document_id")},
 				map[string]any{"document_id": existing}, randomNow)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
@@ -148,7 +150,7 @@ func TestRandomTreatsABlankValueAsMissing(t *testing.T) {
 }
 
 func TestRandomOverwrite(t *testing.T) {
-	out, err := (&RandomArgs{Output: "document_id", Overwrite: true}).Apply(
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("document_id"), Overwrite: true},
 		map[string]any{"document_id": "ABC-123"}, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -161,10 +163,10 @@ func TestRandomOverwrite(t *testing.T) {
 	}
 }
 
-// Dot-notation output nests, the same way every other primitive's does, so
+// A nested output nests, the same way every other primitive's does, so
 // this can target a claim AttributeMapper materialised under a parent.
 func TestRandomNestsADottedOutput(t *testing.T) {
-	out, err := (&RandomArgs{Output: "identity.document_id"}).Apply(map[string]any{}, randomNow)
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("identity", "document_id")}, map[string]any{}, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -183,7 +185,7 @@ func TestRandomNestsADottedOutput(t *testing.T) {
 func TestRandomLeavesAnExistingNestedValueAlone(t *testing.T) {
 	claims := map[string]any{"identity": map[string]any{"document_id": "ABC-123"}}
 
-	out, err := (&RandomArgs{Output: "identity.document_id"}).Apply(claims, randomNow)
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("identity", "document_id")}, claims, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -198,18 +200,18 @@ func TestRandomLeavesAnExistingNestedValueAlone(t *testing.T) {
 func TestRandomRefusesBadConfiguration(t *testing.T) {
 	for name, args := range map[string]RandomArgs{
 		"no output":        {Format: RandomFormatHex},
-		"unknown format":   {Output: "id", Format: "dice"},
-		"too few bytes":    {Output: "id", Format: RandomFormatHex, Bytes: minRandomBytes - 1},
-		"too many bytes":   {Output: "id", Format: RandomFormatHex, Bytes: maxRandomBytes + 1},
-		"negative bytes":   {Output: "id", Format: RandomFormatBase64URL, Bytes: -1},
-		"output conflicts": {Output: "id.sub", Format: RandomFormatHex},
+		"unknown format":   {Output: claimpath.Keys("id"), Format: "dice"},
+		"too few bytes":    {Output: claimpath.Keys("id"), Format: RandomFormatHex, Bytes: minRandomBytes - 1},
+		"too many bytes":   {Output: claimpath.Keys("id"), Format: RandomFormatHex, Bytes: maxRandomBytes + 1},
+		"negative bytes":   {Output: claimpath.Keys("id"), Format: RandomFormatBase64URL, Bytes: -1},
+		"output conflicts": {Output: claimpath.Keys("id", "sub"), Format: RandomFormatHex},
 	} {
 		t.Run(name, func(t *testing.T) {
 			claims := map[string]any{}
 			if name == "output conflicts" {
 				claims["id"] = "not a map"
 			}
-			if _, err := args.Apply(claims, randomNow); err == nil {
+			if _, err := apply(&args, claims, randomNow); err == nil {
 				t.Fatal("want an error, got none")
 			}
 		})
@@ -220,7 +222,7 @@ func TestRandomRefusesBadConfiguration(t *testing.T) {
 // length, and a leftover setting from a format change should not stop
 // issuance.
 func TestRandomIgnoresBytesForUUID(t *testing.T) {
-	out, err := (&RandomArgs{Output: "id", Format: RandomFormatUUID, Bytes: maxRandomBytes}).Apply(
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("id"), Format: RandomFormatUUID, Bytes: maxRandomBytes},
 		map[string]any{}, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -233,13 +235,13 @@ func TestRandomIgnoresBytesForUUID(t *testing.T) {
 // The dispatcher finds it by name, which is what makes `random:` a usable
 // key in a scope's derivations list.
 func TestRandomIsDispatchedByName(t *testing.T) {
-	d := &Derivation{Random: &RandomArgs{Output: "document_id"}}
+	d := &Derivation{Random: &RandomArgs{Output: claimpath.Keys("document_id")}}
 
 	if got := d.SelectedName(); got != "random" {
 		t.Fatalf("SelectedName is %q, want \"random\"", got)
 	}
 
-	out, err := d.Apply(map[string]any{}, randomNow)
+	out, err := apply(d, map[string]any{}, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -248,11 +250,10 @@ func TestRandomIsDispatchedByName(t *testing.T) {
 	}
 }
 
-// The clobber this guards against: without the parent check, generating
-// into "id.sub" would have ApplyDerivations replace a scalar "id" that the
-// source data really supplied.
+// The clobber this guards against: writing ["id", "sub"] must not replace a
+// scalar "id" that the source data really supplied.
 func TestRandomRefusesToClobberAScalarParent(t *testing.T) {
-	_, err := (&RandomArgs{Output: "id.sub"}).Apply(map[string]any{"id": "ABC-123"}, randomNow)
+	_, err := apply(&RandomArgs{Output: claimpath.Keys("id", "sub")}, map[string]any{"id": "ABC-123"}, randomNow)
 	if err == nil {
 		t.Fatal("want an error, got none")
 	}
@@ -261,7 +262,7 @@ func TestRandomRefusesToClobberAScalarParent(t *testing.T) {
 // An absent parent is not a conflict - that is the ordinary case, where the
 // derivation creates the nesting.
 func TestRandomCreatesAnAbsentParent(t *testing.T) {
-	out, err := (&RandomArgs{Output: "a.b.c"}).Apply(map[string]any{}, randomNow)
+	out, err := apply(&RandomArgs{Output: claimpath.Keys("a", "b", "c")}, map[string]any{}, randomNow)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -270,4 +271,25 @@ func TestRandomCreatesAnAbsentParent(t *testing.T) {
 	if _, err := uuid.Parse(b["c"].(string)); err != nil {
 		t.Errorf("not a uuid: %v", err)
 	}
+}
+
+// apply runs a primitive over JSON-based claims, writes its outputs into
+// them as the derivation runner does, and returns the outputs by claim.
+func apply(a Applier, claims map[string]any, now time.Time) (map[string]any, error) {
+	shapes := Shapes{Source: claimpath.Nested(), Issued: claimpath.Nested()}
+	working := NewWorking(claims, shapes)
+	writes, err := a.Apply(working, now)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for _, w := range writes {
+		if err := working.Write(w.Path, w.Value); err != nil {
+			return nil, err
+		}
+		if err := shapes.Issued.Set(out, w.Path, w.Value); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

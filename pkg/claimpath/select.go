@@ -94,9 +94,6 @@ func asArray(value any) ([]any, bool) {
 
 // get returns the one claim a pointer of keys and indices selects.
 func (p Pointer) get(root map[string]any) (any, bool, error) {
-	if !p.SelectsOne() {
-		return nil, false, fmt.Errorf("claimpath: %s selects every element of an array, where one claim is read", p)
-	}
 	var current any = root
 	for i, c := range p.components {
 		children, err := c.children(current)
@@ -114,9 +111,6 @@ func (p Pointer) get(root map[string]any) (any, bool, error) {
 // set writes value at a pointer of keys and indices, creating the objects
 // a key passes through.
 func (p Pointer) set(root map[string]any, value any) error {
-	if !p.SelectsOne() {
-		return fmt.Errorf("claimpath: %s selects every element of an array, where one claim is written", p)
-	}
 	n := len(p.components) - 1
 	var container any = root
 	for i, c := range p.components[:n] {

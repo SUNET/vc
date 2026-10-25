@@ -229,12 +229,6 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
-		// Needs the schemas, so it runs after the loop above.
-		if err := checkAuxiliaryData(cfg, serviceName); err != nil {
-			return nil, err
-		}
-		deriveAuxiliaryDataRequired(cfg)
-
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
 		// document is consistent.
@@ -260,6 +254,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		cfg.APIGW, cfg.Issuer, cfg.Verifier = nil, nil, nil
 	case "apigw":
 		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
+	}
+
+	// Needs the schemas, and reads only the sections this service keeps.
+	if err := resolveClaimPaths(cfg, serviceName); err != nil {
+		return nil, err
 	}
 
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
@@ -307,6 +306,26 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	return cfg, nil
+}
+
+// resolveClaimPaths reads the dotted claims of the configuration as claims
+// path pointers, and then refuses a pointer still pending, naming where it
+// is. It then checks the auxiliary_data, which reads the resolved claims.
+func resolveClaimPaths(cfg *model.Cfg, serviceName string) error {
+	if err := cfg.ResolveClaimPaths(); err != nil {
+		return err
+	}
+	if err := claimpath.CheckResolved(cfg); err != nil {
+		return err
+	}
+	if !servicesRequiringVCTM[serviceName] {
+		return nil
+	}
+	if err := checkAuxiliaryData(cfg, serviceName); err != nil {
+		return err
+	}
+	deriveAuxiliaryDataRequired(cfg)
+	return nil
 }
 
 // checkCredentialMetadataEntries refuses a common.credential_metadata key

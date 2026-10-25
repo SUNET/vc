@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -26,10 +28,10 @@ var errIdentityMismatch = errors.New("the presented credential does not identify
 // evaluated against unverified claims tests nothing but what the sender
 // chose to write.
 //
-// Claim paths are resolved with lookupClaimPath, the same format-aware
-// lookup the presentation scopes use, so a caller writes the same path
-// here that it would write anywhere else and an mdoc's literal
-// namespace-qualified key keeps working.
+// A claim is read in the presented credential's shape, the same one the
+// presentation scopes use, and a dotted claim path the way that format
+// reads it, so a caller writes the same path here that it would write
+// anywhere else and an mdoc's namespace-qualified claim keeps working.
 //
 // Neither the returned error NOR the log names the values. The error is
 // handed back to whoever is holding the wallet, and telling them which of
@@ -52,25 +54,41 @@ func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[strin
 		return nil
 	}
 
-	for _, path := range match.ClaimPaths() {
-		test := match.Claims[path]
-
-		value, present := lookupClaimPath(sourceFormat, presented, path)
+	shape := openid4vp.PresentedShape(sourceFormat)
+	for _, claim := range match.Claims {
+		value, present, err := presentedClaim(shape, presented, claim.Path)
+		if err != nil {
+			return fmt.Errorf("identity match claim %s: %w", claim.Path, err)
+		}
 		if !present {
-			c.log.Info("identity match failed: claim absent from the presented credential", "claim", path)
-			return fmt.Errorf("%w: claim %q is not present", errIdentityMismatch, path)
+			c.log.Info("identity match failed: claim absent from the presented credential", "claim", claim.Path.String())
+			return fmt.Errorf("%w: claim %s is not present", errIdentityMismatch, claim.Path)
 		}
 		if isMDocLikeFormat(sourceFormat) {
 			value = unwrapMDocFullDate(value)
 		}
 
-		if !claimValueMatches(value, []string{test.Equals}) {
-			c.log.Info("identity match failed: claim value differs", "claim", path)
-			return fmt.Errorf("%w: claim %q does not match", errIdentityMismatch, path)
+		if !claimValueMatches(value, []string{claim.Equals}) {
+			c.log.Info("identity match failed: claim value differs", "claim", claim.Path.String())
+			return fmt.Errorf("%w: claim %s does not match", errIdentityMismatch, claim.Path)
 		}
 	}
 
 	return nil
+}
+
+// presentedClaim returns the claim at a rule path in a presentation held
+// in shape, with a dotted path read in shape. A claim the presentation
+// holds in another structure is absent.
+func presentedClaim(shape claimpath.Shape, presented map[string]any, path claimpath.Pointer) (any, bool, error) {
+	if err := path.Resolve(shape.Dotted); err != nil {
+		return nil, false, err
+	}
+	value, present, err := shape.Get(presented, path)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		return nil, false, nil
+	}
+	return value, present, err
 }
 
 // unwrapMDocFullDate returns the string inside an mdoc full-date (CBOR tag

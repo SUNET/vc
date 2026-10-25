@@ -75,9 +75,9 @@ func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
 		return map[string]any{"vct": vct, "given_name": "Alice", "family_name": "Wonderland", "birthdate": "1990-01-15"}
 	}
 	sdjwtEntry := model.AuthScopeEntry{
-		AuthClaims:         []string{"given_name", "family_name", "birthdate"},
-		IdentityAttributes: map[string]string{"birthdate": "birth_date"},
-		DocumentClaims:     map[string]string{"birthdate": "birth_date"},
+		AuthClaims:         []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name"), claimpath.Keys("birthdate")},
+		IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("birthdate"), Attribute: "birth_date"}},
+		DocumentClaims:     model.DocumentClaims{{From: claimpath.Keys("birthdate"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}},
 	}
 	cases := map[string]struct {
 		format    string
@@ -89,28 +89,22 @@ func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
 		"pid_mdoc": {"mso_mdoc", mdocPresented(t, "eu.europa.ec.eudi.pid.1", map[string]map[string]any{
 			"eu.europa.ec.eudi.pid.1": {"given_name": "Alice", "family_name": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
 		}), model.AuthScopeEntry{
-			AuthClaims: []string{"eu.europa.ec.eudi.pid.1.given_name", "eu.europa.ec.eudi.pid.1.family_name"},
-			IdentityAttributes: map[string]string{
-				"eu.europa.ec.eudi.pid.1.given_name":  "given_name",
-				"eu.europa.ec.eudi.pid.1.family_name": "family_name",
-			},
-			DocumentClaims: map[string]string{"eu.europa.ec.eudi.pid.1.birth_date": "birth_date"},
+			AuthClaims:         []claimpath.Pointer{claimpath.Keys("eu.europa.ec.eudi.pid.1", "given_name"), claimpath.Keys("eu.europa.ec.eudi.pid.1", "family_name")},
+			IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "given_name"), Attribute: "given_name"}, {Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "family_name"), Attribute: "family_name"}},
+			DocumentClaims:     model.DocumentClaims{{From: claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}},
 		}},
 		"mdl": {"mso_mdoc", mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
 			"org.iso.18013.5.1": {"given_name": "Alice", "family_name": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
 		}), model.AuthScopeEntry{
-			AuthClaims:     []string{"given_name", "family_name"},
-			DocumentClaims: map[string]string{"birth_date": "birth_date"},
+			AuthClaims:     []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "given_name"), claimpath.Keys("org.iso.18013.5.1", "family_name")},
+			DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}},
 		}},
 		"photoid": {"mso_mdoc", mdocPresented(t, "eu.europa.ec.eudi.photoid.1", map[string]map[string]any{
 			"org.iso.23220.1": {"given_name_unicode": "Alice", "family_name_unicode": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
 		}), model.AuthScopeEntry{
-			AuthClaims: []string{"org.iso.23220.1.given_name_unicode", "org.iso.23220.1.family_name_unicode"},
-			IdentityAttributes: map[string]string{
-				"org.iso.23220.1.given_name_unicode":  "given_name",
-				"org.iso.23220.1.family_name_unicode": "family_name",
-			},
-			DocumentClaims: map[string]string{"org.iso.23220.1.birth_date": "birth_date"},
+			AuthClaims:         []claimpath.Pointer{claimpath.Keys("org.iso.23220.1", "given_name_unicode"), claimpath.Keys("org.iso.23220.1", "family_name_unicode")},
+			IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("org.iso.23220.1", "given_name_unicode"), Attribute: "given_name"}, {Path: claimpath.Keys("org.iso.23220.1", "family_name_unicode"), Attribute: "family_name"}},
+			DocumentClaims:     model.DocumentClaims{{From: claimpath.Keys("org.iso.23220.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}},
 		}},
 	}
 	target := nymAuthTarget(t)
@@ -119,12 +113,14 @@ func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
 			// What vc main does today: refuses every mdoc birth date (a
 			// cbor.Tag, not a string) and finds no unqualified name for
 			// pid_mdoc/photoid.
+			shape := openid4vp.PresentedShape(tc.format)
 			if tc.format == "mso_mdoc" {
-				_, isTag := tc.presented[firstKey(tc.entry.DocumentClaims)].(cbor.Tag)
-				require.True(t, isTag, "an mdoc full-date must reach the handler as cbor.Tag 1004")
+				birthDate, _, err := shape.Get(tc.presented, tc.entry.DocumentClaims[0].From)
+				require.NoError(t, err)
+				require.IsType(t, cbor.Tag{}, birthDate, "an mdoc full-date must reach the handler as cbor.Tag 1004")
 			}
 
-			ids, err := extractAuthScopeIdentity(tc.format, tc.presented, tc.entry)
+			ids, err := extractAuthScopeIdentity(shape, tc.presented, tc.entry)
 			require.NoError(t, err)
 			require.Equal(t, "Alice", ids["given_name"])
 			require.Equal(t, "Wonderland", ids["family_name"])
@@ -132,7 +128,7 @@ func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
 				require.Equal(t, "1990-01-15", ids["birth_date"], "the SD-JWT birthdate is matched as the mapping's birth_date")
 			}
 
-			copied, err := presentedDocumentClaims(tc.format, tc.presented, tc.entry, target)
+			copied, err := presentedDocumentClaims(shape, tc.presented, tc.entry, target)
 			require.NoError(t, err)
 			require.Equal(t, map[string]any{"birth_date": "1990-01-15"}, copied)
 
@@ -145,27 +141,24 @@ func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
 	}
 }
 
-func firstKey(m map[string]string) string {
-	for k := range m {
-		return k
-	}
-	return ""
-}
-
 func TestPresentedDocumentClaimsFailsClosed(t *testing.T) {
 	target := nymAuthTarget(t)
-	entry := model.AuthScopeEntry{AuthClaims: []string{"given_name"}, DocumentClaims: map[string]string{"birth_date": "birth_date"}}
+	mdocEntry := model.AuthScopeEntry{DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}}}
 	// pid_mdoc as sirosid-dev vendors it today: no birth_date at all.
 	presented := mdocPresented(t, "eu.europa.ec.eudi.pid.1", map[string]map[string]any{
 		"eu.europa.ec.eudi.pid.1": {"given_name": "Alice"},
 	})
-	_, err := presentedDocumentClaims("mso_mdoc", presented, entry, target)
+	_, err := presentedDocumentClaims(openid4vp.PresentedShape("mso_mdoc"), presented, mdocEntry, target)
 	require.Error(t, err)
 
-	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"birth_date": "15/01/1990"}, entry, target)
+	entry := model.AuthScopeEntry{DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}}}
+	_, err = presentedDocumentClaims(claimpath.Nested(), map[string]any{"birth_date": "15/01/1990"}, entry, target)
 	require.Error(t, err, "a date in no RFC 3339 shape is refused, not issued")
-	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"birth_date": "1990-02-30"}, entry, target)
+	_, err = presentedDocumentClaims(claimpath.Nested(), map[string]any{"birth_date": "1990-02-30"}, entry, target)
 	require.Error(t, err, "an impossible date is refused")
+	copied, err := presentedDocumentClaims(claimpath.Nested(), map[string]any{"birth_date": "1990-01-15"}, entry, target)
+	require.NoError(t, err, "the refusals above are about the dates")
+	require.Equal(t, map[string]any{"birth_date": "1990-01-15"}, copied)
 }
 
 func TestNormaliseFullDateShapes(t *testing.T) {
@@ -190,7 +183,7 @@ func TestIssuanceAuthDCQLRequestsTheCopiedClaims(t *testing.T) {
 		"mdl": {Format: "mso_mdoc", Doctype: "org.iso.18013.5.1.mDL", MDDL: &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"}},
 	}}}
 	dcql, err := buildIssuanceAuthDCQL(&model.OpenID4VPCredentialAuth{AuthScopes: map[string]model.AuthScopeEntry{
-		"mdl": {AuthClaims: []string{"given_name", "family_name"}, DocumentClaims: map[string]string{"birth_date": "birth_date"}},
+		"mdl": {AuthClaims: []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "given_name"), claimpath.Keys("org.iso.18013.5.1", "family_name")}, DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}}},
 	}}, cfg)
 	require.NoError(t, err)
 	var paths []claimpath.Pointer
@@ -222,11 +215,11 @@ func TestPresentedContainerClaimsAreJSONEncodable(t *testing.T) {
 	})
 
 	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"org.iso.18013.5.1.driving_privileges"},
-		DocumentClaims: map[string]string{"org.iso.18013.5.1.driving_privileges": "driving_privileges"},
+		AuthClaims:     []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "driving_privileges")},
+		DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", "driving_privileges"), To: claimpath.Keys("driving_privileges")}},
 	}
 
-	copied, err := presentedDocumentClaims("mso_mdoc", presented, entry, nymAuthTarget(t))
+	copied, err := presentedDocumentClaims(openid4vp.PresentedShape("mso_mdoc"), presented, entry, nymAuthTarget(t))
 	require.NoError(t, err, "a valid mdoc container must be copyable")
 
 	// The whole point: the assembled document marshals.
@@ -392,12 +385,12 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 
 	t.Run("an SD-JWT number, which is already a float64", func(t *testing.T) {
 		sdEntry := model.AuthScopeEntry{
-			AuthClaims:     []string{"big"},
-			DocumentClaims: map[string]string{"big": "big"},
+			AuthClaims:     []claimpath.Pointer{claimpath.Keys("big")},
+			DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("big"), To: claimpath.Keys("big")}},
 		}
 		// What Token.Parse hands over: JSON decoded into `any`.
 		presented := map[string]any{"big": float64(9007199254740993)}
-		_, err := presentedDocumentClaims("dc+sd-jwt", presented, sdEntry, nymAuthTarget(t))
+		_, err := presentedDocumentClaims(openid4vp.PresentedShape("dc+sd-jwt"), presented, sdEntry, nymAuthTarget(t))
 		require.Error(t, err, "an unsafe-range float64 must not slip past the integer guards")
 		require.Contains(t, err.Error(), "exceeds the range")
 	})
@@ -410,10 +403,10 @@ func TestPresentedNumbersThatCannotSurviveAreRefused(t *testing.T) {
 		require.Contains(t, string(encoded), "9007199254740991")
 
 		sdEntry := model.AuthScopeEntry{
-			AuthClaims:     []string{"n"},
-			DocumentClaims: map[string]string{"n": "n"},
+			AuthClaims:     []claimpath.Pointer{claimpath.Keys("n")},
+			DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("n"), To: claimpath.Keys("n")}},
 		}
-		out, err := presentedDocumentClaims("dc+sd-jwt", map[string]any{"n": float64(42)}, sdEntry, nymAuthTarget(t))
+		out, err := presentedDocumentClaims(openid4vp.PresentedShape("dc+sd-jwt"), map[string]any{"n": float64(42)}, sdEntry, nymAuthTarget(t))
 		require.NoError(t, err)
 		require.Equal(t, float64(42), out["n"])
 	})
@@ -508,10 +501,10 @@ func TestACopiedByteStringDerivesTheSameOnBothCacheBackends(t *testing.T) {
 	var reloaded model.CompleteDocument
 	require.NoError(t, json.Unmarshal(stored, &reloaded))
 
-	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: "odd", Output: "odd"}}}
-	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, time.Now())
+	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: claimpath.Keys("odd"), Output: claimpath.Keys("odd")}}}
+	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, time.Now(), nestedShapes)
 	require.NoError(t, err, "the memory-backed path must derive")
-	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, time.Now())
+	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, time.Now(), nestedShapes)
 	require.NoError(t, err, "and so must the HA path")
 	require.Equal(t, fromMemory["odd"], fromMongo["odd"])
 
@@ -563,10 +556,10 @@ func TestACopiedTimestampDerivesTheSameOnBothCacheBackends(t *testing.T) {
 
 	// The derivation is the thing that actually breaks, so it is what
 	// the test runs - on the memory-backed value and the HA one.
-	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: "odd", Output: "odd"}}}
-	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, when)
+	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: claimpath.Keys("odd"), Output: claimpath.Keys("odd")}}}
+	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, when, nestedShapes)
 	require.NoError(t, err, "the memory-backed path must derive")
-	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, when)
+	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, when, nestedShapes)
 	require.NoError(t, err, "and so must the HA path, or the deployment fails only under HA")
 	require.Equal(t, fromMemory["odd"], fromMongo["odd"],
 		"a derivation must not depend on which cache backend is configured")
@@ -791,10 +784,10 @@ func TestNonFinitePresentedNumbersAreRefused(t *testing.T) {
 	// An SD-JWT NaN reaches the same guard by the other route: the claim
 	// is already a float64 when it is copied.
 	sdEntry := model.AuthScopeEntry{
-		AuthClaims:     []string{"odd"},
-		DocumentClaims: map[string]string{"odd": "odd"},
+		AuthClaims:     []claimpath.Pointer{claimpath.Keys("odd")},
+		DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("odd"), To: claimpath.Keys("odd")}},
 	}
-	_, err = presentedDocumentClaims("dc+sd-jwt", map[string]any{"odd": math.NaN()}, sdEntry, nymAuthTarget(t))
+	_, err = presentedDocumentClaims(openid4vp.PresentedShape("dc+sd-jwt"), map[string]any{"odd": math.NaN()}, sdEntry, nymAuthTarget(t))
 	require.Error(t, err, "an SD-JWT NaN must be refused as well")
 	require.Contains(t, err.Error(), "JSON can carry")
 }
@@ -865,15 +858,15 @@ func TestPublishedDocumentsAreTheDecoratedOnes(t *testing.T) {
 		}
 	}
 	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"birthdate"},
-		DocumentClaims: map[string]string{"birthdate": "birth_date"},
+		AuthClaims:     []claimpath.Pointer{claimpath.Keys("birthdate")},
+		DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("birthdate"), To: claimpath.Keys("birth_date")}},
 	}
 
 	t.Run("the cached document carries the override and its provenance", func(t *testing.T) {
 		c, cacheService := newClient(t)
 
 		require.NoError(t, c.publishPresentedDocuments(t.Context(), "sess-1", docs(),
-			openid4vp.FormatSDJWTVC, map[string]any{"birthdate": "2010-01-01"}, entry, "nym_auth", "nym_auth"))
+			claimpath.Nested(), map[string]any{"birthdate": "2010-01-01"}, entry, "nym_auth", "nym_auth"))
 
 		cached, ok := cacheService.Document.Get(t.Context(), "sess-1")
 		require.True(t, ok, "the session's documents must have been published")
@@ -899,9 +892,9 @@ func TestPublishedDocumentsAreTheDecoratedOnes(t *testing.T) {
 			"the provenance must name the presented claim and its proved value")
 
 		conflicting := []primitives.Derivation{{
-			Trim: &primitives.TrimArgs{Input: "family_name", Output: "birth_date"},
+			Trim: &primitives.TrimArgs{Input: claimpath.Keys("family_name"), Output: claimpath.Keys("birth_date")},
 		}}
-		derived, err := credential.ApplyDerivationsPinned(conflicting, docData, time.Now(), proved)
+		derived, err := credential.ApplyDerivationsPinned(conflicting, docData, time.Now(), proved, nestedShapes)
 		require.NoError(t, err)
 		require.Equal(t, "stored", derived["birth_date"],
 			"the attempt is reported, which is what makes the conflict visible")
@@ -916,7 +909,7 @@ func TestPublishedDocumentsAreTheDecoratedOnes(t *testing.T) {
 		c, cacheService := newClient(t)
 
 		err := c.publishPresentedDocuments(t.Context(), "sess-2", docs(),
-			openid4vp.FormatSDJWTVC, map[string]any{"something_else": "x"}, entry, "nym_auth", "nym_auth")
+			claimpath.Nested(), map[string]any{"something_else": "x"}, entry, "nym_auth", "nym_auth")
 		require.Error(t, err, "issuing from datastore values would assert what was never presented")
 
 		_, ok := cacheService.Document.Get(t.Context(), "sess-2")
@@ -938,12 +931,12 @@ func TestHandlerDecoratesDocumentsOrRefuses(t *testing.T) {
 		}
 	}
 	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{"birthdate"},
-		DocumentClaims: map[string]string{"birthdate": "birth_date"},
+		AuthClaims:     []claimpath.Pointer{claimpath.Keys("birthdate")},
+		DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("birthdate"), To: claimpath.Keys("birth_date")}},
 	}
 
 	t.Run("the published document carries the override and the provenance", func(t *testing.T) {
-		out, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+		out, err := c.decorateWithPresentedClaims(docs(), claimpath.Nested(),
 			map[string]any{"birthdate": "2010-01-01"}, entry, "nym_auth", "nym_auth")
 		require.NoError(t, err)
 		require.Equal(t, "2010-01-01", out["d"].DocumentData["birth_date"],
@@ -955,7 +948,7 @@ func TestHandlerDecoratesDocumentsOrRefuses(t *testing.T) {
 	})
 
 	t.Run("a missing source claim refuses, before anything is published", func(t *testing.T) {
-		out, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+		out, err := c.decorateWithPresentedClaims(docs(), claimpath.Nested(),
 			map[string]any{"something_else": "x"}, entry, "nym_auth", "nym_auth")
 		require.Error(t, err, "issuing from datastore values would assert what was never presented")
 		require.Nil(t, out, "nothing to publish when the presentation cannot be honoured")
@@ -963,13 +956,13 @@ func TestHandlerDecoratesDocumentsOrRefuses(t *testing.T) {
 	})
 
 	t.Run("an unconvertible source claim refuses too", func(t *testing.T) {
-		_, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+		_, err := c.decorateWithPresentedClaims(docs(), claimpath.Nested(),
 			map[string]any{"birthdate": float64(1 << 60)}, entry, "nym_auth", "nym_auth")
 		require.Error(t, err)
 	})
 
 	t.Run("no configured claims is not an error", func(t *testing.T) {
-		out, err := c.decorateWithPresentedClaims(docs(), openid4vp.FormatSDJWTVC,
+		out, err := c.decorateWithPresentedClaims(docs(), claimpath.Nested(),
 			map[string]any{}, model.AuthScopeEntry{}, "nym_auth", "nym_auth")
 		require.NoError(t, err)
 		require.Nil(t, out["d"].PresentedClaims, "nothing was taken from the presentation")
@@ -1088,15 +1081,18 @@ func callsMadeBy(t *testing.T, file, fn string) map[string]bool {
 // copy per test was four places to keep in step.
 func copiedMdocClaim(t *testing.T, element string, v any) (map[string]any, error) {
 	t.Helper()
-	qualified := "org.iso.18013.5.1." + element
+	target := nymAuthTarget(t)
+	document, err := target.DocumentShape()
+	require.NoError(t, err)
+	to, err := document.Dotted(element)
+	require.NoError(t, err)
 	entry := model.AuthScopeEntry{
-		AuthClaims:     []string{qualified},
-		DocumentClaims: map[string]string{qualified: element},
+		DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", element), To: to}},
 	}
 	presented := mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
 		"org.iso.18013.5.1": {element: v},
 	})
-	return presentedDocumentClaims("mso_mdoc", presented, entry, nymAuthTarget(t))
+	return presentedDocumentClaims(openid4vp.PresentedShape("mso_mdoc"), presented, entry, target)
 }
 
 // Checked against the source, because that is the only thing that shows
@@ -1128,7 +1124,11 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		},
 		{
 			file: "handlers_issuer.go", fn: "VCICredential",
-			calls: []string{"provedClaims", "restoreProvedClaims", "ApplyDerivationsPinned"},
+			calls: []string{"provedClaims", "restoreProvedClaims", "applyDocumentDerivations"},
+		},
+		{
+			file: "handlers_issuer.go", fn: "applyDocumentDerivations",
+			calls: []string{"ApplyDerivationsPinned"},
 		},
 	} {
 		t.Run(tc.fn, func(t *testing.T) {
@@ -1141,3 +1141,6 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		})
 	}
 }
+
+// nestedShapes reads and writes JSON-based claims.
+var nestedShapes = primitives.Shapes{Source: claimpath.Nested(), Issued: claimpath.Nested()}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -23,12 +24,12 @@ func TestApplyDerivations_Random(t *testing.T) {
 	claims := map[string]any{"given_name": "  Ada  "}
 
 	derived, err := credential.ApplyDerivations([]primitives.Derivation{
-		{Random: &primitives.RandomArgs{Output: "document_id"}},
-		{Trim: &primitives.TrimArgs{Input: "given_name"}},
+		{Random: &primitives.RandomArgs{Output: claimpath.Keys("document_id")}},
+		{Trim: &primitives.TrimArgs{Input: claimpath.Keys("given_name")}},
 		// Reads what the first entry produced, which is the property that
 		// makes a generated value usable by the rest of the pipeline.
-		{Uppercase: &primitives.UppercaseArgs{Input: "document_id", Output: "document_id_upper"}},
-	}, claims, now)
+		{Uppercase: &primitives.UppercaseArgs{Input: claimpath.Keys("document_id"), Output: claimpath.Keys("document_id_upper")}},
+	}, claims, now, credentialShapes)
 	require.NoError(t, err)
 
 	id, ok := derived["document_id"].(string)
@@ -46,8 +47,8 @@ func TestApplyDerivations_Random(t *testing.T) {
 // A claim the source data supplied survives: this primitive fills gaps.
 func TestApplyDerivations_RandomDoesNotReplaceSourceData(t *testing.T) {
 	derived, err := credential.ApplyDerivations([]primitives.Derivation{
-		{Random: &primitives.RandomArgs{Output: "document_id"}},
-	}, map[string]any{"document_id": "ABC-123"}, now)
+		{Random: &primitives.RandomArgs{Output: claimpath.Keys("document_id")}},
+	}, map[string]any{"document_id": "ABC-123"}, now, credentialShapes)
 	require.NoError(t, err)
 
 	assert.NotContains(t, derived, "document_id")
@@ -61,7 +62,7 @@ func TestRandomDerivationPassesConfigValidation(t *testing.T) {
 
 	t.Run("on its own", func(t *testing.T) {
 		assert.NoError(t, validate.Struct(&primitives.Derivation{
-			Random: &primitives.RandomArgs{Output: "document_id"},
+			Random: &primitives.RandomArgs{Output: claimpath.Keys("document_id")},
 		}))
 	})
 
@@ -73,22 +74,25 @@ func TestRandomDerivationPassesConfigValidation(t *testing.T) {
 
 	t.Run("with an unknown format", func(t *testing.T) {
 		assert.Error(t, validate.Struct(&primitives.Derivation{
-			Random: &primitives.RandomArgs{Output: "id", Format: "dice"},
+			Random: &primitives.RandomArgs{Output: claimpath.Keys("id"), Format: "dice"},
 		}))
 	})
 
 	t.Run("with a byte count outside the range", func(t *testing.T) {
 		for _, n := range []int{1, 7, 65, 1024} {
 			assert.Error(t, validate.Struct(&primitives.Derivation{
-				Random: &primitives.RandomArgs{Output: "id", Format: "hex", Bytes: n},
+				Random: &primitives.RandomArgs{Output: claimpath.Keys("id"), Format: "hex", Bytes: n},
 			}), "bytes=%d", n)
 		}
 	})
 
 	t.Run("alongside another primitive", func(t *testing.T) {
 		assert.Error(t, validate.Struct(&primitives.Derivation{
-			Random: &primitives.RandomArgs{Output: "id"},
-			Trim:   &primitives.TrimArgs{Input: "name"},
+			Random: &primitives.RandomArgs{Output: claimpath.Keys("id")},
+			Trim:   &primitives.TrimArgs{Input: claimpath.Keys("name")},
 		}))
 	})
 }
+
+// credentialShapes reads and writes JSON-based claims.
+var credentialShapes = primitives.Shapes{Source: claimpath.Nested(), Issued: claimpath.Nested()}
