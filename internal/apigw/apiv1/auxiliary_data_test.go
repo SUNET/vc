@@ -103,6 +103,9 @@ func TestAuxiliaryData(t *testing.T) {
 		scope   string
 		entries []openid4vci.AuxiliaryDataEntry
 	}{
+		"the entry carries only type, alg, path and commitment": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
+			e.Encoding = "hex"
+		})},
 		"the commitment is a sha-256 hash": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
 			e.Commitment = base64.RawURLEncoding.EncodeToString(walletPSC[:31])
 		})},
@@ -164,6 +167,8 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 		map[string]any{"personal_administrative_number": "pan-200"}, []byte(`{"given_name":"Alex"}`), fromWallet)
 	require.NoError(t, err)
 	require.Len(t, toWallet, 1)
+	assert.Equal(t, openid4vci.AuxiliaryDataEntry{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Opening: toWallet[0].Opening},
+		toWallet[0], "a response entry carries type, alg, path and opening")
 	opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
 	require.NoError(t, err)
 	issued := sha256.Sum256(opening)

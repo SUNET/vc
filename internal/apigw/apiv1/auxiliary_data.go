@@ -93,8 +93,12 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment); err != nil {
 			return nil, err
 		}
-		entry.Opening = base64.RawURLEncoding.EncodeToString(opening)
-		delivered = append(delivered, entry)
+		delivered = append(delivered, openid4vci.AuxiliaryDataEntry{
+			Type:    entry.Type,
+			Alg:     entry.Alg,
+			Path:    entry.Path,
+			Opening: base64.RawURLEncoding.EncodeToString(opening),
+		})
 	}
 	return delivered, nil
 }
@@ -300,6 +304,8 @@ func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4v
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("to_issuer of this credential lists no entry for %q", entry.Path))
 	case entry.Alg != want.Alg:
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q must use alg %s", entry.Path, want.Alg))
+	case entry.Opening != "" || entry.Encoding != "" || entry.Required:
+		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q carries only type, alg, path and commitment", entry.Path))
 	}
 	value, err := base64.RawURLEncoding.DecodeString(entry.Commitment)
 	if err != nil || len(value) != sha256.Size {

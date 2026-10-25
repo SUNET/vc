@@ -65,12 +65,13 @@ type AuxiliaryDataEntry struct {
 	// sends.
 	Commitment string `json:"commitment,omitempty" yaml:"commitment,omitempty"`
 
-	// Required, in a to_issuer entry, means the Wallet must send it.
+	// Required, in a to_issuer entry of metadata, means the Wallet must
+	// send it.
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
 
-	// Encoding is how the claim at Path represents the commitment:
-	// base64url, base64 or hex text, or the bytes when empty.
-	Encoding string `json:"-" yaml:"encoding,omitempty" doc_example:"\"base64url\""`
+	// Encoding is how the claim at Path represents the commitment, in
+	// metadata: base64url, base64 or hex text, or the bytes when empty.
+	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty" doc_example:"\"base64url\""`
 }
 
 // The text encodings of AuxiliaryDataEntry.Encoding.
