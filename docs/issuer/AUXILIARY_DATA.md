@@ -124,8 +124,9 @@ written in decimal, and the salt is empty. Each input is a non-empty string
 claim of the source data.
 
 The secret file holds the secret **base64url-encoded**, decoding to at
-least 32 bytes. `head -c 32 /dev/urandom | basenc --base64url | tr -d '='`
-produces one. `create_pki.sh` writes one to `developer_tools/pki`, and the
+least 32 bytes, and only its owner can read it.
+`(umask 077; head -c 32 /dev/urandom | basenc --base64url | tr -d '=' > nym_auth_seed.key)`
+writes one. `create_pki.sh` writes one to `developer_tools/pki`, and the
 Fly deploy provisions one per environment as the `NYM_AUTH_SEED` secret.
 
 **Back the secret up, and keep it.** Every opening this deployment issues
