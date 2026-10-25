@@ -363,10 +363,10 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 
 	// The SAME rule the request was built with. Ranging pb.templates and
 	// taking any scope overlap picked a different template on different runs -
-	// map order is random, and the shipped eudi_pid_basic and eduid_basic both
-	// declare "profile" - so a request for "pid profile" could be built from
-	// the PID template and then have eduID's claim mappings applied to the
-	// credential that came back.
+	// map order is random, and a request for "pid profile" names scopes of
+	// both eudi_pid_basic and eduid_basic - so it could be built from the PID
+	// template and then have eduID's claim mappings applied to the credential
+	// that came back.
 	template, ok := pb.selectTemplate(scopes)
 	if !ok {
 		return nil

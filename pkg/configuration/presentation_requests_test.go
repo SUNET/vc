@@ -367,6 +367,12 @@ claim_mappings:
 	if len(cfg.Templates) != 1 {
 		t.Fatalf("expected 1 template, got %d", len(cfg.Templates))
 	}
+
+	// The shipped templates. The verifier refuses to start when
+	// presentation_requests_dir names a directory that fails to load.
+	if _, err := LoadPresentationRequests(context.Background(), filepath.Join("..", "..", "presentation_requests")); err != nil {
+		t.Fatalf("shipped presentation_requests: %v", err)
+	}
 }
 
 func TestLoadPresentationRequests_DuplicateIDs(t *testing.T) {

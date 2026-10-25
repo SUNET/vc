@@ -12,7 +12,6 @@ templates:
     version: "1.0"
     oidc_scopes:
       - "pid"
-      - "profile"
     dcql:
       credentials:
         - id: "eudi_pid"

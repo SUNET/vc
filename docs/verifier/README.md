@@ -234,7 +234,7 @@ Add mappers in Keycloak to map wallet claims to user attributes:
 | Scope | Credential Type | Claims |
 |-------|----------------|--------|
 | `openid` | PID | `sub` |
-| `profile` | PID | `given_name`, `family_name`, `birthdate`, `nationality` |
+| `profile` | eduID | `given_name`, `family_name`, `birthdate`, `email`, `nationalities` |
 | `email` | PID | `email` |
 | `address` | PID | `address` |
 | `ehic` | EHIC | All EHIC fields |

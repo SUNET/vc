@@ -301,7 +301,7 @@ Scopes determine what information your application receives about the user. Each
 | Scope | What it provides | Credential type |
 | ----- | ---------------- | --------------- |
 | `openid` | **Required.** Enables the OIDC login flow. | _(standard OIDC)_ |
-| `profile` | Basic identity: name, birthdate | PID (Person Identification Data) |
+| `profile` | Basic identity: name, birthdate, email, nationalities | eduID |
 | `email` | Email address | _(standard OIDC)_ |
 | `pid` | Full PID attributes: name, birthdate, nationality, etc. | PID |
 | `ehic` | European Health Insurance Card data | EHIC |
