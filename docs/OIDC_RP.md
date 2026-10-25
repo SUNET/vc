@@ -4,7 +4,7 @@
 
 The OIDC RP feature enables the APIGW service to act as an OpenID Connect Relying Party, allowing users to authenticate with external OIDC Providers (Google, Azure AD, Keycloak, etc.) and receive verifiable credentials based on the claims returned by those providers.
 
-This is an **optional feature** that must be enabled at compile time using the `oidcrp` build tag.
+`apigw.auth_providers.oidc.enable: true` turns the feature on. A credential scope authenticates through it when its data source sets `auth_provider: oidc`.
 
 ## Architecture
 
@@ -54,35 +54,37 @@ This is an **optional feature** that must be enabled at compile time using the `
      │                           │ 11. UserInfo claims         │
      │                           │◄────────────────────────────┤
      │                           │                             │
-     │                           │ 12. Transform claims to     │
-     │                           │     credential format       │
+     │                           │ 12. Map claims, apply       │
+     │                           │     derivations and policy  │
      │                           │                             │
-     │                           │ 13. Issue credential        │
-     │                           │     via Issuer gRPC         │
+     │                           │ 13. Store document under a  │
+     │                           │     pre-authorized code     │
      │                           │                             │
-     │ 14. Credential + Offer    │                             │
+     │ 14. Credential offer      │                             │
      │◄──────────────────────────┤                             │
      │                           │                             │
 ```
 
+The wallet redeems the offer at the token and credential endpoints, and the issuer signs the credential then.
+
+A wallet can also reach the OIDC Provider through the OpenID4VCI authorization flow. The consent page starts the OIDC flow for a scope whose data source sets `auth_provider: oidc`. The callback stores the document in the OpenID4VCI session and redirects the browser to `/authorization/consent/#/credentials`.
+
 ### Key Components
 
-1. **Session Store** (`pkg/oidcrp/session.go`)
-   - In-memory session storage with automatic expiration
-   - Stores OAuth2 state, PKCE code_verifier, nonce, credential_type
-   - Thread-safe with mutex protection
-   - Automatic cleanup every 5 minutes
+1. **Session Store** (`internal/apigw/auth_providers/oidcrp/session.go`)
+   - Sessions live in the apigw cache `apigw_oidcrp_sessions`: in memory, or in MongoDB when `common.ha.enable` is set
+   - Stores OAuth2 state, PKCE code_verifier, nonce, credential type and client ID
+   - Expires after `session_duration`
 
-2. **OIDC Service** (`pkg/oidcrp/service.go`)
+2. **OIDC Service** (`internal/apigw/auth_providers/oidcrp/service.go`)
    - OIDC Provider discovery via `.well-known/openid-configuration`
    - OAuth2 authorization code flow with PKCE (S256)
    - ID Token verification (signature, nonce, expiration)
    - UserInfo endpoint support for extended claims
+   - RFC 7591 dynamic client registration (`dynamic_registration.go`)
 
-3. **Claim Transformer** (`pkg/oidcrp/transformer.go`)
-   - Protocol-agnostic claim transformation
-   - Supports dot-notation for nested structures
-   - Optional transformations: lowercase, uppercase, trim
+3. **Attribute Mapper** (`pkg/credential/attribute_mapping.go`)
+   - Renames OIDC claims to claim paths, with dot-notation for nested structures
    - Required/optional claim validation
    - Default values for missing claims
 
@@ -90,422 +92,228 @@ This is an **optional feature** that must be enabled at compile time using the `
    - `POST /oidcrp/initiate` - Start authentication
    - `GET /oidcrp/callback` - Handle provider callback
 
-## Building with OIDC RP Support
-
-### Compile with OIDC RP enabled:
-```bash
-go build -tags=oidcrp ./cmd/apigw/
-```
-
-### Compile without OIDC RP (smaller binary):
-```bash
-go build ./cmd/apigw/
-```
-
-When built without the `oidcrp` tag, stub implementations are used and the feature is completely disabled.
-
 ## Configuration
+
+OIDC RP configuration has two parts:
+
+1. `apigw.auth_providers.oidc` configures the Relying Party.
+2. Each credential scope that authenticates with OIDC sets `auth_provider: oidc` under `apigw.data_sources`.
+
+[CONFIGURATION.md](./CONFIGURATION.md) lists every field.
 
 ### Basic Configuration
 
-Add the `oidcrp` section to your `config.yaml` under `apigw`:
+```yaml
+apigw:
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "https://accounts.google.com"
+      redirect_uri: "https://issuer.example.com/oidcrp/callback"
+      scopes:
+        - "openid"
+        - "profile"
+        - "email"
+      session_duration: 300
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "your-client-id"
+          client_secret: "your-client-secret"
+  data_sources:
+    assertion:
+      scopes:
+        pid:
+          auth_provider: oidc
+```
+
+- `redirect_uri` is the apigw's `/oidcrp/callback` endpoint. Register it with the provider.
+- `scopes` must include `openid`. The default is `["openid", "profile", "email"]`.
+- `session_duration` is how long, in seconds, an authorization flow may take. The default is 300.
+- `registration` holds exactly one of `preconfigured` and `dynamic`.
+- `client_secret` can move to the secrets file, under the same path (see `secrets.example.yaml`).
+
+### Provider-Specific Settings
+
+Providers differ in `issuer_url` and in how the client is registered:
+
+| Provider | `issuer_url` | Registration |
+|----------|--------------|--------------|
+| Google | `https://accounts.google.com` | `preconfigured`, with OAuth2 credentials from the Google Cloud console |
+| Azure AD | `https://login.microsoftonline.com/{tenant-id}/v2.0` | `preconfigured`, with a client registered in the Azure Portal |
+| Keycloak | `https://keycloak.example.com/realms/{realm-name}` | `preconfigured`, or `dynamic` with an initial access token |
+
+### Data Sources
+
+The data source of a scope decides what the OIDC claims are used for:
+
+| Data source | Use of the OIDC claims |
+|-------------|------------------------|
+| `assertion` | The claims are the credential's data. `defaults` and `expiry_duration` supply credential fields such as `issuing_authority` and `date_of_expiry`. |
+| `datastore` | The claims identify the user. `auth_claims` names the claims matched against the identities of documents pre-loaded under `authentic_source`. |
+| `external_api` | The claims identify the user. The `remote` API supplies the credential's data. |
 
 ```yaml
 apigw:
-  oidcrp:
-    enabled: true
-    client_id: "your-client-id"
-    client_secret: "your-client-secret"
-    redirect_uri: "https://issuer.example.com/oidcrp/callback"
-    issuer_url: "https://accounts.google.com"
-    scopes:
-      - "openid"
-      - "profile"
-      - "email"
-    session_duration: 300
-    credential_mappings:
-      pid:
-        credential_config_id: "urn:eudi:pid:1"
-        attributes:
-          given_name:
-            claim: "identity.given_name"
-            required: true
-          family_name:
-            claim: "identity.family_name"
-            required: true
-          email:
-            claim: "identity.email"
-            required: true
+  data_sources:
+    assertion:
+      scopes:
+        pid:
+          auth_provider: oidc
+          expiry_duration: "8760h"
+          defaults:
+            issuing_authority: "Example Issuer"
+            issuing_country: "SE"
+    datastore:
+      scopes:
+        ehic:
+          auth_provider: oidc
+          authentic_source: "SUNET"
+          auth_claims: ["given_name", "family_name", "birth_date"]
+    external_api:
+      scopes:
+        diploma:
+          auth_provider: oidc
+          remote: ladok
+  remotes:
+    ladok:
+      type: eduapi
+      base_url: "https://api.ladok.se/eduapi"
+      token_url: "https://api.ladok.se/oauth2/token"
+      client_id: "vc-ladok"
+      client_secret: "ladok-client-secret"
 ```
 
-### Provider-Specific Examples
+`auth_claims` names identity fields: `given_name`, `family_name`, `birth_date`, `birth_place`, `authentic_source_person_id` and `personal_administrative_number`. Where the provider names a claim differently, `attribute_mapping` renames it.
 
-#### Google
-
-```yaml
-oidcrp:
-  enabled: true
-  client_id: "123456789-abcdefg.apps.googleusercontent.com"
-  client_secret: "GOCSPX-xxxxxxxxxxxxxxxxxxxx"
-  redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  issuer_url: "https://accounts.google.com"
-  scopes:
-    - "openid"
-    - "profile"
-    - "email"
-  credential_mappings:
-    pid:
-      credential_config_id: "urn:eudi:pid:1"
-      attributes:
-        given_name:
-          claim: "identity.given_name"
-          required: true
-        family_name:
-          claim: "identity.family_name"
-          required: true
-        email:
-          claim: "identity.email"
-          required: true
-        email_verified:
-          claim: "identity.email_verified"
-          required: false
-        sub:
-          claim: "identity.subject_id"
-          required: true
-        picture:
-          claim: "identity.picture_url"
-          required: false
-```
-
-#### Azure AD
-
-```yaml
-oidcrp:
-  enabled: true
-  client_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-  client_secret: "your-azure-client-secret"
-  redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  # Replace {tenant-id} with your Azure AD tenant ID
-  issuer_url: "https://login.microsoftonline.com/{tenant-id}/v2.0"
-  scopes:
-    - "openid"
-    - "profile"
-    - "email"
-  credential_mappings:
-    pid:
-      credential_config_id: "urn:eudi:pid:1"
-      attributes:
-        given_name:
-          claim: "identity.given_name"
-          required: true
-        family_name:
-          claim: "identity.family_name"
-          required: true
-        email:
-          claim: "identity.email"
-          required: true
-        upn:
-          claim: "identity.upn"
-          required: false
-        oid:
-          claim: "identity.azure_oid"
-          required: true
-```
-
-#### Keycloak
-
-```yaml
-oidcrp:
-  enabled: true
-  client_id: "issuer-service"
-  client_secret: "keycloak-client-secret"
-  redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  # Replace {realm-name} with your Keycloak realm
-  issuer_url: "https://keycloak.example.com/realms/{realm-name}"
-  scopes:
-    - "openid"
-    - "profile"
-    - "email"
-  credential_mappings:
-    pid:
-      credential_config_id: "urn:eudi:pid:1"
-      attributes:
-        given_name:
-          claim: "identity.given_name"
-          required: true
-        family_name:
-          claim: "identity.family_name"
-          required: true
-        email:
-          claim: "identity.email"
-          required: true
-        preferred_username:
-          claim: "identity.username"
-          required: true
-        # Custom Keycloak attributes
-        organization:
-          claim: "identity.organization"
-          required: false
-          default: "Unknown"
-```
+Each scope also accepts `oidc_request_params`, `issuance_policy` and `derivations`.
 
 ### Dynamic Client Registration (RFC 7591)
 
-Instead of manually pre-registering your OIDC RP with each provider, you can enable **dynamic client registration** to automatically register at runtime. This is especially useful for:
-
-- Development/testing environments
-- Multi-tenant scenarios
-- Providers that support dynamic registration (Google, Keycloak, etc.)
+With `registration.dynamic`, the service registers itself with the OIDC Provider at startup.
 
 #### How It Works
 
-1. When `dynamic_registration.enabled: true`, the service attempts to register with the OIDC Provider on startup
-2. The provider's `registration_endpoint` is discovered via `.well-known/openid-configuration`
-3. Registration request is sent with client metadata (name, redirect_uri, scopes, etc.)
-4. Provider returns `client_id` and `client_secret`
-5. Credentials are cached to `storage_path` (if configured) to avoid re-registration on restart
-6. Cached credentials are reused until they expire (if `client_secret_expires_at` is set)
+1. The provider's `registration_endpoint` is discovered via `.well-known/openid-configuration`
+2. The registration request carries `redirect_uri`, `scopes`, the client metadata fields and `initial_access_token`
+3. Provider returns `client_id` and `client_secret`
+4. The registration is stored in the apigw database and reused on restart
+5. Before `client_secret_expires_at`, the next flow registers a new client. Flows in progress finish on the client they started with.
 
 #### Configuration Example
 
 ```yaml
-oidcrp:
-  enabled: true
-  # Static credentials are optional when using dynamic registration
-  # client_id: "optional-fallback-id"
-  # client_secret: "optional-fallback-secret"
-  
-  redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  issuer_url: "https://accounts.google.com"
-  scopes:
-    - "openid"
-    - "profile"
-    - "email"
-  
-  # Client metadata for registration
-  client_name: "My Credential Issuer"
-  client_uri: "https://issuer.example.com"
-  logo_uri: "https://issuer.example.com/logo.png"
-  contacts:
-    - "admin@example.com"
-  tos_uri: "https://issuer.example.com/terms"
-  policy_uri: "https://issuer.example.com/privacy"
-  
-  # Enable dynamic registration
-  dynamic_registration:
-    enabled: true
-    # Some providers (e.g., Keycloak) require an initial access token
-    initial_access_token: "optional-bearer-token"
-    # Cache credentials to avoid re-registration
-    storage_path: "/var/lib/vc/oidcrp_credentials.json"
-  
-  credential_mappings:
-    pid:
-      credential_config_id: "urn:eudi:pid:1"
-      attributes:
-        given_name:
-          claim: "identity.given_name"
-          required: true
-        family_name:
-          claim: "identity.family_name"
-          required: true
-        email:
-          claim: "identity.email"
-          required: true
+apigw:
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "https://keycloak.example.com/realms/master"
+      redirect_uri: "https://issuer.example.com/oidcrp/callback"
+      scopes:
+        - "openid"
+        - "profile"
+        - "email"
+
+      # Client metadata for registration
+      client_name: "My Credential Issuer"
+      client_uri: "https://issuer.example.com"
+      logo_uri: "https://issuer.example.com/logo.png"
+      contacts:
+        - "admin@example.com"
+      tos_uri: "https://issuer.example.com/terms"
+      policy_uri: "https://issuer.example.com/privacy"
+
+      registration:
+        dynamic:
+          enable: true
+          # Keycloak: Realm Settings → Client Registration → Initial Access Tokens
+          initial_access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI..."
 ```
 
-#### Provider-Specific Notes
+`initial_access_token` is required with `dynamic`. It can move to the secrets file, under the same path.
 
-**Google**
-- Supports dynamic registration without initial access token
-- Registration endpoint: `https://accounts.google.com/o/oauth2/register`
-- No special configuration needed
+### Attribute Mapping
 
-**Azure AD**
-- Does NOT support RFC 7591 dynamic registration
-- Must use Azure Portal to pre-register clients
-- Use static `client_id` and `client_secret`
+`attribute_mapping` renames OIDC claims before the data source uses them. It applies to every OIDC scope.
 
-**Keycloak**
-- Supports dynamic registration with initial access tokens
-- Generate initial access token in Keycloak admin console:
-  - Go to Realm Settings → Client Registration → Initial Access Tokens
-  - Create new token and copy it to `initial_access_token` field
-- Registration endpoint: `https://keycloak.example.com/realms/{realm}/clients-registrations/openid-connect`
+Each key is an OIDC claim name. Its fields:
 
-**Example: Keycloak with Dynamic Registration**
-
-```yaml
-oidcrp:
-  enabled: true
-  redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  issuer_url: "https://keycloak.example.com/realms/master"
-  scopes:
-    - "openid"
-    - "profile"
-    - "email"
-  
-  client_name: "Issuer Service (Auto-Registered)"
-  client_uri: "https://issuer.example.com"
-  
-  dynamic_registration:
-    enabled: true
-    # Get this from Keycloak admin console
-    initial_access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI..."
-    storage_path: "/var/lib/vc/keycloak_credentials.json"
-  
-  credential_mappings:
-    pid:
-      credential_config_id: "urn:eudi:pid:1"
-      attributes:
-        given_name:
-          claim: "identity.given_name"
-          required: true
-        family_name:
-          claim: "identity.family_name"
-          required: true
-```
-
-#### Cached Credentials Format
-
-When `storage_path` is configured, registered credentials are cached in JSON format:
-
-```json
-{
-  "client_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "client_secret": "super-secret-string",
-  "registration_access_token": "optional-token-for-updates",
-  "registration_client_uri": "https://provider.com/clients/a1b2c3d4...",
-  "client_secret_expires_at": 1735689600,
-  "registered_at": "2024-01-15T10:30:00Z"
-}
-```
-
-**Security Notes:**
-- Cached credential files should have `0600` permissions (owner read/write only)
-- The `storage_path` directory should be protected
-- Consider using volume mounts for Docker deployments
-- Rotate credentials periodically if provider supports it
-
-#### Fallback to Static Credentials
-
-You can configure both dynamic registration AND static credentials for failover:
-
-```yaml
-oidcrp:
-  enabled: true
-  # Static credentials as fallback
-  client_id: "fallback-client-id"
-  client_secret: "fallback-client-secret"
-  
-  redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  issuer_url: "https://provider.example.com"
-  scopes:
-    - "openid"
-    - "profile"
-  
-  # Try dynamic registration first
-  dynamic_registration:
-    enabled: true
-    storage_path: "/var/lib/vc/credentials.json"
-  
-  credential_mappings:
-    # ...
-```
-
-If dynamic registration fails, the service will use the static credentials.
-
-### Credential Mappings
-
-Credential mappings define how OIDC claims are transformed into credential claims.
-
-#### Attribute Mapping Fields
-
-- **claim**: Target claim path in the credential (supports dot-notation)
+- **claim**: Target claim path (supports dot-notation)
   - Example: `"given_name"` for flat structure
-  - Example: `"identity.given_name"` for nested structure
+  - Example: `"place_of_birth.locality"` for nested structure
 
-- **required**: Whether this claim must be present (boolean)
-  - If `true` and claim is missing, authentication fails
-  - If `false` and claim is missing, it's omitted (unless default is set)
+- **required**: Whether the OIDC claim must be present (boolean)
+  - If `true` and the claim is missing, the callback fails
 
-- **transform**: Optional transformation to apply (string)
-  - `"lowercase"` - Convert string to lowercase
-  - `"uppercase"` - Convert string to uppercase
-  - `"trim"` - Remove leading/trailing whitespace
+- **default**: Value used when the OIDC claim is missing (string)
 
-- **default**: Default value if claim is missing (string)
-  - Only used if `required: false`
+- **as_array**: Wraps a string value in a single-element array (boolean)
 
-#### Example: Complete Mapping
+Without `attribute_mapping`, the claims keep their OIDC names. An `assertion` credential then receives the claims its VCTM or MDDL declares.
+
+With `attribute_mapping`, the claim set holds only the mapped claims, and an `assertion` credential receives all of them. Map every claim the scopes need, including claims whose name stays the same.
+
+Value transformations, such as case folding or date formats, are `derivations` on the scope. See [Derivation Primitives](./CONFIGURATION.md#derivation-primitives).
+
+#### Example
 
 ```yaml
-credential_mappings:
-  diploma:
-    credential_config_id: "urn:eudi:diploma:1"
-    attributes:
-      # Required claim
-      email:
-        claim: "student.email"
-        required: true
-
-      # Required claim (value canonicalisation lives in derivations on the
-      # target scope — see docs/CONFIGURATION.md § Derivation Primitives).
-      username:
-        claim: "student.username"
-        required: true
-
-      # Optional claim with default value
-      university:
-        claim: "diploma.university"
-        required: false
-        default: "Unknown University"
-
-      # Nested structure example
-      given_name:
-        claim: "student.personal_info.given_name"
-        required: true
-
-      # Complex nested example
-      degree_title:
-        claim: "diploma.degree.title"
-        required: true
-
-      graduation_year:
-        claim: "diploma.graduation.year"
-        required: true
+apigw:
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "https://idp.example.com"
+      redirect_uri: "https://issuer.example.com/oidcrp/callback"
+      scopes:
+        - "openid"
+        - "profile"
+        - "email"
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "issuer-service"
+          client_secret: "client-secret"
+      attribute_mapping:
+        first_name:
+          claim: "given_name"
+          required: true
+        last_name:
+          claim: "family_name"
+          required: true
+        date_of_birth:
+          claim: "birthdate"
+          required: true
+        birth_city:
+          claim: "place_of_birth.locality"
+        email:
+          claim: "email"
+        country:
+          claim: "nationalities"
+          as_array: true
+          default: "SE"
 ```
 
 This would transform OIDC claims like:
 ```json
 {
-  "email": "student@example.com",
-  "username": "STUDENT123",
-  "given_name": "  John  ",
-  "degree_title": "Bachelor of Science",
-  "graduation_year": "2024"
+  "sub": "248289761001",
+  "first_name": "Jane",
+  "last_name": "Doe",
+  "date_of_birth": "1990-01-01",
+  "birth_city": "Uppsala"
 }
 ```
 
-Into a credential document:
+Into the claim set:
 ```json
 {
-  "student": {
-    "email": "student@example.com",
-    "username": "student123",
-    "personal_info": {
-      "given_name": "John"
-    }
+  "given_name": "Jane",
+  "family_name": "Doe",
+  "birthdate": "1990-01-01",
+  "place_of_birth": {
+    "locality": "Uppsala"
   },
-  "diploma": {
-    "university": "Unknown University",
-    "degree": {
-      "title": "Bachelor of Science"
-    },
-    "graduation": {
-      "year": "2024"
-    }
-  }
+  "nationalities": ["SE"]
 }
 ```
 
@@ -547,19 +355,20 @@ This endpoint is called by the OIDC Provider after successful authentication.
 {
   "status": "success",
   "credential_type": "pid",
-  "credential": "eyJhbGc...",
   "credential_offer": {
     "credential_issuer": "https://issuer.example.com",
-    "credential_configuration_ids": ["urn:eudi:pid:1"],
+    "credential_configuration_ids": ["pid"],
     "grants": {
       "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
-        "pre-authorized_code": "oidcrp_1234567890"
+        "pre-authorized_code": "Wn3x4Qe0k5LrS8vT1yZbJ2cH6dF9gA7m"
       }
     }
   },
-  "message": "OIDC authentication and credential issuance successful"
+  "message": "OIDC authentication successful, credential offer created"
 }
 ```
+
+In the OpenID4VCI authorization flow, the callback redirects the browser to the consent page.
 
 ## Security Considerations
 
@@ -568,7 +377,7 @@ This endpoint is called by the OIDC Provider after successful authentication.
 OIDC RP implementation mandates PKCE using the S256 method:
 - Protects against authorization code interception attacks
 - Required for public clients and recommended for all clients
-- `code_verifier`: 43-128 character random string
+- `code_verifier`: 32 random bytes, base64url-encoded (43 characters)
 - `code_challenge`: Base64URL(SHA256(code_verifier))
 
 ### State Parameter
@@ -593,10 +402,9 @@ The service automatically verifies:
 
 ### Session Management
 
-- In-memory storage (sessions not persisted)
-- Automatic expiration (default: 1 hour)
-- Cleanup of expired sessions every 5 minutes
-- Sessions deleted after successful credential issuance
+- Stored in memory, or in MongoDB when `common.ha.enable` is set
+- Expire after `session_duration` (default: 300 seconds)
+- Sessions deleted after the callback
 
 ## Troubleshooting
 
@@ -604,14 +412,11 @@ The service automatically verifies:
 
 **Error**: `OIDC RP is not enabled`
 
-**Solution**: Rebuild with the `oidcrp` build tag:
-```bash
-go build -tags=oidcrp ./cmd/apigw/
-```
+**Solution**: Set `apigw.auth_providers.oidc.enable: true`
 
 ### Provider discovery fails
 
-**Error**: `failed to discover OIDC provider`
+**Error**: `failed to discover OIDC provider at <issuer_url>`
 
 **Causes**:
 - Invalid `issuer_url`
@@ -622,7 +427,7 @@ go build -tags=oidcrp ./cmd/apigw/
 
 ### Token exchange fails
 
-**Error**: `failed to exchange code for tokens`
+**Error**: `failed to exchange authorization code`
 
 **Causes**:
 - Invalid `client_id` or `client_secret`
@@ -634,22 +439,20 @@ go build -tags=oidcrp ./cmd/apigw/
 
 ### Missing required claims
 
-**Error**: `missing required claim: email`
+**Error**: `missing required attribute: email (claim: email)`
 
-**Solution**: 
+**Solution**:
 - Ensure requested scopes include necessary claims
 - Check provider's claim mapping
-- Mark claim as `required: false` if it's optional
+- Remove `required: true` from the `attribute_mapping` entry if the claim is optional
 
-### Claim transformation errors
+### Claim path conflicts
 
-**Error**: `failed to set claim identity.given_name`
+**Error**: `failed to set claim identity.given_name: path conflict: identity is not a map`
 
-**Causes**:
-- Conflicting claim paths (e.g., "identity" used as both object and value)
-- Invalid dot-notation syntax
+**Cause**: One `attribute_mapping` entry uses a path as a value, and another uses it as an object
 
-**Solution**: Review credential mapping paths for conflicts
+**Solution**: Review the `claim` paths in `attribute_mapping`
 
 ## Differences from SAML Integration
 
@@ -668,8 +471,6 @@ go build -tags=oidcrp ./cmd/apigw/
 - `github.com/coreos/go-oidc/v3/oidc` - OIDC client library
 - `golang.org/x/oauth2` - OAuth2 client library
 
-These dependencies are vendored and only included when building with `-tags=oidcrp`.
-
 ## Testing
 
 ### Manual Testing with Google
@@ -677,28 +478,26 @@ These dependencies are vendored and only included when building with `-tags=oidc
 1. Create OAuth2 credentials at https://console.cloud.google.com/apis/credentials
 2. Configure authorized redirect URI: `https://your-issuer.com/oidcrp/callback`
 3. Update `config.yaml` with client ID and secret
-4. Build with OIDC RP support
-5. Call initiate endpoint
-6. Follow authorization URL in browser
-7. Authenticate with Google account
-8. Observe callback with credential
+4. Call initiate endpoint
+5. Follow authorization URL in browser
+6. Authenticate with Google account
+7. Observe callback with credential offer
 
 ### Integration Tests
 
 Integration tests with mock OIDC provider are located in:
 ```
-internal/apigw/integration/oidcrp_test.go
+internal/apigw/integration/oidc_integration_test.go
 ```
 
 Run tests with:
 ```bash
-go test -tags=oidcrp ./internal/apigw/integration/
+go test -tags=integration ./internal/apigw/integration/
 ```
 
 ## Future Enhancements
 
 - [ ] Support for additional OIDC features (e.g., refresh tokens)
-- [ ] Persistent session storage (Redis, database)
 - [ ] Multi-provider support (multiple OIDC providers simultaneously)
 - [ ] Advanced claim transformation (JSONPath, custom functions)
 - [ ] Logout flow implementation
@@ -706,6 +505,6 @@ go test -tags=oidcrp ./internal/apigw/integration/
 
 ## Related Documentation
 
-- [SAML Integration](./SAML.md) - Similar authentication pattern using SAML
+- [Configuration Reference](./CONFIGURATION.md) - `apigw.auth_providers` and `apigw.data_sources`
 - [OpenID4VCI](../standards/api_specification.md) - Credential issuance protocol
 - [Configuration Guide](../README.md#configuration) - General configuration
