@@ -121,7 +121,10 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 
 // verifiedClaims returns the required claims of a presented credential,
 // each checked against its allow-list, in the shape the presented
-// credential used.
+// credential used. Each value is in the form the issued document carries
+// (documentValue): a CBOR-decoded value, such as an mdoc full-date's tag
+// 1004, would come back from the Mongo-backed auth context store as a
+// BSON document.
 func verifiedClaims(sourceFormat string, presented map[string]any, required map[string][]string) (map[string]any, error) {
 	verified := make(map[string]any, len(required))
 	for claim, allowed := range required {
@@ -136,11 +139,17 @@ func verifiedClaims(sourceFormat string, presented map[string]any, required map[
 				fmt.Sprintf("claim %q value not in allow-list", claim),
 				403)
 		}
+		stored, err := documentValue(val)
+		if err != nil {
+			return nil, helpers.NewErrorDetailsWithStatus("claim_value_not_representable",
+				fmt.Sprintf("claim %q: %v", claim, err),
+				400)
+		}
 		// Materialise dotted claim paths as nested map structures so the
 		// downstream VCTM filter (which walks nested maps) can see them
 		// under the same shape the presented credential used. mdoc keeps
 		// its namespace-qualified literal key; SD-JWT always nests.
-		setClaimPath(sourceFormat, verified, presented, claim, val)
+		setClaimPath(sourceFormat, verified, presented, claim, stored)
 	}
 	return verified, nil
 }
