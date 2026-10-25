@@ -217,7 +217,12 @@ EOF
     # Secret of the nym_auth ssc hkdf opening, readable by its owner only
     if [ ! -f "${PKI_DIR}/nym_auth_seed.key" ]; then
         echo "Generating the nym_auth ssc opening secret..."
-        (umask 077; openssl rand 32 | basenc --base64url | tr -d '=' > "${PKI_DIR}/nym_auth_seed.key")
+        seed=$(openssl rand 32 | basenc --base64url | tr -d '=')
+        if [ ${#seed} -ne 43 ]; then
+            echo "Generating the nym_auth ssc opening secret failed" >&2
+            exit 1
+        fi
+        (umask 077; printf '%s\n' "${seed}" > "${PKI_DIR}/nym_auth_seed.key")
     fi
 }
 
