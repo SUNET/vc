@@ -1,12 +1,21 @@
 package sdjwtvc
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/claimpath"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// TestClaimRefusesMissingPath: reading type metadata refuses a claim
+// without a path, next to the same claim with one.
+func TestClaimRefusesMissingPath(t *testing.T) {
+	var claim Claim
+	assert.Error(t, json.Unmarshal([]byte(`{"sd": "always"}`), &claim))
+	assert.NoError(t, json.Unmarshal([]byte(`{"path": ["a"], "sd": "always"}`), &claim))
+}
 
 func TestClaimJSONPath(t *testing.T) {
 	tts := []struct {

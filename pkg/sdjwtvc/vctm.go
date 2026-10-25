@@ -1,6 +1,11 @@
 package sdjwtvc
 
-import "github.com/SUNET/vc/pkg/claimpath"
+import (
+	"encoding/json"
+	"errors"
+
+	"github.com/SUNET/vc/pkg/claimpath"
+)
 
 // VCTM is the Verifiable Credential Type Metadata per SD-JWT VC draft-13 section 6.
 // Type Metadata provides information about credential types including:
@@ -153,6 +158,21 @@ type Claim struct {
 
 	// SVGID is the identifier for SVG template placeholders per section 8.1.2.2 (OPTIONAL).
 	SVGID string `json:"svg_id,omitempty" bson:"svg_id,omitempty"`
+}
+
+// UnmarshalJSON reads a claim, and refuses one without a path: type
+// metadata names each claim it describes by a claims path pointer.
+func (c *Claim) UnmarshalJSON(data []byte) error {
+	type plain Claim
+	var claim plain
+	if err := json.Unmarshal(data, &claim); err != nil {
+		return err
+	}
+	if claim.Path.IsZero() {
+		return errors.New("sdjwtvc: a type metadata claim has no path")
+	}
+	*c = Claim(claim)
+	return nil
 }
 
 // ClaimDisplay provides locale-specific claim display information per section 9.2.

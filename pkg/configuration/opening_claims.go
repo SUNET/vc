@@ -97,12 +97,8 @@ func checkClaimWithheld(meta *model.CredentialMetadata, source model.DataSourceT
 // mddlElementHolding returns the MDDL element at the document key that
 // holds the claim at location: its first key.
 func mddlElementHolding(mddl *mdoc.MDDLSchema, location claimpath.Pointer) (string, bool) {
-	components, err := location.Components()
-	if mddl == nil || err != nil || len(components) == 0 {
-		return "", false
-	}
-	key, ok := components[0].KeyName()
-	if !ok {
+	key, ok := location.FirstKey()
+	if mddl == nil || !ok {
 		return "", false
 	}
 	for _, elements := range mddl.Claims {
