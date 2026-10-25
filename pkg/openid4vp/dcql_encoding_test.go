@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +36,7 @@ func TestCredentialQueryEncodingUnchanged(t *testing.T) {
 			query: CredentialQuery{
 				ID: "pid", Format: FormatMsoMdoc,
 				Meta:   MetaQuery{DoctypeValue: "eu.europa.ec.eudi.pid.1"},
-				Claims: []ClaimQuery{{Path: StringPath("eu.europa.ec.eudi.pid.1", "family_name")}},
+				Claims: []ClaimQuery{{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "family_name")}},
 			},
 		},
 		{
@@ -42,7 +44,7 @@ func TestCredentialQueryEncodingUnchanged(t *testing.T) {
 			query: CredentialQuery{
 				ID: "pid", Format: FormatSDJWTVC, Multiple: new(true),
 				Meta:                              MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
-				Claims:                            []ClaimQuery{{ID: "a", Path: StringPath("family_name")}},
+				Claims:                            []ClaimQuery{{ID: "a", Path: claimpath.Keys("family_name")}},
 				ClaimSet:                          [][]string{{"a"}},
 				RequireCryptographicHolderBinding: requireTrue,
 			},
@@ -156,7 +158,7 @@ func TestOrdinaryQueriesSurviveDecodeAugmentSerialise(t *testing.T) {
 
 			// What augmentDCQLFromVCTM does to a query whose parent claim
 			// has configured children.
-			q.Claims = []ClaimQuery{{Path: StringPath("address")}}
+			q.Claims = []ClaimQuery{{Path: claimpath.Keys("address")}}
 
 			encoded, err := json.Marshal(q)
 			require.NoError(t, err)

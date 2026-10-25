@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -123,10 +124,14 @@ func vctmDeclares(vctm *sdjwtvc.VCTM, claim string) bool {
 }
 
 // pathsOverlap reports whether one path is a prefix of the other. A null
-// segment of the VCTM path matches any segment.
-func pathsOverlap(declared []*string, segments []string) bool {
-	for i := range min(len(declared), len(segments)) {
-		if declared[i] != nil && *declared[i] != segments[i] {
+// component of the VCTM path matches any segment.
+func pathsOverlap(declared claimpath.Pointer, segments []string) bool {
+	components, err := declared.Components()
+	if err != nil {
+		return false
+	}
+	for i := range min(len(components), len(segments)) {
+		if !components[i].IsAll() && components[i] != claimpath.Key(segments[i]) {
 			return false
 		}
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +19,7 @@ import (
 // OpeningInputs keeps the claims the openings read, as copies, under their
 // paths, and nothing else.
 func TestOpeningInputs(t *testing.T) {
-	path := []string{"ns", "ssc"}
+	path := claimpath.Keys("ns", "ssc")
 	list := []Derivation{
 		{Lowercase: &LowercaseArgs{Input: "email"}},
 		{HashCommitment: &HashCommitmentArgs{Path: path, Opening: OpeningArgs{

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
@@ -93,47 +94,62 @@ type claimMatch struct {
 
 // resolve walks a claims path pointer (OpenID4VP §7) through the payload,
 // following _sd digests and array-element disclosures.
-func (sd *sdJWT) resolve(node any, path []*string, need []string) []claimMatch {
+func (sd *sdJWT) resolve(node any, path []claimpath.Component, need []string) []claimMatch {
 	if len(path) == 0 {
 		return []claimMatch{{value: node, need: append(slices.Clone(need), sd.nested(node)...)}}
 	}
 
 	switch n := node.(type) {
 	case map[string]any:
-		if path[0] == nil {
-			return nil
-		}
-		key := *path[0]
-		if child, ok := n[key]; ok && key != "_sd" {
-			return sd.resolve(child, path[1:], need)
-		}
-		digests, _ := n["_sd"].([]any)
-		for _, digest := range digests {
-			s, _ := digest.(string)
-			if disc, ok := sd.byDigest[s]; ok && disc.name == key {
-				return sd.resolve(disc.value, path[1:], append(slices.Clone(need), disc.raw))
-			}
-		}
-		return nil
+		return sd.resolveKey(n, path, need)
 	case []any:
-		if path[0] != nil {
-			return nil
-		}
-		var matches []claimMatch
-		for _, element := range n {
-			child, elementNeed := element, need
-			if disc, ok := sd.arrayElement(element); ok {
-				child, elementNeed = disc.value, append(slices.Clone(need), disc.raw)
-			} else if isArrayPlaceholder(element) {
-				// An undisclosed element or a decoy: there is no value to match.
-				continue
-			}
-			matches = append(matches, sd.resolve(child, path[1:], elementNeed)...)
-		}
-		return matches
+		return sd.resolveElements(n, path, need)
 	default:
 		return nil
 	}
+}
+
+// resolveKey continues a path whose next component is a key, in an object.
+func (sd *sdJWT) resolveKey(n map[string]any, path []claimpath.Component, need []string) []claimMatch {
+	key, ok := path[0].KeyName()
+	if !ok {
+		return nil
+	}
+	if child, ok := n[key]; ok && key != "_sd" {
+		return sd.resolve(child, path[1:], need)
+	}
+	digests, _ := n["_sd"].([]any)
+	for _, digest := range digests {
+		s, _ := digest.(string)
+		if disc, ok := sd.byDigest[s]; ok && disc.name == key {
+			return sd.resolve(disc.value, path[1:], append(slices.Clone(need), disc.raw))
+		}
+	}
+	return nil
+}
+
+// resolveElements continues a path whose next component is null or an
+// index, in an array.
+func (sd *sdJWT) resolveElements(n []any, path []claimpath.Component, need []string) []claimMatch {
+	if _, isKey := path[0].KeyName(); isKey {
+		return nil
+	}
+	index, oneElement := path[0].IndexValue()
+	var matches []claimMatch
+	for i, element := range n {
+		if oneElement && uint(i) != index {
+			continue
+		}
+		child, elementNeed := element, need
+		if disc, ok := sd.arrayElement(element); ok {
+			child, elementNeed = disc.value, append(slices.Clone(need), disc.raw)
+		} else if isArrayPlaceholder(element) {
+			// An undisclosed element or a decoy: there is no value to match.
+			continue
+		}
+		matches = append(matches, sd.resolve(child, path[1:], elementNeed)...)
+	}
+	return matches
 }
 
 // nested is every disclosure reachable inside a selected value, since
@@ -192,9 +208,13 @@ func (sd *sdJWT) arrayElement(element any) (sdDisclosure, bool) {
 // claimDisclosures answers one claim query: whether the claim exists with
 // an acceptable value, and which disclosures reveal it.
 func (sd *sdJWT) claimDisclosures(query openid4vp.ClaimQuery) ([]string, bool) {
+	path, err := query.Path.Components()
+	if err != nil {
+		return nil, false
+	}
 	var need []string
 	found := false
-	for _, m := range sd.resolve(sd.payload, query.Path, nil) {
+	for _, m := range sd.resolve(sd.payload, path, nil) {
 		if len(query.Values) > 0 && !slices.ContainsFunc(query.Values, func(v any) bool { return claimValueEqual(m.value, v) }) {
 			continue
 		}

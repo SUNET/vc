@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -123,8 +124,8 @@ func (p *Pointer) Resolve(interpret func(dotted string) (Pointer, error)) error 
 	return nil
 }
 
-// Components returns the pointer's components. A pending or unset pointer
-// is an error.
+// Components returns the pointer's components. A pending or unset pointer,
+// and one with an empty key, is an error.
 func (p Pointer) Components() ([]Component, error) {
 	if p.dotted != "" {
 		return nil, fmt.Errorf("claimpath: claim %q is unresolved", p.dotted)
@@ -132,8 +133,15 @@ func (p Pointer) Components() ([]Component, error) {
 	if len(p.components) == 0 {
 		return nil, errors.New("claimpath: the claims path pointer is unset")
 	}
+	for i, c := range p.components {
+		if c.kind == keyKind && c.key == "" {
+			return nil, fmt.Errorf("claimpath: element %d: %w", i, errEmptyKey)
+		}
+	}
 	return p.components, nil
 }
+
+var errEmptyKey = errors.New("a key is a non-empty string")
 
 // KeyNames returns the keys of a pointer made only of keys.
 func (p Pointer) KeyNames() ([]string, bool) {
@@ -169,14 +177,27 @@ func (p Pointer) Name() (string, bool) {
 	return p.components[len(p.components)-1].KeyName()
 }
 
-// Parent returns the pointer without its last component, and that
-// component. A pointer of one component has no parent pointer.
-func (p Pointer) Parent() (parent Pointer, last Component, ok bool) {
+// Parent returns the pointer without its last component. A pointer of
+// one component has none.
+func (p Pointer) Parent() (Pointer, bool) {
+	return p.Prefix(len(p.components) - 1)
+}
+
+// Last returns the last component of a resolved pointer.
+func (p Pointer) Last() (Component, bool) {
 	if p.dotted != "" || len(p.components) == 0 {
-		return Pointer{}, Component{}, false
+		return Component{}, false
 	}
-	n := len(p.components) - 1
-	return Pointer{components: p.components[:n:n]}, p.components[n], true
+	return p.components[len(p.components)-1], true
+}
+
+// Prefix returns the first n components of the pointer, for n from 1 to
+// its length.
+func (p Pointer) Prefix(n int) (Pointer, bool) {
+	if p.dotted != "" || n < 1 || n > len(p.components) {
+		return Pointer{}, false
+	}
+	return Pointer{components: p.components[:n:n]}, true
 }
 
 // KeyPrefix returns the leading keys of the pointer, up to its first null
@@ -277,7 +298,7 @@ func component(value any) (Component, error) {
 	switch v := value.(type) {
 	case string:
 		if v == "" {
-			return Component{}, errors.New("a key is a non-empty string")
+			return Component{}, errEmptyKey
 		}
 		return Key(v), nil
 	case nil:
@@ -382,6 +403,22 @@ func (p *Pointer) UnmarshalYAML(unmarshal func(any) error) error {
 	default:
 		return fmt.Errorf("claimpath: a claim is an array or a dotted string, not %v", raw)
 	}
+}
+
+// ValidationValue is the value go-playground/validator checks for a
+// Pointer: its components, or nil for a pointer that is unset, pending or
+// has an empty key. A validator that registers it with
+// RegisterCustomTypeFunc reads "required" as a valid resolved pointer.
+func ValidationValue(field reflect.Value) any {
+	p, ok := field.Interface().(Pointer)
+	if !ok {
+		return nil
+	}
+	components, err := p.Components()
+	if err != nil {
+		return nil
+	}
+	return components
 }
 
 // Compare orders pointers by their rendering, for a stable order.

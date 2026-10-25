@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -14,8 +15,8 @@ import (
 // TestBuildIssuanceAuthDCQL exercises the DCQL query built for OpenID4VP-based
 // issuance authentication: one CredentialQuery per auth scope, each carrying
 // that scope's single canonical VCTM.VCT in meta.vct_values (see
-// (*model.Cfg).VCTIdentifiersForScopes), per-scope auth_claims mapped to
-// StringPath, and a CredentialSets Options entry so the wallet may pick any
+// (*model.Cfg).VCTIdentifiersForScopes), per-scope auth_claims as claims
+// path pointers, and a CredentialSets Options entry so the wallet may pick any
 // of the acceptable credential types.
 func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	cfg := &model.Cfg{
@@ -52,13 +53,13 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	assert.Equal(t, "dc+sd-jwt", byID["pid"].Format)
 	assert.Equal(t, []string{"urn:eudi:pid:1"}, byID["pid"].Meta.VCTValues)
 	require.Len(t, byID["pid"].Claims, 2)
-	assert.Equal(t, openid4vp.StringPath("given_name"), byID["pid"].Claims[0].Path)
-	assert.Equal(t, openid4vp.StringPath("family_name"), byID["pid"].Claims[1].Path)
+	assert.Equal(t, claimpath.Keys("given_name"), byID["pid"].Claims[0].Path)
+	assert.Equal(t, claimpath.Keys("family_name"), byID["pid"].Claims[1].Path)
 
 	assert.Equal(t, "vc+sd-jwt", byID["eduid"].Format)
 	assert.Equal(t, []string{"urn:sunet:eduid:1"}, byID["eduid"].Meta.VCTValues)
 	require.Len(t, byID["eduid"].Claims, 1)
-	assert.Equal(t, openid4vp.StringPath("eduPersonPrincipalName"), byID["eduid"].Claims[0].Path)
+	assert.Equal(t, claimpath.Keys("eduPersonPrincipalName"), byID["eduid"].Claims[0].Path)
 
 	// CredentialSets Options list one entry per auth scope, sorted
 	// alphabetically for deterministic iteration.

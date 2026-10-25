@@ -652,13 +652,6 @@ func copyDCQL(src *DCQL) *DCQL {
 		if len(cred.Claims) > 0 {
 			dst.Credentials[i].Claims = make([]ClaimQuery, len(cred.Claims))
 			for j, claim := range cred.Claims {
-				pathCopy := make([]*string, len(claim.Path))
-				for k, p := range claim.Path {
-					if p != nil {
-						s := *p
-						pathCopy[k] = &s
-					}
-				}
 				// Through copyAnyValue, not a shallow append. A claim
 				// value is `any`, so it can hold a raw leaf or a
 				// container just as Params can, and appending copies the
@@ -672,9 +665,10 @@ func copyDCQL(src *DCQL) *DCQL {
 						valuesCopy[k] = copyAnyValue(v)
 					}
 				}
+				// A claims path pointer is immutable, so the copy shares it.
 				dst.Credentials[i].Claims[j] = ClaimQuery{
 					ID:     claim.ID,
-					Path:   pathCopy,
+					Path:   claim.Path,
 					Values: valuesCopy,
 				}
 			}

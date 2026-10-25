@@ -3,6 +3,8 @@ package openid4vci
 import (
 	"encoding/json"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -267,9 +269,7 @@ type CredentialMetadata struct {
 // ClaimDescription describes a claim within a Credential for display purposes.
 type ClaimDescription struct {
 	// Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential.
-	// A nil entry denotes a wildcard over an array's elements (e.g. ["nationalities", null]),
-	// matching the claims path pointer semantics used by presentation/DCQL and VCTM.
-	Path []*string `json:"path" yaml:"path" validate:"required"`
+	Path claimpath.Pointer `json:"path" yaml:"path" validate:"required"`
 
 	// SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.
 	SVGID string `json:"svg_id,omitempty" yaml:"svg_id,omitempty"`

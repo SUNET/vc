@@ -3,6 +3,7 @@ package configuration
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -110,7 +111,7 @@ func TestPresetProfileIsOptIn(t *testing.T) {
 func TestPresetProfileIgnoresClaimsTheUIWouldDrop(t *testing.T) {
 	scope := conformingScope()
 	scope.Claims = []model.VerificationPresetClaim{
-		{Path: []string{"eu.europa.ec.eudi.nym_auth.1", "secret_seed_commitment"}},
+		{Path: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "secret_seed_commitment")},
 	}
 	require.NoError(t, checkPresetValidationProfiles(presetCfg(scope)))
 }

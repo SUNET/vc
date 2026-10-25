@@ -9,6 +9,7 @@ import (
 	"hash"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 )
 
@@ -103,89 +104,6 @@ func TestSign_JSONMarshalError(t *testing.T) {
 	}
 }
 
-// TestProcessClaimPath_NilPathElement tests nil handling
-func TestProcessClaimPath_NilPathElement(t *testing.T) {
-	client := &Client{}
-
-	data := map[string]any{
-		"level1": map[string]any{
-			"level2": "value",
-		},
-	}
-
-	// Create a path with a nil element in the middle
-	level1 := "level1"
-	var nilString *string = nil
-	path := []*string{&level1, nilString}
-
-	_, _, err := client.processClaimPath(data, path, sha256.New())
-	if err == nil {
-		t.Error("Expected error for nil path element")
-	}
-}
-
-// TestAddHashToPath_Errors tests error conditions in addHashToPath
-func TestAddHashToPath_Errors(t *testing.T) {
-	client := &Client{}
-
-	t.Run("nil_path_element_in_addHashToPath", func(t *testing.T) {
-		data := map[string]any{
-			"level1": map[string]any{},
-		}
-
-		level1 := "level1"
-		var nilString *string = nil
-		path := []*string{&level1, nilString}
-
-		err := client.addHashToPath(data, path, "test-hash")
-		if err == nil {
-			t.Error("Expected error for nil path element")
-		}
-	})
-
-	t.Run("path_not_found_in_addHashToPath", func(t *testing.T) {
-		data := map[string]any{
-			"level1": map[string]any{},
-		}
-
-		level1 := "level1"
-		nonexistent := "nonexistent"
-		path := []*string{&level1, &nonexistent}
-
-		err := client.addHashToPath(data, path, "test-hash")
-		if err == nil {
-			t.Error("Expected error for non-existent path")
-		}
-	})
-
-	t.Run("non_object_in_path", func(t *testing.T) {
-		data := map[string]any{
-			"level1": "not-an-object",
-		}
-
-		level1 := "level1"
-		path := []*string{&level1}
-
-		err := client.addHashToPath(data, path, "test-hash")
-		if err == nil {
-			t.Error("Expected error for non-object in path")
-		}
-	})
-
-	t.Run("sd_is_not_an_array", func(t *testing.T) {
-		data := map[string]any{
-			"_sd": "not-an-array", // _sd should be an array
-		}
-
-		path := []*string{} // Empty path means root level
-
-		err := client.addHashToPath(data, path, "test-hash")
-		if err == nil {
-			t.Error("Expected error when _sd is not an array")
-		}
-	})
-}
-
 // TestGenerateSalt_ErrorSimulation tests salt generation
 func TestGenerateSalt_Coverage(t *testing.T) {
 	// Generate multiple salts to ensure coverage
@@ -230,7 +148,7 @@ func TestMakeCredential_ProcessClaimPathErrors(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&level1, &arrayElem},
+					Path: claimpath.Keys(level1, arrayElem),
 					SD:   "always",
 				},
 			},
@@ -289,7 +207,7 @@ func TestBuildCredentialWithSigner_SignError(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&name},
+				Path: claimpath.Keys(name),
 				SD:   "always",
 			},
 		},

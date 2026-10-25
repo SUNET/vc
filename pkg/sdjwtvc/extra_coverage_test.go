@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 )
 
@@ -105,7 +106,7 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&level1, &level2, &level3, &finalClaim},
+					Path: claimpath.Keys(level1, level2, level3, finalClaim),
 					SD:   "always",
 				},
 			},
@@ -145,11 +146,11 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&address, &street},
+					Path: claimpath.Keys(address, street),
 					SD:   "always",
 				},
 			},
@@ -206,11 +207,11 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&age},
+					Path: claimpath.Keys(age),
 					SD:   "never", // Should not be disclosed
 				},
 			},
@@ -241,7 +242,7 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{}, // Empty path
+					Path: claimpath.Pointer{}, // Empty path
 					SD:   "always",
 				},
 			},
@@ -251,20 +252,9 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 			"name": "John",
 		}
 
-		// Should not process claims with empty paths
-		credential, disclosures, err := client.MakeCredential(sha256.New(), data, vctm, 0)
-		if err != nil {
-			t.Fatalf("MakeCredential failed: %v", err)
-		}
-
-		// No disclosures should be created for empty path
-		if len(disclosures) != 0 {
-			t.Errorf("Expected 0 disclosures for empty path, got %d", len(disclosures))
-		}
-
-		// Original data should be unchanged (except for _sd_alg)
-		if _, ok := credential["name"]; !ok {
-			t.Error("Expected name to remain in credential")
+		// A claim without a path is malformed type metadata
+		if _, _, err := client.MakeCredential(sha256.New(), data, vctm, 0); err == nil {
+			t.Fatal("MakeCredential accepted a claim without a path")
 		}
 	})
 }

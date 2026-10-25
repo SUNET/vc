@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -37,8 +38,8 @@ func TestAuxiliaryData(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "nym_auth_seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
 
-	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
-	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
+	ssc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc")
+	psc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "psc")
 	inputs := []string{"issuing_country", "personal_administrative_number"}
 	c := &Client{
 		log: logger.NewSimple("test"),
@@ -109,7 +110,7 @@ func TestAuxiliaryData(t *testing.T) {
 			e.Commitment = base64.RawURLEncoding.EncodeToString(walletPSC[:31])
 		})},
 		"the path is a to_issuer entry": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
-			e.Path = []string{"eu.europa.ec.eudi.nym_auth.1", "birth_date"}
+			e.Path = claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")
 		})},
 		"the alg is the to_issuer entry's":  {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) { e.Alg = "sha-384" })},
 		"the credential takes the entries":  {"pid", fromWallet},
@@ -154,13 +155,9 @@ func TestAuxiliaryData(t *testing.T) {
 func TestAuxiliaryDataSDJWT(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "secret.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
-	ssc, psc := []string{"commitments", "ssc"}, []string{"commitments", "psc"}
-	always := func(path []string) sdjwtvc.Claim {
-		segments := make([]*string, len(path))
-		for i := range path {
-			segments[i] = &path[i]
-		}
-		return sdjwtvc.Claim{Path: segments, SD: "always"}
+	ssc, psc := claimpath.Keys("commitments", "ssc"), claimpath.Keys("commitments", "psc")
+	always := func(path claimpath.Pointer) sdjwtvc.Claim {
+		return sdjwtvc.Claim{Path: path, SD: "always"}
 	}
 	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{always(ssc), always(psc)}}
 	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
@@ -234,7 +231,7 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
 	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"subject.pan"}, Bytes: 16}
-	hc := primitives.HashCommitmentArgs{Path: []string{"commitments", "ssc"}, Opening: primitives.OpeningArgs{HKDF: &opening}}
+	hc := primitives.HashCommitmentArgs{Path: claimpath.Keys("commitments", "ssc"), Opening: primitives.OpeningArgs{HKDF: &opening}}
 	_, err = hc.NewOpening(claims)
 	require.NoError(t, err, "subject.pan resolves in the normalised claims")
 	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
@@ -297,8 +294,8 @@ func TestStoredClaimsLeavesTheCachedClaimsUnchanged(t *testing.T) {
 // their SHA-256. The claim is base64url of the bytes 00 to 0f, whose
 // SHA-256 is from `openssl dgst -sha256`.
 func TestAuxiliaryDataClaimOpening(t *testing.T) {
-	ssc := []string{"commitments", "ssc"}
-	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{{Path: []*string{&ssc[0], &ssc[1]}, SD: "always"}}}
+	ssc := claimpath.Keys("commitments", "ssc")
+	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{{Path: ssc, SD: "always"}}}
 	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
 		"example": {Format: "dc+sd-jwt", VCTM: vctm, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
 			ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Encoding: "hex"}},

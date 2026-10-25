@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -36,6 +37,7 @@ var spocpDimensionPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 // NewValidator creates a new validator
 func NewValidator() (*validator.Validate, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
+	validate.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		// Prefer yaml tag (used by config structs), fall back to json tag

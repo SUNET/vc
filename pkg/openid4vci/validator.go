@@ -5,12 +5,15 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/go-playground/validator/v10"
 )
 
 // NewValidator creates a new validator
 func NewValidator() (*validator.Validate, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
+	validate.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name, _, _ := strings.Cut(fld.Tag.Get("json"), ",")
