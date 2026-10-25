@@ -16,6 +16,34 @@ func (v *VCTM) Validate() error {
 	return validator.New().Struct(v)
 }
 
+// ClaimAt returns the claim the VCTM declares at a claims path of object
+// keys.
+func (v *VCTM) ClaimAt(path []string) (Claim, bool) {
+	if v == nil {
+		return Claim{}, false
+	}
+	for _, claim := range v.Claims {
+		if len(claim.Path) == len(path) && ClaimPathHasPrefix(claim.Path, path) {
+			return claim, true
+		}
+	}
+	return Claim{}, false
+}
+
+// ClaimPathHasPrefix reports whether a claim path starts with the object
+// keys of prefix.
+func ClaimPathHasPrefix(claimPath []*string, prefix []string) bool {
+	if len(claimPath) < len(prefix) {
+		return false
+	}
+	for i, segment := range prefix {
+		if claimPath[i] == nil || *claimPath[i] != segment {
+			return false
+		}
+	}
+	return true
+}
+
 // SRIIntegrity computes the Subresource Integrity (SRI) hash of the VCTM document
 // as defined in W3C SRI spec and SD-JWT VC draft-14 Section 6.
 // The rawBytes parameter should be the original VCTM document bytes (not re-marshalled)

@@ -17,8 +17,18 @@ common:
     mdl:
       mddl_file_path: "/metadata/mdl.mdoc.json"
       format: "mso_mdoc"
+    nym_auth:
+      mddl_file_path: "/metadata/nym_auth.mdoc.json"
+      format: "mso_mdoc"
+      auxiliary_data:
+        to_wallet:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, ssc]}
+        to_issuer:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, psc]}
 issuer:
   issuer_url: "https://apigw.vc.docker:8080"
+  mdoc:
+    certificate_chain_path: "/pki/signing_ec_chain.pem"
   api_server:
     addr: :8080
     tls:
@@ -179,6 +189,10 @@ apigw:
         redirect_uri: "https://apigw.vc.docker:8080/ui/callback"
         scopes: ["openid", "profile"]
   public_url: "https://apigw.vc.docker:8080"
+  issuer_metadata:
+    credential_encryption:
+      keys:
+        - private_key_path: "/pki/credential_encryption.pem"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
@@ -189,6 +203,7 @@ apigw:
     users:
       - "100"
       - "102"
+      - "200"
   data_sources:
     datastore:
       import:
@@ -203,6 +218,7 @@ apigw:
         users:
           - "100"
           - "102"
+          - "200"
       scopes:
         pid:
           auth_provider: oidc
@@ -226,6 +242,48 @@ apigw:
         # Wallet-initiated PAR requests for this scope are rejected.
         #microcredential:
         #  auth_provider: preauth
+    presentation:
+      scopes:
+        nym_auth:
+          from:
+            pid:
+              required_claims:
+                birthdate: []
+                issuing_country: []
+                personal_administrative_number: []
+              derivations:
+                - copy: {input: birthdate, output: birth_date}
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf:
+                        secret_path: "/pki/nym_auth_seed.key"
+                        inputs: [issuing_country, personal_administrative_number]
+                        bytes: 16
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, psc]
+                    unique:
+                      key:
+                        - [eu.europa.ec.eudi.nym_auth.1, ssc]
+            pid_mdoc:
+              required_claims:
+                eu.europa.ec.eudi.pid.1.birth_date: []
+                eu.europa.ec.eudi.pid.1.issuing_country: []
+                eu.europa.ec.eudi.pid.1.administrative_number: []
+              derivations:
+                - copy: {input: eu.europa.ec.eudi.pid.1.birth_date, output: birth_date}
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf:
+                        secret_path: "/pki/nym_auth_seed.key"
+                        inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
+                        bytes: 16
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, psc]
+                    unique:
+                      key:
+                        - [eu.europa.ec.eudi.nym_auth.1, ssc]
   auth_providers:
     # preauth (data_sources scopes with auth_provider: preauth).
     # Set enable_pin: true to require a PIN on pre-authorized credential offers.
@@ -254,6 +312,7 @@ apigw:
             - "ehic"
             - "pid_mdoc"
             - "mdl"
+            - "nym_auth"
     credential_offers:
       issuer_url: "https://apigw.vc.docker:8080"
       wallets:

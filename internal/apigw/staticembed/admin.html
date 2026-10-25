@@ -86,6 +86,7 @@
             </div>
             <a class="nav-link" :class="{'active': view === 'datastore'}" @click="switchView('datastore'); sidebarOpen = false">Datastore</a>
             <a class="nav-link" :class="{'active': view === 'identity'}" @click="switchView('identity'); sidebarOpen = false">Identity Mapping</a>
+            <a class="nav-link" x-show="uniqueCommitmentEntries.length > 0" :class="{'active': view === 'commitments'}" @click="switchView('commitments'); sidebarOpen = false">Commitments</a>
             <a class="nav-link logout" @click="logout()">Logout</a>
         </nav>
 
@@ -442,6 +443,70 @@
                             </div>
                         </div>
                     </template>
+                </div>
+            </template>
+
+            <!-- Commitments View -->
+            <template x-if="view === 'commitments' && uniqueCommitmentEntries.length > 0">
+                <div>
+                    <h2 class="h4 mb-3">Commitments</h2>
+                    <template x-if="unrestricted">
+                        <div class="alert alert-warning small">Resets need operator sign-in (<code>apigw.api_server.api_auth.oidc</code>).</div>
+                    </template>
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <form @submit.prevent="findCommitment($el)" @input="commitmentEdited()">
+                                <template x-if="uniqueCommitmentEntries.length > 1">
+                                    <div class="mb-3">
+                                        <label class="form-label" for="hc-entry">Credential</label>
+                                        <select id="hc-entry" class="form-select" x-model.number="hc.entry" @change="clearCommitmentForm()">
+                                            <template x-for="(e, i) in uniqueCommitmentEntries" :key="i">
+                                                <option :value="i" x-text="e.label"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                </template>
+                                <template x-if="uniqueCommitmentEntries.length === 1">
+                                    <p class="fw-semibold mb-3" x-text="uniqueCommitmentEntries[0].label"></p>
+                                </template>
+                                <template x-for="(part, k) in uniqueCommitmentEntries[hc.entry].key" :key="hc.entry + '-' + k">
+                                    <div>
+                                        <template x-if="part.inputs">
+                                            <div>
+                                                <template x-for="(label, j) in part.inputs" :key="hc.entry + '-' + k + '-' + j">
+                                                    <div class="mb-3">
+                                                        <label class="form-label" :for="'hc-key-' + k + '-' + j" x-text="label"></label>
+                                                        <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required autocomplete="off">
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <template x-if="!part.inputs">
+                                            <div class="mb-3">
+                                                <label class="form-label" :for="'hc-key-' + k" x-text="part.label"></label>
+                                                <input class="form-control" :id="'hc-key-' + k" x-model="hc.values[k]" required autocomplete="off">
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <button class="btn btn-primary" type="submit" :disabled="hc.busy">Find</button>
+                            </form>
+                            <template x-if="hc.found">
+                                <form class="border-top mt-3 pt-3" @submit.prevent="resetCommitment($el)">
+                                    <p class="mb-3">Recorded <span x-text="hc.found.recordedAt"></span></p>
+                                    <div class="mb-3">
+                                        <label class="form-label" for="hc-evidence">Case reference</label>
+                                        <input id="hc-evidence" class="form-control" x-model="hc.evidence" required maxlength="256" autocomplete="off">
+                                    </div>
+                                    <button class="btn btn-danger" type="submit" :disabled="unrestricted || hc.busy">Reset commitment</button>
+                                    <button class="btn btn-link" type="button" @click="hc.found = null">Cancel</button>
+                                </form>
+                            </template>
+                            <template x-if="hc.message">
+                                <div class="alert mt-3 mb-0" :class="{ 'alert-secondary': hc.message.kind === 'none', 'alert-success': hc.message.kind === 'done', 'alert-danger': hc.message.kind === 'error' }" x-text="hc.message.text"></div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </template>
 

@@ -46,6 +46,9 @@ const (
 
 	// ErrCredentialRequestDenied The Credential Request has not been accepted by the Credential Issuer.
 	ErrCredentialRequestDenied = "credential_request_denied" // #nosec G101
+
+	// ErrAuxiliaryDataConflict An Auxiliary Data Entry conflicts with a value the Credential Issuer holds for the subject (Credential Auxiliary Data).
+	ErrAuxiliaryDataConflict = "auxiliary_data_conflict"
 )
 
 const (
@@ -116,7 +119,7 @@ const (
 // StatusCode returns the HTTP status code for the error
 func StatusCode(err *Error) int {
 	switch err.Err {
-	case ErrInvalidScope, ErrUnsupportedResponseType, ErrInvalidCredentialRequest, ErrUnsupportedCredentialType, ErrUnsupportedCredentialFormat, ErrInvalidProof, ErrInvalidNonce, ErrInvalidEncryptionParameters, ErrInvalidRequest, ErrCredentialRequestDenied, InvalidNotificationID, ErrUnknownCredentialConfiguration, ErrUnknownCredentialIdentifier:
+	case ErrInvalidScope, ErrUnsupportedResponseType, ErrInvalidCredentialRequest, ErrUnsupportedCredentialType, ErrUnsupportedCredentialFormat, ErrInvalidProof, ErrInvalidNonce, ErrInvalidEncryptionParameters, ErrInvalidRequest, ErrCredentialRequestDenied, ErrAuxiliaryDataConflict, InvalidNotificationID, ErrUnknownCredentialConfiguration, ErrUnknownCredentialIdentifier:
 		return http.StatusBadRequest
 	case ErrUnauthorizedClient:
 		return http.StatusUnauthorized

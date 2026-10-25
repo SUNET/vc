@@ -468,6 +468,13 @@ func IsSDJWTFormatIdentifier(format string) bool {
 	return format == FormatSDJWTVC
 }
 
+// IsSDJWTVCCredentialFormat reports whether a credential format is SD-JWT
+// VC, in either spelling issuance accepts: dc+sd-jwt or the legacy
+// vc+sd-jwt.
+func IsSDJWTVCCredentialFormat(format string) bool {
+	return format == FormatSDJWTVC || format == "vc+sd-jwt"
+}
+
 // IsMdocFormat returns true if the format is ISO mdoc format.
 func IsMdocFormat(format string) bool {
 	return format == FormatMsoMdoc

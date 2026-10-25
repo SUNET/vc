@@ -294,6 +294,7 @@ cmd_launch() {
     # apigw's SAML SP keypair, mounted via [[files]] in fly/<profile>/apigw/fly.toml.
     # See provision_apigw_saml_sp_keypair for the rationale.
     provision_apigw_saml_sp_keypair
+    provision_apigw_nym_auth_secrets
 
     echo ""
     echo "==> Apps created. Next: ./fly/deploy.sh deploy --profile ${PROFILE:-dev}"
@@ -337,6 +338,33 @@ provision_apigw_saml_sp_keypair() {
         echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
     fi
     rm -rf "$saml_tmp"
+}
+
+# apigw's credential encryption key and nym_auth seed secret, mounted via
+# [[files]] in fly/<profile>/apigw/fly.toml. Each is generated once per
+# environment: the seed secret derives every issued ssc.
+provision_apigw_nym_auth_secrets() {
+    local apigw_app secrets_json value
+    apigw_app="$(app_name "apigw")"
+    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null || echo '[]')"
+    if printf '%s' "$secrets_json" | grep -q '"CREDENTIAL_ENCRYPTION_KEY"'; then
+        echo "==> CREDENTIAL_ENCRYPTION_KEY already set for $apigw_app (skipping)"
+    else
+        echo "==> Provisioning CREDENTIAL_ENCRYPTION_KEY for $apigw_app"
+        value="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')"
+        fly secrets set --app "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value" \
+            2>/dev/null && echo "    CREDENTIAL_ENCRYPTION_KEY set" \
+            || echo "    (failed to set CREDENTIAL_ENCRYPTION_KEY; app missing?)"
+    fi
+    if printf '%s' "$secrets_json" | grep -q '"NYM_AUTH_SEED"'; then
+        echo "==> NYM_AUTH_SEED already set for $apigw_app (skipping)"
+    else
+        echo "==> Provisioning NYM_AUTH_SEED for $apigw_app"
+        value="$(openssl rand 32 | basenc --base64url | tr -d '=' | base64 | tr -d '\n')"
+        fly secrets set --app "$apigw_app" NYM_AUTH_SEED="$value" \
+            2>/dev/null && echo "    NYM_AUTH_SEED set" \
+            || echo "    (failed to set NYM_AUTH_SEED; app missing?)"
+    fi
 }
 
 # Stage branding data URLs as Fly secrets consumed by the upstream image's
@@ -484,6 +512,7 @@ cmd_deploy() {
         # tls.LoadX509KeyPair. provision_apigw_saml_sp_keypair is idempotent.
         if [[ "$service" == "apigw" ]]; then
             provision_apigw_saml_sp_keypair
+            provision_apigw_nym_auth_secrets
         fi
 
         if [[ "$service" == "wallet-frontend" ]]; then

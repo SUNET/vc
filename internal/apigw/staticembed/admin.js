@@ -2,6 +2,14 @@
 import Alpine from '/static/alpinejs.esm.min.js';
 
 window.adminApp = function () {
+    /** The message of a failed API response: {"error": {"title", "details"}} or {"error": "..."}. */
+    async function errorMessage(resp) {
+        const body = await resp.json().catch(() => ({}));
+        const err = body.error;
+        if (err && typeof err === 'object') return err.details || err.title || resp.statusText;
+        return err || body.detail || resp.statusText;
+    }
+
     /** Flatten a nested object into dot-notation key-value pairs */
     function flattenObject(obj, prefix) {
         const entries = [];
@@ -60,9 +68,13 @@ window.adminApp = function () {
         preauthScopes: [],
         allowedAuthenticSources: [],
         hasIdentityMapping: false,
+        uniqueCommitmentEntries: [],
         csrfToken: '',
         view: 'datastore',
         sidebarOpen: false,
+
+        // Commitment lookup and reset
+        hc: { entry: 0, values: [], evidence: '', busy: false, found: null, message: null },
 
         // Datastore state
         ds: {
@@ -180,6 +192,8 @@ window.adminApp = function () {
                     this.preauthScopes = data.preauth_scopes || [];
                     this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
                     this.hasIdentityMapping = data.has_identity_mapping || false;
+                    this.uniqueCommitmentEntries = data.unique_commitment_entries || [];
+                    this.clearCommitmentForm();
                     this.unrestricted = data.unrestricted || false;
                     this.csrfToken = data.csrf_token || '';
                     this.searchDocuments();
@@ -209,6 +223,96 @@ window.adminApp = function () {
             this.importState.mapResult = null;
             if (v === 'datastore') this.searchDocuments();
             if (v === 'identity') this.searchMappings();
+            if (v === 'commitments') this.clearCommitmentForm();
+        },
+
+        /** Empty the commitment form for the selected entry: a list per hkdf part, a string per other part. */
+        clearCommitmentForm() {
+            const entry = this.uniqueCommitmentEntries[this.hc.entry];
+            this.hc.values = entry ? entry.key.map(part => part.inputs ? part.inputs.map(() => '') : '') : [];
+            this.hc.evidence = '';
+            this.hc.found = null;
+            this.hc.message = null;
+        },
+
+        /** The values changed, so what was found no longer applies. */
+        commitmentEdited() {
+            this.hc.found = null;
+            this.hc.message = null;
+        },
+
+        /** Trim the entered values, so the browser refuses a blank one as missing. */
+        async commitmentFormValid(form) {
+            this.hc.values = this.hc.values.map(v => Array.isArray(v) ? v.map(s => s.trim()) : v.trim());
+            this.hc.evidence = this.hc.evidence.trim();
+            await this.$nextTick();
+            return form.reportValidity();
+        },
+
+        nothingRecorded() {
+            this.hc.found = null;
+            this.hc.message = { kind: 'none', text: 'No commitment recorded.' };
+        },
+
+        /** The entry and key values the lookup and the reset name. */
+        commitmentQuery() {
+            const entry = this.uniqueCommitmentEntries[this.hc.entry];
+            return {
+                scope: entry.scope,
+                path: entry.path,
+                key: entry.key.map((part, k) => part.inputs
+                    ? { path: part.path, inputs: this.hc.values[k] }
+                    : { path: part.path, value: this.hc.values[k] }),
+            };
+        },
+
+        async commitmentCall(path, body) {
+            this.hc.busy = true;
+            this.hc.message = null;
+            try {
+                return await this.apiFetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+            } catch (e) {
+                this.hc.message = { kind: 'error', text: e.message };
+                return null;
+            } finally {
+                this.hc.busy = false;
+            }
+        },
+
+        /** Look up the commitment on record for the entered values. */
+        async findCommitment(form) {
+            if (!await this.commitmentFormValid(form)) return;
+            this.hc.found = null;
+            const resp = await this.commitmentCall('/api/v1/auxiliary_data/lookup', this.commitmentQuery());
+            if (!resp) return;
+            if (resp.ok) {
+                const body = await resp.json();
+                this.hc.found = { recordedAt: new Date(body.recorded_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) };
+            } else if (resp.status === 404) {
+                this.nothingRecorded();
+            } else {
+                this.hc.message = { kind: 'error', text: await errorMessage(resp) };
+            }
+        },
+
+        /** Reset the commitment the lookup found. */
+        async resetCommitment(form) {
+            if (!await this.commitmentFormValid(form)) return;
+            const resp = await this.commitmentCall('/api/v1/auxiliary_data/reset',
+                { ...this.commitmentQuery(), evidence_ref: this.hc.evidence });
+            if (!resp) return;
+            if (resp.ok) {
+                this.clearCommitmentForm();
+                this.hc.message = { kind: 'done', text: 'Commitment reset.' };
+            } else if (resp.status === 404) {
+                this.nothingRecorded();
+            } else {
+                this.hc.message = { kind: 'error', text: await errorMessage(resp) };
+            }
         },
 
         treeView(entries) { return buildTreeView(entries); },
@@ -321,8 +425,7 @@ window.adminApp = function () {
                 credentials: 'same-origin'
             });
             if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || err.detail || resp.statusText);
+                throw new Error(await errorMessage(resp));
             }
             const result = await resp.json().catch(() => ({}));
             return result.count || 0;
@@ -591,8 +694,7 @@ window.adminApp = function () {
                 credentials: 'same-origin'
             });
             if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || err.detail || resp.statusText);
+                throw new Error(await errorMessage(resp));
             }
             const result = await resp.json().catch(() => ({}));
             return result.count || 0;
