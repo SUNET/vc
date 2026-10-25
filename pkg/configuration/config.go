@@ -342,9 +342,28 @@ func checkAuxiliaryData(cfg *model.Cfg, serviceName string) error {
 	if serviceName != "apigw" || cfg.APIGW == nil {
 		return nil
 	}
+	if err := checkToWalletEncryption(cfg); err != nil {
+		return err
+	}
 	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
 		if err := checkHashCommitmentDerivations(src, toWalletPaths(cfg.Common.CredentialMetadata[src.Scope])); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// checkToWalletEncryption requires a credential encryption key for a
+// credential with to_wallet entries. Their openings travel only in an
+// encrypted Credential Response, and the Credential Endpoint refuses
+// credential_response_encryption without a key.
+func checkToWalletEncryption(cfg *model.Cfg) error {
+	if len(cfg.APIGW.IssuerMetadata.CredentialEncryption.Keys) > 0 {
+		return nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if len(toWalletPaths(cfg.Common.CredentialMetadata[scope])) > 0 {
+			return fmt.Errorf("common.credential_metadata.%s.auxiliary_data.to_wallet: an opening travels only in an encrypted Credential Response, which needs a key under apigw.issuer_metadata.credential_encryption.keys", scope)
 		}
 	}
 	return nil

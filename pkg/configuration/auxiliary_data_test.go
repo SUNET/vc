@@ -26,6 +26,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
 	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
+	encryption := model.CredentialEncryption{Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: p256KeyPath(t)}}}
 
 	base := func() *model.Cfg {
 		return &model.Cfg{
@@ -41,16 +42,19 @@ func TestCheckAuxiliaryData(t *testing.T) {
 					ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
 				},
 			}}},
-			APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
-				Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{
-					"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
-						Path: ssc,
-						Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-							SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
-						}},
-					}}}},
-				}}},
-			}}},
+			APIGW: &model.APIGW{
+				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
+				DataSources: model.DataSources{Presentation: model.PresentationConfig{
+					Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{
+						"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+							Path: ssc,
+							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
+								SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
+							}},
+						}}}},
+					}}},
+				}},
+			},
 		}
 	}
 	entry := func(c *model.Cfg) *openid4vci.AuxiliaryDataEntry {
@@ -99,6 +103,9 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"an unfulfilled to_wallet entry": {func(c *model.Cfg) {
 			c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = model.PresentedCredential{}
 		}, "no hash_commitment derivation fulfils"},
+		"to_wallet without a credential encryption key": {func(c *model.Cfg) {
+			c.APIGW.IssuerMetadata.CredentialEncryption = model.CredentialEncryption{}
+		}, "needs a key under apigw.issuer_metadata.credential_encryption.keys"},
 		"a derivation for a path outside to_wallet": {func(c *model.Cfg) {
 			derivation(c).Path = []string{ssc[0], "birth_date"}
 		}, "is no to_wallet entry"},
@@ -129,6 +136,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
 	ssc, psc := []string{"commitments", "ssc"}, []string{"commitments", "psc"}
+	encryption := model.CredentialEncryption{Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: p256KeyPath(t)}}}
 	claim := func(sd string, mandatory bool, path ...string) sdjwtvc.Claim {
 		segments := make([]*string, len(path))
 		for i := range path {
@@ -149,16 +157,19 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 					ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Encoding: "hex"}},
 				},
 			}}},
-			APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
-				Scopes: map[string]model.PresentationScope{"example": {From: map[string]model.PresentedCredential{
-					"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
-						Path: ssc,
-						Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-							SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
-						}},
-					}}}},
-				}}},
-			}}},
+			APIGW: &model.APIGW{
+				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
+				DataSources: model.DataSources{Presentation: model.PresentationConfig{
+					Scopes: map[string]model.PresentationScope{"example": {From: map[string]model.PresentedCredential{
+						"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+							Path: ssc,
+							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
+								SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
+							}},
+						}}}},
+					}}},
+				}},
+			},
 		}
 	}
 	meta := func(c *model.Cfg) *model.CredentialMetadata { return c.Common.CredentialMetadata["example"] }
