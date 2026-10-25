@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -60,22 +61,23 @@ func TestPrepareIssuance_MatchesAnMdocClaimUnderEitherSpelling(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := newChallengeClient(t)
 
-			// An mdoc authentication credential, configured the way a
-			// deployment writes it: bare claim names.
+			// An mdoc authentication credential, whose bare auth claim
+			// "family_name" the loader reads as the element of
+			// org.iso.18013.5.1.
 			client.cfg.Common.CredentialMetadata[challengeAuthScope] = &model.CredentialMetadata{
 				Format:  openid4vp.FormatMsoMdoc,
 				Doctype: "org.iso.18013.5.1.mDL",
 			}
 			scopes := client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope]
 			scopes.AuthScopes = map[string]model.AuthScopeEntry{
-				challengeAuthScope: {AuthClaims: []string{"family_name"}},
+				challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "family_name")}},
 			}
 			client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
 
 			reply, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 				Scope: challengeScope,
 				IdentityMatch: &openid4vci.IdentityMatch{
-					Claims: map[string]openid4vci.ClaimTest{ruleClaim: {Equals: "Andersson"}},
+					Claims: openid4vci.ClaimMatches{{Path: dottedPath(ruleClaim), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}},
 				},
 			})
 			require.NoError(t, err, "the request asks for this claim, however the rule spells it")
@@ -93,7 +95,7 @@ func TestPrepareIssuance_StillRefusesAClaimTheRequestDoesNotAsk(t *testing.T) {
 	reply, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope: challengeScope,
 		IdentityMatch: &openid4vci.IdentityMatch{
-			Claims: map[string]openid4vci.ClaimTest{"nationality": {Equals: "SE"}},
+			Claims: openid4vci.ClaimMatches{{Path: dottedPath("nationality"), ClaimTest: openid4vci.ClaimTest{Equals: "SE"}}},
 		},
 	})
 	require.Error(t, err)

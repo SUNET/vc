@@ -3,8 +3,11 @@ package model
 import (
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 )
 
@@ -135,27 +138,83 @@ type DatastoreScope struct {
 // AuthScopeEntry configures per-scope authentication requirements for OpenID4VP.
 // Each entry represents one acceptable credential type the wallet can present.
 type AuthScopeEntry struct {
-	// AuthClaims lists the identity claims to extract from this credential type.
-	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1" doc_example:"[given_name, family_name, birth_date]"`
+	// AuthClaims lists the identity claims to extract from this credential
+	// type, each a claims path pointer into the presented credential. A
+	// dotted string is read as a claim of the presented credential.
+	AuthClaims []claimpath.Pointer `yaml:"auth_claims" validate:"required,min=1,dive,required" doc_example:"[[given_name], [family_name], [birth_date]]"`
 
 	// IdentityAttributes renames an auth claim to the identity-mapping
 	// attribute it is matched as (given_name, family_name, birth_date or
 	// authentic_source_person_id). Needed when the presented credential
-	// spells the attribute differently - an SD-JWT PID's "birthdate", an
-	// mdoc claim outside org.iso.18013.5.1 such as
-	// "eu.europa.ec.eudi.pid.1.given_name", or a Photo ID's
-	// "org.iso.23220.1.given_name_unicode". An auth claim without an entry is
-	// matched under its own name, as before.
-	IdentityAttributes map[string]string `yaml:"identity_attributes,omitempty" doc_key:"auth claim"`
+	// names the attribute differently - an SD-JWT PID's "birthdate", or a
+	// Photo ID's ["org.iso.23220.1", "given_name_unicode"]. An auth claim
+	// without an entry is matched under the key its path ends in. The
+	// mapping form {auth claim: attribute} is read too.
+	IdentityAttributes IdentityAttributes `yaml:"identity_attributes,omitempty" validate:"omitempty,dive"`
 
 	// DocumentClaims copies claims of the verified presented credential into
-	// the issued document: presented claim path -> top-level claim of the
-	// issued credential. The copied value overrides the datastore document's
-	// own. A full-date target (MDDL value_type full-date) is normalised to
-	// "YYYY-MM-DD" whatever the source shape (SD-JWT string, mdoc CBOR tag
-	// 1004/0, date-time). Every source claim is added to the DCQL request,
-	// and one that is missing from the presentation fails issuance.
-	DocumentClaims map[string]string `yaml:"document_claims,omitempty" doc_key:"presented claim"`
+	// the issued document: from a claim of the presented credential to a
+	// top-level claim of the issued credential. The copied value overrides
+	// the datastore document's own. A full-date target (MDDL value_type
+	// full-date) is normalised to "YYYY-MM-DD" whatever the source shape
+	// (SD-JWT string, mdoc CBOR tag 1004/0, date-time). Every source claim is
+	// added to the DCQL request, and one that is missing from the
+	// presentation fails issuance. The mapping form {presented claim: issued
+	// claim} is read too.
+	DocumentClaims DocumentClaims `yaml:"document_claims,omitempty" validate:"omitempty,dive"`
+}
+
+// IdentityAttribute names the identity-mapping attribute an auth claim is
+// matched as.
+type IdentityAttribute struct {
+	// Path is the auth claim.
+	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[birthdate]"`
+	// Attribute is the identity-mapping attribute: given_name, family_name,
+	// birth_date or authentic_source_person_id.
+	Attribute string `yaml:"attribute" validate:"required" doc_example:"birth_date"`
+}
+
+// IdentityAttributes is the list of identity attribute renames. YAML also
+// reads the mapping form {auth claim: attribute}.
+type IdentityAttributes []IdentityAttribute
+
+// UnmarshalYAML reads the list, or the mapping form.
+func (a *IdentityAttributes) UnmarshalYAML(unmarshal func(any) error) error {
+	return claimpath.DecodeList(unmarshal, a, func(path claimpath.Pointer, attribute string) (IdentityAttribute, error) {
+		return IdentityAttribute{Path: path, Attribute: attribute}, nil
+	})
+}
+
+// For returns the attribute an auth claim is matched as: its rename, or
+// the key its path ends in.
+func (a IdentityAttributes) For(claim claimpath.Pointer) (string, bool) {
+	for _, rename := range a {
+		if rename.Path.Equal(claim) {
+			return rename.Attribute, true
+		}
+	}
+	return claim.Name()
+}
+
+// DocumentClaim copies a claim of the presented credential into the issued
+// document.
+type DocumentClaim struct {
+	// From is the claim of the presented credential.
+	From claimpath.Pointer `yaml:"from" validate:"required" doc_example:"[birthdate]"`
+	// To is the top-level claim of the issued credential.
+	To claimpath.Pointer `yaml:"to" validate:"required" doc_example:"[eu.europa.ec.eudi.nym_auth.1, birth_date]"`
+}
+
+// DocumentClaims is the list of document claim copies. YAML also reads the
+// mapping form {presented claim: issued claim}.
+type DocumentClaims []DocumentClaim
+
+// UnmarshalYAML reads the list, or the mapping form.
+func (d *DocumentClaims) UnmarshalYAML(unmarshal func(any) error) error {
+	return claimpath.DecodeList(unmarshal, d, func(from claimpath.Pointer, to string) (DocumentClaim, error) {
+		pointer, err := claimpath.Dotted(to)
+		return DocumentClaim{From: from, To: pointer}, err
+	})
 }
 
 // AuthScopeNames returns the list of scope keys from AuthScopes.
@@ -230,8 +289,9 @@ type AssertionScope struct {
 	// Defaults holds claim values injected into the assertion document for
 	// credential-level fields the authentication assertion cannot supply
 	// (e.g. issuing_authority, issuing_country, date_of_expiry). Merged
-	// after attribute_mapping — real attributes always win.
-	Defaults map[string]any `yaml:"defaults,omitempty" doc_key:"claim path"`
+	// after attribute_mapping — real attributes always win. The mapping
+	// form {claim: value} is read too.
+	Defaults ClaimDefaults `yaml:"defaults,omitempty" validate:"omitempty,dive"`
 
 	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
 	// now+duration (formatted as ISO YYYY-MM-DD) and overrides any static
@@ -245,24 +305,16 @@ type AssertionScope struct {
 	Derivations []primitives.Derivation `yaml:"derivations,omitempty" validate:"omitempty,dive" doc_key:"derivation index"`
 }
 
-// ResolveDefaults returns Defaults with date_of_expiry populated from
-// ExpiryDuration when set, and date_of_issuance populated from now.
-// Injecting now keeps the callers testable.
-func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
-	out := make(map[string]any, len(a.Defaults)+2)
-	maps.Copy(out, a.Defaults)
-	if a.ExpiryDuration != "" {
-		d, err := time.ParseDuration(a.ExpiryDuration)
-		if err != nil {
-			return nil, fmt.Errorf("invalid expiry_duration %q: %w", a.ExpiryDuration, err)
-		}
-		if d <= 0 {
-			return nil, fmt.Errorf("expiry_duration %q must be positive", a.ExpiryDuration)
-		}
-		out["date_of_expiry"] = now.Add(d).Format("2006-01-02")
+// MergeDefaults injects Defaults into doc, with date_of_expiry populated
+// from ExpiryDuration when set and date_of_issuance populated from now,
+// both named in the document shape. Injecting now keeps the callers
+// testable.
+func (a AssertionScope) MergeDefaults(doc map[string]any, now time.Time, document claimpath.Shape) error {
+	defaults, err := a.Defaults.resolve(now, a.ExpiryDuration, document)
+	if err != nil {
+		return err
 	}
-	out["date_of_issuance"] = now.Format("2006-01-02")
-	return out, nil
+	return defaults.Merge(doc, document)
 }
 
 // ExternalAPIConfig groups external API credential scopes.
@@ -318,33 +370,38 @@ type PresentationConfig struct {
 // PresentationScope configures a credential type whose data is derived from
 // another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 type PresentationScope struct {
-	// FromScope names the credential scope the wallet must present (e.g. "eduid").
-	// The presented credential is verified against the issuer trust chain before
+	// From lists the credentials the wallet may present, keyed by their
+	// credential scope (e.g. "eduid"). The wallet presents one of them. The
+	// presented credential is verified against the issuer trust chain before
 	// its claims are consumed.
-	FromScope string `yaml:"from_scope" validate:"required" doc_example:"\"eduid\""`
+	From map[string]PresentedCredential `yaml:"from" validate:"required,min=1,dive" doc_key:"presented credential scope"`
 
 	// AuthProvider is fixed to "openid4vp" for now; kept as a field for
 	// symmetry with the other data sources and so future providers can be
 	// added without a config-shape change.
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp" default:"openid4vp"`
 
-	// RequiredClaims maps a claim path on the presented credential to an
-	// allow-list of exact-match values. Empty list = presence-only (any
-	// value passes). Populated list = the claim's value must equal one of
-	// the listed strings (or, when the claim is an array, at least one
-	// array element must match). Every key must be present on the
-	// presented credential's verified claims; missing keys fail issuance.
-	RequiredClaims map[string][]string `yaml:"required_claims" validate:"required,min=1" doc_key:"claim path"`
-
 	// Defaults holds claim values injected into the derived credential
 	// document for fields the presented credential does not carry
-	// (e.g. issuing_authority, issuing_country).
-	Defaults map[string]any `yaml:"defaults,omitempty" doc_key:"claim path"`
+	// (e.g. issuing_authority, issuing_country). The mapping form
+	// {claim: value} is read too.
+	Defaults ClaimDefaults `yaml:"defaults,omitempty" validate:"omitempty,dive"`
 
 	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
 	// now+duration (formatted as ISO YYYY-MM-DD). Same semantics as
 	// AssertionScope.ExpiryDuration.
 	ExpiryDuration string `yaml:"expiry_duration,omitempty" doc_example:"\"8760h\""`
+}
+
+// PresentedCredential configures one credential a presentation scope
+// accepts.
+type PresentedCredential struct {
+	// RequiredClaims lists the claims of the presented credential that
+	// must be present, each with an optional allow-list of exact-match
+	// values, in the shape of a DCQL claims query. Every claim must be
+	// present on the presented credential's verified claims; a missing one
+	// fails issuance. The mapping form {claim: values} is read too.
+	RequiredClaims RequiredClaims `yaml:"required_claims" validate:"required,min=1,dive"`
 
 	// Derivations are generic post-verification steps that compute additional
 	// claims from the presented credential's own claims
@@ -352,23 +409,136 @@ type PresentationScope struct {
 	Derivations []primitives.Derivation `yaml:"derivations,omitempty" validate:"omitempty,dive" doc_key:"derivation index"`
 }
 
-// ResolveDefaults returns Defaults with date_of_expiry populated from
-// ExpiryDuration when set, and date_of_issuance populated from now.
-func (p PresentationScope) ResolveDefaults(now time.Time) (map[string]any, error) {
-	out := make(map[string]any, len(p.Defaults)+2)
-	maps.Copy(out, p.Defaults)
-	if p.ExpiryDuration != "" {
-		d, err := time.ParseDuration(p.ExpiryDuration)
-		if err != nil {
-			return nil, fmt.Errorf("invalid expiry_duration %q: %w", p.ExpiryDuration, err)
-		}
-		if d <= 0 {
-			return nil, fmt.Errorf("expiry_duration %q must be positive", p.ExpiryDuration)
-		}
-		out["date_of_expiry"] = now.Add(d).Format("2006-01-02")
+// RequiredClaim is a claim a presented credential must carry.
+type RequiredClaim struct {
+	// Path is the claim. A null selects every element of an array, and
+	// the claim is present when it selects one.
+	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[nationalities, null]"`
+	// Values is the allow-list: empty lets any value pass. Otherwise a
+	// selected value must equal one of the listed strings, or, for an
+	// array, one of its elements must.
+	Values []string `yaml:"values,omitempty" doc_example:"[SE, NO]"`
+}
+
+// RequiredClaims is the list of required claims. YAML also reads the
+// mapping form {claim: values}.
+type RequiredClaims []RequiredClaim
+
+// UnmarshalYAML reads the list, or the mapping form.
+func (r *RequiredClaims) UnmarshalYAML(unmarshal func(any) error) error {
+	return claimpath.DecodeList(unmarshal, r, func(path claimpath.Pointer, values []string) (RequiredClaim, error) {
+		return RequiredClaim{Path: path, Values: values}, nil
+	})
+}
+
+// Paths returns the paths of the required claims.
+func (r RequiredClaims) Paths() []claimpath.Pointer {
+	paths := make([]claimpath.Pointer, 0, len(r))
+	for _, claim := range r {
+		paths = append(paths, claim.Path)
 	}
-	out["date_of_issuance"] = now.Format("2006-01-02")
+	return paths
+}
+
+// MergeDefaults injects Defaults into doc, with date_of_expiry populated
+// from ExpiryDuration when set and date_of_issuance populated from now,
+// both named in the document shape.
+func (p PresentationScope) MergeDefaults(doc map[string]any, now time.Time, document claimpath.Shape) error {
+	defaults, err := p.Defaults.resolve(now, p.ExpiryDuration, document)
+	if err != nil {
+		return err
+	}
+	return defaults.Merge(doc, document)
+}
+
+// ClaimDefault is the value of a claim the source data does not carry.
+type ClaimDefault struct {
+	// Path is the claim of the issued credential.
+	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[issuing_country]"`
+	// Value is the claim's value.
+	Value any `yaml:"value" doc_example:"SE"`
+}
+
+// ClaimDefaults is the list of claim defaults. YAML also reads the
+// mapping form {claim: value}.
+type ClaimDefaults []ClaimDefault
+
+// UnmarshalYAML reads the list, or the mapping form.
+func (d *ClaimDefaults) UnmarshalYAML(unmarshal func(any) error) error {
+	return claimpath.DecodeList(unmarshal, d, func(path claimpath.Pointer, value any) (ClaimDefault, error) {
+		return ClaimDefault{Path: path, Value: value}, nil
+	})
+}
+
+// Merge injects the defaults into doc, held in shape, for any claim not
+// already present. Existing values — including nested ones — always win.
+// Overlapping defaults (["identity"] and ["identity", "country"]) are
+// rejected because merging them is otherwise order-dependent.
+func (d ClaimDefaults) Merge(doc map[string]any, shape claimpath.Shape) error {
+	if err := d.CheckDistinct(); err != nil {
+		return err
+	}
+	for _, claim := range d {
+		_, present, err := shape.Get(doc, claim.Path)
+		if err != nil {
+			return fmt.Errorf("default %s: %w", claim.Path, err)
+		}
+		if present {
+			continue
+		}
+		if err := shape.Set(doc, claim.Path, claim.Value); err != nil {
+			return fmt.Errorf("failed to set default %s: %w", claim.Path, err)
+		}
+	}
+	return nil
+}
+
+// CheckDistinct refuses two defaults of which one claim holds the other,
+// since merging them would depend on their order.
+func (d ClaimDefaults) CheckDistinct() error {
+	for i, a := range d {
+		for _, b := range d[i+1:] {
+			if a.Path.HasPrefix(b.Path) || b.Path.HasPrefix(a.Path) {
+				return fmt.Errorf("overlapping default paths: %s and %s", a.Path, b.Path)
+			}
+		}
+	}
+	return nil
+}
+
+// resolve returns the defaults with date_of_issuance set to now, and
+// date_of_expiry to now plus expiryDuration when that is set. A computed
+// claim replaces a configured default of the same claim.
+func (d ClaimDefaults) resolve(now time.Time, expiryDuration string, document claimpath.Shape) (ClaimDefaults, error) {
+	computed := map[string]string{"date_of_issuance": now.Format("2006-01-02")}
+	if expiryDuration != "" {
+		lifetime, err := time.ParseDuration(expiryDuration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expiry_duration %q: %w", expiryDuration, err)
+		}
+		if lifetime <= 0 {
+			return nil, fmt.Errorf("expiry_duration %q must be positive", expiryDuration)
+		}
+		computed["date_of_expiry"] = now.Add(lifetime).Format("2006-01-02")
+	}
+	out := slices.Clone(d)
+	for _, name := range slices.Sorted(maps.Keys(computed)) {
+		path, err := document.Dotted(name)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		out = setDefault(out, ClaimDefault{Path: path, Value: computed[name]})
+	}
 	return out, nil
+}
+
+// setDefault replaces the default of the same claim, or appends one.
+func setDefault(defaults ClaimDefaults, value ClaimDefault) ClaimDefaults {
+	if i := slices.IndexFunc(defaults, func(d ClaimDefault) bool { return d.Path.Equal(value.Path) }); i >= 0 {
+		defaults[i] = value
+		return defaults
+	}
+	return append(defaults, value)
 }
 
 // Remote defines an external API connection.
@@ -731,8 +901,9 @@ func (ds *DataSources) LookupScopePolicyConfig(scope, authProvider string) *Scop
 }
 
 // DerivationsFor returns the Derivations list configured on whichever scope
-// (datastore, assertion, external_api, or presentation) owns the given
-// credential type. Returns nil if the scope is unknown or has no derivations.
+// (datastore, assertion or external_api) owns the given credential type.
+// Presentation scopes configure derivations per presented credential
+// (PresentationScope.From). Returns nil if the scope is unknown or has no derivations.
 // The lookup order mirrors LookupCredentialSources.
 //
 // Prefer DerivationsForSource when the caller knows which data source is in
@@ -749,9 +920,6 @@ func (ds *DataSources) DerivationsFor(credentialType string) []primitives.Deriva
 		return cred.Derivations
 	}
 	if cred, ok := ds.ExternalAPI.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
-		return cred.Derivations
-	}
-	if cred, ok := ds.Presentation.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
 		return cred.Derivations
 	}
 	return nil
@@ -781,11 +949,51 @@ func (ds *DataSources) DerivationsForSource(credentialType string, source DataSo
 			return cred.Derivations
 		}
 	case DataSourcePresentation:
-		if cred, ok := ds.Presentation.Scopes[credentialType]; ok {
-			return cred.Derivations
-		}
+		// Configured per presented credential: PresentationScope.From.
+		return nil
 	case "":
 		return ds.DerivationsFor(credentialType)
 	}
 	return nil
+}
+
+// SourceScope is one data source's configuration of a credential scope. A
+// presentation scope has one per credential it accepts.
+type SourceScope struct {
+	Source DataSourceType
+	Scope  string
+	// Presented is the accepted credential's scope, for a presentation
+	// source.
+	Presented   string
+	Derivations []primitives.Derivation
+}
+
+// Where is the configuration path of the source scope.
+func (s SourceScope) Where() string {
+	where := fmt.Sprintf("apigw.data_sources.%s.scopes.%s", s.Source, s.Scope)
+	if s.Presented != "" {
+		where += ".from." + s.Presented
+	}
+	return where
+}
+
+// SourceScopes returns every source scope, ordered by Where.
+func (ds *DataSources) SourceScopes() []SourceScope {
+	var out []SourceScope
+	for scope, s := range ds.Datastore.Scopes {
+		out = append(out, SourceScope{Source: DataSourceDatastore, Scope: scope, Derivations: s.Derivations})
+	}
+	for scope, s := range ds.Assertion.Scopes {
+		out = append(out, SourceScope{Source: DataSourceAssertion, Scope: scope, Derivations: s.Derivations})
+	}
+	for scope, s := range ds.ExternalAPI.Scopes {
+		out = append(out, SourceScope{Source: DataSourceExternalAPI, Scope: scope, Derivations: s.Derivations})
+	}
+	for scope, s := range ds.Presentation.Scopes {
+		for presented, accepted := range s.From {
+			out = append(out, SourceScope{Source: DataSourcePresentation, Scope: scope, Presented: presented, Derivations: accepted.Derivations})
+		}
+	}
+	slices.SortFunc(out, func(a, b SourceScope) int { return strings.Compare(a.Where(), b.Where()) })
+	return out
 }

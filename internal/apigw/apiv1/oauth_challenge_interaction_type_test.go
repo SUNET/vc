@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -48,14 +49,15 @@ func TestInteractionTypeFollowsTheSameSelectorAsAuthorize(t *testing.T) {
 				AuthProvider:    model.AuthProviderOIDC,
 				AuthenticSource: "authentic-source",
 				AuthScopes: map[string]model.AuthScopeEntry{
-					challengeAuthScope: {AuthClaims: []string{"given_name", "family_name"}},
+					challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
 				},
 			}
 			client.cfg.APIGW.DataSources.Presentation.Scopes = map[string]model.PresentationScope{
 				challengeScope: {
-					AuthProvider:   model.AuthProviderOpenID4VP,
-					FromScope:      challengeAuthScope,
-					RequiredClaims: map[string][]string{"given_name": nil, "family_name": nil},
+					AuthProvider: model.AuthProviderOpenID4VP,
+					From: map[string]model.PresentedCredential{
+						challengeAuthScope: {RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("given_name")}, {Path: claimpath.Keys("family_name")}}},
+					},
 				},
 			}
 

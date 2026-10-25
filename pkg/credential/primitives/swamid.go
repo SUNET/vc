@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // swamidAssuranceRank orders recognised SWAMID Assurance Framework URIs;
@@ -64,25 +66,21 @@ func SWAMIDHighestAssuranceLevel(value any) string {
 // errors if the input is present but no SWAMID URI is recognised.
 type SWAMIDHighestAssuranceLevelArgs struct {
 	// Input is the source claim (string or list of strings).
-	Input string `yaml:"input" validate:"required" doc_example:"assurance_level"`
+	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"assurance_level\"]"`
 
 	// Output is the target claim. Defaults to Input (in-place).
-	Output string `yaml:"output,omitempty" doc_example:"assurance_level"`
+	Output claimpath.Pointer `yaml:"output,omitempty" doc_example:"[\"assurance_level\"]"`
 }
 
 // Apply implements Applier.
-func (a *SWAMIDHighestAssuranceLevelArgs) Apply(claims map[string]any, _ time.Time) (map[string]any, error) {
-	output := a.Output
-	if output == "" {
-		output = a.Input
-	}
-	val, present := claims[a.Input]
-	if !present {
-		return nil, nil
+func (a *SWAMIDHighestAssuranceLevelArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
+	val, present, err := claims.Input(a.Input)
+	if err != nil || !present {
+		return nil, err
 	}
 	uri := SWAMIDHighestAssuranceLevel(val)
 	if uri == "" {
-		return nil, fmt.Errorf("no recognized SWAMID assurance URI in claim %q", a.Input)
+		return nil, fmt.Errorf("no recognized SWAMID assurance URI in claim %s", a.Input)
 	}
-	return map[string]any{output: uri}, nil
+	return []Write{{Path: inPlace(a.Input, a.Output), Value: uri}}, nil
 }

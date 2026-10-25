@@ -77,9 +77,6 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		credentialTypes = []string{"VerifiableCredential"}
 	}
 
-	// Seed-backed claims, before anything is signed. A no-op for a scope
-	// with no commitments configured.
-
 	// Parse document data into credential subject
 	var credentialSubject map[string]any
 	if err := json.Unmarshal(req.DocumentData, &credentialSubject); err != nil {

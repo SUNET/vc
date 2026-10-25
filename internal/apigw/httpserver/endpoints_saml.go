@@ -211,13 +211,10 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// assertion simply does not carry a source-only input (e.g. a birthdate
 	// that only the external API returns).
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
-		if derivs := s.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-			derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
-			if derr != nil {
-				span.SetStatus(codes.Error, derr.Error())
-				return nil, fmt.Errorf("SAML derivations failed: %w", derr)
-			}
-			credential.MergeNestedClaims(claims, derived)
+		src := model.SourceScope{Source: credSourceForDerivs.DataSource, Scope: session.CredentialType}
+		if derr := credential.ApplyScopeDerivations(s.cfg, src, claims, time.Now()); derr != nil {
+			span.SetStatus(codes.Error, derr.Error())
+			return nil, fmt.Errorf("SAML derivations failed: %w", derr)
 		}
 	}
 
@@ -258,14 +255,9 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
-			defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
-			if derr != nil {
-				span.SetStatus(codes.Error, "assertion defaults resolve failed")
-				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
-			}
-			if err := credential.MergeDefaults(claims, defaults); err != nil {
+			if err := s.mergeAssertionDefaults(claims, session.CredentialType); err != nil {
 				span.SetStatus(codes.Error, "assertion defaults merge failed")
-				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+				return nil, err
 			}
 			doc := &model.CompleteDocument{
 				Meta: &model.MetaData{
@@ -415,14 +407,9 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 	} else {
 		if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
-			defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
-			if derr != nil {
-				span.SetStatus(codes.Error, "assertion defaults resolve failed")
-				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
-			}
-			if err := credential.MergeDefaults(claims, defaults); err != nil {
+			if err := s.mergeAssertionDefaults(claims, session.CredentialType); err != nil {
 				span.SetStatus(codes.Error, "assertion defaults merge failed")
-				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+				return nil, err
 			}
 		}
 		doc := &model.CompleteDocument{
@@ -451,4 +438,17 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	return response, nil
+}
+
+// mergeAssertionDefaults merges the assertion scope's defaults into the
+// claims of its document.
+func (s *Service) mergeAssertionDefaults(claims map[string]any, credentialType string) error {
+	document, err := s.cfg.DocumentShape(credentialType)
+	if err != nil {
+		return fmt.Errorf("failed to merge assertion defaults: %w", err)
+	}
+	if err := s.cfg.APIGW.DataSources.Assertion.Scopes[credentialType].MergeDefaults(claims, time.Now(), document); err != nil {
+		return fmt.Errorf("failed to merge assertion defaults: %w", err)
+	}
+	return nil
 }

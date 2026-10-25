@@ -27,5 +27,5 @@ templates:
           claims:
             - path: ["age_over_18"]
     claim_mappings:
-      age_over_18: "age_over_18"
+      - {path: [age_over_18], claim: age_over_18}
     enabled: true

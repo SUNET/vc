@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -21,29 +22,27 @@ import (
 // extractAuthScopeIdentity extracts the identity attributes ResolveIdentifier
 // matches on from a verified presented credential.
 //
-// Format-aware (lookupClaimPath), so a namespace-qualified mdoc claim
-// resolves, and value-normalising, so an mdoc full-date - which arrives as a
-// CBOR tag 1004, not a string - can be matched at all. Each claim is stored
-// under entry.IdentityAttributes[claim] when present, else its own name.
-func extractAuthScopeIdentity(sourceFormat string, presented map[string]any, entry model.AuthScopeEntry) (map[string]string, error) {
+// Read in the presented credential's shape, so a namespace-qualified mdoc
+// claim resolves, and value-normalising, so an mdoc full-date - which
+// arrives as a CBOR tag 1004, not a string - can be matched at all. Each
+// claim is stored under its identity attribute (IdentityAttributes.For).
+func extractAuthScopeIdentity(shape claimpath.Shape, presented map[string]any, entry model.AuthScopeEntry) (map[string]string, error) {
 	out := make(map[string]string, len(entry.AuthClaims))
 	var missing []string
 	for _, claim := range entry.AuthClaims {
-		raw, ok := lookupClaimPath(sourceFormat, presented, claim)
+		s, ok, err := presentedString(shape, presented, claim)
+		if err != nil {
+			return nil, err
+		}
+		attribute, named := entry.IdentityAttributes.For(claim)
+		if !named {
+			return nil, fmt.Errorf("auth claim %s names no identity attribute", claim)
+		}
 		if !ok {
-			missing = append(missing, claim)
+			missing = append(missing, claim.String())
 			continue
 		}
-		s, ok := claimString(raw)
-		if !ok {
-			missing = append(missing, claim)
-			continue
-		}
-		key := claim
-		if attr, ok := entry.IdentityAttributes[claim]; ok {
-			key = attr
-		}
-		out[key] = s
+		out[attribute] = s
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("required identity claims missing or not string: %v", missing)
@@ -51,55 +50,99 @@ func extractAuthScopeIdentity(sourceFormat string, presented map[string]any, ent
 	return out, nil
 }
 
+// authScopeIdentity extracts the identity attributes of a presentation of
+// an auth scope, and returns the shape its claims are held in.
+func (c *Client) authScopeIdentity(authScope string, presented map[string]any, entry model.AuthScopeEntry) (map[string]string, claimpath.Shape, error) {
+	shape, err := c.cfg.PresentedShape(authScope)
+	if err != nil {
+		return nil, claimpath.Shape{}, serverFault(err)
+	}
+	identity, err := extractAuthScopeIdentity(shape, presented, entry)
+	return identity, shape, err
+}
+
+// presentedString returns a presented claim as a string. A claim the
+// presentation does not carry, holds in another structure, or holds as
+// something other than a string is reported as not ok.
+func presentedString(shape claimpath.Shape, presented map[string]any, claim claimpath.Pointer) (string, bool, error) {
+	raw, present, err := shape.Get(presented, claim)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		return "", false, nil
+	}
+	if err != nil || !present {
+		return "", false, err
+	}
+	s, ok := claimString(raw)
+	return s, ok, nil
+}
+
 // presentedDocumentClaims builds the claims entry.DocumentClaims copies from
-// the verified presented credential into the issued document. A missing
-// source claim, or a value that cannot be normalised to the target's type,
-// fails closed: the caller must not issue from the datastore document alone
-// when the configuration says the value comes from the presentation.
-func presentedDocumentClaims(sourceFormat string, presented map[string]any, entry model.AuthScopeEntry, target *model.CredentialMetadata) (map[string]any, error) {
+// the verified presented credential into the issued document, keyed by the
+// document key each target names. A missing source claim, or a value that
+// cannot be normalised to the target's type, fails closed: the caller must
+// not issue from the datastore document alone when the configuration says
+// the value comes from the presentation.
+func presentedDocumentClaims(shape claimpath.Shape, presented map[string]any, entry model.AuthScopeEntry, target *model.CredentialMetadata) (map[string]any, error) {
+	document, err := target.DocumentShape()
+	if err != nil {
+		return nil, err
+	}
 	out := make(map[string]any, len(entry.DocumentClaims))
-	for _, src := range slices.Sorted(maps.Keys(entry.DocumentClaims)) {
-		dst := entry.DocumentClaims[src]
-		raw, ok := lookupClaimPath(sourceFormat, presented, src)
-		if !ok {
-			return nil, fmt.Errorf("document claim %q is not present on the presented credential", src)
+	for _, claim := range entry.DocumentClaims {
+		key, value, err := presentedDocumentClaim(shape, document, presented, claim, target)
+		if err != nil {
+			return nil, err
 		}
-		switch targetValueType(target, dst) {
-		case "full-date":
-			d, err := normaliseFullDate(raw)
-			if err != nil {
-				return nil, fmt.Errorf("document claim %q -> %q: %w", src, dst, err)
-			}
-			out[dst] = d
-		default:
-			if s, ok := claimString(raw); ok {
-				out[dst] = s
-				continue
-			}
-			value, err := documentValue(raw)
-			if err != nil {
-				return nil, fmt.Errorf("document claim %q -> %q: %w", src, dst, err)
-			}
-			out[dst] = value
-		}
+		out[key] = value
 	}
 	return out, nil
 }
 
+// presentedDocumentClaim returns the document key a copy targets and the
+// value it copies there.
+func presentedDocumentClaim(shape, document claimpath.Shape, presented map[string]any, claim model.DocumentClaim, target *model.CredentialMetadata) (string, any, error) {
+	location, err := document.Locate(claim.To)
+	if err != nil {
+		return "", nil, err
+	}
+	key, ok := location.Name()
+	if !ok || location.Len() != 1 {
+		return "", nil, fmt.Errorf("document claim %s is no top-level claim of the issued document", claim.To)
+	}
+	raw, present, err := shape.Get(presented, claim.From)
+	if err != nil {
+		return "", nil, fmt.Errorf("document claim %s: %w", claim.From, err)
+	}
+	if !present {
+		return "", nil, fmt.Errorf("document claim %s is not present on the presented credential", claim.From)
+	}
+	if targetValueType(target, claim.To) == "full-date" {
+		d, err := normaliseFullDate(raw)
+		if err != nil {
+			return "", nil, fmt.Errorf("document claim %s -> %s: %w", claim.From, claim.To, err)
+		}
+		return key, d, nil
+	}
+	if s, ok := claimString(raw); ok {
+		return key, s, nil
+	}
+	value, err := documentValue(raw)
+	if err != nil {
+		return "", nil, fmt.Errorf("document claim %s -> %s: %w", claim.From, claim.To, err)
+	}
+	return key, value, nil
+}
+
 // targetValueType returns the MDDL value_type the target credential declares
-// for a top-level element, in whichever namespace declares it; "" when the
-// target is not an mdoc or does not declare the element.
-func targetValueType(target *model.CredentialMetadata, element string) string {
+// for an element; "" when the target is not an mdoc or the claim is no
+// element its MDDL declares.
+func targetValueType(target *model.CredentialMetadata, claim claimpath.Pointer) string {
 	schema := target.GetMDDL()
-	if schema == nil {
+	namespace, element, err := claim.MDoc()
+	if schema == nil || err != nil {
 		return ""
 	}
-	for _, ns := range slices.Sorted(maps.Keys(schema.Claims)) {
-		if meta, ok := schema.Claims[ns][element]; ok {
-			return meta.ValueType
-		}
-	}
-	return ""
+	return schema.Claims[namespace][element].ValueType
 }
 
 // claimString returns a presented claim value as a string: a plain string,

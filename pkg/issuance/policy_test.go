@@ -368,7 +368,7 @@ func TestEvaluate_BooleanClaims(t *testing.T) {
 }
 
 func TestBuildQuery_WithTemplate(t *testing.T) {
-	query, _ := buildQuery("pid", map[string]any{
+	query, _, err := buildQuery("pid", map[string]any{
 		"acr":    "loa3",
 		"org_id": "123",
 		"sub":    "alice",
@@ -376,6 +376,7 @@ func TestBuildQuery_WithTemplate(t *testing.T) {
 		{Dimension: "acr", Claim: "acr"},
 		{Dimension: "org_id", Claim: "org_id"},
 	})
+	require.NoError(t, err)
 
 	// Query should be a list with tag "credential"
 	list, ok := query.(*sexp.List)
@@ -390,10 +391,11 @@ func TestBuildQuery_WithTemplate(t *testing.T) {
 // dimensions - the query carries the scope and nothing else, rather than
 // silently reaching for whatever claims happened to be present.
 func TestBuildQuery_WithoutTemplate(t *testing.T) {
-	query, _ := buildQuery("pid", map[string]any{
+	query, _, err := buildQuery("pid", map[string]any{
 		"acr": "loa3",
 		"sub": "alice",
 	}, nil)
+	require.NoError(t, err)
 
 	list, ok := query.(*sexp.List)
 	require.True(t, ok)
@@ -465,7 +467,8 @@ func TestBuildQueryResolvesNestedClaimPaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// String() renders the canonical length-prefixed SPOCP form,
 			// not the human-readable one the rules are written in.
-			q, _ := buildQuery("pid", claims, []model.QueryDimension{{Dimension: "dim", Claim: tc.claim}})
+			q, _, err := buildQuery("pid", claims, []model.QueryDimension{{Dimension: "dim", Claim: tc.claim}})
+			require.NoError(t, err)
 			assert.Equal(t, tc.want, q.String())
 		})
 	}

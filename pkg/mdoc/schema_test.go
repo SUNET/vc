@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
 )
 
@@ -151,7 +152,7 @@ func TestMDDLSchema_Attributes(t *testing.T) {
 	if !ok {
 		t.Fatal("missing 'Family Name' label under en-US")
 	}
-	if len(path) != 2 || *path[0] != "org.iso.18013.5.1" || *path[1] != "family_name" {
+	if !path.Equal(claimpath.Keys("org.iso.18013.5.1", "family_name")) {
 		t.Errorf("path = %v, want [org.iso.18013.5.1 family_name]", path)
 	}
 

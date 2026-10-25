@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -36,6 +37,7 @@ var spocpDimensionPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 // NewValidator creates a new validator
 func NewValidator() (*validator.Validate, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
+	validate.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		// Prefer yaml tag (used by config structs), fall back to json tag
@@ -639,21 +641,7 @@ func NewValidator() (*validator.Validate, error) {
 					if len(entry.AuthClaims) == 0 {
 						sl.ReportError(entry.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_auth_scope", name)
 					}
-					for claim, attr := range entry.IdentityAttributes {
-						if !slices.Contains(entry.AuthClaims, claim) {
-							sl.ReportError(entry.IdentityAttributes, "IdentityAttributes", "IdentityAttributes", "identity_attribute_not_an_auth_claim", name+"."+claim)
-						}
-						switch attr {
-						case "given_name", "family_name", "birth_date", "authentic_source_person_id":
-						default:
-							sl.ReportError(entry.IdentityAttributes, "IdentityAttributes", "IdentityAttributes", "identity_attribute_unknown", name+"."+claim)
-						}
-					}
-					for src, dst := range entry.DocumentClaims {
-						if dst == "" || strings.Contains(dst, ".") {
-							sl.ReportError(entry.DocumentClaims, "DocumentClaims", "DocumentClaims", "document_claim_target_must_be_top_level", name+"."+src)
-						}
-					}
+					validateIdentityAttributes(sl, name, entry)
 				}
 				if len(cred.AuthClaims) > 0 {
 					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_allowed_for_openid4vp", scope)
@@ -816,6 +804,22 @@ func reportOIDCOnlyScopeFields(sl validator.StructLevel, authProvider string, pa
 	}
 	if policy != nil {
 		sl.ReportError(policy, "IssuancePolicy", "IssuancePolicy", "oidc_only_scope_field", authProvider)
+	}
+}
+
+// validateIdentityAttributes requires each identity attribute rename to
+// name an auth claim and a known identity-mapping attribute.
+func validateIdentityAttributes(sl validator.StructLevel, authScope string, entry model.AuthScopeEntry) {
+	for i, rename := range entry.IdentityAttributes {
+		where := fmt.Sprintf("%s.identity_attributes[%d]", authScope, i)
+		if !slices.ContainsFunc(entry.AuthClaims, rename.Path.Equal) {
+			sl.ReportError(entry.IdentityAttributes, "IdentityAttributes", "IdentityAttributes", "identity_attribute_not_an_auth_claim", where)
+		}
+		switch rename.Attribute {
+		case "given_name", "family_name", "birth_date", "authentic_source_person_id":
+		default:
+			sl.ReportError(entry.IdentityAttributes, "IdentityAttributes", "IdentityAttributes", "identity_attribute_unknown", where)
+		}
 	}
 }
 

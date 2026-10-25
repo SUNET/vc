@@ -451,12 +451,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				for _, cq := range dcqlQuery.Credentials {
 					if cq.ID == queryID && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
-						for _, claim := range cq.Claims {
-							if len(claim.Path) == 0 || claim.Path[len(claim.Path)-1] == nil {
-								continue
-							}
-							requestedClaimIDs = append(requestedClaimIDs, *claim.Path[len(claim.Path)-1])
-						}
+						requestedClaimIDs = append(requestedClaimIDs, claimNames(cq.Claims)...)
 						break
 					}
 				}
@@ -1059,6 +1054,18 @@ const (
 	// FormatUnknown represents an unrecognized format
 	FormatUnknown CredentialFormat = "unknown"
 )
+
+// claimNames returns the key each claims query's path ends in: the data
+// element identifier of an mdoc claim.
+func claimNames(claims []openid4vp.ClaimQuery) []string {
+	var names []string
+	for _, claim := range claims {
+		if name, ok := claim.Path.Name(); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
 
 // detectCredentialFormat determines the credential format from the VP token.
 // SD-JWT: contains ~ separators (disclosure markers) and JWT dots

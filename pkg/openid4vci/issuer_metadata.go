@@ -3,6 +3,8 @@ package openid4vci
 import (
 	"encoding/json"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -161,6 +163,9 @@ type CredentialConfigurationsSupported struct {
 	// CredentialMetadata: OPTIONAL. Object containing information relevant to the usage and display of issued Credentials.
 	CredentialMetadata *CredentialMetadata `json:"credential_metadata,omitempty" yaml:"credential_metadata,omitempty"`
 
+	// AuxiliaryDataSupported: OPTIONAL. The Auxiliary Data Entries this configuration is issued with (Credential Auxiliary Data).
+	AuxiliaryDataSupported *AuxiliaryDataSupported `json:"auxiliary_data_supported,omitempty" yaml:"auxiliary_data_supported,omitempty"`
+
 	// --- Format-specific parameters (Appendix A) ---
 
 	// VCT: REQUIRED for dc+sd-jwt format. String designating the type of the Credential, as defined in SD-JWT VC.
@@ -255,14 +260,16 @@ type CredentialMetadata struct {
 
 	// Claims: OPTIONAL. A non-empty array of claims description objects as defined in Appendix B.2.
 	Claims []ClaimDescription `json:"claims,omitempty" yaml:"claims,omitempty"`
+
+	// AuxiliaryData: the Auxiliary Data Entries of a Credential Response (Credential Auxiliary Data).
+	// Set it on a response with CredentialResponse.AddAuxiliaryData.
+	AuxiliaryData []AuxiliaryDataEntry `json:"auxiliary_data,omitempty" yaml:"-"`
 }
 
 // ClaimDescription describes a claim within a Credential for display purposes.
 type ClaimDescription struct {
 	// Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential.
-	// A nil entry denotes a wildcard over an array's elements (e.g. ["nationalities", null]),
-	// matching the claims path pointer semantics used by presentation/DCQL and VCTM.
-	Path []*string `json:"path" yaml:"path" validate:"required"`
+	Path claimpath.Pointer `json:"path" yaml:"path" validate:"required"`
 
 	// SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.
 	SVGID string `json:"svg_id,omitempty" yaml:"svg_id,omitempty"`

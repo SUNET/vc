@@ -12,10 +12,13 @@ import (
 
 	"github.com/SUNET/vc/pkg/issuance"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -226,11 +229,6 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
-		// Needs the schemas, so it runs after the loop above.
-		if err := checkCommitmentTargets(cfg); err != nil {
-			return nil, err
-		}
-
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
 		// document is consistent.
@@ -256,6 +254,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		cfg.APIGW, cfg.Issuer, cfg.Verifier = nil, nil, nil
 	case "apigw":
 		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
+	}
+
+	// Needs the schemas, and reads only the sections this service keeps.
+	if err := resolveClaimPaths(cfg, serviceName); err != nil {
+		return nil, err
 	}
 
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
@@ -305,6 +308,26 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	return cfg, nil
 }
 
+// resolveClaimPaths reads the dotted claims of the configuration as claims
+// path pointers, and then refuses a pointer still pending, naming where it
+// is. It then checks the auxiliary_data, which reads the resolved claims.
+func resolveClaimPaths(cfg *model.Cfg, serviceName string) error {
+	if err := cfg.ResolveClaimPaths(); err != nil {
+		return err
+	}
+	if err := claimpath.CheckResolved(cfg); err != nil {
+		return err
+	}
+	if !servicesRequiringVCTM[serviceName] {
+		return nil
+	}
+	if err := checkAuxiliaryData(cfg, serviceName); err != nil {
+		return err
+	}
+	deriveAuxiliaryDataRequired(cfg)
+	return nil
+}
+
 // checkCredentialMetadataEntries refuses a common.credential_metadata key
 // whose value is nil.
 //
@@ -329,31 +352,126 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	return nil
 }
 
-// checkCommitmentTargets settles every seed-backed claim against the
-// schemas this service has loaded, and refuses a configuration that would
-// not do what it says.
-//
-// The issuer cannot do this at ITS startup - it has no schemas, it
-// receives them inline per request - so without this the misconfiguration
-// surfaces when someone is waiting for a credential. And it surfaces
-// quietly: an mdoc signer emits the elements its schema declares and
-// ignores anything else in the document.
-//
-// The resolution itself lives in pkg/model and is the same call the issuer
-// makes at issuance. Two implementations of it had already drifted once.
-func checkCommitmentTargets(cfg *model.Cfg) error {
-	if cfg.Common == nil {
+// checkAuxiliaryData refuses auxiliary_data this issuer cannot honour.
+func checkAuxiliaryData(cfg *model.Cfg, serviceName string) error {
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if err := checkAuxiliaryDataEntries(scope, cfg.Common.CredentialMetadata[scope]); err != nil {
+			return err
+		}
+	}
+	if serviceName != "apigw" || cfg.APIGW == nil {
 		return nil
 	}
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		if err := checkHashCommitmentDerivations(src, toWalletPaths(cfg.Common.CredentialMetadata[src.Scope])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
-		meta := cfg.Common.CredentialMetadata[scope]
-		if meta == nil || len(meta.Commitments) == 0 {
+// checkAuxiliaryDataEntries checks every entry of a credential's
+// auxiliary_data, and that no path has two.
+func checkAuxiliaryDataEntries(scope string, meta *model.CredentialMetadata) error {
+	if meta == nil || meta.AuxiliaryData == nil {
+		return nil
+	}
+	where := fmt.Sprintf("common.credential_metadata.%s.auxiliary_data", scope)
+	seen := map[string]bool{}
+	if err := checkAuxiliaryDataList(meta, where+".to_wallet", meta.AuxiliaryData.ToWallet, seen); err != nil {
+		return err
+	}
+	return checkAuxiliaryDataList(meta, where+".to_issuer", meta.AuxiliaryData.ToIssuer, seen)
+}
+
+func checkAuxiliaryDataList(meta *model.CredentialMetadata, where string, entries []openid4vci.AuxiliaryDataEntry, seen map[string]bool) error {
+	for i, entry := range entries {
+		if err := checkHashCommitmentEntry(meta, entry); err != nil {
+			return fmt.Errorf("%s[%d]: %w", where, i, err)
+		}
+		key := entry.Path.String()
+		if seen[key] {
+			return fmt.Errorf("%s[%d]: a second entry for path %s", where, i, entry.Path)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+// checkHashCommitmentEntry accepts a sha-256 hash_commitment entry whose
+// path names a claim the credential's format can carry a commitment in.
+func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.AuxiliaryDataEntry) error {
+	switch {
+	case entry.Type != openid4vci.AuxiliaryDataTypeHashCommitment:
+		return fmt.Errorf("type %q; this issuer implements %q", entry.Type, openid4vci.AuxiliaryDataTypeHashCommitment)
+	case entry.Alg != openid4vci.HashCommitmentAlgSHA256:
+		return fmt.Errorf("alg %q; this issuer implements %q", entry.Alg, openid4vci.HashCommitmentAlgSHA256)
+	case entry.Opening != "" || entry.Commitment != "":
+		return errors.New("metadata carries no opening or commitment")
+	case entry.Required:
+		return errors.New("required comes from the type metadata's mandatory flag")
+	}
+	return checkCommitmentClaim(meta, entry)
+}
+
+// deriveAuxiliaryDataRequired sets each to_issuer entry's required from the
+// mandatory flag the type metadata gives its claim.
+func deriveAuxiliaryDataRequired(cfg *model.Cfg) {
+	for _, meta := range cfg.Common.CredentialMetadata {
+		if meta == nil || meta.AuxiliaryData == nil {
 			continue
 		}
-		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{MDoc: meta.MDDL, VCTM: meta.VCTM}); err != nil {
-			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
+		for i, entry := range meta.AuxiliaryData.ToIssuer {
+			meta.AuxiliaryData.ToIssuer[i].Required = claimMandatory(meta, entry.Path)
 		}
+	}
+}
+
+// toWalletPaths returns the to_wallet paths of a credential, by their
+// rendering.
+func toWalletPaths(meta *model.CredentialMetadata) map[string]claimpath.Pointer {
+	paths := map[string]claimpath.Pointer{}
+	if meta == nil || meta.AuxiliaryData == nil {
+		return paths
+	}
+	for _, entry := range meta.AuxiliaryData.ToWallet {
+		paths[entry.Path.String()] = entry.Path
+	}
+	return paths
+}
+
+// checkHashCommitmentDerivations requires a source scope to fulfil each
+// to_wallet path with exactly one hash_commitment derivation.
+func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string]claimpath.Pointer) error {
+	fulfilled := map[string]bool{}
+	for i, d := range src.Derivations {
+		if d.HashCommitment == nil {
+			continue
+		}
+		if err := checkHashCommitmentDerivation(d.HashCommitment, toWallet, fulfilled); err != nil {
+			return fmt.Errorf("%s.derivations[%d].hash_commitment: %w", src.Where(), i, err)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(toWallet)) {
+		if !fulfilled[key] {
+			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %s of common.credential_metadata.%s.auxiliary_data",
+				src.Where(), toWallet[key], src.Scope)
+		}
+	}
+	return nil
+}
+
+func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string]claimpath.Pointer, fulfilled map[string]bool) error {
+	key := hc.Path.String()
+	if _, ok := toWallet[key]; !ok {
+		return fmt.Errorf("path %s is no to_wallet entry of the credential's auxiliary_data", hc.Path)
+	}
+	if fulfilled[key] {
+		return fmt.Errorf("path %s is fulfilled twice", hc.Path)
+	}
+	fulfilled[key] = true
+	if err := hc.Opening.Validate(); err != nil {
+		return fmt.Errorf("opening: %w", err)
 	}
 	return nil
 }
@@ -380,19 +498,19 @@ func checkRandomDerivations(cfg *model.Cfg) error {
 	if cfg == nil || cfg.APIGW == nil {
 		return nil
 	}
-
-	scopes := cfg.APIGW.DataSources.Presentation.Scopes
-	for _, scope := range slices.Sorted(maps.Keys(scopes)) {
-		for i, derivation := range scopes[scope].Derivations {
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		if src.Source != model.DataSourcePresentation {
+			continue
+		}
+		for i, derivation := range src.Derivations {
 			if derivation.Random != nil {
-				return fmt.Errorf("apigw.data_sources.presentation.scopes.%s.derivations[%d]: "+
+				return fmt.Errorf("%s.derivations[%d]: "+
 					"the random primitive is not supported on a presentation source, because derivations run "+
 					"once for the consent preview and again for issuance, so the generated value would differ "+
-					"between what the holder approves and what they receive", scope, i)
+					"between what the holder approves and what they receive", src.Where(), i)
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -966,9 +1084,9 @@ func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) erro
 }
 
 // checkPresentationScopeFromScope rejects an apigw config whose
-// presentation-source scopes reference a from_scope that has no matching
-// common.credential_metadata entry. Without this guard, a typo (e.g.
-// from_scope: eudid instead of eduid) reaches buildIssuanceAuthDCQL /
+// presentation-source scopes accept a presented credential scope that has no
+// matching common.credential_metadata entry. Without this guard, a typo (e.g.
+// from: {eudid: ...} instead of eduid) reaches buildIssuanceAuthDCQL /
 // enforceScopeCredentialType and either fails to build a DCQL constraint or
 // dereferences a nil CredentialMetadata mid-flow — turning a config error
 // into a runtime failure only visible on a wallet round-trip.
@@ -979,22 +1097,17 @@ func checkPresentationScopeFromScope(cfg *model.Cfg, serviceName string) error {
 	if cfg.Common == nil {
 		return nil
 	}
-	scopes := cfg.APIGW.DataSources.Presentation.Scopes
-	if len(scopes) == 0 {
-		return nil
-	}
 	var missing []string
-	for _, scope := range slices.Sorted(maps.Keys(scopes)) {
-		fromScope := scopes[scope].FromScope
-		if fromScope == "" {
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		if src.Source != model.DataSourcePresentation {
 			continue
 		}
-		if _, ok := cfg.Common.CredentialMetadata[fromScope]; !ok {
-			missing = append(missing, fmt.Sprintf("apigw.data_sources.presentation.scopes.%s.from_scope=%q", scope, fromScope))
+		if _, ok := cfg.Common.CredentialMetadata[src.Presented]; !ok {
+			missing = append(missing, src.Where())
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("presentation from_scope references unknown credential_metadata entries: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("presentation from references unknown credential_metadata entries: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }

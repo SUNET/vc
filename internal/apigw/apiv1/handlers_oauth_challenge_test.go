@@ -19,6 +19,7 @@ import (
 	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -113,7 +114,7 @@ func newChallengeClient(t *testing.T) *Client {
 						AuthProvider:    model.AuthProviderOpenID4VP,
 						AuthenticSource: "authentic-source",
 						AuthScopes: map[string]model.AuthScopeEntry{
-							challengeAuthScope: {AuthClaims: []string{"given_name", "family_name"}},
+							challengeAuthScope: {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name")}},
 						},
 					},
 				}},

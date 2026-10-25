@@ -266,20 +266,14 @@ func copyDCQL(src *DCQL) *DCQL {
 		if len(cred.Claims) > 0 {
 			dst.Credentials[i].Claims = make([]ClaimQuery, len(cred.Claims))
 			for j, claim := range cred.Claims {
-				pathCopy := make([]*string, len(claim.Path))
-				for k, p := range claim.Path {
-					if p != nil {
-						s := *p
-						pathCopy[k] = &s
-					}
-				}
 				var valuesCopy []any
 				if claim.Values != nil {
 					valuesCopy = append([]any{}, claim.Values...)
 				}
+				// A claims path pointer is immutable, so the copy shares it.
 				dst.Credentials[i].Claims[j] = ClaimQuery{
 					ID:     claim.ID,
-					Path:   pathCopy,
+					Path:   claim.Path,
 					Values: valuesCopy,
 				}
 			}
@@ -374,15 +368,15 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 	return template
 }
 
-// GetClaimMappings is a helper to extract claim mappings from a template
-// Returns nil if the template doesn't implement this method
-func GetClaimMappings(template PresentationRequestTemplate) map[string]string {
+// GetClaimMappings is a helper to extract claim mappings from a template.
+// The mappings are empty when the template doesn't implement this method.
+func GetClaimMappings(template PresentationRequestTemplate) ClaimMappings {
 	if t, ok := template.(interface {
-		GetClaimMappings() map[string]string
+		GetClaimMappings() ClaimMappings
 	}); ok {
 		return t.GetClaimMappings()
 	}
-	return nil
+	return ClaimMappings{}
 }
 
 // ListTemplates returns all templates

@@ -11,6 +11,15 @@ import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
 import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
+// A claims path pointer (OpenID4VP 1.0 section 7) names a claim by object
+// keys, array indices, and null for every element of an array.
+const arrayIndexSchema = v.pipe(v.number(), v.integer(), v.minValue(0));
+const claimPathSchema = v.array(v.union([v.string(), v.null(), arrayIndexSchema]));
+// A validation reads one claim, so its pointer has no null.
+const singleClaimPathSchema = v.array(v.union([v.string(), arrayIndexSchema]));
+
+/** @typedef {(string|number|null)[]} ClaimPath */
+
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
     format: v.string(),
@@ -27,25 +36,25 @@ const credentialAttributesSchema = v.object({
         v.string(),
         v.record(
             v.string(),
-            v.array(v.nullable(v.string())),
+            claimPathSchema,
         ),
     ),
 });
 
 /**
- * @typedef {{ label: string; path: (string|null)[]; children: ClaimNode[] }} ClaimNode
+ * @typedef {{ label: string; path: ClaimPath; children: ClaimNode[] }} ClaimNode
  */
 
 /**
  * Build a tree of claim nodes from a flat claims map.
  * Groups nested claims (path.length > 1) under their parent object.
- * @param {Record<string, (string|null)[]>} claims - label → path mapping
+ * @param {Record<string, ClaimPath>} claims - label → path mapping
  * @returns {ClaimNode[]}
  */
 function buildClaimTree(claims) {
     /** @type {ClaimNode[]} */
     const roots = [];
-    /** @type {Map<string, ClaimNode>} */
+    /** @type {Map<string|number, ClaimNode>} */
     const parentMap = new Map();
 
     // First pass: identify parent nodes (path.length === 1 that have children)
@@ -73,7 +82,7 @@ function buildClaimTree(claims) {
             let parent = parentMap.get(parentKey);
             if (!parent) {
                 // Parent has no display entry; create a synthetic one
-                parent = { label: parentKey, path: [parentKey], children: [] };
+                parent = { label: String(parentKey), path: [parentKey], children: [] };
                 parentMap.set(parentKey, parent);
                 roots.push(parent);
             }
@@ -138,11 +147,11 @@ const metadataResponseSchema = v.object({
                 zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
             }),
             claims: v.optional(v.array(v.object({
-                path: v.array(v.nullable(v.string())),
+                path: claimPathSchema,
             }))),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
-                path: v.array(v.string()),
+                path: singleClaimPathSchema,
                 value: v.any(),
             }))),
         })),
@@ -171,7 +180,7 @@ const dcqlQueryCredentialSchema = v.object({
         zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
     }),
     claims: v.optional(v.array(v.object({
-        path: v.array(v.nullable(v.string())),
+        path: claimPathSchema,
     }))),
 });
 
@@ -481,7 +490,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether sendDcqlQuery() calls navigator.credentials.get() before rendering the wallet link/QR screen; when false it goes straight to that screen. Separate from dcApiEnabled because an OS-level DC API matcher can reject a format with its own dialog before any JS runs, leaving no failure to catch - see DigitalCredentialsConfig.AutoAttempt. */
     dcApiAutoAttempt: true,
 
-     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; type_values?: string[][]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; type_values?: string[][]; claims: Record<string, ClaimPath>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /**
@@ -510,7 +519,7 @@ Alpine.data("app", () => ({
     /** @type {DCQLQuery | null} */
     dcqlQuery: null,
 
-    /** @type {Record<string, Array<{rule: string, path: string[], value: any}>> | null} */
+    /** @type {Record<string, Array<{rule: string, path: (string|number)[], value: any}>> | null} */
     validations: null,
 
     /** @type {PresentationDefinition | null} */
@@ -707,7 +716,7 @@ Alpine.data("app", () => ({
 
         const chosenCredential = this.credentialsList[credential];
 
-        /** @type {Record<string, (string|null)[]>} */
+        /** @type {Record<string, ClaimPath>} */
         const claims = {}
         // Not attributes['en-US'] directly: a credential whose claims live
         // only under another locale would send no claim paths at all.

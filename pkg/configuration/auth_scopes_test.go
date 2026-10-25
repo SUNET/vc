@@ -3,6 +3,7 @@ package configuration
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -35,8 +36,8 @@ func TestCheckAuthScopes(t *testing.T) {
 			"ehic": {
 				AuthProvider: model.AuthProviderOpenID4VP,
 				AuthScopes: map[string]model.AuthScopeEntry{
-					"pid":   {AuthClaims: []string{"given_name"}},
-					"eduid": {AuthClaims: []string{"given_name"}},
+					"pid":   {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
+					"eduid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 				},
 			},
 		}))
@@ -48,8 +49,8 @@ func TestCheckAuthScopes(t *testing.T) {
 			"ehic": {
 				AuthProvider: model.AuthProviderOpenID4VP,
 				AuthScopes: map[string]model.AuthScopeEntry{
-					"pid":              {AuthClaims: []string{"given_name"}},
-					"nosuchcredential": {AuthClaims: []string{"given_name"}},
+					"pid":              {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
+					"nosuchcredential": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 				},
 			},
 		}))
@@ -63,8 +64,8 @@ func TestCheckAuthScopes(t *testing.T) {
 			"ehic": {
 				AuthProvider: model.AuthProviderOpenID4VP,
 				AuthScopes: map[string]model.AuthScopeEntry{
-					"aaa": {AuthClaims: []string{"given_name"}},
-					"zzz": {AuthClaims: []string{"given_name"}},
+					"aaa": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
+					"zzz": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 				},
 			},
 		}))
@@ -80,7 +81,7 @@ func TestCheckAuthScopes(t *testing.T) {
 			"ehic": {
 				AuthProvider: model.AuthProviderSAML,
 				AuthScopes: map[string]model.AuthScopeEntry{
-					"nosuchcredential": {AuthClaims: []string{"given_name"}},
+					"nosuchcredential": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 				},
 			},
 		}))
@@ -95,7 +96,7 @@ func TestCheckAuthScopes(t *testing.T) {
 		cfg := cfgWith(map[string]model.DatastoreScope{
 			"ehic": {
 				AuthProvider: model.AuthProviderOpenID4VP,
-				AuthScopes:   map[string]model.AuthScopeEntry{"pid": {AuthClaims: []string{"given_name"}}},
+				AuthScopes:   map[string]model.AuthScopeEntry{"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}}},
 			},
 		})
 		cfg.Common = nil

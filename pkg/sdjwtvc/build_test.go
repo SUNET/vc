@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 
 	"github.com/stretchr/testify/assert"
@@ -26,8 +27,8 @@ func TestBuildCredentialWithSigner(t *testing.T) {
 	vctm := &VCTM{
 		VCT: "TestCredential",
 		Claims: []Claim{
-			{Path: []*string{&personalNumber}, SD: "always"},
-			{Path: []*string{&issuingAuth}, SD: "always"},
+			{Path: claimpath.Keys(personalNumber), SD: "always"},
+			{Path: claimpath.Keys(issuingAuth), SD: "always"},
 		},
 	}
 
@@ -183,7 +184,7 @@ func TestBuildCredentialWithSigner_AlgorithmSelection(t *testing.T) {
 			testClaim := "test_claim"
 			vctm := &VCTM{
 				VCT:    "TestCredential",
-				Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+				Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 			}
 
 			vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -223,7 +224,7 @@ func TestBuildCredentialWithSigner_InvalidJSON(t *testing.T) {
 	testClaim := "test"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)

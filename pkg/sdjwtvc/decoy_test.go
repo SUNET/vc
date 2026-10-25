@@ -3,6 +3,8 @@ package sdjwtvc
 import (
 	"crypto/sha256"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 func TestDecoyDigests(t *testing.T) {
@@ -11,7 +13,7 @@ func TestDecoyDigests(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeName},
+				Path: claimpath.Keys(mockAttributeName),
 				SD:   "always",
 			},
 		},
@@ -78,11 +80,11 @@ func TestDecoyDigests(t *testing.T) {
 		nestedVCTM := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&mockPersonal, &mockPersonalName},
+					Path: claimpath.Keys(mockPersonal, mockPersonalName),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&mockWork, &mockWorkTitle},
+					Path: claimpath.Keys(mockWork, mockWorkTitle),
 					SD:   "always",
 				},
 			},

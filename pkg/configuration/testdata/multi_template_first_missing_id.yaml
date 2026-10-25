@@ -14,7 +14,7 @@ templates:
           claims:
             - path: ["name"]
     claim_mappings:
-      name: "name"
+      - {path: [name], claim: name}
     enabled: true
 
   - id: "valid_second"
@@ -33,5 +33,5 @@ templates:
           claims:
             - path: ["value"]
     claim_mappings:
-      value: "value"
+      - {path: [value], claim: value}
     enabled: true

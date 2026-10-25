@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	"github.com/SUNET/vc/internal/apigw/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -21,9 +22,9 @@ import (
 // family_name, given_name or birth_date either.
 func ehicMetadata() *model.CredentialMetadata {
 	return &model.CredentialMetadata{VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{new("social_security_pin")}},
-		{Path: []*string{new("starting_date")}},
-		{Path: []*string{new("date_of_issuance")}},
+		{Path: claimpath.Keys("social_security_pin")},
+		{Path: claimpath.Keys("starting_date")},
+		{Path: claimpath.Keys("date_of_issuance")},
 	}}}
 }
 
@@ -69,7 +70,7 @@ func claimsTestClient(t *testing.T) (*Client, *memoryDatastoreStore, *memoryIden
 						Scopes: map[string]model.AssertionScope{
 							"ehic": {
 								AuthProvider: "oidc",
-								Defaults:     map[string]any{"starting_date": "2030-01-01"},
+								Defaults:     model.ClaimDefaults{{Path: claimpath.Keys("starting_date"), Value: "2030-01-01"}},
 							},
 						},
 					},
@@ -217,10 +218,15 @@ func TestBuildOIDCDocument_KeepsIssue623Filtering(t *testing.T) {
 // identifier. The two cases here are the ones where document data would
 // otherwise still be the identity map itself.
 func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
+	// unknown-scope is a JSON-based credential whose type metadata never
+	// loaded, so there is nothing to filter against.
+	unknownScope := func(c *Client) {
+		c.cfg.Common.CredentialMetadata["unknown-scope"] = &model.CredentialMetadata{Format: "dc+sd-jwt"}
+	}
 	setDefaults := func(c *Client, scope string) {
 		c.cfg.APIGW.DataSources.Assertion.Scopes[scope] = model.AssertionScope{
 			AuthProvider: "oidc",
-			Defaults:     map[string]any{"authentic_source_person_id": "default-not-an-identity"},
+			Defaults:     model.ClaimDefaults{{Path: claimpath.Keys("authentic_source_person_id"), Value: "default-not-an-identity"}},
 		}
 	}
 
@@ -228,7 +234,7 @@ func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
 		c, _, _, _ := claimsTestClient(t)
 		setDefaults(c, "ehic")
 
-		transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{"given_name": {Claim: "given_name"}})
+		transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{"given_name": {Claim: claimpath.Keys("given_name")}})
 		cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), transformer)
 		require.NoError(t, err)
 
@@ -242,6 +248,7 @@ func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
 
 	t.Run("no metadata to filter against", func(t *testing.T) {
 		c, _, _, _ := claimsTestClient(t)
+		unknownScope(c)
 		setDefaults(c, "unknown-scope")
 
 		raw := map[string]any{"given_name": "Helen"}
@@ -257,14 +264,15 @@ func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
 			"the provider's own claim map must not be written to either")
 	})
 
-	// Assertion defaults are dot-notation paths, so MergeDefaults walks into
-	// nested maps to set one. A shallow copy of the top level would leave that
+	// An assertion default can name a nested claim, so MergeDefaults walks
+	// into nested maps to set one. A shallow copy of the top level would leave that
 	// nested map shared with the identity claims.
 	t.Run("default path nested inside an existing claim", func(t *testing.T) {
 		c, _, _, _ := claimsTestClient(t)
+		unknownScope(c)
 		c.cfg.APIGW.DataSources.Assertion.Scopes["unknown-scope"] = model.AssertionScope{
 			AuthProvider: "oidc",
-			Defaults:     map[string]any{"address.locality": "Stockholm"},
+			Defaults:     model.ClaimDefaults{{Path: claimpath.Keys("address", "locality"), Value: "Stockholm"}},
 		}
 
 		address := map[string]any{"country": "SE"}
@@ -289,8 +297,8 @@ func TestCallbackClaims_TransformerOutputNotFiltered(t *testing.T) {
 	c, _, _, _ := claimsTestClient(t)
 
 	transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{
-		"given_name": {Claim: "given_name"},
-		"email":      {Claim: "email"},
+		"given_name": {Claim: claimpath.Keys("given_name")},
+		"email":      {Claim: claimpath.Keys("email")},
 	})
 
 	cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), transformer)
@@ -310,7 +318,7 @@ func TestCallbackClaims_TransformerError(t *testing.T) {
 	c, _, _, _ := claimsTestClient(t)
 
 	transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{
-		"personal_administrative_number": {Claim: "personal_administrative_number", Required: true},
+		"personal_administrative_number": {Claim: claimpath.Keys("personal_administrative_number"), Required: true},
 	})
 
 	cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), transformer)

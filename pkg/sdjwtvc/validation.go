@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // ValidationError represents a validation error with details
@@ -95,40 +97,8 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 	}
 
 	errors := &ValidationErrors{}
-
-	// Check mandatory claims are present
 	for _, claim := range vctm.Claims {
-		if claim.Mandatory {
-			if skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path) {
-				continue
-			}
-			claimPath := claim.Path
-			if !claimExists(claims, claimPath) {
-				errors.AddError(
-					claim.JSONPath(),
-					"mandatory claim is missing",
-				)
-			}
-		}
-	}
-
-	// Validate claim structure and types
-	for _, claim := range vctm.Claims {
-		if len(claim.Path) == 0 {
-			continue
-		}
-
-		// Get the value at the path
-		value, exists := getClaimValue(claims, claim.Path)
-		if !exists {
-			// Already handled by mandatory check
-			continue
-		}
-
-		// Validate based on claim path structure
-		if err := validateClaimValue(claim, value); err != nil {
-			errors.AddError(claim.JSONPath(), err.Error())
-		}
+		validateClaim(errors, claims, claim, skipIssuerSupplied)
 	}
 
 	if errors.HasErrors() {
@@ -138,53 +108,21 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 	return nil
 }
 
-// claimExists checks if a claim exists at the given path
-func claimExists(claims map[string]any, path []*string) bool {
-	_, exists := getClaimValue(claims, path)
-	return exists
-}
-
-// getClaimValue retrieves the value at the given path
-func getClaimValue(claims map[string]any, path []*string) (any, bool) {
-	if len(path) == 0 {
-		return nil, false
-	}
-
-	current := any(claims)
-
-	for i, pathElement := range path {
-		if pathElement == nil {
-			// null in path means "all array elements" - validate this is an array
-			arr, ok := current.([]any)
-			if !ok {
-				return nil, false
-			}
-			// For validation purposes, we just check the array exists
-			// Individual elements will be validated separately
-			if i == len(path)-1 {
-				return arr, true
-			}
-			// Can't traverse further with null path element
-			return nil, false
+// validateClaim checks that a mandatory claim is present and that every
+// value the claim's path selects has a JSON type.
+func validateClaim(errors *ValidationErrors, claims map[string]any, claim Claim, skipIssuerSupplied bool) {
+	values, err := claim.Path.Select(claims)
+	if err != nil {
+		if claim.Mandatory && !(skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path)) {
+			errors.AddError(claim.JSONPath(), "mandatory claim is missing")
 		}
-
-		key := *pathElement
-
-		// Try as object
-		if obj, ok := current.(map[string]any); ok {
-			val, exists := obj[key]
-			if !exists {
-				return nil, false
-			}
-			current = val
-			continue
-		}
-
-		// Not an object, can't navigate further
-		return nil, false
+		return
 	}
-
-	return current, true
+	for _, value := range values {
+		if err := validateClaimValue(claim, value); err != nil {
+			errors.AddError(claim.JSONPath(), err.Error())
+		}
+	}
 }
 
 // validateClaimValue validates a claim value based on basic type checking
@@ -241,34 +179,42 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 		}
 	}
 
-	// Build a map of allowed claim paths
-	allowedPaths := make(map[string]bool)
-	for _, claim := range vctm.Claims {
-		if len(claim.Path) > 0 {
-			// Add the top-level key
-			if claim.Path[0] != nil {
-				allowedPaths[*claim.Path[0]] = true
-			}
-		}
+	allowedPaths, err := topLevelClaims(vctm)
+	if err != nil {
+		return err
 	}
-
-	// Check all top-level claims in document
-	for key := range claims {
-		// Skip standard JWT claims
-		if isStandardClaim(key) {
-			continue
-		}
-
-		if !allowedPaths[key] {
-			errors.AddError(key, "claim not defined in VCTM")
-		}
-	}
+	addUndeclaredClaims(errors, claims, allowedPaths)
 
 	if errors.HasErrors() {
 		return errors
 	}
 
 	return nil
+}
+
+// addUndeclaredClaims reports each top-level claim of the document that is
+// neither allowed nor a standard JWT claim.
+func addUndeclaredClaims(errors *ValidationErrors, claims map[string]any, allowed map[string]bool) {
+	for key := range claims {
+		if !isStandardClaim(key) && !allowed[key] {
+			errors.AddError(key, "claim not defined in VCTM")
+		}
+	}
+}
+
+// topLevelClaims returns the keys the VCTM's claim paths start with.
+func topLevelClaims(vctm *VCTM) (map[string]bool, error) {
+	keys := make(map[string]bool)
+	for _, claim := range vctm.Claims {
+		components, err := claim.Path.Components()
+		if err != nil {
+			return nil, err
+		}
+		if key, ok := components[0].KeyName(); ok {
+			keys[key] = true
+		}
+	}
+	return keys, nil
 }
 
 // isIssuerSuppliedClaim reports whether a VCTM claim path refers to a
@@ -279,11 +225,12 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 // This exemption is only applied in document-data paths (ValidateDocument,
 // ValidateClaimPaths) — ValidateClaims validates strictly, since a fully
 // assembled credential must carry these envelope claims.
-func isIssuerSuppliedClaim(path []*string) bool {
-	if len(path) != 1 || path[0] == nil {
+func isIssuerSuppliedClaim(path claimpath.Pointer) bool {
+	keys, ok := path.KeyNames()
+	if !ok || len(keys) != 1 {
 		return false
 	}
-	switch *path[0] {
+	switch keys[0] {
 	case "iss", "nbf", "exp", "cnf", "vct", "status", "iat":
 		return true
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -34,8 +35,8 @@ func TestUIMetadata(t *testing.T) {
 				"pid": {
 					VCTMFilePath: "/path/to/vctm",
 					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-					Attributes: map[string]map[string][]*string{
-						"en-US": {"given_name": {new("given_name")}},
+					Attributes: map[string]map[string]claimpath.Pointer{
+						"en-US": {"given_name": claimpath.Keys("given_name")},
 					},
 				},
 				"diploma": {
@@ -185,9 +186,9 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:eudi:pid:1",
 						Claims: []sdjwtvc.Claim{
-							{Path: []*string{new("given_name")}},
-							{Path: []*string{new("family_name")}},
-							{Path: []*string{new("birthdate")}},
+							{Path: claimpath.Keys("given_name")},
+							{Path: claimpath.Keys("family_name")},
+							{Path: claimpath.Keys("birthdate")},
 						},
 					},
 				},
@@ -196,8 +197,8 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:eudi:ehic:1",
 						Claims: []sdjwtvc.Claim{
-							{Path: []*string{new("card_number")}},
-							{Path: []*string{new("expiry_date")}},
+							{Path: claimpath.Keys("card_number")},
+							{Path: claimpath.Keys("expiry_date")},
 						},
 					},
 				},
@@ -208,20 +209,20 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 				"PID Age Over 18": {Credentials: model.VerificationPreset{
 					"pid": &model.VerificationPresetScope{
 						Claims: []model.VerificationPresetClaim{
-							{Path: []string{"birthdate"}},
+							{Path: claimpath.Keys("birthdate")},
 						},
 						Validations: []openid4vp.ClaimValidation{
-							{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+							{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 						},
 					},
 				}},
 				"PID + EHIC": {Credentials: model.VerificationPreset{
 					"pid": &model.VerificationPresetScope{
 						ExcludeClaims: []model.VerificationPresetClaim{
-							{Path: []string{"family_name"}},
+							{Path: claimpath.Keys("family_name")},
 						},
 						Validations: []openid4vp.ClaimValidation{
-							{Rule: "age_over", Path: []string{"birthdate"}, Value: 21},
+							{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 21},
 						},
 					},
 					"ehic": nil, // no overrides, no validations
@@ -250,9 +251,7 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 
 		// Only explicit claims should be included (birthdate), others excluded
 		require.Len(t, pidCred.Claims, 1)
-		require.Len(t, pidCred.Claims[0].Path, 1)
-		require.NotNil(t, pidCred.Claims[0].Path[0])
-		assert.Equal(t, "birthdate", *pidCred.Claims[0].Path[0])
+		assert.Equal(t, claimpath.Keys("birthdate"), pidCred.Claims[0].Path)
 	})
 
 	t.Run("multi scope preset scopes validations correctly", func(t *testing.T) {
@@ -299,8 +298,8 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 		// PID should exclude family_name, have given_name and birthdate
 		pidPaths := make([]string, 0, len(pidCred.Claims))
 		for _, c := range pidCred.Claims {
-			if c.Path[0] != nil {
-				pidPaths = append(pidPaths, *c.Path[0])
+			if name, ok := c.Path.Name(); ok {
+				pidPaths = append(pidPaths, name)
 			}
 		}
 		assert.Contains(t, pidPaths, "given_name")
@@ -310,8 +309,8 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 		// EHIC should have all its claims (no exclusions)
 		ehicPaths := make([]string, 0, len(ehicCred.Claims))
 		for _, c := range ehicCred.Claims {
-			if c.Path[0] != nil {
-				ehicPaths = append(ehicPaths, *c.Path[0])
+			if name, ok := c.Path.Name(); ok {
+				ehicPaths = append(ehicPaths, name)
 			}
 		}
 		assert.Contains(t, ehicPaths, "card_number")
@@ -399,88 +398,88 @@ func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 		name          string
 		vctmClaims    []sdjwtvc.Claim
 		inputClaims   []openid4vp.ClaimQuery
-		expectedPaths [][]*string
-		removedPaths  [][]*string
+		expectedPaths []claimpath.Pointer
+		removedPaths  []claimpath.Pointer
 	}{
 		{
 			name: "parent removed when array-element path present",
 			vctmClaims: []sdjwtvc.Claim{
-				{Path: []*string{new("nationalities")}},
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.Keys("nationalities")},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("nationalities")}},
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.Keys("nationalities")},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
-			expectedPaths: [][]*string{
-				{new("nationalities"), nil},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 			},
-			removedPaths: [][]*string{
-				{new("nationalities")},
+			removedPaths: []claimpath.Pointer{
+				claimpath.Keys("nationalities"),
 			},
 		},
 		{
 			name: "array-element path only - no change",
 			vctmClaims: []sdjwtvc.Claim{
-				{Path: []*string{new("nationalities")}},
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.Keys("nationalities")},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
-			expectedPaths: [][]*string{
-				{new("nationalities"), nil},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 			},
 		},
 		{
 			name: "parent only without array-element path - no change",
 			vctmClaims: []sdjwtvc.Claim{
-				{Path: []*string{new("nationalities")}},
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.Keys("nationalities")},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("nationalities")}},
+				{Path: claimpath.Keys("nationalities")},
 			},
-			expectedPaths: [][]*string{
-				{new("nationalities")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("nationalities"),
 			},
 		},
 		{
 			name: "nested object parent replaced with children",
 			vctmClaims: []sdjwtvc.Claim{
-				{Path: []*string{new("address")}},
-				{Path: []*string{new("address"), new("street")}},
-				{Path: []*string{new("address"), new("city")}},
+				{Path: claimpath.Keys("address")},
+				{Path: claimpath.Keys("address", "street")},
+				{Path: claimpath.Keys("address", "city")},
 			},
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("address")}},
+				{Path: claimpath.Keys("address")},
 			},
-			expectedPaths: [][]*string{
-				{new("address"), new("street")},
-				{new("address"), new("city")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("address", "street"),
+				claimpath.Keys("address", "city"),
 			},
-			removedPaths: [][]*string{
-				{new("address")},
+			removedPaths: []claimpath.Pointer{
+				claimpath.Keys("address"),
 			},
 		},
 		{
 			name: "mixed: array and simple claims coexist",
 			vctmClaims: []sdjwtvc.Claim{
-				{Path: []*string{new("given_name")}},
-				{Path: []*string{new("nationalities")}},
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.Keys("given_name")},
+				{Path: claimpath.Keys("nationalities")},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("given_name")}},
-				{Path: []*string{new("nationalities")}},
-				{Path: []*string{new("nationalities"), nil}},
+				{Path: claimpath.Keys("given_name")},
+				{Path: claimpath.Keys("nationalities")},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 			},
-			expectedPaths: [][]*string{
-				{new("given_name")},
-				{new("nationalities"), nil},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("given_name"),
+				claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 			},
-			removedPaths: [][]*string{
-				{new("nationalities")},
+			removedPaths: []claimpath.Pointer{
+				claimpath.Keys("nationalities"),
 			},
 		},
 	}
@@ -516,40 +515,18 @@ func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 
 			client.augmentDCQLFromVCTM(dcql)
 
-			resultPaths := make([][]*string, 0, len(dcql.Credentials[0].Claims))
+			resultPaths := make([]claimpath.Pointer, 0, len(dcql.Credentials[0].Claims))
 			for _, claim := range dcql.Credentials[0].Claims {
 				resultPaths = append(resultPaths, claim.Path)
 			}
 
 			// Check expected paths are present
-			require.Len(t, resultPaths, len(tt.expectedPaths), "unexpected number of claims")
-			for i, expected := range tt.expectedPaths {
-				require.Len(t, resultPaths[i], len(expected), "path %d has wrong length", i)
-				for j, seg := range expected {
-					if seg == nil {
-						assert.Nil(t, resultPaths[i][j], "path[%d][%d] should be nil", i, j)
-					} else {
-						require.NotNil(t, resultPaths[i][j], "path[%d][%d] should not be nil", i, j)
-						assert.Equal(t, *seg, *resultPaths[i][j], "path[%d][%d] mismatch", i, j)
-					}
-				}
-			}
+			assert.Equal(t, tt.expectedPaths, resultPaths)
 
 			// Check removed paths are absent
 			for _, removed := range tt.removedPaths {
 				for _, resultPath := range resultPaths {
-					if len(resultPath) != len(removed) {
-						continue
-					}
-					match := true
-					for j, seg := range removed {
-						if seg == nil && resultPath[j] != nil {
-							match = false
-						} else if seg != nil && (resultPath[j] == nil || *seg != *resultPath[j]) {
-							match = false
-						}
-					}
-					assert.False(t, match, "path %v should have been removed", removed)
+					assert.False(t, resultPath.Equal(removed), "path %s should have been removed", removed)
 				}
 			}
 		})
@@ -573,7 +550,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "validation passes for matching scope",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid":  {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")}}},
@@ -585,7 +562,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "validation fails for matching scope",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid":  {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")}}},
@@ -598,7 +575,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "no validation on EHIC even though claim missing",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid":  {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")}}},
@@ -619,7 +596,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "validation on second scope only",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"ehic": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"ehic": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid":  {{Credential: map[string]any{"given_name": "John"}}},
@@ -631,7 +608,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "multiple credentials per scope all pass",
 			scopes: []string{"pid"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid": {
@@ -645,7 +622,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "multiple credentials per scope second fails",
 			scopes: []string{"pid"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid": {
@@ -660,7 +637,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:   "multiple credentials per scope validation scoped correctly",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
 				"pid": {
@@ -703,17 +680,17 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 	//   "nationalities": ["British", "Betelgeusian"]
 	// }
 	vctmClaims := []sdjwtvc.Claim{
-		{Path: []*string{new("name")}},
-		{Path: []*string{new("address")}},
-		{Path: []*string{new("address"), new("street_address")}},
-		{Path: []*string{new("address"), new("locality")}},
-		{Path: []*string{new("address"), new("postal_code")}},
-		{Path: []*string{new("degrees")}},
-		{Path: []*string{new("degrees"), nil}},
-		{Path: []*string{new("degrees"), nil, new("type")}},
-		{Path: []*string{new("degrees"), nil, new("university")}},
-		{Path: []*string{new("nationalities")}},
-		{Path: []*string{new("nationalities"), nil}},
+		{Path: claimpath.Keys("name")},
+		{Path: claimpath.Keys("address")},
+		{Path: claimpath.Keys("address", "street_address")},
+		{Path: claimpath.Keys("address", "locality")},
+		{Path: claimpath.Keys("address", "postal_code")},
+		{Path: claimpath.Keys("degrees")},
+		{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All())},
+		{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type"))},
+		{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("university"))},
+		{Path: claimpath.Keys("nationalities")},
+		{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 	}
 
 	// The credential that the DCQL paths will be resolved against.
@@ -734,17 +711,17 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 	tests := []struct {
 		name             string
 		inputClaims      []openid4vp.ClaimQuery
-		expectedPaths    [][]*string
+		expectedPaths    []claimpath.Pointer
 		expectedDCQLJSON []string // expected JSON for each claim after marshal
 		expectedValues   []any    // expected resolved values from the credential
 	}{
 		{
 			name: "array of objects element field: degrees null type",
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("degrees"), nil, new("type")}},
+				{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type"))},
 			},
-			expectedPaths: [][]*string{
-				{new("degrees"), nil, new("type")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type")),
 			},
 			expectedDCQLJSON: []string{
 				`{"path":["degrees",null,"type"]}`,
@@ -756,42 +733,42 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 		{
 			name: "simple array element: nationalities 1",
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("nationalities"), new("1")}},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.Index(1))},
 			},
-			expectedPaths: [][]*string{
-				{new("nationalities"), new("1")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.New(claimpath.Key("nationalities"), claimpath.Index(1)),
 			},
 			expectedDCQLJSON: []string{
-				`{"path":["nationalities","1"]}`,
+				`{"path":["nationalities",1]}`,
 			},
 			expectedValues: []any{
-				"Betelgeusian",
+				[]any{"Betelgeusian"},
 			},
 		},
 		{
 			name: "simple scalar: name",
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("name")}},
+				{Path: claimpath.Keys("name")},
 			},
-			expectedPaths: [][]*string{
-				{new("name")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("name"),
 			},
 			expectedDCQLJSON: []string{
 				`{"path":["name"]}`,
 			},
 			expectedValues: []any{
-				"Arthur Dent",
+				[]any{"Arthur Dent"},
 			},
 		},
 		{
 			name: "object parent replaced with children: address",
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("address")}},
+				{Path: claimpath.Keys("address")},
 			},
-			expectedPaths: [][]*string{
-				{new("address"), new("street_address")},
-				{new("address"), new("locality")},
-				{new("address"), new("postal_code")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("address", "street_address"),
+				claimpath.Keys("address", "locality"),
+				claimpath.Keys("address", "postal_code"),
 			},
 			expectedDCQLJSON: []string{
 				`{"path":["address","street_address"]}`,
@@ -799,47 +776,47 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 				`{"path":["address","postal_code"]}`,
 			},
 			expectedValues: []any{
-				"42 Market Street",
-				"Milliways",
-				"12345",
+				[]any{"42 Market Street"},
+				[]any{"Milliways"},
+				[]any{"12345"},
 			},
 		},
 		{
 			name: "object child directly: address street_address",
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("address"), new("street_address")}},
+				{Path: claimpath.Keys("address", "street_address")},
 			},
-			expectedPaths: [][]*string{
-				{new("address"), new("street_address")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("address", "street_address"),
 			},
 			expectedDCQLJSON: []string{
 				`{"path":["address","street_address"]}`,
 			},
 			expectedValues: []any{
-				"42 Market Street",
+				[]any{"42 Market Street"},
 			},
 		},
 		{
 			name: "all five claims together",
 			inputClaims: []openid4vp.ClaimQuery{
-				{Path: []*string{new("degrees"), nil, new("type")}},
-				{Path: []*string{new("nationalities"), new("1")}},
-				{Path: []*string{new("name")}},
-				{Path: []*string{new("address")}},
-				{Path: []*string{new("address"), new("street_address")}},
+				{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type"))},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.Index(1))},
+				{Path: claimpath.Keys("name")},
+				{Path: claimpath.Keys("address")},
+				{Path: claimpath.Keys("address", "street_address")},
 			},
-			expectedPaths: [][]*string{
-				{new("degrees"), nil, new("type")},
-				{new("nationalities"), new("1")},
-				{new("name")},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type")),
+				claimpath.New(claimpath.Key("nationalities"), claimpath.Index(1)),
+				claimpath.Keys("name"),
 				// "address" parent replaced by children from VCTM
-				{new("address"), new("street_address")},
-				{new("address"), new("locality")},
-				{new("address"), new("postal_code")},
+				claimpath.Keys("address", "street_address"),
+				claimpath.Keys("address", "locality"),
+				claimpath.Keys("address", "postal_code"),
 			},
 			expectedDCQLJSON: []string{
 				`{"path":["degrees",null,"type"]}`,
-				`{"path":["nationalities","1"]}`,
+				`{"path":["nationalities",1]}`,
 				`{"path":["name"]}`,
 				`{"path":["address","street_address"]}`,
 				`{"path":["address","locality"]}`,
@@ -847,11 +824,11 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 			},
 			expectedValues: []any{
 				[]any{"Bachelor of Science", "Master of Science"},
-				"Betelgeusian",
-				"Arthur Dent",
-				"42 Market Street",
-				"Milliways",
-				"12345",
+				[]any{"Betelgeusian"},
+				[]any{"Arthur Dent"},
+				[]any{"42 Market Street"},
+				[]any{"Milliways"},
+				[]any{"12345"},
 			},
 		},
 	}
@@ -887,23 +864,12 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 
 			client.augmentDCQLFromVCTM(dcql)
 
-			resultPaths := make([][]*string, 0, len(dcql.Credentials[0].Claims))
+			resultPaths := make([]claimpath.Pointer, 0, len(dcql.Credentials[0].Claims))
 			for _, claim := range dcql.Credentials[0].Claims {
 				resultPaths = append(resultPaths, claim.Path)
 			}
 
-			require.Len(t, resultPaths, len(tt.expectedPaths), "unexpected number of claims")
-			for i, expected := range tt.expectedPaths {
-				require.Len(t, resultPaths[i], len(expected), "path %d has wrong length", i)
-				for j, seg := range expected {
-					if seg == nil {
-						assert.Nil(t, resultPaths[i][j], "path[%d][%d] should be nil", i, j)
-					} else {
-						require.NotNil(t, resultPaths[i][j], "path[%d][%d] should not be nil", i, j)
-						assert.Equal(t, *seg, *resultPaths[i][j], "path[%d][%d] mismatch", i, j)
-					}
-				}
-			}
+			assert.Equal(t, tt.expectedPaths, resultPaths)
 
 			// Verify JSON serialization produces correct output (null vs "null", etc.)
 			for i, claim := range dcql.Credentials[0].Claims {
@@ -914,7 +880,8 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 
 			// Verify resolved values from the credential match expectations
 			for i, claim := range dcql.Credentials[0].Claims {
-				resolved := openid4vp.ResolveDCQLPath(credential, claim.Path)
+				resolved, err := claim.Path.Select(credential)
+				require.NoError(t, err, "claim[%d]", i)
 				assert.Equal(t, tt.expectedValues[i], resolved, "claim[%d] resolved value mismatch", i)
 			}
 		})

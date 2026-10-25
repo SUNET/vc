@@ -13,6 +13,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -320,6 +321,7 @@ func TestOIDCRPCallbackPolicyIgnoresDerivedClaims(t *testing.T) {
 	// fetched document), and LookupScopePolicyConfig reads assertion scopes
 	// too. A datastore scope never executes the derivation branch at all,
 	// so a fixture built on one tests nothing here.
+	client.cfg.Common.CredentialMetadata = map[string]*model.CredentialMetadata{"pid": {Format: "dc+sd-jwt"}}
 	client.cfg.APIGW.DataSources = model.DataSources{
 		Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
 			"pid": {
@@ -330,7 +332,7 @@ func TestOIDCRPCallbackPolicyIgnoresDerivedClaims(t *testing.T) {
 				},
 				// Manufactures exactly the claim the policy gates on.
 				Derivations: []primitives.Derivation{{
-					Lowercase: &primitives.LowercaseArgs{Input: "loa_hint", Output: "acr"},
+					Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("loa_hint"), Output: claimpath.Keys("acr")},
 				}},
 			},
 		}},

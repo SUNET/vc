@@ -1,6 +1,10 @@
 package oeapi
 
-import "time"
+import (
+	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
+)
 
 // Config holds the full Open Education API (OEAPI v6.0) data source configuration
 // for credential issuance.
@@ -43,8 +47,9 @@ type AttributeMapping map[string]AttributeConfig
 // (canonicalisation, case folding, date reformatting) is expressed as
 // derivations on the target scope.
 type AttributeConfig struct {
-	// Claim is the target claim name (supports dot-notation for nesting)
-	Claim string `yaml:"claim" validate:"required"`
+	// Claim is the target claim. A dotted string is read as a claim of
+	// the credential's document.
+	Claim claimpath.Pointer `yaml:"claim" validate:"required"`
 
 	// Required indicates if this attribute must be present
 	Required bool `yaml:"required" default:"false"`

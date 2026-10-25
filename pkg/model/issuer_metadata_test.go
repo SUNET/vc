@@ -224,9 +224,9 @@ func TestIssuerMetadata_Generate_MDDLClaims_DisplayAndSVGID(t *testing.T) {
 
 	byElementID := map[string]openid4vci.ClaimDescription{}
 	for _, c := range credConfig.CredentialMetadata.Claims {
-		require.Len(t, c.Path, 2)
-		require.NotNil(t, c.Path[1])
-		byElementID[*c.Path[1]] = c
+		_, element, err := c.Path.MDoc()
+		require.NoError(t, err)
+		byElementID[element] = c
 	}
 
 	familyName := byElementID["family_name"]

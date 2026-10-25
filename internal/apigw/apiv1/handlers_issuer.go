@@ -16,6 +16,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -348,7 +349,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// MergeNestedClaims writes into existing nested maps, so a
 				// shallow maps.Clone would still share nested references
 				// (e.g. the "identity" sub-map) with the cache and let a
-				// derivation targeting a dotted path corrupt it.
+				// derivation targeting a nested claim corrupt it.
 				docData := credential.CloneNestedClaims(document.DocumentData)
 
 				// What the holder PROVED, kept aside before derivations
@@ -363,7 +364,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// output feeds the next, so a dependent derivation must
 				// read the verified value rather than one a previous step
 				// computed over it.
-				derived, err := credential.ApplyDerivationsPinned(derivs, docData, time.Now(), proved)
+				derived, err := c.applyDocumentDerivations(scope, authContext, derivs, docData, proved)
 				if err != nil {
 					return nil, err
 				}
@@ -513,23 +514,23 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Seed-backed claims, before anything is signed and before the issuer
-	// service is called at all.
-	//
-	// HERE rather than in each of the four signing paths inside the
-	// issuer, which is where this began. One call site means one place
-	// that decides what a commitment is worth, and the SIGNING FORMAT is
-	// in hand - which the issuer-side version had to be told separately,
-	// and got wrong when a caller named a scope configured for another
-	// format. The issuer now receives ssc as an ordinary claim and never
-	// sees a derivation secret.
-	//
-	// A no-op for a scope with no commitments configured, which is every
-	// scope in a deployment that does not use the feature.
-	documentData, err = c.injectCommitments(ctx, scope, format, documentData)
+	// Credential Auxiliary Data, before anything is signed: the
+	// commitments go into the document, and the openings into the
+	// response.
+	fromWallet, err := walletAuxiliaryData(req)
 	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", scope)
 		return nil, err
+	}
+	documentData, toWallet, err := c.issueAuxiliaryData(ctx, scope, authContext, document.DocumentData, documentData, fromWallet)
+	if err != nil {
+		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)
+		return nil, err
+	}
+	if len(toWallet) > 0 && req.CredentialResponseEncryption == nil {
+		return nil, &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidEncryptionParameters,
+			ErrorDescription: "this credential sends an opening: request credential_response_encryption",
+		}
 	}
 
 	var credentials []openid4vci.Credential
@@ -577,7 +578,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 
-	return c.newCredentialResponse(credentials, scope, configurationID), nil
+	response := c.newCredentialResponse(credentials, scope, configurationID)
+	if len(toWallet) > 0 {
+		response.AddAuxiliaryData(toWallet...)
+	}
+	return response, nil
 }
 
 // newCredentialResponse assembles the Credential Response.
@@ -1343,4 +1348,14 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 	// string, and wrapping it again would leave the wallet decoding a layer
 	// the format does not have.
 	return []openid4vci.Credential{{Credential: reply.Credentials[0].Credential}}, nil
+}
+
+// applyDocumentDerivations runs the derivations of a document data source
+// over its document, with pinned claims.
+func (c *Client) applyDocumentDerivations(scope string, authContext *cache.AuthorizationContext, derivs []primitives.Derivation, docData, proved map[string]any) (map[string]any, error) {
+	shapes, err := c.cfg.DerivationShapes(model.SourceScope{Source: model.DataSourceType(authContext.DataSource), Scope: scope})
+	if err != nil {
+		return nil, err
+	}
+	return credential.ApplyDerivationsPinned(derivs, docData, time.Now(), proved, shapes)
 }

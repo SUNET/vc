@@ -6,6 +6,8 @@ import (
 	"math"
 	"strconv"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // nowFunc is the clock used by validation logic. Override in tests to avoid flakiness.
@@ -16,8 +18,8 @@ type ClaimValidation struct {
 	// Rule is the validation rule to apply, e.g., "age_over".
 	Rule string `json:"rule" yaml:"rule" validate:"required,oneof=age_over" doc_example:"\"age_over\""`
 
-	// Path is the claim path to validate, e.g., ["birthdate"].
-	Path []string `json:"path" yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"birthdate\"]"`
+	// Path is the claims path pointer of the claim to validate, e.g., ["birthdate"].
+	Path claimpath.Pointer `json:"path" yaml:"path" validate:"required" doc_example:"[\"birthdate\"]"`
 
 	// Value is the threshold or expected value for the validation.
 	Value any `json:"value" yaml:"value" validate:"required" doc_example:"18"`
@@ -41,11 +43,7 @@ func ValidateClaims(claims map[string]any, validations []ClaimValidation) error 
 
 // validateAgeOver checks that a date claim (e.g., birthdate) indicates age >= threshold.
 // The date must be in RFC 3339 full-date format (YYYY-MM-DD) per SD-JWT VC / PID spec.
-func validateAgeOver(claims map[string]any, path []string, threshold any) error {
-	if len(path) == 0 {
-		return fmt.Errorf("age_over validation: empty path")
-	}
-
+func validateAgeOver(claims map[string]any, path claimpath.Pointer, threshold any) error {
 	thresholdAge, ok := toInt(threshold)
 	if !ok {
 		return fmt.Errorf("age_over validation: threshold must be an integer, got %T", threshold)
@@ -55,19 +53,22 @@ func validateAgeOver(claims map[string]any, path []string, threshold any) error 
 	}
 
 	// Resolve the claim value from the path
-	val, ok := resolvePath(claims, path)
+	val, ok, err := claimpath.Nested().Get(claims, path)
+	if err != nil {
+		return fmt.Errorf("age_over validation: %w", err)
+	}
 	if !ok {
-		return fmt.Errorf("age_over validation: claim %v not found", path)
+		return fmt.Errorf("age_over validation: claim %s not found", path)
 	}
 
 	dateStr, ok := val.(string)
 	if !ok {
-		return fmt.Errorf("age_over validation: claim %v is not a string, got %T", path, val)
+		return fmt.Errorf("age_over validation: claim %s is not a string, got %T", path, val)
 	}
 
 	birthdate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
-		return fmt.Errorf("age_over validation: invalid date format for %v: %w", path, err)
+		return fmt.Errorf("age_over validation: invalid date format for %s: %w", path, err)
 	}
 
 	now := nowFunc()
@@ -88,22 +89,6 @@ func computeAge(birthdate, now time.Time) int {
 		years--
 	}
 	return years
-}
-
-// resolvePath walks a nested map using the given path segments.
-func resolvePath(claims map[string]any, path []string) (any, bool) {
-	var current any = claims
-	for _, segment := range path {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		current, ok = m[segment]
-		if !ok {
-			return nil, false
-		}
-	}
-	return current, true
 }
 
 // toInt converts a numeric value to int (handles Go numeric types, float64 from standard

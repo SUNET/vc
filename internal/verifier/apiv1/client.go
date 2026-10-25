@@ -831,7 +831,7 @@ func (c *Client) extractAndMapClaims(ctx context.Context, vpToken string, scopeS
 
 	// Get claim mappings from template
 	claimMappings := openid4vp.GetClaimMappings(template)
-	if claimMappings == nil {
+	if claimMappings.IsZero() {
 		c.log.Debug("Template has no claim mappings, using basic extraction")
 		return c.claimsExtractor.ExtractClaimsFromVPToken(ctx, vpToken)
 	}

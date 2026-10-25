@@ -1,11 +1,21 @@
 package sdjwtvc
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
+
+// TestClaimRefusesMissingPath: reading type metadata refuses a claim
+// without a path, next to the same claim with one.
+func TestClaimRefusesMissingPath(t *testing.T) {
+	var claim Claim
+	assert.Error(t, json.Unmarshal([]byte(`{"sd": "always"}`), &claim))
+	assert.NoError(t, json.Unmarshal([]byte(`{"path": ["a"], "sd": "always"}`), &claim))
+}
 
 func TestClaimJSONPath(t *testing.T) {
 	tts := []struct {
@@ -15,28 +25,23 @@ func TestClaimJSONPath(t *testing.T) {
 	}{
 		{
 			name:  "single path element",
-			claim: Claim{Path: []*string{new("given_name")}},
+			claim: Claim{Path: claimpath.Keys("given_name")},
 			want:  "$.given_name",
 		},
 		{
 			name:  "nested path",
-			claim: Claim{Path: []*string{new("address"), new("country")}},
+			claim: Claim{Path: claimpath.Keys("address", "country")},
 			want:  "$.address.country",
 		},
 		{
 			name:  "nil element is wildcard",
-			claim: Claim{Path: []*string{new("items"), nil, new("name")}},
+			claim: Claim{Path: claimpath.New(claimpath.Key("items"), claimpath.All(), claimpath.Key("name"))},
 			want:  "$.items[*].name",
 		},
 		{
-			name:  "nil path returns empty",
-			claim: Claim{Path: nil},
+			name:  "unset path returns empty",
+			claim: Claim{Path: claimpath.Pointer{}},
 			want:  "",
-		},
-		{
-			name:  "empty path returns root",
-			claim: Claim{Path: []*string{}},
-			want:  "$",
 		},
 		{
 			name:  "nil claim returns empty",
@@ -82,19 +87,19 @@ func TestVCTMAttributes(t *testing.T) {
 	v := &VCTM{
 		Claims: []Claim{
 			{
-				Path:    []*string{new("given_name")},
+				Path:    claimpath.Keys("given_name"),
 				Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}},
 			},
 			{
-				Path:    []*string{new("family_name")},
+				Path:    claimpath.Keys("family_name"),
 				Display: []ClaimDisplay{{Locale: "en", Label: "Last Name"}, {Locale: "sv", Label: "Efternamn"}},
 			},
 			{
-				Path:    []*string{new("address"), new("country")},
+				Path:    claimpath.Keys("address", "country"),
 				Display: []ClaimDisplay{{Locale: "en", Label: "Country"}},
 			},
 			{
-				Path:    []*string{new("no_display")},
+				Path:    claimpath.Keys("no_display"),
 				Display: nil,
 			},
 		},
@@ -104,19 +109,14 @@ func TestVCTMAttributes(t *testing.T) {
 
 	t.Run("english locale", func(t *testing.T) {
 		en := attrs["en"]
-		require.Len(t, en["First Name"], 1)
-		assert.Equal(t, "given_name", *en["First Name"][0])
-		require.Len(t, en["Last Name"], 1)
-		assert.Equal(t, "family_name", *en["Last Name"][0])
-		require.Len(t, en["Country"], 2)
-		assert.Equal(t, "address", *en["Country"][0])
-		assert.Equal(t, "country", *en["Country"][1])
+		assert.Equal(t, claimpath.Keys("given_name"), en["First Name"])
+		assert.Equal(t, claimpath.Keys("family_name"), en["Last Name"])
+		assert.Equal(t, claimpath.Keys("address", "country"), en["Country"])
 	})
 
 	t.Run("swedish locale", func(t *testing.T) {
 		sv := attrs["sv"]
-		require.Len(t, sv["Efternamn"], 1)
-		assert.Equal(t, "family_name", *sv["Efternamn"][0])
+		assert.Equal(t, claimpath.Keys("family_name"), sv["Efternamn"])
 	})
 
 	t.Run("claims without display are excluded", func(t *testing.T) {
@@ -132,15 +132,15 @@ func TestVCTMAttributesWithoutObjects(t *testing.T) {
 	v := &VCTM{
 		Claims: []Claim{
 			{
-				Path:    []*string{new("given_name")},
+				Path:    claimpath.Keys("given_name"),
 				Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}},
 			},
 			{
-				Path:    []*string{new("address"), new("country")},
+				Path:    claimpath.Keys("address", "country"),
 				Display: []ClaimDisplay{{Locale: "en", Label: "Country"}},
 			},
 			{
-				Path:    []*string{new("no_display")},
+				Path:    claimpath.Keys("no_display"),
 				Display: nil,
 			},
 		},
@@ -149,8 +149,7 @@ func TestVCTMAttributesWithoutObjects(t *testing.T) {
 	attrs := v.AttributesWithoutObjects()
 
 	t.Run("single-path claims included", func(t *testing.T) {
-		require.Len(t, attrs["en"]["First Name"], 1)
-		assert.Equal(t, "given_name", *attrs["en"]["First Name"][0])
+		assert.Equal(t, claimpath.Keys("given_name"), attrs["en"]["First Name"])
 	})
 
 	t.Run("multi-path claims excluded", func(t *testing.T) {
@@ -168,15 +167,15 @@ func TestVCTMClaimJSONPath(t *testing.T) {
 	v := &VCTM{
 		Claims: []Claim{
 			{
-				Path:  []*string{new("given_name")},
+				Path:  claimpath.Keys("given_name"),
 				SVGID: "first_name",
 			},
 			{
-				Path:  []*string{new("address"), new("country")},
+				Path:  claimpath.Keys("address", "country"),
 				SVGID: "",
 			},
 			{
-				Path:  []*string{new("items"), nil},
+				Path:  claimpath.New(claimpath.Key("items"), claimpath.All()),
 				SVGID: "all_items",
 			},
 		},
@@ -204,8 +203,8 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("leaf claims resolved from data", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
-				{Path: []*string{new("hidden")}, Display: nil},
+				{Path: claimpath.Keys("given_name"), Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: claimpath.Keys("hidden"), Display: nil},
 			},
 		}
 		data := map[string]any{"given_name": "Helen", "hidden": "secret"}
@@ -220,9 +219,9 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("parent with children", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("address")}, Display: []ClaimDisplay{{Locale: "en", Label: "Address"}}},
-				{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
-				{Path: []*string{new("address"), new("street")}, Display: []ClaimDisplay{{Locale: "en", Label: "Street"}}},
+				{Path: claimpath.Keys("address"), Display: []ClaimDisplay{{Locale: "en", Label: "Address"}}},
+				{Path: claimpath.Keys("address", "country"), Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
+				{Path: claimpath.Keys("address", "street"), Display: []ClaimDisplay{{Locale: "en", Label: "Street"}}},
 			},
 		}
 		data := map[string]any{
@@ -241,9 +240,9 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("children without displayable parent are flat leaf claims", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("address")}, Display: nil},
-				{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
-				{Path: []*string{new("address"), new("street")}, Display: []ClaimDisplay{{Locale: "en", Label: "Street"}}},
+				{Path: claimpath.Keys("address"), Display: nil},
+				{Path: claimpath.Keys("address", "country"), Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
+				{Path: claimpath.Keys("address", "street"), Display: []ClaimDisplay{{Locale: "en", Label: "Street"}}},
 			},
 		}
 		data := map[string]any{
@@ -262,7 +261,7 @@ func TestVCTMPresentation(t *testing.T) {
 
 	t.Run("nil data returns nil", func(t *testing.T) {
 		v := &VCTM{Claims: []Claim{
-			{Path: []*string{new("x")}, Display: []ClaimDisplay{{Locale: "en", Label: "X"}}},
+			{Path: claimpath.Keys("x"), Display: []ClaimDisplay{{Locale: "en", Label: "X"}}},
 		}}
 		assert.Nil(t, v.Presentation(nil))
 	})
@@ -276,8 +275,8 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("missing data values are skipped", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
-				{Path: []*string{new("missing")}, Display: []ClaimDisplay{{Locale: "en", Label: "Missing"}}},
+				{Path: claimpath.Keys("given_name"), Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: claimpath.Keys("missing"), Display: []ClaimDisplay{{Locale: "en", Label: "Missing"}}},
 			},
 		}
 		data := map[string]any{"given_name": "Helen"}
@@ -290,8 +289,8 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("array wildcard path does not panic", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("nationalities"), nil}, Display: []ClaimDisplay{{Locale: "en", Label: "Nationalities"}}},
-				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()), Display: []ClaimDisplay{{Locale: "en", Label: "Nationalities"}}},
+				{Path: claimpath.Keys("given_name"), Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
 			},
 		}
 		data := map[string]any{
@@ -313,9 +312,9 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("parent with only array-wildcard children emits value", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("nationalities")}, Display: []ClaimDisplay{{Locale: "en", Label: "Nationalities"}}},
-				{Path: []*string{new("nationalities"), nil}, Display: []ClaimDisplay{{Locale: "en", Label: "Nationality"}}},
-				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: claimpath.Keys("nationalities"), Display: []ClaimDisplay{{Locale: "en", Label: "Nationalities"}}},
+				{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()), Display: []ClaimDisplay{{Locale: "en", Label: "Nationality"}}},
+				{Path: claimpath.Keys("given_name"), Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
 			},
 		}
 		data := map[string]any{
@@ -336,8 +335,8 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("parent with nil Path[0] does not panic", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{nil}, Display: []ClaimDisplay{{Locale: "en", Label: "Root"}}},
-				{Path: []*string{nil, new("child")}, Display: []ClaimDisplay{{Locale: "en", Label: "Child"}}},
+				{Path: claimpath.New(claimpath.All()), Display: []ClaimDisplay{{Locale: "en", Label: "Root"}}},
+				{Path: claimpath.New(claimpath.All(), claimpath.Key("child")), Display: []ClaimDisplay{{Locale: "en", Label: "Child"}}},
 			},
 		}
 		data := map[string]any{"child": "val"}
@@ -349,8 +348,8 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("empty path claim does not panic", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{}, Display: []ClaimDisplay{{Locale: "en", Label: "Empty"}}},
-				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: claimpath.Pointer{}, Display: []ClaimDisplay{{Locale: "en", Label: "Empty"}}},
+				{Path: claimpath.Keys("given_name"), Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
 			},
 		}
 		data := map[string]any{"given_name": "Helen"}
@@ -364,8 +363,8 @@ func TestVCTMPresentation(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
 				// No displayable parent for address or birth — both are orphaned leaves.
-				{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Address Country"}}},
-				{Path: []*string{new("birth"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Birth Country"}}},
+				{Path: claimpath.Keys("address", "country"), Display: []ClaimDisplay{{Locale: "en", Label: "Address Country"}}},
+				{Path: claimpath.Keys("birth", "country"), Display: []ClaimDisplay{{Locale: "en", Label: "Birth Country"}}},
 			},
 		}
 		data := map[string]any{
@@ -385,9 +384,9 @@ func TestVCTMPresentation(t *testing.T) {
 	t.Run("deeply nested orphan leaves (diploma pattern)", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
-				{Path: []*string{new("credentialSubject"), new("givenName"), new("und")}, Display: []ClaimDisplay{{Locale: "en", Label: "Given name"}}},
-				{Path: []*string{new("credentialSubject"), new("familyName"), new("und")}, Display: []ClaimDisplay{{Locale: "en", Label: "Family name"}}},
-				{Path: []*string{new("credentialSubject"), new("dateOfBirth")}, Display: []ClaimDisplay{{Locale: "en", Label: "Date of birth"}}},
+				{Path: claimpath.Keys("credentialSubject", "givenName", "und"), Display: []ClaimDisplay{{Locale: "en", Label: "Given name"}}},
+				{Path: claimpath.Keys("credentialSubject", "familyName", "und"), Display: []ClaimDisplay{{Locale: "en", Label: "Family name"}}},
+				{Path: claimpath.Keys("credentialSubject", "dateOfBirth"), Display: []ClaimDisplay{{Locale: "en", Label: "Date of birth"}}},
 			},
 		}
 		data := map[string]any{
@@ -418,31 +417,31 @@ func TestVCTMPresentationPIDRealistic(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			// --- flat leaves (some with svg_id, some without) ---
-			{Path: []*string{new("family_name")}, SVGID: "family_name", Display: []ClaimDisplay{{Locale: "en-US", Label: "Last name"}}},
-			{Path: []*string{new("given_name")}, SVGID: "given_name", Display: []ClaimDisplay{{Locale: "en-US", Label: "First name"}}},
-			{Path: []*string{new("birthdate")}, SVGID: "birth_date", Display: []ClaimDisplay{{Locale: "en-US", Label: "Date of birth"}}},
-			{Path: []*string{new("personal_administrative_number")}, SVGID: "personal_administrative_number", Display: []ClaimDisplay{{Locale: "en-US", Label: "Personal ID"}}},
-			{Path: []*string{new("sex")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Sex"}}},
+			{Path: claimpath.Keys("family_name"), SVGID: "family_name", Display: []ClaimDisplay{{Locale: "en-US", Label: "Last name"}}},
+			{Path: claimpath.Keys("given_name"), SVGID: "given_name", Display: []ClaimDisplay{{Locale: "en-US", Label: "First name"}}},
+			{Path: claimpath.Keys("birthdate"), SVGID: "birth_date", Display: []ClaimDisplay{{Locale: "en-US", Label: "Date of birth"}}},
+			{Path: claimpath.Keys("personal_administrative_number"), SVGID: "personal_administrative_number", Display: []ClaimDisplay{{Locale: "en-US", Label: "Personal ID"}}},
+			{Path: claimpath.Keys("sex"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Sex"}}},
 			// --- address parent + children ---
-			{Path: []*string{new("address")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Address"}}},
-			{Path: []*string{new("address"), new("house_number")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence number"}}},
-			{Path: []*string{new("address"), new("street_address")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence street"}}},
-			{Path: []*string{new("address"), new("locality")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "City of residence"}}},
-			{Path: []*string{new("address"), new("region")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "State of residence"}}},
-			{Path: []*string{new("address"), new("postal_code")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence ZIP"}}},
-			{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Country of residence"}}},
-			{Path: []*string{new("address"), new("formatted")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Full address"}}},
+			{Path: claimpath.Keys("address"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Address"}}},
+			{Path: claimpath.Keys("address", "house_number"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence number"}}},
+			{Path: claimpath.Keys("address", "street_address"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence street"}}},
+			{Path: claimpath.Keys("address", "locality"), Display: []ClaimDisplay{{Locale: "en-US", Label: "City of residence"}}},
+			{Path: claimpath.Keys("address", "region"), Display: []ClaimDisplay{{Locale: "en-US", Label: "State of residence"}}},
+			{Path: claimpath.Keys("address", "postal_code"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence ZIP"}}},
+			{Path: claimpath.Keys("address", "country"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Country of residence"}}},
+			{Path: claimpath.Keys("address", "formatted"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Full address"}}},
 			// --- place_of_birth parent + children ---
-			{Path: []*string{new("place_of_birth")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Place of birth"}}},
-			{Path: []*string{new("place_of_birth"), new("locality")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "City of birth"}}},
-			{Path: []*string{new("place_of_birth"), new("region")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Region of birth"}}},
-			{Path: []*string{new("place_of_birth"), new("country")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Country of birth"}}},
+			{Path: claimpath.Keys("place_of_birth"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Place of birth"}}},
+			{Path: claimpath.Keys("place_of_birth", "locality"), Display: []ClaimDisplay{{Locale: "en-US", Label: "City of birth"}}},
+			{Path: claimpath.Keys("place_of_birth", "region"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Region of birth"}}},
+			{Path: claimpath.Keys("place_of_birth", "country"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Country of birth"}}},
 			// --- nationalities parent + array wildcard child ---
-			{Path: []*string{new("nationalities")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Nationalities"}}},
-			{Path: []*string{new("nationalities"), nil}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Nationality"}}},
+			{Path: claimpath.Keys("nationalities"), Display: []ClaimDisplay{{Locale: "en-US", Label: "Nationalities"}}},
+			{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()), Display: []ClaimDisplay{{Locale: "en-US", Label: "Nationality"}}},
 			// --- metadata without display (should be excluded) ---
-			{Path: []*string{new("iss")}, Display: nil},
-			{Path: []*string{new("vct")}, Display: nil},
+			{Path: claimpath.Keys("iss"), Display: nil},
+			{Path: claimpath.Keys("vct"), Display: nil},
 		},
 	}
 
@@ -548,10 +547,10 @@ func TestVCTMPresentationPIDRealistic(t *testing.T) {
 func TestVCTMSVGValues(t *testing.T) {
 	v := &VCTM{
 		Claims: []Claim{
-			{Path: []*string{new("given_name")}, SVGID: "first_name", Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
-			{Path: []*string{new("family_name")}, SVGID: "last_name", Display: []ClaimDisplay{{Locale: "en", Label: "Last Name"}}},
-			{Path: []*string{new("address"), new("country")}, SVGID: "country", Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
-			{Path: []*string{new("no_svg")}, SVGID: "", Display: []ClaimDisplay{{Locale: "en", Label: "No SVG"}}},
+			{Path: claimpath.Keys("given_name"), SVGID: "first_name", Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+			{Path: claimpath.Keys("family_name"), SVGID: "last_name", Display: []ClaimDisplay{{Locale: "en", Label: "Last Name"}}},
+			{Path: claimpath.Keys("address", "country"), SVGID: "country", Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
+			{Path: claimpath.Keys("no_svg"), SVGID: "", Display: []ClaimDisplay{{Locale: "en", Label: "No SVG"}}},
 		},
 	}
 
@@ -600,71 +599,71 @@ func TestWalkPath(t *testing.T) {
 	}
 
 	t.Run("empty path returns nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{}))
+		assert.Nil(t, walkPath(data, claimpath.Pointer{}))
 	})
 
 	t.Run("nil-only path returns nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{nil}))
+		assert.Nil(t, walkPath(data, claimpath.New(claimpath.All())))
 	})
 
 	t.Run("resolves normal key", func(t *testing.T) {
-		assert.Equal(t, "Helen", walkPath(data, []*string{new("name")}))
+		assert.Equal(t, "Helen", walkPath(data, claimpath.Keys("name")))
 	})
 
 	t.Run("empty string normalized to nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{new("empty_s")}))
+		assert.Nil(t, walkPath(data, claimpath.Keys("empty_s")))
 	})
 
 	t.Run("empty slice normalized to nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{new("empty_a")}))
+		assert.Nil(t, walkPath(data, claimpath.Keys("empty_a")))
 	})
 
 	t.Run("empty map normalized to nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{new("empty_m")}))
+		assert.Nil(t, walkPath(data, claimpath.Keys("empty_m")))
 	})
 
 	t.Run("non-empty slice preserved", func(t *testing.T) {
-		assert.Equal(t, []any{"a", "b"}, walkPath(data, []*string{new("items")}))
+		assert.Equal(t, []any{"a", "b"}, walkPath(data, claimpath.Keys("items")))
 	})
 
 	t.Run("non-empty map preserved", func(t *testing.T) {
-		assert.Equal(t, map[string]any{"key": "val"}, walkPath(data, []*string{new("nested")}))
+		assert.Equal(t, map[string]any{"key": "val"}, walkPath(data, claimpath.Keys("nested")))
 	})
 
 	t.Run("zero int preserved", func(t *testing.T) {
-		assert.Equal(t, 0, walkPath(data, []*string{new("zero_int")}))
+		assert.Equal(t, 0, walkPath(data, claimpath.Keys("zero_int")))
 	})
 
 	t.Run("false bool preserved", func(t *testing.T) {
-		assert.Equal(t, false, walkPath(data, []*string{new("falsy")}))
+		assert.Equal(t, false, walkPath(data, claimpath.Keys("falsy")))
 	})
 
 	t.Run("array wildcard returns parent value", func(t *testing.T) {
-		assert.Equal(t, []any{"a", "b"}, walkPath(data, []*string{new("items"), nil}))
+		assert.Equal(t, []any{"a", "b"}, walkPath(data, claimpath.New(claimpath.Key("items"), claimpath.All())))
 	})
 
-	t.Run("bracket index resolves array element", func(t *testing.T) {
-		assert.Equal(t, "a", walkPath(data, []*string{new("items[0]")}))
-		assert.Equal(t, "b", walkPath(data, []*string{new("items[1]")}))
+	t.Run("index resolves array element", func(t *testing.T) {
+		assert.Equal(t, "a", walkPath(data, claimpath.New(claimpath.Key("items"), claimpath.Index(0))))
+		assert.Equal(t, "b", walkPath(data, claimpath.New(claimpath.Key("items"), claimpath.Index(1))))
 	})
 
-	t.Run("bracket index out of bounds returns nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{new("items[5]")}))
+	t.Run("index out of bounds returns nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, claimpath.New(claimpath.Key("items"), claimpath.Index(5))))
 	})
 
-	t.Run("bracket index on non-array returns nil", func(t *testing.T) {
-		assert.Nil(t, walkPath(data, []*string{new("name[0]")}))
+	t.Run("index on non-array returns nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, claimpath.New(claimpath.Key("name"), claimpath.Index(0))))
 	})
 
-	t.Run("bracket index with nested traversal", func(t *testing.T) {
+	t.Run("index with nested traversal", func(t *testing.T) {
 		deep := map[string]any{
 			"claims": []any{
 				map[string]any{"title": "PhD"},
 				map[string]any{"title": "MSc"},
 			},
 		}
-		assert.Equal(t, "PhD", walkPath(deep, []*string{new("claims[0]"), new("title")}))
-		assert.Equal(t, "MSc", walkPath(deep, []*string{new("claims[1]"), new("title")}))
+		assert.Equal(t, "PhD", walkPath(deep, claimpath.New(claimpath.Key("claims"), claimpath.Index(0), claimpath.Key("title"))))
+		assert.Equal(t, "MSc", walkPath(deep, claimpath.New(claimpath.Key("claims"), claimpath.Index(1), claimpath.Key("title"))))
 	})
 }
 
@@ -676,42 +675,37 @@ func TestIsChildOfDisplayableParent(t *testing.T) {
 
 	tts := []struct {
 		name string
-		path []*string
+		path claimpath.Pointer
 		want bool
 	}{
 		{
 			name: "child of displayable parent",
-			path: []*string{new("address"), new("country")},
+			path: claimpath.Keys("address", "country"),
 			want: true,
 		},
 		{
 			name: "not a child",
-			path: []*string{new("given_name")},
+			path: claimpath.Keys("given_name"),
 			want: false,
 		},
 		{
 			name: "single element is never a child",
-			path: []*string{new("address")},
+			path: claimpath.Keys("address"),
 			want: false,
 		},
 		{
 			name: "nil path element (array wildcard)",
-			path: []*string{new("items"), nil, new("name")},
+			path: claimpath.New(claimpath.Key("items"), claimpath.All(), claimpath.Key("name")),
 			want: true,
 		},
 		{
 			name: "empty path",
-			path: []*string{},
-			want: false,
-		},
-		{
-			name: "nil path",
-			path: nil,
+			path: claimpath.Pointer{},
 			want: false,
 		},
 		{
 			name: "unrelated nested path",
-			path: []*string{new("other"), new("field")},
+			path: claimpath.Keys("other", "field"),
 			want: false,
 		},
 	}
