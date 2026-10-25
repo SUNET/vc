@@ -229,7 +229,7 @@ apigw:
           authentic_source: "Skatteverket"
           auth_scopes:
             pid:
-              auth_claims: ["given_name", "family_name", "birth_date"]
+              auth_claims: [[given_name], [family_name], [birth_date]]
         pid_mdoc:
           auth_provider: oidc
           authentic_source: "Skatteverket"
@@ -248,31 +248,31 @@ apigw:
           from:
             pid:
               required_claims:
-                birthdate: []
-                issuing_country: []
-                personal_administrative_number: []
+                - path: [birthdate]
+                - path: [issuing_country]
+                - path: [personal_administrative_number]
               derivations:
-                - copy: {input: birthdate, output: birth_date}
+                - copy: {input: [birthdate], output: [eu.europa.ec.eudi.nym_auth.1, birth_date]}
                 - hash_commitment:
                     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
                     opening:
                       hkdf:
                         secret_path: "/pki/nym_auth_seed.key"
-                        inputs: [issuing_country, personal_administrative_number]
+                        inputs: [[issuing_country], [personal_administrative_number]]
                         bytes: 16
             pid_mdoc:
               required_claims:
-                eu.europa.ec.eudi.pid.1.birth_date: []
-                eu.europa.ec.eudi.pid.1.issuing_country: []
-                eu.europa.ec.eudi.pid.1.administrative_number: []
+                - path: [eu.europa.ec.eudi.pid.1, birth_date]
+                - path: [eu.europa.ec.eudi.pid.1, issuing_country]
+                - path: [eu.europa.ec.eudi.pid.1, administrative_number]
               derivations:
-                - copy: {input: eu.europa.ec.eudi.pid.1.birth_date, output: birth_date}
+                - copy: {input: [eu.europa.ec.eudi.pid.1, birth_date], output: [eu.europa.ec.eudi.nym_auth.1, birth_date]}
                 - hash_commitment:
                     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
                     opening:
                       hkdf:
                         secret_path: "/pki/nym_auth_seed.key"
-                        inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
+                        inputs: [[eu.europa.ec.eudi.pid.1, issuing_country], [eu.europa.ec.eudi.pid.1, administrative_number]]
                         bytes: 16
   auth_providers:
     # preauth (data_sources scopes with auth_provider: preauth).

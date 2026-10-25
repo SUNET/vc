@@ -105,7 +105,7 @@ apigw:
       #
       # attribute_mapping:
       #   sub:                          # OIDC claim name
-      #     claim: "subject_id"         # canonical claim name (if different)
+      #     claim: [subject_id]         # canonical claim (if different)
       #     required: true
       #
       # For value transformations (e.g. lowercase), attach a derivations block

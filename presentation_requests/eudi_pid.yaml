@@ -26,10 +26,10 @@ templates:
             - path: ["birthdate"]
             - path: ["nationalities", null]
     claim_mappings:
-      given_name: "given_name"
-      family_name: "family_name"
-      birthdate: "birthdate"
-      nationalities: "nationalities"
+      - {path: [given_name], claim: given_name}
+      - {path: [family_name], claim: family_name}
+      - {path: [birthdate], claim: birthdate}
+      - {path: [nationalities], claim: nationalities}
     enabled: true
 
   - id: "eudi_pid_full"
@@ -55,6 +55,5 @@ templates:
             - path: ["address"]
             - path: ["issuing_country"]
             - path: ["issuing_authority"]
-    claim_mappings:
-      "*": "*"  # Map all claims through unchanged
+    claim_mappings: "*"  # Map all claims through unchanged
     enabled: true

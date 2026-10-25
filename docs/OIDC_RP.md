@@ -128,13 +128,13 @@ apigw:
         credential_config_id: "urn:eudi:pid:1"
         attributes:
           given_name:
-            claim: "identity.given_name"
+            claim: [identity, given_name]
             required: true
           family_name:
-            claim: "identity.family_name"
+            claim: [identity, family_name]
             required: true
           email:
-            claim: "identity.email"
+            claim: [identity, email]
             required: true
 ```
 
@@ -158,22 +158,22 @@ oidcrp:
       credential_config_id: "urn:eudi:pid:1"
       attributes:
         given_name:
-          claim: "identity.given_name"
+          claim: [identity, given_name]
           required: true
         family_name:
-          claim: "identity.family_name"
+          claim: [identity, family_name]
           required: true
         email:
-          claim: "identity.email"
+          claim: [identity, email]
           required: true
         email_verified:
-          claim: "identity.email_verified"
+          claim: [identity, email_verified]
           required: false
         sub:
-          claim: "identity.subject_id"
+          claim: [identity, subject_id]
           required: true
         picture:
-          claim: "identity.picture_url"
+          claim: [identity, picture_url]
           required: false
 ```
 
@@ -196,19 +196,19 @@ oidcrp:
       credential_config_id: "urn:eudi:pid:1"
       attributes:
         given_name:
-          claim: "identity.given_name"
+          claim: [identity, given_name]
           required: true
         family_name:
-          claim: "identity.family_name"
+          claim: [identity, family_name]
           required: true
         email:
-          claim: "identity.email"
+          claim: [identity, email]
           required: true
         upn:
-          claim: "identity.upn"
+          claim: [identity, upn]
           required: false
         oid:
-          claim: "identity.azure_oid"
+          claim: [identity, azure_oid]
           required: true
 ```
 
@@ -231,20 +231,20 @@ oidcrp:
       credential_config_id: "urn:eudi:pid:1"
       attributes:
         given_name:
-          claim: "identity.given_name"
+          claim: [identity, given_name]
           required: true
         family_name:
-          claim: "identity.family_name"
+          claim: [identity, family_name]
           required: true
         email:
-          claim: "identity.email"
+          claim: [identity, email]
           required: true
         preferred_username:
-          claim: "identity.username"
+          claim: [identity, username]
           required: true
         # Custom Keycloak attributes
         organization:
-          claim: "identity.organization"
+          claim: [identity, organization]
           required: false
           default: "Unknown"
 ```
@@ -304,13 +304,13 @@ oidcrp:
       credential_config_id: "urn:eudi:pid:1"
       attributes:
         given_name:
-          claim: "identity.given_name"
+          claim: [identity, given_name]
           required: true
         family_name:
-          claim: "identity.family_name"
+          claim: [identity, family_name]
           required: true
         email:
-          claim: "identity.email"
+          claim: [identity, email]
           required: true
 ```
 
@@ -359,10 +359,10 @@ oidcrp:
       credential_config_id: "urn:eudi:pid:1"
       attributes:
         given_name:
-          claim: "identity.given_name"
+          claim: [identity, given_name]
           required: true
         family_name:
-          claim: "identity.family_name"
+          claim: [identity, family_name]
           required: true
 ```
 
@@ -421,9 +421,10 @@ Credential mappings define how OIDC claims are transformed into credential claim
 
 #### Attribute Mapping Fields
 
-- **claim**: Target claim path in the credential (supports dot-notation)
-  - Example: `"given_name"` for flat structure
-  - Example: `"identity.given_name"` for nested structure
+- **claim**: Target claim in the credential, as a claims path pointer (OpenID4VP 1.0 section 7)
+  - Example: `[given_name]` for flat structure
+  - Example: `[identity, given_name]` for nested structure
+  - A dotted string such as `"identity.given_name"` is read as one key per dot-separated segment
 
 - **required**: Whether this claim must be present (boolean)
   - If `true` and claim is missing, authentication fails
@@ -446,33 +447,33 @@ credential_mappings:
     attributes:
       # Required claim
       email:
-        claim: "student.email"
+        claim: [student, email]
         required: true
 
       # Required claim (value canonicalisation lives in derivations on the
       # target scope — see docs/CONFIGURATION.md § Derivation Primitives).
       username:
-        claim: "student.username"
+        claim: [student, username]
         required: true
 
       # Optional claim with default value
       university:
-        claim: "diploma.university"
+        claim: [diploma, university]
         required: false
         default: "Unknown University"
 
       # Nested structure example
       given_name:
-        claim: "student.personal_info.given_name"
+        claim: [student, personal_info, given_name]
         required: true
 
       # Complex nested example
       degree_title:
-        claim: "diploma.degree.title"
+        claim: [diploma, degree, title]
         required: true
 
       graduation_year:
-        claim: "diploma.graduation.year"
+        claim: [diploma, graduation, year]
         required: true
 ```
 

@@ -21,7 +21,6 @@ dcql:
       # No claims array = request all claims
 
 # Wildcard mapping - pass through all claims unchanged
-claim_mappings:
-  "*": "*"
+claim_mappings: "*"
 
 enabled: true

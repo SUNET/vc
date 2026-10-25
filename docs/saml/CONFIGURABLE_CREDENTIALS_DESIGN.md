@@ -67,25 +67,25 @@ issuer:
         attributes:
           # Direct mappings
           "urn:oid:2.5.4.42":  # SAML givenName
-            claim: "given_name"
+            claim: [given_name]
             required: true
           
           "urn:oid:2.5.4.4":   # SAML surname
-            claim: "family_name"
+            claim: [family_name]
             required: true
           
           "urn:oid:1.2.752.29.4.13":  # Swedish personnummer
-            claim: "personal_administrative_number"
+            claim: [personal_administrative_number]
             required: false
           
           # Nested mappings for complex structures
           "urn:oid:2.5.4.10":  # organizationName
-            claim: "identity.organization"
+            claim: [identity, organization]
             required: false
           
           # Conditional/computed fields
           "urn:oid:0.9.2342.19200300.100.1.3":  # mail
-            claim: "email_address"
+            claim: [email_address]
             required: false
             # Value transformations (e.g. lowercase) live on the target scope's
             # derivations block — see docs/CONFIGURATION.md § Derivation Primitives.
@@ -95,13 +95,13 @@ issuer:
         credential_config_id: "urn:eudi:diploma:1"
         attributes:
           "urn:oid:2.5.4.42":
-            claim: "credential_subject.given_name"
+            claim: [credential_subject, given_name]
             required: true
           "urn:oid:2.5.4.4":
-            claim: "credential_subject.family_name"
+            claim: [credential_subject, family_name]
             required: true
           "urn:oid:1.3.6.1.4.1.5923.1.1.1.1":  # eduPersonAffiliation
-            claim: "affiliation"
+            claim: [affiliation]
             required: true
 ```
 
@@ -285,10 +285,10 @@ issuer:
         credential_config_id: "urn:company:employee:1"
         attributes:
           "urn:oid:2.16.840.1.113730.3.1.3":  # employeeNumber
-            claim: "employee_number"
+            claim: [employee_number]
             required: true
           "urn:oid:2.5.4.10":  # organizationName
-            claim: "employer"
+            claim: [employer]
             required: true
 ```
 

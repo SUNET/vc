@@ -18,8 +18,8 @@ templates:
             - path: ["credentialSubject", "degree"]
             - path: ["credentialSubject", "name"]
     claim_mappings:
-      degree: "degree"
-      name: "name"
+      - {path: [degree], claim: degree}
+      - {path: [name], claim: name}
     enabled: true
 
 default_template: "w3c_vc_diploma"
