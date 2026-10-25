@@ -117,17 +117,17 @@ func (p Pointer) set(root map[string]any, value any) error {
 	if !p.SelectsOne() {
 		return fmt.Errorf("claimpath: %s selects every element of an array, where one claim is written", p)
 	}
-	parent, last, _ := p.Parent()
+	n := len(p.components) - 1
 	var container any = root
-	for i, c := range parent.components {
+	for i, c := range p.components[:n] {
 		next, err := c.child(container, p.components[i+1])
 		if err != nil {
 			return fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, i, err)
 		}
 		container = next
 	}
-	if err := last.put(container, value); err != nil {
-		return fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, len(p.components)-1, err)
+	if err := p.components[n].put(container, value); err != nil {
+		return fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, n, err)
 	}
 	return nil
 }

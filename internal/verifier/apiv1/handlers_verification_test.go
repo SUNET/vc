@@ -14,6 +14,7 @@ import (
 
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/notify"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -257,7 +258,7 @@ func TestVerificationDirectPost(t *testing.T) {
 			name:   "single scope validation passes",
 			scopes: []string{"pid"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			claims: map[string]map[string]any{
 				"pid": {"given_name": "John", "birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")},
@@ -268,7 +269,7 @@ func TestVerificationDirectPost(t *testing.T) {
 			name:   "single scope validation fails",
 			scopes: []string{"pid"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			claims: map[string]map[string]any{
 				"pid": {"given_name": "John", "birthdate": time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")},
@@ -280,7 +281,7 @@ func TestVerificationDirectPost(t *testing.T) {
 			name:   "multi scope validation only applies to target",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			claims: map[string]map[string]any{
 				"pid":  {"given_name": "John", "birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")},
@@ -292,7 +293,7 @@ func TestVerificationDirectPost(t *testing.T) {
 			name:   "multi scope validation on second scope fails",
 			scopes: []string{"pid", "ehic"},
 			validations: map[string][]openid4vp.ClaimValidation{
-				"ehic": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"ehic": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			claims: map[string]map[string]any{
 				"pid":  {"given_name": "John", "birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")},
@@ -536,7 +537,7 @@ func TestVerificationDirectPostDecoyDisclosure(t *testing.T) {
 		Scopes:                   []string{"pid"},
 		EphemeralEncryptionKeyID: kid,
 		Validations: map[string][]openid4vp.ClaimValidation{
-			"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+			"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 		},
 	}
 	require.NoError(t, client.cacheService.AuthContext.Save(ctx, authCtx))

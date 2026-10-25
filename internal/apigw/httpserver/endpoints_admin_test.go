@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -340,8 +341,8 @@ func TestAdminStatus_ScopeTemplates(t *testing.T) {
 				"eduid": {
 					VCTM: &sdjwtvc.VCTM{
 						Claims: []sdjwtvc.Claim{
-							{Path: []*string{&firstName}},
-							{Path: []*string{&lastName}},
+							{Path: claimpath.Keys(firstName)},
+							{Path: claimpath.Keys(lastName)},
 						},
 					},
 				},
@@ -455,11 +456,11 @@ func TestAdminStatus_ScopeTemplates_NestedPaths(t *testing.T) {
 				"pid": {
 					VCTM: &sdjwtvc.VCTM{
 						Claims: []sdjwtvc.Claim{
-							{Path: []*string{&firstName}},
-							{Path: []*string{&address, &street}},
-							{Path: []*string{&address, &city}},
-							{Path: []*string{}},    // empty path — should be skipped
-							{Path: []*string{nil}}, // nil element — should be skipped
+							{Path: claimpath.Keys(firstName)},
+							{Path: claimpath.Keys(address, street)},
+							{Path: claimpath.Keys(address, city)},
+							{Path: claimpath.Pointer{}},            // empty path — should be skipped
+							{Path: claimpath.New(claimpath.All())}, // nil element — should be skipped
 						},
 					},
 				},
@@ -506,9 +507,9 @@ func TestAdminStatus_ScopeTemplates_LeafOverwrittenByNested(t *testing.T) {
 					VCTM: &sdjwtvc.VCTM{
 						Claims: []sdjwtvc.Claim{
 							// First claim: "address" as a leaf
-							{Path: []*string{&address}},
+							{Path: claimpath.Keys(address)},
 							// Second claim: "address.street" as nested — should overwrite
-							{Path: []*string{&address, &street}},
+							{Path: claimpath.Keys(address, street)},
 						},
 					},
 				},

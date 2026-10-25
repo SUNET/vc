@@ -7,18 +7,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/base64url"
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // HashCommitmentArgs fulfils the to_wallet hash_commitment entry at Path.
 type HashCommitmentArgs struct {
 	// Path is the claims path pointer of the to_wallet entry it fulfils.
-	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
+	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
 	// Opening produces the opening.
 	Opening OpeningArgs `yaml:"opening" validate:"required"`
 }
@@ -60,9 +60,9 @@ func (a *HashCommitmentArgs) Apply(map[string]any, time.Time) (map[string]any, e
 
 // HashCommitmentFor returns the hash_commitment derivation of list for
 // path.
-func HashCommitmentFor(list []Derivation, path []string) *HashCommitmentArgs {
+func HashCommitmentFor(list []Derivation, path claimpath.Pointer) *HashCommitmentArgs {
 	for _, d := range list {
-		if d.HashCommitment != nil && slices.Equal(d.HashCommitment.Path, path) {
+		if d.HashCommitment != nil && d.HashCommitment.Path.Equal(path) {
 			return d.HashCommitment
 		}
 	}

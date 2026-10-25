@@ -14,6 +14,7 @@ import (
 	"time"
 
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
@@ -192,15 +193,11 @@ func TestIssuanceAuthDCQLRequestsTheCopiedClaims(t *testing.T) {
 		"mdl": {AuthClaims: []string{"given_name", "family_name"}, DocumentClaims: map[string]string{"birth_date": "birth_date"}},
 	}}, cfg)
 	require.NoError(t, err)
-	var paths [][]string
+	var paths []claimpath.Pointer
 	for _, c := range dcql.Credentials[0].Claims {
-		var p []string
-		for _, s := range c.Path {
-			p = append(p, *s)
-		}
-		paths = append(paths, p)
+		paths = append(paths, c.Path)
 	}
-	require.Contains(t, paths, []string{"org.iso.18013.5.1", "birth_date"})
+	require.Contains(t, paths, claimpath.Keys("org.iso.18013.5.1", "birth_date"))
 	require.Equal(t, openid4vp.FormatMsoMdoc, dcql.Credentials[0].Format)
 }
 

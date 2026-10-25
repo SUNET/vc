@@ -67,7 +67,8 @@
       "path": [
         "elm",
         "credentialSubject",
-        "hasClaim[0]",
+        "hasClaim",
+        0,
         "awardedBy",
         "awardingBody",
         "legalName",

@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/stretchr/testify/assert"
@@ -11,14 +12,14 @@ import (
 
 func TestDeclaredClaimNames_VCTM(t *testing.T) {
 	m := &CredentialMetadata{VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{new("given_name")}},
-		{Path: []*string{new("family_name")}},
+		{Path: claimpath.Keys("given_name")},
+		{Path: claimpath.Keys("family_name")},
 		// A nested claim contributes its top-level object, so an address
 		// object from the provider is admitted and handled downstream.
-		{Path: []*string{new("address"), new("street_address")}},
-		{Path: []*string{new("address"), new("country")}},
-		{Path: nil},            // malformed entries must not panic
-		{Path: []*string{nil}}, //
+		{Path: claimpath.Keys("address", "street_address")},
+		{Path: claimpath.Keys("address", "country")},
+		{Path: claimpath.Pointer{}},            // malformed entries must not panic
+		{Path: claimpath.New(claimpath.All())}, //
 	}}}
 
 	names, loaded := m.DeclaredClaimNames()

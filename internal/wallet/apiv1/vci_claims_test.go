@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/wallet/credential"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
@@ -59,7 +60,7 @@ func presentedDisclosures(presentation string) []string {
 func TestSelectClaims_OnlyTheRequestedClaimIsDisclosed(t *testing.T) {
 	raw, d := testSDJWT(t)
 	got, ok := selectClaims(raw, openid4vp.CredentialQuery{
-		Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("given_name")}},
+		Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name")}},
 	})
 	require.True(t, ok)
 	assert.Equal(t, []string{d["given_name"]}, presentedDisclosures(got))
@@ -76,8 +77,8 @@ func TestSelectClaims_NestedAndArrayPaths(t *testing.T) {
 	raw, d := testSDJWT(t)
 	got, ok := selectClaims(raw, openid4vp.CredentialQuery{
 		Claims: []openid4vp.ClaimQuery{
-			{Path: openid4vp.StringPath("address", "locality")},
-			{Path: []*string{new("nationalities"), nil}},
+			{Path: claimpath.Keys("address", "locality")},
+			{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())},
 		},
 	})
 	require.True(t, ok)
@@ -87,7 +88,7 @@ func TestSelectClaims_NestedAndArrayPaths(t *testing.T) {
 func TestSelectClaims_MissingClaimDoesNotMatch(t *testing.T) {
 	raw, _ := testSDJWT(t)
 	_, ok := selectClaims(raw, openid4vp.CredentialQuery{
-		Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("family_name")}},
+		Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("family_name")}},
 	})
 	assert.False(t, ok)
 }
@@ -96,12 +97,12 @@ func TestSelectClaims_Values(t *testing.T) {
 	raw, d := testSDJWT(t)
 
 	_, ok := selectClaims(raw, openid4vp.CredentialQuery{
-		Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("given_name"), Values: []any{"Max"}}},
+		Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name"), Values: []any{"Max"}}},
 	})
 	assert.False(t, ok, "a value outside values does not satisfy the claim")
 
 	got, ok := selectClaims(raw, openid4vp.CredentialQuery{
-		Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("given_name"), Values: []any{"Max", "Erika"}}},
+		Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name"), Values: []any{"Max", "Erika"}}},
 	})
 	require.True(t, ok)
 	assert.Equal(t, []string{d["given_name"]}, presentedDisclosures(got))
@@ -111,9 +112,9 @@ func TestSelectClaims_FirstSatisfiedClaimSet(t *testing.T) {
 	raw, d := testSDJWT(t)
 	got, ok := selectClaims(raw, openid4vp.CredentialQuery{
 		Claims: []openid4vp.ClaimQuery{
-			{ID: "family", Path: openid4vp.StringPath("family_name")},
-			{ID: "given", Path: openid4vp.StringPath("given_name")},
-			{ID: "dob", Path: openid4vp.StringPath("birthdate")},
+			{ID: "family", Path: claimpath.Keys("family_name")},
+			{ID: "given", Path: claimpath.Keys("given_name")},
+			{ID: "dob", Path: claimpath.Keys("birthdate")},
 		},
 		ClaimSet: [][]string{{"family", "dob"}, {"given"}, {"given", "dob"}},
 	})
@@ -122,7 +123,7 @@ func TestSelectClaims_FirstSatisfiedClaimSet(t *testing.T) {
 		"the first satisfiable claim set is used, and only its claims are disclosed")
 
 	_, ok = selectClaims(raw, openid4vp.CredentialQuery{
-		Claims:   []openid4vp.ClaimQuery{{ID: "family", Path: openid4vp.StringPath("family_name")}},
+		Claims:   []openid4vp.ClaimQuery{{ID: "family", Path: claimpath.Keys("family_name")}},
 		ClaimSet: [][]string{{"family"}},
 	})
 	assert.False(t, ok)
@@ -134,8 +135,8 @@ func TestMatchingCredentials_ClaimConstraintsDecideAnswerability(t *testing.T) {
 	raw, d := testSDJWT(t)
 	candidates := []*credential.StoredCredential{{Format: "dc+sd-jwt", VCT: "urn:test", RawCredential: raw}}
 
-	missing := openid4vp.CredentialQuery{ID: "a", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("family_name")}}}
-	present := openid4vp.CredentialQuery{ID: "b", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("birthdate")}}}
+	missing := openid4vp.CredentialQuery{ID: "a", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("family_name")}}}
+	present := openid4vp.CredentialQuery{ID: "b", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("birthdate")}}}
 
 	assert.Empty(t, matchingCredentials(candidates, missing))
 	matched := matchingCredentials(candidates, present)
@@ -162,7 +163,7 @@ func TestMatchingCredentials_ClaimConstraintsDecideAnswerability(t *testing.T) {
 // can present is chosen instead.
 func TestMatchingCredentials_MdocNeverMatches(t *testing.T) {
 	mdoc := []*credential.StoredCredential{{Format: "mso_mdoc", VCT: "org.iso.18013.5.1.mDL", RawCredential: "o2d2ZXJzaW9u"}}
-	withClaims := openid4vp.CredentialQuery{ID: "mdl", Format: "mso_mdoc", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("org.iso.18013.5.1", "family_name")}}}
+	withClaims := openid4vp.CredentialQuery{ID: "mdl", Format: "mso_mdoc", Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("org.iso.18013.5.1", "family_name")}}}
 	assert.Empty(t, matchingCredentials(mdoc, withClaims))
 
 	unconstrained := openid4vp.CredentialQuery{ID: "mdl", Format: "mso_mdoc", Meta: openid4vp.MetaQuery{DoctypeValue: "org.iso.18013.5.1.mDL"}}
@@ -202,7 +203,7 @@ func TestSelectClaims_UndisclosedArrayPlaceholderIsNotAValue(t *testing.T) {
 	wildcard := openid4vp.CredentialQuery{
 		ID:     "nat",
 		Format: "dc+sd-jwt",
-		Claims: []openid4vp.ClaimQuery{{Path: []*string{new("nationalities"), nil}}},
+		Claims: []openid4vp.ClaimQuery{{Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All())}},
 	}
 	_, ok := selectClaims(raw, wildcard)
 	assert.False(t, ok, "an unresolved placeholder must not satisfy a terminal wildcard")
@@ -214,7 +215,7 @@ func TestSelectClaims_UndisclosedArrayPlaceholderIsNotAValue(t *testing.T) {
 	other := []*credential.StoredCredential{
 		{ID: "has-given-name", Format: "dc+sd-jwt", VCT: "urn:test", RawCredential: alternative},
 	}
-	given := openid4vp.CredentialQuery{ID: "given", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("given_name")}}}
+	given := openid4vp.CredentialQuery{ID: "given", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name")}}}
 
 	answerable := map[string][]*credential.StoredCredential{}
 	if m := matchingCredentials(candidates, wildcard); len(m) > 0 {

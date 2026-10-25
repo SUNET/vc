@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -251,6 +252,7 @@ type AuthorizationContext struct {
 // Validate checks the AuthorizationContext against its struct validation tags.
 func (a *AuthorizationContext) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())
+	v.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name, _, _ := strings.Cut(fld.Tag.Get("json"), ",")
 		if name == "-" {

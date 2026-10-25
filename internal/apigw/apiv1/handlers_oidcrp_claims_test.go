@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	"github.com/SUNET/vc/internal/apigw/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -21,9 +22,9 @@ import (
 // family_name, given_name or birth_date either.
 func ehicMetadata() *model.CredentialMetadata {
 	return &model.CredentialMetadata{VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{new("social_security_pin")}},
-		{Path: []*string{new("starting_date")}},
-		{Path: []*string{new("date_of_issuance")}},
+		{Path: claimpath.Keys("social_security_pin")},
+		{Path: claimpath.Keys("starting_date")},
+		{Path: claimpath.Keys("date_of_issuance")},
 	}}}
 }
 

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -788,8 +789,8 @@ type VerificationPresetScope struct {
 
 // VerificationPresetClaim defines a claim path to request within a credential.
 type VerificationPresetClaim struct {
-	// Path is the claim path segments
-	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"birthdate\"], [\"address\", \"locality\"]"`
+	// Path is the claims path pointer of the claim.
+	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[\"birthdate\"], [\"address\", \"locality\"], [\"nationalities\", null]"`
 }
 
 // VerifierInbound groups inbound credential verification configuration
@@ -2726,7 +2727,7 @@ type CredentialMetadata struct {
 	// Attributes maps claim names to their source fields for credential issuance.
 	// Data sources are rename-only (attribute_mapping); value transformations
 	// belong in the target scope's derivations.
-	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
+	Attributes map[string]map[string]claimpath.Pointer `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document, passed inline
 	// to the issuer at issuance time and served via /type-metadata/:scope
@@ -3024,7 +3025,7 @@ func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
 }
 
 // GetAttributes returns the derived attributes under a read lock.
-func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
+func (c *CredentialMetadata) GetAttributes() map[string]map[string]claimpath.Pointer {
 	if c == nil {
 		return nil
 	}
@@ -3483,10 +3484,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				}
 				sort.Strings(elementIDs)
 				for _, elementID := range elementIDs {
-					ns, el := namespace, elementID
 					meta := elements[elementID]
 					claim := openid4vci.ClaimDescription{
-						Path:      []*string{&ns, &el},
+						Path:      claimpath.Keys(namespace, elementID),
 						Mandatory: meta.Mandatory,
 						SVGID:     meta.SVGID,
 					}
@@ -3630,9 +3630,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		if len(vctm.Claims) > 0 {
 			credMetadata.Claims = make([]openid4vci.ClaimDescription, len(vctm.Claims))
 			for i, vctmClaim := range vctm.Claims {
-				// vctmClaim.Path may contain nil entries denoting an array-element
-				// wildcard (e.g. ["nationalities", null]); preserve them as-is so
-				// the emitted claims path pointer keeps the same semantics.
 				claim := openid4vci.ClaimDescription{
 					Path:      vctmClaim.Path,
 					Mandatory: vctmClaim.Mandatory,
@@ -3753,6 +3750,20 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, 
 	return metadata.WithInteractiveAuthorizationNames(ia.MetadataNames())
 }
 
+// addVCTMClaimNames adds the key each VCTM claim path starts with. A claim
+// without a path, or one that starts with null or an index, names nothing.
+func addVCTMClaimNames(names map[string]bool, vctm *sdjwtvc.VCTM) {
+	for _, claim := range vctm.Claims {
+		components, err := claim.Path.Components()
+		if err != nil {
+			continue
+		}
+		if name, ok := components[0].KeyName(); ok {
+			names[name] = true
+		}
+	}
+}
+
 // DeclaredClaimNames returns the top-level claim names this credential type
 // declares, across both VCTM and MDDL. The boolean reports whether any
 // metadata was available to derive them from - an empty set from a loaded
@@ -3777,12 +3788,7 @@ func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
 
 	if c.VCTM != nil {
 		loaded = true
-		for _, claim := range c.VCTM.Claims {
-			if len(claim.Path) == 0 || claim.Path[0] == nil {
-				continue
-			}
-			names[*claim.Path[0]] = true
-		}
+		addVCTMClaimNames(names, c.VCTM)
 	}
 
 	if c.MDDL != nil {

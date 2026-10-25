@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // Credential Auxiliary Data carries data that goes with a Credential at
@@ -55,7 +57,7 @@ type AuxiliaryDataEntry struct {
 
 	// Path is the claims path pointer of the claim that holds the
 	// commitment.
-	Path []string `json:"path,omitempty" yaml:"path" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
+	Path claimpath.Pointer `json:"path,omitzero" yaml:"path" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
 
 	// Opening is the base64url secret, in an entry the Credential Issuer
 	// sends. It is a Secret Value.
@@ -143,7 +145,7 @@ func decodeWalletAuxiliaryData(claim json.RawMessage) ([]AuxiliaryDataEntry, err
 		if !recognized {
 			continue
 		}
-		if slices.ContainsFunc(entries, func(e AuxiliaryDataEntry) bool { return slices.Equal(e.Path, entry.Path) }) {
+		if slices.ContainsFunc(entries, func(e AuxiliaryDataEntry) bool { return e.Path.Equal(entry.Path) }) {
 			return nil, fmt.Errorf("auxiliary_data[%d]: a second entry for %q", i, entry.Path)
 		}
 		entries = append(entries, entry)

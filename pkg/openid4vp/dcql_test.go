@@ -5,6 +5,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
@@ -101,9 +103,9 @@ func TestExample(t *testing.T) {
 							VCTValues: []string{"https://credentials.example.com/identity_credential"},
 						},
 						Claims: []ClaimQuery{
-							{Path: StringPath("last_name")},
-							{Path: StringPath("first_name")},
-							{Path: StringPath("address", "street_address")},
+							{Path: claimpath.Keys("last_name")},
+							{Path: claimpath.Keys("first_name")},
+							{Path: claimpath.Keys("address", "street_address")},
 						},
 					},
 				},
@@ -126,40 +128,40 @@ func TestExample(t *testing.T) {
 							VCTValues: []string{"urn:eudi:pid:1"},
 						},
 						Claims: []ClaimQuery{
-							{Path: StringPath("given_name")},
-							{Path: StringPath("birth_given_name")},
-							{Path: StringPath("family_name")},
-							{Path: StringPath("birth_family_name")},
-							{Path: StringPath("birthdate")},
-							{Path: StringPath("place_of_birth", "country")},
-							{Path: StringPath("place_of_birth", "region")},
-							{Path: StringPath("place_of_birth", "locality")},
-							{Path: StringPath("nationalities")},
-							{Path: StringPath("personal_administrative_number")},
-							{Path: StringPath("sex")},
-							{Path: StringPath("address", "formatted")},
-							{Path: StringPath("address", "street_address")},
-							{Path: StringPath("address", "house_number")},
-							{Path: StringPath("address", "postal_code")},
-							{Path: StringPath("address", "locality")},
-							{Path: StringPath("address", "region")},
-							{Path: StringPath("address", "country")},
-							{Path: StringPath("age_equal_or_over", "14")},
-							{Path: StringPath("age_equal_or_over", "16")},
-							{Path: StringPath("age_equal_or_over", "18")},
-							{Path: StringPath("age_equal_or_over", "21")},
-							{Path: StringPath("age_equal_or_over", "65")},
-							{Path: StringPath("age_in_years")},
-							{Path: StringPath("age_birth_year")},
-							{Path: StringPath("email")},
-							{Path: StringPath("phone_number")},
-							{Path: StringPath("issuing_authority")},
-							{Path: StringPath("issuing_country")},
-							{Path: StringPath("issuing_jurisdiction")},
-							{Path: StringPath("date_of_expiry")},
-							{Path: StringPath("date_of_issuance")},
-							{Path: StringPath("document_number")},
-							{Path: StringPath("picture")},
+							{Path: claimpath.Keys("given_name")},
+							{Path: claimpath.Keys("birth_given_name")},
+							{Path: claimpath.Keys("family_name")},
+							{Path: claimpath.Keys("birth_family_name")},
+							{Path: claimpath.Keys("birthdate")},
+							{Path: claimpath.Keys("place_of_birth", "country")},
+							{Path: claimpath.Keys("place_of_birth", "region")},
+							{Path: claimpath.Keys("place_of_birth", "locality")},
+							{Path: claimpath.Keys("nationalities")},
+							{Path: claimpath.Keys("personal_administrative_number")},
+							{Path: claimpath.Keys("sex")},
+							{Path: claimpath.Keys("address", "formatted")},
+							{Path: claimpath.Keys("address", "street_address")},
+							{Path: claimpath.Keys("address", "house_number")},
+							{Path: claimpath.Keys("address", "postal_code")},
+							{Path: claimpath.Keys("address", "locality")},
+							{Path: claimpath.Keys("address", "region")},
+							{Path: claimpath.Keys("address", "country")},
+							{Path: claimpath.Keys("age_equal_or_over", "14")},
+							{Path: claimpath.Keys("age_equal_or_over", "16")},
+							{Path: claimpath.Keys("age_equal_or_over", "18")},
+							{Path: claimpath.Keys("age_equal_or_over", "21")},
+							{Path: claimpath.Keys("age_equal_or_over", "65")},
+							{Path: claimpath.Keys("age_in_years")},
+							{Path: claimpath.Keys("age_birth_year")},
+							{Path: claimpath.Keys("email")},
+							{Path: claimpath.Keys("phone_number")},
+							{Path: claimpath.Keys("issuing_authority")},
+							{Path: claimpath.Keys("issuing_country")},
+							{Path: claimpath.Keys("issuing_jurisdiction")},
+							{Path: claimpath.Keys("date_of_expiry")},
+							{Path: claimpath.Keys("date_of_issuance")},
+							{Path: claimpath.Keys("document_number")},
+							{Path: claimpath.Keys("picture")},
 						},
 					},
 				},
@@ -189,9 +191,9 @@ func TestClaimSetsRoundTrip(t *testing.T) {
 					VCTValues: []string{"urn:eudi:pid:1"},
 				},
 				Claims: []ClaimQuery{
-					{ID: "name", Path: StringPath("given_name")},
-					{ID: "family", Path: StringPath("family_name")},
-					{ID: "age", Path: StringPath("age_over_18")},
+					{ID: "name", Path: claimpath.Keys("given_name")},
+					{ID: "family", Path: claimpath.Keys("family_name")},
+					{ID: "age", Path: claimpath.Keys("age_over_18")},
 				},
 				ClaimSet: [][]string{
 					{"name", "family"},
@@ -237,7 +239,7 @@ func TestClaimQueryValues_RoundTrip(t *testing.T) {
 		{
 			name: "strings (spec Appendix D example)",
 			query: ClaimQuery{
-				Path:   StringPath("postal_code"),
+				Path:   claimpath.Keys("postal_code"),
 				Values: []any{"90210", "90211"},
 			},
 			wantOnWire: `{"path":["postal_code"],"values":["90210","90211"]}`,
@@ -245,7 +247,7 @@ func TestClaimQueryValues_RoundTrip(t *testing.T) {
 		{
 			name: "integers",
 			query: ClaimQuery{
-				Path:   StringPath("age_in_years"),
+				Path:   claimpath.Keys("age_in_years"),
 				Values: []any{18, 21},
 			},
 			wantOnWire: `{"path":["age_in_years"],"values":[18,21]}`,
@@ -253,7 +255,7 @@ func TestClaimQueryValues_RoundTrip(t *testing.T) {
 		{
 			name: "booleans",
 			query: ClaimQuery{
-				Path:   StringPath("is_adult"),
+				Path:   claimpath.Keys("is_adult"),
 				Values: []any{true, false},
 			},
 			wantOnWire: `{"path":["is_adult"],"values":[true,false]}`,
@@ -262,7 +264,7 @@ func TestClaimQueryValues_RoundTrip(t *testing.T) {
 			name: "mixed string int bool",
 			query: ClaimQuery{
 				ID:     "mix",
-				Path:   StringPath("mixed"),
+				Path:   claimpath.Keys("mixed"),
 				Values: []any{"x", 1, true},
 			},
 			wantOnWire: `{"id":"mix","path":["mixed"],"values":["x",1,true]}`,
@@ -291,7 +293,7 @@ func TestClaimQueryValues_RoundTrip(t *testing.T) {
 // TestClaimQueryValues_OmittedWhenAbsent guards the omitempty semantics on the
 // wire tag: a ClaimQuery with no Values MUST NOT emit a "values" key.
 func TestClaimQueryValues_OmittedWhenAbsent(t *testing.T) {
-	data, err := json.Marshal(ClaimQuery{Path: StringPath("family_name")})
+	data, err := json.Marshal(ClaimQuery{Path: claimpath.Keys("family_name")})
 	assert.NoError(t, err)
 	assert.NotContains(t, string(data), `"values"`)
 }
@@ -305,11 +307,11 @@ func TestClaimQueryValues_MarshalRejectsInvalid(t *testing.T) {
 		name  string
 		query ClaimQuery
 	}{
-		{"empty slice", ClaimQuery{Path: StringPath("x"), Values: []any{}}},
-		{"nil element", ClaimQuery{Path: StringPath("x"), Values: []any{nil}}},
-		{"nested map", ClaimQuery{Path: StringPath("x"), Values: []any{map[string]any{"k": "v"}}}},
-		{"nested slice", ClaimQuery{Path: StringPath("x"), Values: []any{[]any{1, 2}}}},
-		{"non-integer float", ClaimQuery{Path: StringPath("x"), Values: []any{1.5}}},
+		{"empty slice", ClaimQuery{Path: claimpath.Keys("x"), Values: []any{}}},
+		{"nil element", ClaimQuery{Path: claimpath.Keys("x"), Values: []any{nil}}},
+		{"nested map", ClaimQuery{Path: claimpath.Keys("x"), Values: []any{map[string]any{"k": "v"}}}},
+		{"nested slice", ClaimQuery{Path: claimpath.Keys("x"), Values: []any{[]any{1, 2}}}},
+		{"non-integer float", ClaimQuery{Path: claimpath.Keys("x"), Values: []any{1.5}}},
 	}
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
@@ -330,8 +332,8 @@ func TestClaimQueryPath_MarshalRejectsInvalid(t *testing.T) {
 		query ClaimQuery
 	}{
 		{"nil path", ClaimQuery{}},
-		{"empty path", ClaimQuery{Path: []*string{}}},
-		{"empty-string element", ClaimQuery{Path: []*string{&empty}}},
+		{"empty path", ClaimQuery{Path: claimpath.Pointer{}}},
+		{"empty-string element", ClaimQuery{Path: claimpath.Keys(empty)}},
 	}
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
@@ -409,7 +411,7 @@ func TestClaimQueryValues_YAMLRoundTrip(t *testing.T) {
 	src := []byte("path:\n  - postal_code\nvalues:\n  - \"90210\"\n  - \"90211\"\n")
 	var cq ClaimQuery
 	assert.NoError(t, yaml.Unmarshal(src, &cq))
-	assert.Equal(t, StringPath("postal_code"), cq.Path)
+	assert.Equal(t, claimpath.Keys("postal_code"), cq.Path)
 	assert.Equal(t, []any{"90210", "90211"}, cq.Values)
 }
 
@@ -419,7 +421,7 @@ func TestClaimQueryValues_YAMLRoundTrip(t *testing.T) {
 func TestClaimQuery_MarshalYAML_RoundTrip(t *testing.T) {
 	orig := ClaimQuery{
 		ID:     "postal",
-		Path:   ArrayElementPath("addresses"),
+		Path:   claimpath.New(claimpath.Key("addresses"), claimpath.All()),
 		Values: []any{"90210", "90211"},
 	}
 	out, err := yaml.Marshal(orig)
@@ -444,8 +446,8 @@ func TestDCQL_MarshalYAML_RoundTrip(t *testing.T) {
 			Format: FormatSDJWTVC,
 			Meta:   MetaQuery{VCTValues: []string{"urn:eu:pid"}},
 			Claims: []ClaimQuery{
-				{ID: "fn", Path: StringPath("family_name")},
-				{ID: "pc", Path: StringPath("address", "postal_code"), Values: []any{"90210"}},
+				{ID: "fn", Path: claimpath.Keys("family_name")},
+				{ID: "pc", Path: claimpath.Keys("address", "postal_code"), Values: []any{"90210"}},
 			},
 		}},
 	}

@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -47,7 +48,7 @@ func main() {
 type invocation struct {
 	configPath  string
 	scope       string
-	path        []string
+	path        claimpath.Pointer
 	inputs      []string
 	expect      []byte
 	showOpening bool
@@ -121,8 +122,8 @@ func parseInvocation(args []string) (*invocation, error) {
 		return nil, errors.New("-input is required, once per hkdf input in the configured order")
 	}
 	if pathJSON != "" {
-		if err := json.Unmarshal([]byte(pathJSON), &inv.path); err != nil || len(inv.path) == 0 {
-			return nil, fmt.Errorf("-path %q is no JSON array of strings", pathJSON)
+		if err := json.Unmarshal([]byte(pathJSON), &inv.path); err != nil || inv.path.IsZero() {
+			return nil, fmt.Errorf("-path %q is no claims path pointer", pathJSON)
 		}
 	}
 	if !flagGiven(flags, "expect") {
@@ -169,20 +170,20 @@ type sourceOpening struct {
 
 // findEntry returns the to_wallet entry of scope at path, or the one with
 // an hkdf opening when path is empty.
-func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
+func findEntry(cfg *model.Cfg, scope string, path claimpath.Pointer) (*entry, error) {
 	meta := cfg.Common.CredentialMetadata[scope]
 	if meta == nil || meta.AuxiliaryData == nil || cfg.APIGW == nil {
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data", scope)
 	}
 	var err error
-	if path == nil {
+	if path.IsZero() {
 		if path, err = onlyHKDFPath(cfg.APIGW.DataSources, scope); err != nil {
 			return nil, err
 		}
 	}
-	i := slices.IndexFunc(meta.AuxiliaryData.ToWallet, func(e openid4vci.AuxiliaryDataEntry) bool { return slices.Equal(e.Path, path) })
+	i := slices.IndexFunc(meta.AuxiliaryData.ToWallet, func(e openid4vci.AuxiliaryDataEntry) bool { return e.Path.Equal(path) })
 	if i < 0 {
-		return nil, fmt.Errorf("scope %q has no to_wallet entry %q", scope, path)
+		return nil, fmt.Errorf("scope %q has no to_wallet entry %s", scope, path)
 	}
 	openings, err := hkdfOpenings(cfg.APIGW.DataSources, scope, path)
 	if err != nil {
@@ -193,7 +194,7 @@ func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
 
 // hkdfOpenings returns the hkdf opening each source scope of scope
 // configures for path, each one validated.
-func hkdfOpenings(sources model.DataSources, scope string, path []string) ([]sourceOpening, error) {
+func hkdfOpenings(sources model.DataSources, scope string, path claimpath.Pointer) ([]sourceOpening, error) {
 	var openings []sourceOpening
 	for _, src := range sources.SourceScopes() {
 		hc := primitives.HashCommitmentFor(src.Derivations, path)
@@ -206,24 +207,24 @@ func hkdfOpenings(sources model.DataSources, scope string, path []string) ([]sou
 		openings = append(openings, sourceOpening{where: src.Where(), hkdf: hc.Opening.HKDF})
 	}
 	if len(openings) == 0 {
-		return nil, fmt.Errorf("no source scope of %q derives %q with hkdf", scope, path)
+		return nil, fmt.Errorf("no source scope of %q derives %s with hkdf", scope, path)
 	}
 	return openings, nil
 }
 
 // onlyHKDFPath returns the path of scope's one hkdf hash_commitment.
-func onlyHKDFPath(sources model.DataSources, scope string) ([]string, error) {
-	var paths [][]string
+func onlyHKDFPath(sources model.DataSources, scope string) (claimpath.Pointer, error) {
+	var paths []claimpath.Pointer
 	for _, src := range sources.SourceScopes() {
 		for _, d := range src.Derivations {
 			hc := d.HashCommitment
-			if src.Scope == scope && hc != nil && hc.Opening.HKDF != nil && !slices.ContainsFunc(paths, func(p []string) bool { return slices.Equal(p, hc.Path) }) {
+			if src.Scope == scope && hc != nil && hc.Opening.HKDF != nil && !slices.ContainsFunc(paths, hc.Path.Equal) {
 				paths = append(paths, hc.Path)
 			}
 		}
 	}
 	if len(paths) != 1 {
-		return nil, fmt.Errorf("scope %q has %d hkdf entries %q; name one with -path", scope, len(paths), paths)
+		return claimpath.Pointer{}, fmt.Errorf("scope %q has %d hkdf entries %s; name one with -path", scope, len(paths), paths)
 	}
 	return paths[0], nil
 }

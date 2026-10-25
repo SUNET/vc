@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -771,9 +772,11 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			}
 		}
 		for _, claim := range requested {
-			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
-				Path: openid4vp.StringPath(authClaimPathSegments(format, claim)...),
-			})
+			path, err := claimpath.FromKeys(authClaimPathSegments(format, claim))
+			if err != nil {
+				return nil, fmt.Errorf("auth scope %q claim %q: %w", authScope, claim, err)
+			}
+			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{Path: path})
 		}
 		// By format, so an mso_mdoc auth scope is constrained by its doctype
 		// rather than sent out with a vct_values no mdoc credential carries.

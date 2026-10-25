@@ -69,7 +69,7 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 		// Refuse issuance rather than emit an unfiltered document.
 		return nil, fmt.Errorf("presentation scope %q has no VCTM to filter against; refusing to issue an unfiltered document", scope)
 	}
-	return credential.FilterAgainstVCTM(doc, vctm), nil
+	return credential.FilterAgainstVCTM(doc, vctm)
 }
 
 // filterAgainstMDDL keeps the elements the MDDL declares, keyed by element

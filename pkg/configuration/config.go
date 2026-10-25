@@ -12,6 +12,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/issuance"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -369,9 +370,9 @@ func checkAuxiliaryDataList(meta *model.CredentialMetadata, where string, entrie
 		if err := checkHashCommitmentEntry(meta, entry); err != nil {
 			return fmt.Errorf("%s[%d]: %w", where, i, err)
 		}
-		key := claimsPathKey(entry.Path)
+		key := entry.Path.String()
 		if seen[key] {
-			return fmt.Errorf("%s[%d]: a second entry for path %q", where, i, entry.Path)
+			return fmt.Errorf("%s[%d]: a second entry for path %s", where, i, entry.Path)
 		}
 		seen[key] = true
 	}
@@ -407,22 +408,22 @@ func deriveAuxiliaryDataRequired(cfg *model.Cfg) {
 	}
 }
 
-// toWalletPaths returns the to_wallet paths of a credential, by
-// claimsPathKey.
-func toWalletPaths(meta *model.CredentialMetadata) map[string][]string {
-	paths := map[string][]string{}
+// toWalletPaths returns the to_wallet paths of a credential, by their
+// rendering.
+func toWalletPaths(meta *model.CredentialMetadata) map[string]claimpath.Pointer {
+	paths := map[string]claimpath.Pointer{}
 	if meta == nil || meta.AuxiliaryData == nil {
 		return paths
 	}
 	for _, entry := range meta.AuxiliaryData.ToWallet {
-		paths[claimsPathKey(entry.Path)] = entry.Path
+		paths[entry.Path.String()] = entry.Path
 	}
 	return paths
 }
 
 // checkHashCommitmentDerivations requires a source scope to fulfil each
 // to_wallet path with exactly one hash_commitment derivation.
-func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][]string) error {
+func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string]claimpath.Pointer) error {
 	fulfilled := map[string]bool{}
 	for i, d := range src.Derivations {
 		if d.HashCommitment == nil {
@@ -434,31 +435,26 @@ func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][
 	}
 	for _, key := range slices.Sorted(maps.Keys(toWallet)) {
 		if !fulfilled[key] {
-			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %q of common.credential_metadata.%s.auxiliary_data",
+			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %s of common.credential_metadata.%s.auxiliary_data",
 				src.Where(), toWallet[key], src.Scope)
 		}
 	}
 	return nil
 }
 
-func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string][]string, fulfilled map[string]bool) error {
-	key := claimsPathKey(hc.Path)
+func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string]claimpath.Pointer, fulfilled map[string]bool) error {
+	key := hc.Path.String()
 	if _, ok := toWallet[key]; !ok {
-		return fmt.Errorf("path %q is no to_wallet entry of the credential's auxiliary_data", hc.Path)
+		return fmt.Errorf("path %s is no to_wallet entry of the credential's auxiliary_data", hc.Path)
 	}
 	if fulfilled[key] {
-		return fmt.Errorf("path %q is fulfilled twice", hc.Path)
+		return fmt.Errorf("path %s is fulfilled twice", hc.Path)
 	}
 	fulfilled[key] = true
 	if err := hc.Opening.Validate(); err != nil {
 		return fmt.Errorf("opening: %w", err)
 	}
 	return nil
-}
-
-// claimsPathKey is a map key for a claims path pointer.
-func claimsPathKey(path []string) string {
-	return strings.Join(path, "\x00")
 }
 
 // checkRandomDerivations refuses the random primitive on a presentation

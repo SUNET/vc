@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -35,8 +36,8 @@ func TestAuxiliaryData(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "nym_auth_seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
 
-	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
-	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
+	ssc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc")
+	psc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "psc")
 	inputs := []string{"issuing_country", "personal_administrative_number"}
 	c := &Client{
 		log: logger.NewSimple("test"),
@@ -110,7 +111,7 @@ func TestAuxiliaryData(t *testing.T) {
 			e.Commitment = base64.RawURLEncoding.EncodeToString(walletPSC[:31])
 		})},
 		"the path is a to_issuer entry": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
-			e.Path = []string{"eu.europa.ec.eudi.nym_auth.1", "birth_date"}
+			e.Path = claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")
 		})},
 		"the alg is the to_issuer entry's":  {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) { e.Alg = "sha-384" })},
 		"the credential takes the entries":  {"pid", fromWallet},
@@ -139,13 +140,9 @@ func TestAuxiliaryData(t *testing.T) {
 func TestAuxiliaryDataSDJWT(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "secret.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
-	ssc, psc := []string{"commitments", "ssc"}, []string{"commitments", "psc"}
-	always := func(path []string) sdjwtvc.Claim {
-		segments := make([]*string, len(path))
-		for i := range path {
-			segments[i] = &path[i]
-		}
-		return sdjwtvc.Claim{Path: segments, SD: "always"}
+	ssc, psc := claimpath.Keys("commitments", "ssc"), claimpath.Keys("commitments", "psc")
+	always := func(path claimpath.Pointer) sdjwtvc.Claim {
+		return sdjwtvc.Claim{Path: path, SD: "always"}
 	}
 	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{always(ssc), always(psc)}}
 	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{

@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -45,8 +46,8 @@ type UICredentialInfo struct {
 	// From credential_type_values, not credential_types. Empty for other
 	// formats and for a W3C scope whose configured alternatives narrow
 	// nothing - see DCQLMetaQuery for why those are refused, not sent.
-	TypeValues [][]string                      `json:"type_values,omitempty"`
-	Attributes map[string]map[string][]*string `json:"attributes"`
+	TypeValues [][]string                              `json:"type_values,omitempty"`
+	Attributes map[string]map[string]claimpath.Pointer `json:"attributes"`
 }
 
 // UIPreset is a verification preset served to the UI.
@@ -95,7 +96,7 @@ type UIPresetMeta struct {
 
 // UIPresetClaim is a claim path within a preset credential.
 type UIPresetClaim struct {
-	Path []*string `json:"path"`
+	Path claimpath.Pointer `json:"path"`
 }
 
 type UIMetadataReply struct {
@@ -196,7 +197,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		// and then throws when the credential is selected.
 		attributes := constructor.GetAttributes()
 		if len(attributes) == 0 {
-			attributes = map[string]map[string][]*string{uiDefaultLocale: {}}
+			attributes = map[string]map[string]claimpath.Pointer{uiDefaultLocale: {}}
 		}
 		info := &UICredentialInfo{
 			Format:     constructor.Format,
@@ -346,58 +347,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 
 				// scopeCfg may be nil (scope with no overrides)
-				var claims []model.VerificationPresetClaim
-				var excludeSet map[string]bool
 				if scopeCfg != nil {
-					claims = scopeCfg.Claims
-					excludeSet = make(map[string]bool, len(scopeCfg.ExcludeClaims))
-					for _, ex := range scopeCfg.ExcludeClaims {
-						excludeSet[claimPathKey(ex.Path)] = true
-					}
-					// Attach validations to this credential
 					uiCred.Validations = scopeCfg.Validations
 				}
-
-				// Resolve claims: use explicit claims, or fall back to VCTM claims
-				if len(claims) == 0 && meta != nil {
-					if vctm := meta.GetVCTM(); vctm != nil {
-						// First pass: collect all valid paths (including array-element paths with null)
-						var allPaths [][]*string
-						for _, vc := range vctm.Claims {
-							if len(vc.Path) == 0 {
-								continue
-							}
-							// Skip claims whose first element is a JWT registered claim
-							if vc.Path[0] != nil && jwtRegisteredClaim(*vc.Path[0]) {
-								continue
-							}
-							path := make([]*string, len(vc.Path))
-							copy(path, vc.Path)
-							allPaths = append(allPaths, path)
-						}
-						// Build set of parent prefixes: for each path, mark all its proper prefixes.
-						// Array-element paths (e.g. ["nationalities", nil]) supersede their parent
-						// (["nationalities"]), so mark the parent as a prefix to exclude.
-						parentSet := make(map[string]bool)
-						for _, p := range allPaths {
-							for i := 1; i < len(p); i++ {
-								parentSet[claimPtrPathKey(p[:i])] = true
-							}
-						}
-						// Second pass: only include non-parent claims
-						for _, path := range allPaths {
-							if !parentSet[claimPtrPathKey(path)] {
-								claims = append(claims, model.VerificationPresetClaim{Path: ptrPathToStringPath(path)})
-							}
-						}
-					}
-				}
-
-				for _, claim := range claims {
-					if !excludeSet[claimPathKey(claim.Path)] {
-						uiCred.Claims = append(uiCred.Claims, UIPresetClaim{Path: stringPathToPtrPath(claim.Path)})
-					}
-				}
+				uiCred.Claims = presetClaims(scopeCfg, meta)
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
 			}
 			// An all-dropped preset would ask the wallet for nothing.
@@ -1005,8 +958,8 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 
 // sameDCQLQuery reports whether two DCQL queries are equivalent for the
 // purposes of session reuse. Compared by canonical JSON: DCQL contains
-// []*string paths and interface{} values that reflect.DeepEqual would trip
-// over, and the request object serializes through the same encoder before
+// claims path pointers and interface{} values that reflect.DeepEqual would
+// trip over, and the request object serializes through the same encoder before
 // it ever reaches a wallet - so wire-shape equality is the right test.
 func sameDCQLQuery(a, b *openid4vp.DCQL) bool {
 	if a == nil || b == nil {
@@ -1042,12 +995,6 @@ func sameValidations(a, b map[string][]openid4vp.ClaimValidation) bool {
 	return bytes.Equal(ja, jb)
 }
 
-// claimPathKey returns a string key for a claim path for use in exclusion sets.
-// Uses a null byte separator to avoid ambiguity when segments contain dots.
-func claimPathKey(path []string) string {
-	return strings.Join(path, "\x00")
-}
-
 // jwtRegisteredClaims are standard JWT/SD-JWT claims that should not appear in DCQL queries.
 var jwtRegisteredClaims = map[string]bool{
 	"iss":    true,
@@ -1065,35 +1012,75 @@ func jwtRegisteredClaim(name string) bool {
 	return jwtRegisteredClaims[name]
 }
 
-// stringPathToPtrPath converts a []string path to a []*string path.
-// The sentinel string "null" is converted back to nil (representing JSON null
-// for DCQL array element access).
-func stringPathToPtrPath(path []string) []*string {
-	out := make([]*string, len(path))
-	for i := range path {
-		if path[i] == "null" {
-			out[i] = nil
-		} else {
-			s := path[i]
-			out[i] = &s
+// presetClaims returns the claims a preset requests of a credential: the
+// claims the preset lists, or the VCTM's leaf claims, without the excluded
+// ones.
+func presetClaims(scopeCfg *model.VerificationPresetScope, meta *model.CredentialMetadata) []UIPresetClaim {
+	var paths []claimpath.Pointer
+	excluded := map[string]bool{}
+	if scopeCfg != nil {
+		for _, claim := range scopeCfg.Claims {
+			paths = append(paths, claim.Path)
+		}
+		for _, claim := range scopeCfg.ExcludeClaims {
+			excluded[claim.Path.String()] = true
+		}
+	}
+	if len(paths) == 0 {
+		paths = vctmLeafClaims(meta)
+	}
+	var out []UIPresetClaim
+	for _, path := range paths {
+		if !excluded[path.String()] {
+			out = append(out, UIPresetClaim{Path: path})
 		}
 	}
 	return out
 }
 
-// ptrPathToStringPath converts a []*string path to a []string path.
-// Nil elements are represented as the literal string "null" for use in
-// config-level structures (e.g. exclusion sets) that don't support nil.
-func ptrPathToStringPath(path []*string) []string {
-	out := make([]string, len(path))
-	for i, p := range path {
-		if p == nil {
-			out[i] = "null"
-		} else {
-			out[i] = *p
+// vctmLeafClaims returns the requestable VCTM claim paths no other claim
+// path extends. An array-element path (e.g. ["nationalities", null])
+// supersedes its parent (["nationalities"]).
+func vctmLeafClaims(meta *model.CredentialMetadata) []claimpath.Pointer {
+	if meta == nil {
+		return nil
+	}
+	vctm := meta.GetVCTM()
+	if vctm == nil {
+		return nil
+	}
+	all := requestableClaims(vctm)
+	parents := map[string]bool{}
+	for _, p := range all {
+		for n := 1; n < p.Len(); n++ {
+			prefix, _ := p.Prefix(n)
+			parents[prefix.String()] = true
 		}
 	}
-	return out
+	var leaves []claimpath.Pointer
+	for _, p := range all {
+		if !parents[p.String()] {
+			leaves = append(leaves, p)
+		}
+	}
+	return leaves
+}
+
+// requestableClaims returns the VCTM claim paths, without the JWT
+// registered claims.
+func requestableClaims(vctm *sdjwtvc.VCTM) []claimpath.Pointer {
+	var paths []claimpath.Pointer
+	for _, vc := range vctm.Claims {
+		components, err := vc.Path.Components()
+		if err != nil {
+			continue
+		}
+		if name, ok := components[0].KeyName(); ok && jwtRegisteredClaim(name) {
+			continue
+		}
+		paths = append(paths, vc.Path)
+	}
+	return paths
 }
 
 // augmentDCQLFromVCTM enriches the DCQL query using VCTM metadata.
@@ -1113,80 +1100,83 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 		if meta == nil || meta.VCTM == nil {
 			continue
 		}
-
-		// Collect nested object sub-paths from VCTM (paths with len>=2 where all elements are non-nil)
-		childPaths := make(map[string][][]*string) // parentKey -> list of child paths
-		for _, vc := range meta.VCTM.Claims {
-			if len(vc.Path) >= 2 && vc.Path[0] != nil && vc.Path[len(vc.Path)-1] != nil {
-				parentKey := claimPtrPathKey(vc.Path[:1])
-				childPaths[parentKey] = append(childPaths[parentKey], vc.Path)
-			}
-		}
-
-		// Build set of existing claim paths
-		existing := make(map[string]bool, len(cred.Claims))
-		for _, claim := range cred.Claims {
-			existing[claimPtrPathKey(claim.Path)] = true
-		}
-
-		// Identify parent paths that should be removed:
-		// 1. Parents that have nested object sub-paths (replace with children)
-		// 2. Parents that have a corresponding array-element path ["x", null]
-		//    (the null path already implies element-level disclosure; keeping the
-		//    parent causes wallets to skip element disclosures)
-		parentsToRemove := make(map[string]bool)
-		for _, claim := range cred.Claims {
-			if len(claim.Path) != 1 || claim.Path[0] == nil {
-				continue
-			}
-			parentKey := claimPtrPathKey(claim.Path)
-
-			// Check for array-element path: if ["x", null] is also in the query,
-			// remove the parent ["x"]
-			arrayPath := []*string{claim.Path[0], nil}
-			if existing[claimPtrPathKey(arrayPath)] {
-				parentsToRemove[parentKey] = true
-				continue
-			}
-
-			// Check for nested object children from VCTM
-			children, ok := childPaths[parentKey]
-			if !ok {
-				continue
-			}
-			parentsToRemove[parentKey] = true
-			for _, childPath := range children {
-				childKey := claimPtrPathKey(childPath)
-				if !existing[childKey] {
-					dcql.Credentials[i].Claims = append(dcql.Credentials[i].Claims, openid4vp.ClaimQuery{Path: childPath})
-					existing[childKey] = true
-				}
-			}
-		}
-
-		// Remove parent paths that were expanded or superseded
-		if len(parentsToRemove) > 0 {
-			filtered := make([]openid4vp.ClaimQuery, 0, len(dcql.Credentials[i].Claims))
-			for _, claim := range dcql.Credentials[i].Claims {
-				key := claimPtrPathKey(claim.Path)
-				if !parentsToRemove[key] {
-					filtered = append(filtered, claim)
-				}
-			}
-			dcql.Credentials[i].Claims = filtered
-		}
+		dcql.Credentials[i].Claims = expandParentClaims(cred.Claims, vctmChildPaths(meta.VCTM))
 	}
 }
 
-// claimPtrPathKey returns a string key for a []*string path.
-func claimPtrPathKey(path []*string) string {
-	parts := make([]string, len(path))
-	for i, p := range path {
-		if p == nil {
-			parts[i] = "\x01" // sentinel for null
-		} else {
-			parts[i] = *p
+// vctmChildPaths returns the VCTM claim paths of two or more components
+// that end in a key or an index, by the rendering of their first key.
+func vctmChildPaths(vctm *sdjwtvc.VCTM) map[string][]claimpath.Pointer {
+	children := map[string][]claimpath.Pointer{}
+	for _, vc := range vctm.Claims {
+		components, err := vc.Path.Components()
+		if err != nil || len(components) < 2 || components[len(components)-1].IsAll() {
+			continue
+		}
+		if _, ok := components[0].KeyName(); ok {
+			parent, _ := vc.Path.Prefix(1)
+			children[parent.String()] = append(children[parent.String()], vc.Path)
 		}
 	}
-	return strings.Join(parts, "\x00")
+	return children
+}
+
+// expandParentClaims replaces each single-key claim with the VCTM paths
+// beneath it, and drops one whose array-element path ["x", null] is also
+// requested: the null path already asks for element-level disclosure, and
+// keeping the parent makes wallets skip the element disclosures.
+func expandParentClaims(claims []openid4vp.ClaimQuery, children map[string][]claimpath.Pointer) []openid4vp.ClaimQuery {
+	existing := make(map[string]bool, len(claims))
+	for _, claim := range claims {
+		existing[claim.Path.String()] = true
+	}
+	removed := map[string]bool{}
+	var added []openid4vp.ClaimQuery
+	for _, claim := range claims {
+		replacement, replaced := parentReplacement(claim.Path, children, existing)
+		if replaced {
+			removed[claim.Path.String()] = true
+			added = append(added, replacement...)
+		}
+	}
+	if len(removed) == 0 {
+		return claims
+	}
+	out := make([]openid4vp.ClaimQuery, 0, len(claims)+len(added))
+	for _, claim := range append(claims, added...) {
+		if !removed[claim.Path.String()] {
+			out = append(out, claim)
+		}
+	}
+	return out
+}
+
+// parentReplacement reports whether a single-key claim path is superseded,
+// and returns the VCTM paths beneath it that the query does not have yet.
+// existing records the paths it returns.
+func parentReplacement(path claimpath.Pointer, children map[string][]claimpath.Pointer, existing map[string]bool) ([]openid4vp.ClaimQuery, bool) {
+	key, ok := singleKey(path)
+	if !ok {
+		return nil, false
+	}
+	if existing[claimpath.New(claimpath.Key(key), claimpath.All()).String()] {
+		return nil, true
+	}
+	var added []openid4vp.ClaimQuery
+	for _, child := range children[path.String()] {
+		if !existing[child.String()] {
+			added = append(added, openid4vp.ClaimQuery{Path: child})
+			existing[child.String()] = true
+		}
+	}
+	return added, len(children[path.String()]) > 0
+}
+
+// singleKey returns the key of a pointer that is one key.
+func singleKey(path claimpath.Pointer) (string, bool) {
+	keys, ok := path.KeyNames()
+	if !ok || len(keys) != 1 {
+		return "", false
+	}
+	return keys[0], true
 }

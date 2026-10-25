@@ -1,5 +1,7 @@
 package sdjwtvc
 
+import "github.com/SUNET/vc/pkg/claimpath"
+
 // VCTM is the Verifiable Credential Type Metadata per SD-JWT VC draft-13 section 6.
 // Type Metadata provides information about credential types including:
 // - Display properties for rendering credentials in wallets
@@ -135,9 +137,9 @@ type SVGTemplateProperties struct {
 
 // Claim represents credential claim metadata per section 9.
 type Claim struct {
-	// Path indicates the claim(s) being addressed per section 9.1 (REQUIRED).
-	// Elements: string selects a key, nil selects all array elements.
-	Path []*string `json:"path" bson:"path" validate:"required,min=1"`
+	// Path indicates the claim(s) being addressed per section 9.1
+	// (REQUIRED): a claims path pointer.
+	Path claimpath.Pointer `json:"path" bson:"path" validate:"required"`
 
 	// Display contains locale-specific display information per section 9.2 (OPTIONAL).
 	Display []ClaimDisplay `json:"display,omitempty" bson:"display,omitempty" validate:"omitempty,dive"`
