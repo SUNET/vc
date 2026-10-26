@@ -74,6 +74,15 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		require.NoError(t, checkAuxiliaryData(cfg, "apigw"))
 	})
 
+	claimOpening := func(c *model.Cfg, claim string) {
+		derivation(c).Opening = primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claim}}
+	}
+	t.Run("a claim opening whose claim the credential withholds", func(t *testing.T) {
+		cfg := base()
+		claimOpening(cfg, "nym_auth_opening")
+		require.NoError(t, checkAuxiliaryData(cfg, "apigw"))
+	})
+
 	t.Run("required comes from mandatory", func(t *testing.T) {
 		cfg := base()
 		cfg.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{
@@ -117,7 +126,21 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		}, "an opening has 16 to 64 bytes, got 0"},
 		"an opening with two generators": {func(c *model.Cfg) {
 			derivation(c).Opening.Random = &primitives.RandomOpeningArgs{Bytes: 16}
-		}, "exactly one of hkdf and random"},
+		}, "exactly one of hkdf, hmac, random and claim"},
+		"an hmac opening longer than the HMAC": {func(c *model.Cfg) {
+			derivation(c).Opening = primitives.OpeningArgs{HMAC: &primitives.HMACOpeningArgs{
+				SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 33,
+			}}
+		}, "hmac: an opening has 16 to 32 bytes, got 33"},
+		"a claim opening whose claim the MDDL declares": {func(c *model.Cfg) {
+			claimOpening(c, "birth_date")
+		}, `the credential carries claim "birth_date": the MDDL declares element "birth_date"`},
+		"a claim opening whose claim another derivation reads": {func(c *model.Cfg) {
+			claimOpening(c, "nym_auth_opening")
+			pid := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"]
+			pid.Derivations = append(pid.Derivations, primitives.Derivation{Copy: &primitives.CopyArgs{Input: "nym_auth_opening", Output: "copied"}})
+			c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = pid
+		}, `derivations[1] reads claim "nym_auth_opening"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base()
@@ -173,11 +196,21 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		}
 	}
 	meta := func(c *model.Cfg) *model.CredentialMetadata { return c.Common.CredentialMetadata["example"] }
+	claimOpening := func(claim string) []primitives.Derivation {
+		return []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+			Path:    ssc,
+			Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claim}},
+		}}}
+	}
 
 	cfg := base()
 	require.NoError(t, checkAuxiliaryData(cfg, "apigw"))
 	deriveAuxiliaryDataRequired(cfg)
 	assert.True(t, meta(cfg).AuxiliaryData.ToIssuer[0].Required, "psc is mandatory in the VCTM")
+
+	cfg = base()
+	cfg.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{Derivations: claimOpening("nym_auth_opening")}
+	require.NoError(t, checkAuxiliaryData(cfg, "apigw"), "a presentation's claim the VCTM leaves out stays out of the credential")
 
 	for name, tc := range map[string]struct {
 		mutate func(*model.Cfg)
@@ -210,6 +243,13 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		"an unknown encoding": {func(c *model.Cfg) {
 			meta(c).AuxiliaryData.ToIssuer[0].Encoding = "base32"
 		}, `encoding "base32" is none of`},
+		"a claim opening whose claim the VCTM declares": {func(c *model.Cfg) {
+			c.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{Derivations: claimOpening("given_name")}
+		}, `the credential carries claim "given_name": the VCTM declares it`},
+		"a claim opening on an SD-JWT VC from the datastore": {func(c *model.Cfg) {
+			c.APIGW.DataSources.Presentation = model.PresentationConfig{}
+			c.APIGW.DataSources.Datastore.Scopes = map[string]model.DatastoreScope{"example": {Derivations: claimOpening("nym_auth_opening")}}
+		}, "an SD-JWT VC from the datastore source carries its whole document"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base()

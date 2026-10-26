@@ -1,9 +1,9 @@
 // opening_recover reproduces the opening of a hash_commitment entry, and its
 // commitment, from the issuer's config file and a subject's identifiers.
 //
-// It reads the secret the entry's hkdf opening names, so it runs where the
-// issuer's config and secret are. Whoever can run it can reproduce the
-// opening of any subject.
+// It reads the secret the entry's hkdf or hmac opening names, so it runs
+// where the issuer's config and secret are. Whoever can run it can
+// reproduce the opening of any subject.
 package main
 
 import (
@@ -73,12 +73,12 @@ func run(ctx context.Context, args []string, out io.Writer) (int, error) {
 	if err != nil {
 		return exitError, err
 	}
-	return report(out, inv, results), nil
+	return report(out, inv, results, entry.underived), nil
 }
 
-// report prints each result and returns the exit code of the comparison
-// with -expect.
-func report(out io.Writer, inv *invocation, results []result) int {
+// report prints each result and each opening with nothing to derive, and
+// returns the exit code of the comparison with -expect.
+func report(out io.Writer, inv *invocation, results []result, underived []underivedOpening) int {
 	matched := false
 	for _, r := range results {
 		fmt.Fprintf(out, "sources:    %s\n", strings.Join(r.sources, ", "))
@@ -87,6 +87,10 @@ func report(out io.Writer, inv *invocation, results []result) int {
 			fmt.Fprintf(out, "opening:    %s\n", hex.EncodeToString(r.opening))
 		}
 		matched = matched || (inv.expect != nil && subtle.ConstantTimeCompare(inv.expect, r.commitment) == 1)
+	}
+	for _, u := range underived {
+		fmt.Fprintf(out, "sources:    %s\n", u.where)
+		fmt.Fprintf(out, "opening:    %s\n", u.reason)
 	}
 	switch {
 	case inv.expect == nil:
@@ -113,10 +117,10 @@ func parseInvocation(args []string) (*invocation, error) {
 	)
 	flags.StringVar(&inv.configPath, "config", "", "the issuer's config file (required)")
 	flags.StringVar(&inv.scope, "scope", "", "the credential scope (required)")
-	flags.StringVar(&pathJSON, "path", "", `the entry's claims path as JSON, such as ["eu.europa.ec.eudi.nym_auth.1","ssc"]; optional when the scope has one hkdf entry`)
+	flags.StringVar(&pathJSON, "path", "", `the entry's claims path as JSON, such as ["eu.europa.ec.eudi.nym_auth.1","ssc"]; optional when the credential has one to_wallet entry`)
 	flags.StringVar(&expect, "expect", "", "a commitment in hex: exit 0 on a match, 2 on a mismatch")
 	flags.BoolVar(&inv.showOpening, "show-opening", false, "also print the opening")
-	flags.Var(&inputs, "input", "an hkdf input value; repeat in the configured order (required)")
+	flags.Var(&inputs, "input", "an hkdf or hmac input value; repeat in the configured order (required)")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -127,7 +131,7 @@ func parseInvocation(args []string) (*invocation, error) {
 	case inv.scope == "":
 		return nil, errors.New("-scope is required")
 	case len(inv.inputs) == 0:
-		return nil, errors.New("-input is required, once per hkdf input in the configured order")
+		return nil, errors.New("-input is required, once per hkdf or hmac input in the configured order")
 	}
 	if pathJSON != "" {
 		if err := json.Unmarshal([]byte(pathJSON), &inv.path); err != nil || len(inv.path) == 0 {
@@ -164,77 +168,98 @@ func loadConfig(path string) (*model.Cfg, error) {
 	return cfg, nil
 }
 
-// entry is a to_wallet entry with the hkdf openings its source scopes
-// configure.
+// entry is a to_wallet entry with the opening each source scope
+// configures for it.
 type entry struct {
-	alg      string
-	openings []sourceOpening
+	alg       string
+	keyed     []keyedOpening
+	underived []underivedOpening
 }
 
-type sourceOpening struct {
-	where string
-	hkdf  *primitives.HKDFOpeningArgs
+// keyedOpening is an hkdf or hmac opening, which the tool reproduces.
+type keyedOpening struct {
+	where   string
+	opening primitives.KeyedOpening
 }
 
-// findEntry returns the to_wallet entry of scope at path, or the one with
-// an hkdf opening when path is empty.
+// underivedOpening is an opening with nothing to derive, and where it
+// comes from.
+type underivedOpening struct {
+	where  string
+	reason string
+}
+
+// findEntry returns the to_wallet entry of scope at path, or its one
+// to_wallet entry when path is empty.
 func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
 	meta := cfg.Common.CredentialMetadata[scope]
 	if meta == nil || meta.AuxiliaryData == nil || cfg.APIGW == nil {
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data", scope)
 	}
-	var err error
+	toWallet := meta.AuxiliaryData.ToWallet
 	if path == nil {
-		if path, err = onlyHKDFPath(cfg.APIGW.DataSources, scope); err != nil {
-			return nil, err
+		if len(toWallet) != 1 {
+			return nil, fmt.Errorf("scope %q has %d to_wallet entries; name one with -path", scope, len(toWallet))
 		}
+		path = toWallet[0].Path
 	}
-	i := slices.IndexFunc(meta.AuxiliaryData.ToWallet, func(e openid4vci.AuxiliaryDataEntry) bool { return slices.Equal(e.Path, path) })
+	i := slices.IndexFunc(toWallet, func(e openid4vci.AuxiliaryDataEntry) bool { return slices.Equal(e.Path, path) })
 	if i < 0 {
 		return nil, fmt.Errorf("scope %q has no to_wallet entry %q", scope, path)
 	}
-	openings, err := hkdfOpenings(cfg.APIGW.DataSources, scope, path)
-	if err != nil {
+	e := &entry{alg: toWallet[i].Alg}
+	if err := e.collectOpenings(cfg.APIGW.DataSources, scope, path); err != nil {
 		return nil, err
 	}
-	return &entry{alg: meta.AuxiliaryData.ToWallet[i].Alg, openings: openings}, nil
+	return e, nil
 }
 
-// hkdfOpenings returns the hkdf opening each source scope of scope
-// configures for path, each one validated.
-func hkdfOpenings(sources model.DataSources, scope string, path []string) ([]sourceOpening, error) {
-	var openings []sourceOpening
+// collectOpenings sorts the opening each source scope of scope configures
+// for path, each one validated, into those it reproduces and those with
+// nothing to derive. An entry with no keyed opening is refused.
+func (e *entry) collectOpenings(sources model.DataSources, scope string, path []string) error {
 	for _, src := range sources.SourceScopes() {
 		hc := primitives.HashCommitmentFor(src.Derivations, path)
-		if src.Scope != scope || hc == nil || hc.Opening.HKDF == nil {
+		if src.Scope != scope || hc == nil {
 			continue
 		}
 		if err := hc.Opening.Validate(); err != nil {
-			return nil, fmt.Errorf("%s: %w", src.Where(), err)
+			return fmt.Errorf("%s: %w", src.Where(), err)
 		}
-		openings = append(openings, sourceOpening{where: src.Where(), hkdf: hc.Opening.HKDF})
+		if opening, ok := hc.Opening.Keyed(); ok {
+			e.keyed = append(e.keyed, keyedOpening{where: src.Where(), opening: opening})
+		} else {
+			e.underived = append(e.underived, underivedOpening{where: src.Where(), reason: nothingToDerive(hc.Opening)})
+		}
 	}
-	if len(openings) == 0 {
-		return nil, fmt.Errorf("no source scope of %q derives %q with hkdf", scope, path)
+	if len(e.keyed) == 0 {
+		return e.nothingToReproduce(scope, path)
 	}
-	return openings, nil
+	return nil
 }
 
-// onlyHKDFPath returns the path of scope's one hkdf hash_commitment.
-func onlyHKDFPath(sources model.DataSources, scope string) ([]string, error) {
-	var paths [][]string
-	for _, src := range sources.SourceScopes() {
-		for _, d := range src.Derivations {
-			hc := d.HashCommitment
-			if src.Scope == scope && hc != nil && hc.Opening.HKDF != nil && !slices.ContainsFunc(paths, func(p []string) bool { return slices.Equal(p, hc.Path) }) {
-				paths = append(paths, hc.Path)
-			}
-		}
+// nothingToReproduce explains an entry without a keyed opening.
+func (e *entry) nothingToReproduce(scope string, path []string) error {
+	if len(e.underived) == 0 {
+		return fmt.Errorf("no source scope of %q derives %q", scope, path)
 	}
-	if len(paths) != 1 {
-		return nil, fmt.Errorf("scope %q has %d hkdf entries %q; name one with -path", scope, len(paths), paths)
+	reasons := make([]string, len(e.underived))
+	for i, u := range e.underived {
+		reasons[i] = u.where + ": " + u.reason
 	}
-	return paths[0], nil
+	return fmt.Errorf("nothing to derive for %q: %s", path, strings.Join(reasons, "; "))
+}
+
+// nothingToDerive says where an opening without a keyed generator comes
+// from.
+func nothingToDerive(opening primitives.OpeningArgs) string {
+	switch {
+	case opening.Claim != nil:
+		return fmt.Sprintf("the opening is claim %q of the source data; read it from the source", opening.Claim.Input)
+	case opening.Random != nil:
+		return "the opening is random; only the wallet holds it"
+	}
+	return "the opening has no hkdf or hmac generator"
 }
 
 // checkExpect refuses an -expect value whose length no commitment under
@@ -260,12 +285,12 @@ type result struct {
 	commitment []byte
 }
 
-// reproduce derives the opening of each source scope, and merges the
-// source scopes that derive the same one.
+// reproduce derives the opening of each keyed source scope, and merges
+// the source scopes that derive the same one.
 func (e *entry) reproduce(ctx context.Context, inputs []string) ([]result, error) {
 	var results []result
-	for _, o := range e.openings {
-		opening, err := o.hkdf.OpenValues(inputs)
+	for _, o := range e.keyed {
+		opening, err := o.opening.OpenValues(inputs)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", o.where, err)
 		}

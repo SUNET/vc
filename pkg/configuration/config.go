@@ -345,8 +345,18 @@ func checkAuxiliaryData(cfg *model.Cfg, serviceName string) error {
 	if err := checkToWalletEncryption(cfg); err != nil {
 		return err
 	}
+	return checkSourceOpenings(cfg)
+}
+
+// checkSourceOpenings checks the hash_commitment derivations of each data
+// source scope against its credential's to_wallet entries.
+func checkSourceOpenings(cfg *model.Cfg) error {
 	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
-		if err := checkHashCommitmentDerivations(src, toWalletPaths(cfg.Common.CredentialMetadata[src.Scope])); err != nil {
+		meta := cfg.Common.CredentialMetadata[src.Scope]
+		if err := checkHashCommitmentDerivations(src, toWalletPaths(meta)); err != nil {
+			return err
+		}
+		if err := checkClaimOpenings(src, meta); err != nil {
 			return err
 		}
 	}

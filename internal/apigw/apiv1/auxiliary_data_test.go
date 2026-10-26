@@ -199,3 +199,29 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	assert.NotContains(t, payload["commitments"], "ssc")
 	assert.NotContains(t, payload["commitments"], "psc")
 }
+
+// A claim opening is the bytes the claim holds, and the credential carries
+// their SHA-256. The claim is base64url of the bytes 00 to 0f, whose
+// SHA-256 is from `openssl dgst -sha256`.
+func TestAuxiliaryDataClaimOpening(t *testing.T) {
+	ssc := []string{"commitments", "ssc"}
+	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{{Path: []*string{&ssc[0], &ssc[1]}, SD: "always"}}}
+	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+		"example": {Format: "dc+sd-jwt", VCTM: vctm, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+			ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Encoding: "hex"}},
+		}},
+	}}}}
+	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+		Path:    ssc,
+		Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: "nym_auth_opening"}},
+	}}}
+	const claim = "AAECAwQFBgcICQoLDA0ODw"
+
+	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations, map[string]any{"nym_auth_opening": claim}, []byte(`{}`), nil)
+	require.NoError(t, err)
+	require.Len(t, toWallet, 1)
+	assert.Equal(t, claim, toWallet[0].Opening, "the opening is the claim's bytes")
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+	assert.Equal(t, map[string]any{"ssc": "be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991"}, doc["commitments"])
+}

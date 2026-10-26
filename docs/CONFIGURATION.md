@@ -768,18 +768,33 @@ an enforced one.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening`
 
-is set.
+Exactly one field is set.
 
 | Field    | Type     | Description                                                           | Example | Default | Required |
 | -------- | -------- | --------------------------------------------------------------------- | ------- | ------- | -------- |
 | `hkdf`   | `object` | HKDF derives the opening from a secret and claims of the source data. | -       | -       | No       |
+| `hmac`   | `object` | HMAC derives the opening from a secret and claims of the source data. | -       | -       | No       |
 | `random` | `object` | Random draws a random opening.                                        | -       | -       | No       |
+| `claim`  | `object` | Claim takes the opening from a claim of the source data.              | -       | -       | No       |
 
 ### `hkdf`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening.hkdf`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening.hkdf`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening.hkdf`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening.hkdf`
 
-input claims.
+The opening has 16 to 64 bytes.
+
+| Field         | Type       | Description                                                                                | Example                                                 | Default | Required |
+| ------------- | ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------- | -------- |
+| `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                         | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
+| `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
+| `bytes`       | `int`      | Opening length.                                                                            | `16`                                                    | -       | Yes      |
+
+### `hmac`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening.hmac`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening.hmac`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening.hmac`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening.hmac`
+
+The opening has 16 to 32 bytes: the HMAC output, truncated to at least
+half its length (RFC 2104 section 5).
 
 | Field         | Type       | Description                                                                                | Example                                                 | Default | Required |
 | ------------- | ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------- | -------- |
@@ -791,9 +806,22 @@ input claims.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening.random`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening.random`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening.random`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening.random`
 
-| Field   | Type  | Description     | Example | Default | Required |
-| ------- | ----- | --------------- | ------- | ------- | -------- |
-| `bytes` | `int` | Opening length. | `16`    | -       | Yes      |
+| Field   | Type  | Description               | Example | Default | Required |
+| ------- | ----- | ------------------------- | ------- | ------- | -------- |
+| `bytes` | `int` | Opening length, 16 to 64. | `16`    | -       | Yes      |
+
+### `claim`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.opening.claim`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.opening.claim`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.opening.claim`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.opening.claim`
+
+The claim holds a per-subject secret as base64url text, decoding to 16 to
+64 bytes. The secret stays out of the credential: the configuration is
+refused when the credential carries the claim or another derivation
+reads it.
+
+| Field   | Type     | Description                                                                                                 | Example              | Default | Required |
+| ------- | -------- | ----------------------------------------------------------------------------------------------------------- | -------------------- | ------- | -------- |
+| `input` | `string` | Claim of the source data that holds the opening. Supports dot-notation claim paths and literal dotted keys. | `"nym_auth_opening"` | -       | Yes      |
 
 ### `import`
 

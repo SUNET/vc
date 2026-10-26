@@ -32,6 +32,11 @@ common:
       auxiliary_data:
         to_wallet:
           - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, ssc]}
+    nym_auth_claim:
+      format: mso_mdoc
+      auxiliary_data:
+        to_wallet:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, ssc]}
 apigw:
   data_sources:
     presentation:
@@ -50,6 +55,14 @@ apigw:
                     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
                     opening:
                       hkdf: {secret_path: %[1]q, inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number], bytes: 16}
+        nym_auth_claim:
+          from:
+            pid:
+              derivations:
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      claim: {input: nym_auth_opening}
 `, secretPath), 0o600))
 
 	// What issuance writes for these source claims.
@@ -80,10 +93,11 @@ apigw:
 	assert.Equal(t, exitMismatch, code, out)
 
 	for rule, args := range map[string][]string{
-		"-expect has a value":           {"-input", "SE", "-input", "pan-100", "-expect", ""},
-		"-expect has the alg's length":  {"-input", "SE", "-input", "pan-100", "-expect", "00"},
-		"one value per hkdf input":      {"-input", "SE"},
-		"-path names a to_wallet entry": {"-input", "SE", "-input", "pan-100", "-path", `["eu.europa.ec.eudi.nym_auth.1","psc"]`},
+		"-expect has a value":                   {"-input", "SE", "-input", "pan-100", "-expect", ""},
+		"-expect has the alg's length":          {"-input", "SE", "-input", "pan-100", "-expect", "00"},
+		"one value per hkdf input":              {"-input", "SE"},
+		"-path names a to_wallet entry":         {"-input", "SE", "-input", "pan-100", "-path", `["eu.europa.ec.eudi.nym_auth.1","psc"]`},
+		"a claim opening has nothing to derive": {"-scope", "nym_auth_claim", "-input", "SE"},
 	} {
 		code, _, err := recoverOpening(args...)
 		assert.Error(t, err, rule)
