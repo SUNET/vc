@@ -46,7 +46,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
 				DataSources: model.DataSources{Presentation: model.PresentationConfig{
 					Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{
-						"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+						"pid": {RequiredClaims: map[string][]string{"personal_administrative_number": nil, "nym_auth_opening": nil}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
 								SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
@@ -135,6 +135,17 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"a claim opening whose claim the MDDL declares": {func(c *model.Cfg) {
 			claimOpening(c, "birth_date")
 		}, `the credential carries claim "birth_date": the MDDL declares element "birth_date"`},
+		"an hkdf input the presentation does not require": {func(c *model.Cfg) {
+			derivation(c).Opening.HKDF.Inputs = []string{"issuing_country"}
+		}, `from.pid.derivations[0].hash_commitment.opening.hkdf: input "issuing_country" is no key of required_claims`},
+		"an hmac input the presentation does not require": {func(c *model.Cfg) {
+			derivation(c).Opening = primitives.OpeningArgs{HMAC: &primitives.HMACOpeningArgs{
+				SecretPath: secretPath, Inputs: []string{"personal_administrative_number", "issuing_country"}, Bytes: 16,
+			}}
+		}, `from.pid.derivations[0].hash_commitment.opening.hmac: input "issuing_country" is no key of required_claims`},
+		"a claim input the presentation does not require": {func(c *model.Cfg) {
+			claimOpening(c, "other_opening")
+		}, `from.pid.derivations[0].hash_commitment.opening.claim: input "other_opening" is no key of required_claims`},
 		"a claim opening whose claim another derivation reads": {func(c *model.Cfg) {
 			claimOpening(c, "nym_auth_opening")
 			pid := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"]
@@ -184,7 +195,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
 				DataSources: model.DataSources{Presentation: model.PresentationConfig{
 					Scopes: map[string]model.PresentationScope{"example": {From: map[string]model.PresentedCredential{
-						"pid": {Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+						"pid": {RequiredClaims: map[string][]string{"personal_administrative_number": nil}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
 								SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
@@ -209,7 +220,9 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 	assert.True(t, meta(cfg).AuxiliaryData.ToIssuer[0].Required, "psc is mandatory in the VCTM")
 
 	cfg = base()
-	cfg.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{Derivations: claimOpening("nym_auth_opening")}
+	cfg.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{
+		RequiredClaims: map[string][]string{"nym_auth_opening": nil}, Derivations: claimOpening("nym_auth_opening"),
+	}
 	require.NoError(t, checkAuxiliaryData(cfg, "apigw"), "a presentation's claim the VCTM leaves out stays out of the credential")
 
 	for name, tc := range map[string]struct {

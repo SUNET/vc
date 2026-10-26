@@ -48,7 +48,8 @@ type RandomOpeningArgs struct {
 // reads it.
 type ClaimOpeningArgs struct {
 	// Input is the claim of the source data that holds the opening.
-	// Supports dot-notation claim paths and literal dotted keys.
+	// Supports dot-notation claim paths and literal dotted keys. A
+	// presentation source lists it in its required_claims.
 	Input string `yaml:"input" validate:"required" doc_example:"\"nym_auth_opening\""`
 }
 
@@ -80,6 +81,10 @@ func (a *HashCommitmentArgs) NewOpening(claims map[string]any) ([]byte, error) {
 
 // openingGenerator produces an opening from the claims of the source data.
 type openingGenerator interface {
+	// name is the generator's key under opening.
+	name() string
+	// inputs are the claims of the source data the generator reads.
+	inputs() []string
 	open(claims map[string]any) ([]byte, error)
 	// validate checks what the configuration fixes: the length, and a
 	// secret.
@@ -115,6 +120,16 @@ func (o OpeningArgs) Validate() error {
 		return err
 	}
 	return generator.validate()
+}
+
+// Inputs returns the key of the generator the opening sets, and the claims
+// of the source data it reads.
+func (o OpeningArgs) Inputs() (generator string, claims []string, err error) {
+	g, err := o.generator()
+	if err != nil {
+		return "", nil, err
+	}
+	return g.name(), g.inputs(), nil
 }
 
 // Keyed returns the generator of an opening that sets hkdf or hmac alone.
@@ -153,9 +168,12 @@ func inputClaim(claims map[string]any, path string) (string, error) {
 	return s, nil
 }
 
+func (a *RandomOpeningArgs) name() string     { return "random" }
+func (a *RandomOpeningArgs) inputs() []string { return nil }
+
 func (a *RandomOpeningArgs) validate() error {
 	if err := openingLengths.check(a.Bytes); err != nil {
-		return fmt.Errorf("random: %w", err)
+		return fmt.Errorf("%s: %w", a.name(), err)
 	}
 	return nil
 }
@@ -167,6 +185,9 @@ func (a *RandomOpeningArgs) open(map[string]any) ([]byte, error) {
 	}
 	return opening, nil
 }
+
+func (a *ClaimOpeningArgs) name() string     { return "claim" }
+func (a *ClaimOpeningArgs) inputs() []string { return []string{a.Input} }
 
 // validate accepts every claim: its value is checked when it is read.
 func (a *ClaimOpeningArgs) validate() error {

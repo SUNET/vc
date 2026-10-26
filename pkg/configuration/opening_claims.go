@@ -11,15 +11,46 @@ import (
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
-// checkClaimOpenings refuses a claim opening whose claim reaches the
-// credential, where its secret would be in the clear.
-func checkClaimOpenings(src model.SourceScope, meta *model.CredentialMetadata) error {
+// checkOpeningClaims checks the claims of the source data each opening of
+// src reads.
+func checkOpeningClaims(src model.SourceScope, meta *model.CredentialMetadata) error {
 	for i, d := range src.Derivations {
-		if d.HashCommitment == nil || d.HashCommitment.Opening.Claim == nil {
+		if d.HashCommitment == nil {
 			continue
 		}
-		if err := checkClaimSecret(src, meta, d.HashCommitment.Opening.Claim.Input); err != nil {
-			return fmt.Errorf("%s.derivations[%d].hash_commitment.opening.claim: %w", src.Where(), i, err)
+		opening := d.HashCommitment.Opening
+		generator, inputs, err := opening.Inputs()
+		if err != nil {
+			return fmt.Errorf("%s.derivations[%d].hash_commitment.opening: %w", src.Where(), i, err)
+		}
+		if err := checkOpeningInputs(src, meta, opening, inputs); err != nil {
+			return fmt.Errorf("%s.derivations[%d].hash_commitment.opening.%s: %w", src.Where(), i, generator, err)
+		}
+	}
+	return nil
+}
+
+// checkOpeningInputs keeps a claim opening's claim out of the credential,
+// and requires a presentation to require each input.
+func checkOpeningInputs(src model.SourceScope, meta *model.CredentialMetadata, opening primitives.OpeningArgs, inputs []string) error {
+	if opening.Claim != nil {
+		if err := checkClaimSecret(src, meta, opening.Claim.Input); err != nil {
+			return err
+		}
+	}
+	return checkInputsRequired(src, inputs)
+}
+
+// checkInputsRequired refuses an input a presentation source does not
+// require: its source data holds the required claims alone, each under its
+// required_claims key.
+func checkInputsRequired(src model.SourceScope, inputs []string) error {
+	if src.Source != model.DataSourcePresentation {
+		return nil
+	}
+	for _, input := range inputs {
+		if _, required := src.RequiredClaims[input]; !required {
+			return fmt.Errorf("input %q is no key of required_claims", input)
 		}
 	}
 	return nil

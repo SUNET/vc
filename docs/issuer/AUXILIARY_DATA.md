@@ -89,7 +89,8 @@ apigw:
 
 A `hash_commitment` derivation reads the claims of the source data: the
 verified presented claims for a presentation scope, the document data for
-the others.
+the others. A presentation verifies its `required_claims` alone, so each
+claim an opening reads is a key of `required_claims`.
 
 The issuer requires `credential_response_encryption` on a request for a
 credential with `to_wallet` entries, and

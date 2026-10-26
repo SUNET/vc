@@ -801,8 +801,11 @@ type SourceScope struct {
 	Scope  string
 	// Presented is the accepted credential's scope, for a presentation
 	// source.
-	Presented   string
-	Derivations []primitives.Derivation
+	Presented string
+	// RequiredClaims are the required_claims of a presentation source. Its
+	// source data holds these claims alone.
+	RequiredClaims map[string][]string
+	Derivations    []primitives.Derivation
 }
 
 // Where is the configuration path of the source scope.
@@ -828,7 +831,7 @@ func (ds *DataSources) SourceScopes() []SourceScope {
 	}
 	for scope, s := range ds.Presentation.Scopes {
 		for presented, accepted := range s.From {
-			out = append(out, SourceScope{Source: DataSourcePresentation, Scope: scope, Presented: presented, Derivations: accepted.Derivations})
+			out = append(out, SourceScope{Source: DataSourcePresentation, Scope: scope, Presented: presented, RequiredClaims: accepted.RequiredClaims, Derivations: accepted.Derivations})
 		}
 	}
 	slices.SortFunc(out, func(a, b SourceScope) int { return strings.Compare(a.Where(), b.Where()) })

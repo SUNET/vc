@@ -783,11 +783,11 @@ Exactly one field is set.
 
 The opening has 16 to 64 bytes.
 
-| Field         | Type       | Description                                                                                | Example                                                 | Default | Required |
-| ------------- | ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------- | -------- |
-| `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                         | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
-| `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
-| `bytes`       | `int`      | Opening length.                                                                            | `16`                                                    | -       | Yes      |
+| Field         | Type       | Description                                                                                                                                         | Example                                                 | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------- | -------- |
+| `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                                                                                  | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
+| `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. A presentation source lists each in its required_claims. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
+| `bytes`       | `int`      | Opening length.                                                                                                                                     | `16`                                                    | -       | Yes      |
 
 ### `hmac`
 
@@ -796,11 +796,11 @@ The opening has 16 to 64 bytes.
 The opening has 16 to 32 bytes: the HMAC output, truncated to at least
 half its length (RFC 2104 section 5).
 
-| Field         | Type       | Description                                                                                | Example                                                 | Default | Required |
-| ------------- | ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------- | -------- |
-| `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                         | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
-| `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
-| `bytes`       | `int`      | Opening length.                                                                            | `16`                                                    | -       | Yes      |
+| Field         | Type       | Description                                                                                                                                         | Example                                                 | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------- | -------- |
+| `secret_path` | `string`   | File holding the secret, base64url, decoding to at least 32 bytes.                                                                                  | `"/pki/nym_auth_seed.key"`                              | -       | Yes      |
+| `inputs`      | `[]string` | Claims of the source data, each a non-empty string. Their order is part of the derivation. A presentation source lists each in its required_claims. | `["issuing_country", "personal_administrative_number"]` | -       | Yes      |
+| `bytes`       | `int`      | Opening length.                                                                                                                                     | `16`                                                    | -       | Yes      |
 
 ### `random`
 
@@ -819,9 +819,9 @@ The claim holds a per-subject secret as base64url text, decoding to 16 to
 refused when the credential carries the claim or another derivation
 reads it.
 
-| Field   | Type     | Description                                                                                                 | Example              | Default | Required |
-| ------- | -------- | ----------------------------------------------------------------------------------------------------------- | -------------------- | ------- | -------- |
-| `input` | `string` | Claim of the source data that holds the opening. Supports dot-notation claim paths and literal dotted keys. | `"nym_auth_opening"` | -       | Yes      |
+| Field   | Type     | Description                                                                                                                                                        | Example              | Default | Required |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- | ------- | -------- |
+| `input` | `string` | Claim of the source data that holds the opening. Supports dot-notation claim paths and literal dotted keys. A presentation source lists it in its required_claims. | `"nym_auth_opening"` | -       | Yes      |
 
 ### `import`
 

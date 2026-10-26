@@ -356,7 +356,7 @@ func checkSourceOpenings(cfg *model.Cfg) error {
 		if err := checkHashCommitmentDerivations(src, toWalletPaths(meta)); err != nil {
 			return err
 		}
-		if err := checkClaimOpenings(src, meta); err != nil {
+		if err := checkOpeningClaims(src, meta); err != nil {
 			return err
 		}
 	}

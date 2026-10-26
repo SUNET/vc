@@ -20,7 +20,8 @@ type KeyedOpeningArgs[F keyedFunction] struct {
 	// least 32 bytes.
 	SecretPath string `yaml:"secret_path" validate:"required" doc_example:"\"/pki/nym_auth_seed.key\""`
 	// Inputs are claims of the source data, each a non-empty string.
-	// Their order is part of the derivation.
+	// Their order is part of the derivation. A presentation source lists
+	// each in its required_claims.
 	Inputs []string `yaml:"inputs" validate:"required,min=1,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
 	// Bytes is the opening length.
 	Bytes int `yaml:"bytes" validate:"required" doc_example:"16"`
@@ -89,6 +90,13 @@ func (hmacSHA256) derive(secret, message []byte, n int) ([]byte, error) {
 	}
 	return mac.Sum(nil)[:n], nil
 }
+
+func (a *KeyedOpeningArgs[F]) name() string {
+	var f F
+	return f.name()
+}
+
+func (a *KeyedOpeningArgs[F]) inputs() []string { return a.Inputs }
 
 func (a *KeyedOpeningArgs[F]) validate() error {
 	_, err := a.key()
