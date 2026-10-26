@@ -598,86 +598,6 @@ type Issuer struct {
 	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
-// Seed models a SeedSource may declare.
-//
-// There is one. A "stored" model - a random seed drawn on first sight of
-// a subject and kept - was described here and never implemented, because
-// it needs a per-subject store that nothing on this path has. It is gone
-// rather than left as a refused-at-startup option: a configuration knob
-// that only ever produces an error is a promise the code does not keep.
-const (
-	// SeedModelDerived computes a subject's seed from a secret and the
-	// subject identifiers. Nothing is stored and the seed is recomputable.
-	SeedModelDerived = "derived"
-)
-
-// SeedSource configures one named per-subject seed source.
-//
-// The seed itself is never issued, logged or returned: what reaches a
-// credential is a commitment over it. The issuer keeps the ability to
-// reproduce a subject's seed, which is what makes anything derived from it
-// - a pseudonym, typically - remappable to a person later.
-type SeedSource struct {
-	// Model is how a subject's seed comes about. "derived" is the only
-	// one: the seed is computed from Secret and the subject identifiers,
-	// so nothing is stored and it is recomputable forever.
-	Model string `yaml:"model" validate:"required,oneof=derived" doc_example:"\"derived\""`
-
-	// SecretPath is a file holding the derivation secret, base64url-encoded
-	// (padding and trailing whitespace are tolerated), whose DECODED value
-	// must be at least 32 bytes. Preferred where a file can be mounted,
-	// since it keeps the secret out of the rendered config entirely.
-	//
-	// Base64url rather than raw bytes, matching BBSConfig.SecretKeyPath:
-	// 32 raw bytes in this file decode to 24 or fail outright, which is a
-	// confusing way to find out the format was not what you assumed.
-	// `head -c 32 /dev/urandom | basenc --base64url | tr -d '='` produces
-	// one.
-	//
-	// THE SECRET IS PERMANENT. Every commitment ever written under it is a
-	// function of it, so replacing it gives every subject a new seed and a
-	// new pseudonym, and losing it destroys the ability to reproduce any
-	// seed this deployment has ever issued over. Back it up; do not rotate
-	// it. There is deliberately no key identifier and no rotation
-	// mechanism, because having one would suggest otherwise.
-	SecretPath string `yaml:"secret_path" validate:"omitempty" doc_example:"\"/etc/vc/seed/issuer.key\""`
-
-	// Secret is the derivation secret, base64url-encoded, decoding to at
-	// least 32 bytes.
-	//
-	// NOT SETTABLE IN THE MAIN CONFIGURATION, by design. It is filled from
-	// apigw.seeds.<name>.secret in the SECRETS FILE, the same way Mongo,
-	// SQL and the HA credentials are, so the most permanent secret an
-	// issuer holds never appears in the rendered config.
-	//
-	// This was an inline config field and is deliberately not one any
-	// more. The justification for it was BBSConfig.SecretKey as
-	// precedent, and that field is an exception to the convention rather
-	// than an example of it - following it meant copying the one place
-	// that already sidesteps the custom. A deployment therefore has two
-	// routes: a mounted file via secret_path, or the secrets file.
-	//
-	// Exactly one of secret_path and this must end up set for a derived
-	// source. Both, or neither, is refused at startup rather than resolved
-	// by precedence - a deployment with two sources of truth for this
-	// secret cannot tell which one is live, and an operator editing the
-	// half that is not would see no effect at all.
-	Secret string `yaml:"-"`
-
-	// SeedBytes is the length of the seeds this source produces. 0 means
-	// 16, which is what the nym_auth rulebook specifies.
-	//
-	// It is part of the derivation, not just its output size, so changing
-	// it changes every seed - the same irreversible act as changing the
-	// secret.
-	//
-	// 16 is also the MINIMUM. The seed is the opening of a published
-	// commitment, so a short one is a small search space rather than a
-	// short key: at 1 byte there are 256 possible openings and the
-	// commitment is trivially opened, however strong the secret is.
-	SeedBytes int `yaml:"seed_bytes" validate:"omitempty,min=16,max=64" doc_example:"16"`
-}
-
 // BBSConfig holds the issuer's blind BBS key pair.
 //
 // Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
@@ -2376,23 +2296,6 @@ type APIGW struct {
 	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://issuer.sunet.se\""`
 	// IssuerClient is the gRPC client config for issuer
-	// Seeds are the named per-subject seed sources this deployment can
-	// use.
-	//
-	// A seed source turns a subject's stable identifiers into that
-	// subject's permanent seed; a credential configuration then names one
-	// to back a commitment claim - see CredentialMetadata.Commitments.
-	// Empty means none is offered, and any scope asking for one refuses
-	// at startup.
-	//
-	// HERE rather than under issuer, which is where it began. The seed is
-	// derived and its commitment injected BEFORE the issuer service is
-	// called, so the issuer receives an ordinary claim and never sees the
-	// derivation secret at all. A secret that only one service needs
-	// belongs in that service's configuration, and keeping it where it is
-	// not used is how it ends up mounted somewhere it need not be.
-	Seeds map[string]*SeedSource `yaml:"seeds" validate:"omitempty,dive" doc_key:"seed source name"`
-
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry
 	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
@@ -2553,9 +2456,9 @@ func (c *Cfg) LookupCredentialSources(scope string) ([]CredentialSource, error) 
 
 // GetOpenID4VPAuth returns the OpenID4VP authentication config for a credential type, or nil if not found.
 // For a datastore scope with auth_provider=openid4vp, returns its AuthScopes as-is.
-// For a presentation scope, synthesises a single-entry AuthScopes map from the
-// scope's from_scope + required_claims: the wallet must present a credential of
-// FromScope disclosing every key of RequiredClaims.
+// For a presentation scope, synthesises one AuthScopes entry per credential in
+// the scope's from: the wallet must present one of them, disclosing every key
+// of its RequiredClaims.
 func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 	if c.APIGW == nil {
 		return nil
@@ -2571,16 +2474,16 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 		if cred.AuthProvider != AuthProviderOpenID4VP {
 			return nil
 		}
-		claims := make([]string, 0, len(cred.RequiredClaims))
-		for k := range cred.RequiredClaims {
-			claims = append(claims, k)
+		authScopes := make(map[string]AuthScopeEntry, len(cred.From))
+		for presented, accepted := range cred.From {
+			claims := make([]string, 0, len(accepted.RequiredClaims))
+			for k := range accepted.RequiredClaims {
+				claims = append(claims, k)
+			}
+			sort.Strings(claims)
+			authScopes[presented] = AuthScopeEntry{AuthClaims: claims}
 		}
-		sort.Strings(claims)
-		return &OpenID4VPCredentialAuth{
-			AuthScopes: map[string]AuthScopeEntry{
-				cred.FromScope: {AuthClaims: claims},
-			},
-		}
+		return &OpenID4VPCredentialAuth{AuthScopes: authScopes}
 	}
 	return nil
 }
@@ -2685,87 +2588,10 @@ func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
 	})
 }
 
-// CommitmentClaim configures one seed-backed claim.
-//
-// What is written into the credential is commit(seed) - never the seed.
-// The seed is not delivered to the Wallet by this server at all: a derived
-// seed is recomputable whenever it is wanted, so there is no moment at
-// which it has to be handed over to avoid losing it.
-type CommitmentClaim struct {
-	// Seed names the entry in apigw.seeds that backs this claim.
-	//
-	// Required for an issuer-held commitment. A claim whose commitment the
-	// HOLDER computes names no seed source - the issuer never sees that
-	// seed - and is configured with Source instead.
-	Seed string `yaml:"seed,omitempty" validate:"required_without=Source" doc_example:"\"primary\""`
-
-	// Source names a party other than this issuer as the origin of the
-	// value. The only value is "holder": the commitment arrives in the
-	// Credential Request and is written as sent.
-	//
-	// Not implemented here - it needs a record of which commitment a
-	// subject already supplied, and the issuer has no store - so a
-	// configuration naming it is refused at startup.
-	Source string `yaml:"source,omitempty" validate:"omitempty,oneof=holder" doc_example:"\"holder\""`
-
-	// Subjects is an ORDERED list of dotted paths into the document data
-	// naming the stable subject identifiers this claim's seed is derived
-	// from.
-	//
-	// They are the only inputs that separate one person's seed from
-	// another's, so what they point at decides what "the same person"
-	// means for every pseudonym built on this credential.
-	//
-	// A list rather than one path because one identifier is frequently
-	// not an identifier on its own: a national personal number is unique
-	// within its country and a document number within its scheme, so the
-	// country or the scheme has to be derived over as well or two people
-	// in different populations collide. A deployment issuing a Swedish
-	// PID might configure the personnummer alone; one issuing across
-	// member states configures the issuing country and the personnummer,
-	// in that order.
-	//
-	// ORDER IS PART OF THE DERIVATION. ["a","b"] and ["b","a"] are
-	// different seeds, so reordering this list repseudonymises everyone
-	// as surely as changing the secret does. A one-element list derives
-	// exactly what that identifier derived on its own.
-	//
-	// Every path must resolve, to a non-empty string. There is no
-	// fallback and no skipping: deriving over "" would hand every subject
-	// whose identity did not resolve the same seed - and dropping an
-	// absent entry would be worse, since ["a",""] would then derive what
-	// ["a"] derives and hand one subject another subject's pseudonym.
-	Subjects []string `yaml:"subjects,omitempty" validate:"required_with=Seed,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
-
-	// Commit names the commitment function. Empty means "sha-256", which
-	// is the only one registered.
-	Commit string `yaml:"commit,omitempty" validate:"omitempty,oneof=sha-256" doc_example:"\"sha-256\""`
-
-	// Context separates populations that must not share seeds.
-	//
-	// Empty is the ordinary case and the right default: a subject has ONE
-	// seed, so two credential types issued to the same person lead back to
-	// the same person. Setting it per credential would mean they do not.
-	Context string `yaml:"context,omitempty" validate:"omitempty,max=64"`
-
-	// Encoding is how the commitment bytes are written into the document
-	// data. Empty picks by format: base64 for mso_mdoc, whose bstr carrier
-	// is base64 in JSON, and hex for everything else.
-	Encoding string `yaml:"encoding,omitempty" validate:"omitempty,oneof=hex base64" doc_example:"\"hex\""`
-}
-
 type CredentialMetadata struct {
-	// Commitments marks claims of this credential as seed-backed: the
-	// claim's value is a commitment over a per-subject seed rather than a
-	// value from a data source.
-	//
-	// Keyed by where the value goes in the document data the issuer
-	// receives - the element identifier for mso_mdoc, which is flat, and a
-	// dotted path for the other formats.
-	//
-	// Absent means this credential has no such claim and is issued exactly
-	// as it is today.
-	Commitments map[string]*CommitmentClaim `yaml:"commitments,omitempty" json:"-" validate:"omitempty,dive" doc_key:"claim path"`
+	// AuxiliaryData is the Credential Auxiliary Data this credential
+	// exchanges, published as auxiliary_data_supported.
+	AuxiliaryData *openid4vci.AuxiliaryDataSupported `yaml:"auxiliary_data,omitempty" json:"-"`
 
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
@@ -3592,8 +3418,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			continue
 		}
 		credConfig := openid4vci.CredentialConfigurationsSupported{
-			Format: constructor.Format,
-			Scope:  scope,
+			Format:                 constructor.Format,
+			Scope:                  scope,
+			AuxiliaryDataSupported: constructor.AuxiliaryData,
 		}
 
 		if constructor.Format == "mso_mdoc" {

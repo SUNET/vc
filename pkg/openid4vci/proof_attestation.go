@@ -52,6 +52,21 @@ type ProofAttestationClaims struct {
 
 	// AttestationProcess describes the attestation process, OPTIONAL
 	AttestationProcess string `json:"attestation_process,omitempty"`
+
+	// AuxiliaryData is the Wallet's Auxiliary Data Entries, OPTIONAL
+	// (Credential Auxiliary Data). ExtractAuxiliaryData decodes it, so
+	// validating the attestation is independent of it.
+	AuxiliaryData json.RawMessage `json:"auxiliary_data,omitempty"`
+}
+
+// ExtractAuxiliaryData returns the hash_commitment entries of the
+// auxiliary_data claim. Use it only on a proof that Verify accepted.
+func (p ProofAttestation) ExtractAuxiliaryData() ([]AuxiliaryDataEntry, error) {
+	var claims ProofAttestationClaims
+	if err := jwtPayload(string(p), &claims); err != nil {
+		return nil, err
+	}
+	return decodeWalletAuxiliaryData(claims.AuxiliaryData)
 }
 
 // Validate parses and validates the Key Attestation JWT structure according to OpenID4VCI spec.

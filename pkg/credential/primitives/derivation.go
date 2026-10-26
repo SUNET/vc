@@ -55,6 +55,12 @@ type Derivation struct {
 	// input; see RandomArgs for where the value is generated and how long
 	// it lives.
 	Random *RandomArgs `yaml:"random,omitempty"`
+	// Copy writes an input claim's value, of any type, under another
+	// claim name.
+	Copy *CopyArgs `yaml:"copy,omitempty"`
+	// HashCommitment fulfils a to_wallet hash_commitment entry of the
+	// credential's auxiliary_data.
+	HashCommitment *HashCommitmentArgs `yaml:"hash_commitment,omitempty"`
 }
 
 // Applier is the shape every primitive Args struct implements. Every
@@ -101,7 +107,8 @@ func (d *Derivation) InputClaim() string {
 func (d *Derivation) ReformatsInput() bool {
 	return d.Lowercase != nil || d.Uppercase != nil || d.Trim != nil ||
 		d.CountryAlpha2 != nil || d.CountryAlpha3 != nil ||
-		d.YYYYMMDDToISO != nil || d.SWAMIDHighestAssuranceLevel != nil
+		d.YYYYMMDDToISO != nil || d.SWAMIDHighestAssuranceLevel != nil ||
+		d.Copy != nil
 }
 
 // SelectedName returns the YAML key of the configured primitive, or ""
