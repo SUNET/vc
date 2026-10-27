@@ -69,7 +69,33 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		// its namespace-qualified literal key; SD-JWT always nests.
 		setClaimPath(sourceFormat, verified, presented, claim, val)
 	}
-	authCtx.VerifiedClaims = verified
+	// Normalised BEFORE it is stored, not after it is read.
+	//
+	// These claims are about to cross the cache, and the memory store
+	// hands back exactly what it was given while a Mongo-backed one
+	// round-trips through BSON. A decoded mdoc date is a cbor.Tag, which
+	// has no BSON representation: it comes back as a bson.D of {number,
+	// content}, and the derivation that reads it at issuance refuses it
+	// with "value of type bson.D is not a date". The credential is
+	// refused, under HA only, naming the date rather than the storage -
+	// and no test sees it, because every test derives and reads back in
+	// one process.
+	//
+	// documentValue is the conversion that already exists for this: its
+	// time.Time and []byte cases are there because those two diverged by
+	// backend in the same way. A CBOR tag is the third, and the only one
+	// still reaching the store as a type the store cannot carry.
+	//
+	// Fail closed rather than storing what cannot be read back: a value
+	// no representation can carry is refused here, where the claim can
+	// still be named, instead of at issuance where it cannot.
+	storable, err := documentObject(verified)
+	if err != nil {
+		return helpers.NewErrorDetailsWithStatus("unrepresentable_claim",
+			fmt.Sprintf("a presented claim cannot be carried through to issuance: %v", err), 400)
+	}
+
+	authCtx.VerifiedClaims = storable
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		return serverFault(fmt.Errorf("failed to persist verified claims: %w", err))
 	}
@@ -88,9 +114,9 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// A derivation targeting a dotted path would otherwise write its result
 	// into the holder's verified claims. buildPresentationDocument already
 	// clones for the same reason.
-	previewData := credential.CloneNestedClaims(verified)
+	previewData := credential.CloneNestedClaims(storable)
 	now := time.Now()
-	derived, err := credential.ApplyDerivations(pScope.Derivations, verified, now)
+	derived, err := credential.ApplyDerivations(pScope.Derivations, storable, now)
 	if err != nil {
 		// Not every derivation failure is ours. A scope deriving age from
 		// a required birthdate gets whatever the credential carried, and a

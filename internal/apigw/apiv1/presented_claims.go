@@ -186,6 +186,44 @@ func normaliseFullDate(v any) (string, error) {
 // one. And a negative fraction truncates TOWARD ZERO, so -0.5 became
 // 1970-01-01 when the second it falls in is 1969-12-31; seconds since
 // the epoch floor, they do not round to it.
+// epochTime returns the instant a CBOR tag 1 carries, if v is one.
+//
+// Separate from epochFullDate because the two want different things from
+// the same tag: issuance wants the DATE, and the cache boundary wants a
+// value that survives being stored. Both go through time.Unix in UTC, so
+// they cannot disagree about which day it is.
+func epochTime(v any) (time.Time, bool) {
+	tag, ok := v.(cbor.Tag)
+	if p, isPtr := v.(*cbor.Tag); isPtr {
+		if p == nil {
+			return time.Time{}, false
+		}
+		tag, ok = *p, true
+	}
+	if !ok || tag.Number != 1 {
+		return time.Time{}, false
+	}
+	switch n := tag.Content.(type) {
+	case uint64:
+		if n > math.MaxInt64 {
+			return time.Time{}, false
+		}
+		return time.Unix(int64(n), 0).UTC(), true
+	case int64:
+		return time.Unix(n, 0).UTC(), true
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return time.Time{}, false
+		}
+		seconds := math.Floor(n)
+		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
+			return time.Time{}, false
+		}
+		return time.Unix(int64(seconds), 0).UTC(), true
+	}
+	return time.Time{}, false
+}
+
 func epochFullDate(content any) (string, error) {
 	switch n := content.(type) {
 	case uint64:
@@ -257,6 +295,15 @@ func documentValue(v any) (any, error) {
 	case cbor.Tag, *cbor.Tag:
 		if s, ok := claimString(typed); ok {
 			return s, nil
+		}
+		// A tag 1 epoch is the one other date shape an mdoc can carry,
+		// and normaliseFullDate accepts it - so it has to survive this
+		// conversion too, or normalising on the way INTO the cache
+		// would refuse a presentation that issues fine without one.
+		// Rendered as the timestamp string a time.Time becomes, which
+		// normaliseFullDate parses back to the same UTC date.
+		if t, ok := epochTime(typed); ok {
+			return jsonTimestamp(t)
 		}
 		return nil, fmt.Errorf("value of type %T is a CBOR tag this build cannot represent", v)
 
