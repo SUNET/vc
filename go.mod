@@ -38,7 +38,7 @@ require (
 	github.com/kaptinlin/jsonschema v0.9.10
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/klauspost/compress v1.20.3
-	github.com/lestrrat-go/jwx/v3 v3.3.0
+	github.com/lestrrat-go/jwx/v3 v3.4.0
 	github.com/lithammer/shortuuid/v4 v4.3.0
 	github.com/miekg/pkcs11 v1.1.2
 	github.com/moogar0880/problems v1.0.1
