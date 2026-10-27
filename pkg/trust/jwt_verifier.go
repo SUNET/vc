@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -94,6 +95,20 @@ func NewJWTTrustVerifier(cfg JWTTrustVerifierConfig) *JWTTrustVerifier {
 // that uses the iss claim conventionally, WIAs included; vct simply stays
 // empty for non-SD-JWT-VC tokens like a WIA.
 func (v *JWTTrustVerifier) VerifyJWTSignature(ctx context.Context, tokenString, scope string) (*jwt.Token, *JWTKeyMaterial, error) {
+	return v.verifyJWTSignature(ctx, tokenString, scope, "")
+}
+
+// verifyJWTSignature is VerifyJWTSignature with an issuer to fall back on
+// when the token names none.
+//
+// Only key RESOLUTION uses it: a kid header resolves through JWKS discovery
+// under an issuer identity, and a token that carries no iss leaves that
+// discovery with nothing to discover from. draft-ietf-oauth-status-list
+// Section 5.1 does not require iss, so that is a conforming token rather
+// than a broken one, and a deployment that has configured
+// verifier.revocation.status_list_issuer has already said whose lists these
+// are.
+func (v *JWTTrustVerifier) verifyJWTSignature(ctx context.Context, tokenString, scope, fallbackIssuer string) (*jwt.Token, *JWTKeyMaterial, error) {
 	allowedSet := BuildAllowedAlgorithmSet(v.allowedAlgs)
 
 	// keyInfo is captured by the keyfunc closure and populated during jwt.Parse.
@@ -110,6 +125,9 @@ func (v *JWTTrustVerifier) VerifyJWTSignature(ctx context.Context, tokenString, 
 
 		// Extract issuer and credential type from claims
 		issuerID, credentialType := ExtractJWTClaimsInfo(token)
+		if issuerID == "" {
+			issuerID = fallbackIssuer
+		}
 
 		// Extract key material from header (x5c, jwk, DID, or kid/JWKS resolution)
 		ki, err := v.extractJWTKeyMaterial(ctx, token, issuerID, scope, credentialType)
@@ -192,6 +210,193 @@ func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken stri
 		"key_type", keyInfo.KeyType, "trust_framework", decision.TrustFramework)
 
 	return nil
+}
+
+// StatusListSignerAction is the AuthZEN action.name used when evaluating
+// the signer of a Token Status List. It matches go-wallet-backend's
+// trust.StatusListSignerAction so that one go-trust policy governs both
+// ends of the same exchange.
+const StatusListSignerAction = "status-list-signer"
+
+// StatusListIssuerFallbackAction is the action tried when
+// StatusListSignerAction does not produce a trusted decision. It is the
+// ordinary credential-issuer policy, and it covers the common deployment
+// where the credential issuer signs the status lists for the credentials
+// it issued: such a party is already trusted as an issuer, and a
+// deployment should not have to name it twice to keep revocation working.
+// go-wallet-backend does the same two calls, in the same order.
+const StatusListIssuerFallbackAction = string(RoleCredentialIssuer)
+
+// statusListTokenIssuer returns a verified status list token's own iss
+// claim, or "" when it carries none.
+func statusListTokenIssuer(token *jwt.Token) string {
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return ""
+	}
+	issuer, _ := claims["iss"].(string)
+	return issuer
+}
+
+// statusListSubjectFromURI reduces a status list URL to the origin that
+// served it, for use as a trust subject when the token carries no iss.
+func statusListSubjectFromURI(listURI string) string {
+	u, err := url.Parse(listURI)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// VerifyStatusListToken verifies a Status List Token's signature using key
+// material carried in its OWN header - x5c or jwk, and the same DID and
+// kid/JWKS paths every other JWT here uses - and then evaluates trust in
+// the signer through go-trust.
+//
+// A status list decides whether a credential is still valid, so the
+// question "may this party say that" is the same trust question asked of
+// the credential's issuer, and it has to be answered the same way. Taking
+// the key from a configured file or from JWKS discovery alone answers only
+// "is this the key I expected", never "is this party trusted to speak for
+// these credentials" - and with revocation.fail_open at its default, a
+// failure to answer is tolerated.
+//
+// Two evaluations are made, in order:
+//
+//  1. "status-list-signer". Being trusted to issue credentials is not the
+//     same as being trusted to publish their revocation status: with an
+//     external status service the two are different parties signing with
+//     different keys, and judging the status service as a credential issuer
+//     would deny every legitimate one.
+//  2. "credential-issuer", only if the first did not produce a trusted
+//     decision. This covers the common case - the credential issuer signing
+//     the status lists for its own credentials. That party is already named
+//     as an issuer, and a deployment should not have to name it a second
+//     time under a different action just to keep revocation working.
+//
+// go-wallet-backend makes the same two calls in the same order, so one
+// policy set covers both ends of the exchange.
+//
+// Role is left empty on both so GetEffectiveAction uses the explicit action
+// rather than composing one from the role.
+//
+// NOTE FOR DEPLOYMENTS: go-trust falls back to its DEFAULT policy for an
+// unknown action name, so a deployment that defines neither action judges
+// status list signers by whatever the default says rather than failing
+// loudly.
+//
+// The returned token has a verified signature AND a trusted signer. It is
+// distinct from EvaluateIssuerTrust only in that a Status List Token is a
+// plain JWT rather than an SD-JWT, so there is nothing to split and no vct
+// to read.
+func (v *JWTTrustVerifier) VerifyStatusListToken(ctx context.Context, tokenString, listURI, fallbackIssuer string) (*jwt.Token, error) {
+	if v.trustEvaluator == nil {
+		return nil, fmt.Errorf("trust evaluator not initialized")
+	}
+
+	// fallbackIssuer is verifier.revocation.status_list_issuer, and it is
+	// needed for KEY RESOLUTION: a token with a kid header resolves through
+	// JWKS discovery under an issuer identity, and Section 5.1 does not
+	// require iss - so a conforming status service that omits it left
+	// discovery with nothing to discover from, and the configured issuer
+	// could not help because this path never saw it. With fail_open at its
+	// default, that failure reads as "not revoked".
+	token, keyInfo, err := v.verifyJWTSignature(ctx, tokenString, listURI, fallbackIssuer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Subject: the token's own iss when it has one, otherwise the origin of
+	// the list URI. A status list token need not carry iss (Section 5.1's
+	// required claims are sub, iat and status_list), and a policy still has
+	// to name something - the origin is what the deployment actually
+	// fetched from. Same rule as go-wallet-backend uses.
+	//
+	// Read from the CLAIMS, not from keyInfo.IssuerID. For an x5c token
+	// with no iss, IssuerID is filled in from the leaf certificate's common
+	// name (see extractJWTKeyMaterial), so using it here asked the PDP
+	// about a CN while the rule above - and the deployment's policy - say
+	// the origin. A conforming status service that signs with x5c and omits
+	// iss would have been judged as whatever its certificate happened to be
+	// named.
+	subject := statusListTokenIssuer(token)
+	if subject == "" {
+		// The operator named whose lists these are; that is a better answer
+		// than the origin, and it is the identity the key was resolved
+		// under.
+		subject = fallbackIssuer
+	}
+	if subject == "" {
+		subject = statusListSubjectFromURI(listURI)
+	}
+	if subject == "" {
+		return nil, fmt.Errorf("cannot determine a trust subject for status list %q", listURI)
+	}
+
+	decision, action, err := v.evaluateStatusListSigner(ctx, subject, keyInfo, listURI)
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Trusted {
+		v.log.Warn("Status list signer not trusted",
+			"list_uri", listURI, "subject", subject, "action", action,
+			"key_type", keyInfo.KeyType, "reason", decision.Reason,
+			"trust_framework", decision.TrustFramework)
+		return nil, fmt.Errorf("status list %q is signed by an untrusted party: %s", listURI, decision.Reason)
+	}
+
+	v.log.Info("Status list signer trust verified",
+		"list_uri", listURI, "subject", subject, "action", action,
+		"key_type", keyInfo.KeyType, "trust_framework", decision.TrustFramework)
+
+	return token, nil
+}
+
+// evaluateStatusListSigner asks the PDP about the status list signer, first
+// as a status-list-signer and then, if that is not trusted, as the ordinary
+// credential issuer. It returns the decision that was acted on along with
+// the action that produced it.
+//
+// An evaluation ERROR is not a denial - the PDP did not answer - so the
+// fallback is tried after one too, and the first error is reported only if
+// the fallback also fails to produce an answer. A refusal from the fallback
+// is reported as a refusal, not as the earlier transport error, because a
+// policy that says no is the more specific fact.
+func (v *JWTTrustVerifier) evaluateStatusListSigner(ctx context.Context, subject string, keyInfo *JWTKeyMaterial, listURI string) (*TrustDecision, string, error) {
+	evaluate := func(action string) (*TrustDecision, error) {
+		return v.trustEvaluator.Evaluate(ctx, &EvaluationRequest{
+			SubjectID: subject,
+			KeyType:   keyInfo.KeyType,
+			Key:       keyInfo.KeyMaterial,
+			Action:    action,
+		})
+	}
+
+	decision, err := evaluate(StatusListSignerAction)
+	if err == nil && decision != nil && decision.Trusted {
+		return decision, StatusListSignerAction, nil
+	}
+
+	v.log.Debug("Status list signer not trusted under status-list-signer, trying credential-issuer",
+		"list_uri", listURI, "subject", subject, "error", err)
+
+	fallback, fallbackErr := evaluate(StatusListIssuerFallbackAction)
+	if fallbackErr == nil && fallback != nil {
+		return fallback, StatusListIssuerFallbackAction, nil
+	}
+
+	// Neither action produced an answer. Report the first failure, which is
+	// the one about the action this call is really asking about. An
+	// evaluator that returns neither a decision nor an error has broken its
+	// contract; treat that as a refusal to answer rather than dereferencing
+	// the nil it handed back.
+	if err == nil {
+		err = fallbackErr
+	}
+	if err == nil {
+		err = fmt.Errorf("trust evaluator returned no decision")
+	}
+	return nil, "", fmt.Errorf("trust evaluation error for status list %q: %w", listURI, err)
 }
 
 // extractJWTKeyMaterial extracts key type, key material, and public key from the JWT header.

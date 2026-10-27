@@ -3,10 +3,13 @@ package revocation
 import (
 	"context"
 	"crypto"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -23,10 +26,84 @@ type StatusListChecker struct {
 	httpClient  *http.Client
 	cache       cache.Cache[[]uint8]
 	keyResolver KeyResolver
+	// fallbackIssuer is the issuer identity used for Status List Tokens
+	// that carry no iss claim. Empty means such tokens are refused; see
+	// resolveStatusListKey.
+	fallbackIssuer string
+	// statusListKey is the signing key named directly by configuration,
+	// for a service that publishes it nowhere a resolver can follow.
+	statusListKey crypto.PublicKey
+	// tokenVerifier verifies a Status List Token against key material in
+	// its own header and evaluates trust in the signer. When set it is the
+	// authority; see WithTokenVerifier.
+	tokenVerifier StatusListTokenVerifier
 }
 
 // StatusListCheckerOption configures a StatusListChecker.
 type StatusListCheckerOption func(*StatusListChecker)
+
+// WithFallbackIssuer sets the issuer identity to resolve a signing key
+// under when a Status List Token carries no iss claim. Without it such a
+// token is refused rather than resolved against a guess.
+func WithFallbackIssuer(issuer string) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.fallbackIssuer = issuer
+	}
+}
+
+// StatusListTokenVerifier verifies a Status List Token's signature using
+// key material carried in the token's own header (x5c or jwk) and evaluates
+// trust in the signer through go-trust.
+//
+// Declared here as an interface rather than importing the trust package so
+// that pkg/revocation stays free of the trust stack; the verifier service
+// supplies the implementation, the same way it supplies the KeyResolver.
+type StatusListTokenVerifier interface {
+	// VerifyStatusListToken returns the parsed token only if its signature
+	// verified AND its signer is trusted. listURI is passed for diagnostics
+	// and policy scope.
+	VerifyStatusListToken(ctx context.Context, tokenString, listURI, fallbackIssuer string) (*jwt.Token, error)
+}
+
+// WithTokenVerifier supplies trust-evaluated verification for Status List
+// Tokens, and is the path a deployment with a PDP should use.
+//
+// The key material comes from the token's own header - x5c or jwk - and
+// go-trust decides whether that party may speak for these credentials. That
+// is a different question from the one a key resolver answers: resolving a
+// key establishes "this is the key I expected to find", never "this signer
+// is trusted to say a credential is revoked". A status list is exactly such
+// a statement, so it is the same trust question asked of a credential's
+// issuer and it is answered the same way.
+//
+// When set it takes precedence over both WithStatusListKey and the
+// KeyResolver, which remain for deployments without a trust framework.
+func WithTokenVerifier(v StatusListTokenVerifier) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.tokenVerifier = v
+	}
+}
+
+// WithStatusListKey pins the public key that verifies Status List Tokens
+// from the configured status-list issuer, for a service that publishes that
+// key nowhere a resolver can reach.
+//
+// Scoped, not global: it answers for tokens carrying no iss, and for tokens
+// whose iss matches WithFallbackIssuer. Everything else still goes to the
+// resolver, because a deployment may run vc's own registry alongside an
+// external status service and those lists are signed by different keys - an
+// unscoped pin made the external key answer for registry tokens too, so
+// registry lists stopped verifying, which fail_open would then tolerate.
+//
+// Within that scope it does take precedence over the resolver: an issuer
+// identity whose JWKS does not carry the status-list key resolves to
+// nothing, which with fail_open turns a revoked credential into an accepted
+// one.
+func WithStatusListKey(key crypto.PublicKey) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.statusListKey = key
+	}
+}
 
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(client *http.Client) StatusListCheckerOption {
@@ -67,8 +144,12 @@ func NewStatusListChecker(opts ...StatusListCheckerOption) (*StatusListChecker, 
 	if c.cache == nil {
 		return nil, errors.New("cache is required: use WithCache")
 	}
-	if c.keyResolver == nil {
-		return nil, errors.New("key resolver is required: use WithKeyResolver")
+	// Either path can verify a token: a key resolver, or trust-evaluated
+	// verification from the token's own header. Requiring the resolver
+	// unconditionally forced a deployment that verifies through go-trust to
+	// configure one it would never consult.
+	if c.keyResolver == nil && c.tokenVerifier == nil {
+		return nil, errors.New("status list verification needs a key resolver or a token verifier: use WithKeyResolver or WithTokenVerifier")
 	}
 
 	return c, nil
@@ -80,8 +161,15 @@ func (c *StatusListChecker) Supports(scheme Scheme) bool {
 }
 
 // Extract extracts a Token Status List reference from credential claims.
+//
+// SD-JWT, JWP and mdoc all present it as the JOSE "status" claim (mdoc via
+// MDocDocumentClaims.GetClaims, which surfaces the MSO parameter in that
+// shape). W3C VC 2.0 has no such claim, so credentialStatus is tried next.
 func (c *StatusListChecker) Extract(claims map[string]any) *Reference {
-	return ExtractStatusListReference(claims)
+	if ref := ExtractStatusListReference(claims); ref != nil {
+		return ref
+	}
+	return ExtractCredentialStatusReference(claims)
 }
 
 // CheckStatus checks the revocation status via Token Status List.
@@ -172,24 +260,212 @@ func (c *StatusListChecker) fetchStatusList(ctx context.Context, uri string) ([]
 	}
 
 	contentType := resp.Header.Get("Content-Type")
-	return c.parseStatusListToken(ctx, body, contentType)
+	// The URI travels with the bytes: Section 8.3 requires the token's sub
+	// to equal the uri the Referenced Token pointed at, and a parser that
+	// cannot see the uri cannot make that check.
+	return c.parseStatusListToken(ctx, uri, body, contentType)
 }
 
-func (c *StatusListChecker) parseStatusListToken(ctx context.Context, data []byte, contentType string) ([]uint8, error) {
-	switch contentType {
+func (c *StatusListChecker) parseStatusListToken(ctx context.Context, uri string, data []byte, contentType string) ([]uint8, error) {
+	// A Content-Type may carry parameters (charset, boundary); compare only
+	// the media type itself.
+	mediaType := contentType
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+
+	switch mediaType {
 	case tokenstatuslist.MediaTypeCWT:
-		return c.parseCWTStatusList(ctx, data)
+		return c.parseCWTStatusList(ctx, uri, data)
 	case tokenstatuslist.MediaTypeJWT:
-		return c.parseJWTStatusList(ctx, data)
+		return c.parseJWTStatusList(ctx, uri, data)
 	default:
 		if len(data) > 0 && data[0] == 0xD2 {
-			return c.parseCWTStatusList(ctx, data)
+			return c.parseCWTStatusList(ctx, uri, data)
 		}
-		return c.parseJWTStatusList(ctx, data)
+		return c.parseJWTStatusList(ctx, uri, data)
 	}
 }
 
-func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte) ([]uint8, error) {
+// resolveStatusListKey resolves the key a Status List Token was signed with.
+//
+// draft-ietf-oauth-status-list Section 5.1 does NOT require an iss claim -
+// the REQUIRED claims are sub, iat and status_list - so refusing every
+// token without one rejects conforming status services, which is what vc
+// used to do.
+//
+// But a missing iss leaves nothing in the token to resolve a key from. The
+// list URI is not a substitute: a service such as siros-status-service
+// publishes its status-list signing key separately from the list URL, so
+// treating the URI as an issuer identity sends the resolver looking for
+// discovery under "<list URI>/.well-known/...", which is not there. It
+// would fail anyway - just with an error describing the wrong problem, and
+// on a path that looks like it was designed to work.
+//
+// So the fallback is configuration (WithFallbackIssuer, from
+// verifier.revocation.status_list_issuer), and with none configured a token
+// without iss is refused. Refusing is the fail-closed answer: an
+// unverifiable status list must not be treated as a readable one.
+func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, uri, kid string) (any, error) {
+	// The configured key pins, but only for the issuer it was configured
+	// for. A deployment may run vc's own registry alongside an external
+	// status service - issuer.status_service documents that as supported -
+	// and those lists are signed by different keys. An unscoped pin made
+	// the external key answer for registry tokens too, so registry lists
+	// stopped verifying the moment a key file was configured, which
+	// fail_open would then tolerate.
+	//
+	// Scope: a token with no iss (there is nothing else to go on), or one
+	// whose iss is the configured status_list_issuer. Anything else goes to
+	// the resolver, which is how registry tokens keep working.
+	if c.pinApplies(issuer) {
+		return c.statusListKey, nil
+	}
+
+	// With a trust verifier configured, the generic resolver is NOT an
+	// acceptable fallback. It answers "is this the key that identity
+	// publishes", never "may this party publish these statuses" - and
+	// reaching it here is how a token gets to a status value with no PDP
+	// decision at all: by carrying no x5c/jwk/kid on the JWT path, or
+	// simply by being served as a CWT, which JWTTrustVerifier cannot judge.
+	// Either way the signer would escape exactly the policy the trust
+	// evaluation was added to enforce, and with revocation.fail_open at its
+	// default the escape reads as "not revoked".
+	//
+	// So in that configuration only an operator-pinned key verifies a token
+	// the PDP cannot judge, and a token outside the pin's scope is refused.
+	if c.tokenVerifier != nil {
+		if c.statusListKey != nil {
+			return nil, fmt.Errorf("status list token for %q is issued by %q, which is not verifier.revocation.status_list_issuer, so the configured status_list_key_file does not apply to it, and its signer cannot be trust-evaluated on this path", uri, issuer)
+		}
+		return nil, fmt.Errorf("status list token for %q cannot be trust-evaluated - it names no key in its own header, or it is a CWT - and no verifier.revocation.status_list_key_file is configured to pin its signing key", uri)
+	}
+
+	if issuer == "" {
+		issuer = c.fallbackIssuer
+	}
+	if issuer == "" {
+		return nil, fmt.Errorf("status list token for %q carries no iss claim, and neither verifier.revocation.status_list_key_file nor verifier.revocation.status_list_issuer is configured, so its signing key cannot be resolved", uri)
+	}
+	return c.keyResolver.ResolveKey(ctx, issuer, kid)
+}
+
+// pinApplies reports whether the configured status_list_key_file covers a
+// token from this issuer.
+//
+// Scoped, not global: a deployment may run vc's own registry alongside an
+// external status service - issuer.status_service documents that as
+// supported - and those lists are signed by different keys. An unscoped pin
+// made the external key answer for registry tokens too, so registry lists
+// stopped verifying the moment a key file was configured, which fail_open
+// then tolerated.
+func (c *StatusListChecker) pinApplies(issuer string) bool {
+	return c.statusListKey != nil && (issuer == "" || issuer == c.fallbackIssuer)
+}
+
+// statusListTokenIssuer reads the iss claim WITHOUT verifying anything.
+//
+// Safe for the one thing it is used for: choosing which key to try. The
+// token still has to verify against whichever key that is, so naming the
+// pinned issuer only buys an attacker a signature check against a key they
+// do not hold, and naming a different one sends them to a path that
+// refuses without a PDP decision.
+func statusListTokenIssuer(tokenString string) string {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Issuer string `json:"iss"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		return ""
+	}
+	return claims.Issuer
+}
+
+// jwtHeaderNamesAKey reports whether a JWS header offers key material a
+// trust verifier can resolve and evaluate: an x5c chain, an embedded jwk,
+// or a kid to discover one under.
+//
+// The header is read WITHOUT verifying anything, which is safe because
+// nothing is trusted on the strength of it - it only chooses which
+// verification path runs, and both paths verify. A token claiming an x5c
+// it does not have is sent to the trust path and refused there.
+func jwtHeaderNamesAKey(tokenString string) bool {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	var header map[string]any
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return false
+	}
+	for _, key := range []string{"x5c", "jwk", "kid"} {
+		if v, ok := header[key]; ok && v != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// checkCWTTypeHeader enforces the statuslist+cwt content type carried in
+// COSE protected header 16 (RFC 9596). The header may hold the media type
+// as a string or as a registered CoAP Content-Format integer; only the
+// string form is defined for this media type, so anything else is refused
+// rather than assumed to be equivalent.
+func checkCWTTypeHeader(headers map[int64]any) error {
+	raw, ok := headers[coseHeaderContentType]
+	if !ok {
+		return fmt.Errorf("status list CWT has no typ header, expected %q", tokenstatuslist.CWTTypHeader)
+	}
+	var typ string
+	switch v := raw.(type) {
+	case string:
+		typ = v
+	case []byte:
+		typ = string(v)
+	default:
+		return fmt.Errorf("status list CWT typ header has unexpected type %T, expected %q", raw, tokenstatuslist.CWTTypHeader)
+	}
+	if !tokenstatuslist.AcceptedCWTTypHeader(typ) {
+		return fmt.Errorf("status list CWT has typ %q, expected %q", typ, tokenstatuslist.CWTTypHeader)
+	}
+	return nil
+}
+
+// coseHeaderContentType is COSE protected header label 16, which carries
+// the payload's media type (RFC 9596 "typ").
+const coseHeaderContentType = 16
+
+// checkSubject enforces Section 8.3: "the sub claim value MUST be equal to
+// the uri claim in the status_list object of the Referenced Token".
+//
+// Without it, ANY status list token the issuer ever signed is accepted for
+// ANY uri - so a stale or unrelated list (one where the index in question
+// happens to still read VALID) can be served in place of the real one and
+// a revoked credential verifies. The signature alone does not bind a token
+// to the list it claims to be.
+func checkSubject(subject, uri string) error {
+	if subject == "" {
+		return errors.New("status list token has no sub claim; it cannot be bound to the requested list URI")
+	}
+	if subject != uri {
+		return fmt.Errorf("status list token sub %q does not match the requested status list URI %q", subject, uri)
+	}
+	return nil
+}
+
+func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, data []byte) ([]uint8, error) {
 	// Decode COSE_Sign1 (CBOR Tag 18)
 	var coseTag cbor.Tag
 	if err := cbor.Unmarshal(data, &coseTag); err != nil {
@@ -226,15 +502,43 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte)
 		kid = string(kidBytes)
 	}
 
+	// Section 6.1 makes the content type mandatory, the same way Section
+	// 5.1 does for a JWT's typ. Without this check a different COSE_Sign1
+	// object signed by the same trusted key is accepted as a status list
+	// if its claims happen to be shaped alike - which is exactly the hole
+	// the JWT path closes and this one did not.
+	if err := checkCWTTypeHeader(headers); err != nil {
+		return nil, err
+	}
+
 	// Decode CWT claims to extract issuer
 	var claims map[int]any
 	if err := cbor.Unmarshal(payloadBytes, &claims); err != nil {
 		return nil, fmt.Errorf("failed to decode CWT claims: %w", err)
 	}
-	issuer, _ := claims[1].(string) // CWT claim 1 = iss
+	issuer, _ := claims[1].(string)  // CWT claim 1 = iss (OPTIONAL)
+	subject, _ := claims[2].(string) // CWT claim 2 = sub (REQUIRED)
 
-	// Resolve signing key and verify signature
-	key, err := c.keyResolver.ResolveKey(ctx, issuer, kid)
+	// Bind the token to the list that was asked for BEFORE trusting
+	// anything in it.
+	if err := checkSubject(subject, uri); err != nil {
+		return nil, err
+	}
+
+	// Resolve signing key and verify signature.
+	//
+	// The CWT path has no trust-evaluated equivalent yet - JWTTrustVerifier
+	// works on JWTs - so it still needs a key, and says so rather than
+	// failing later with a nil dereference.
+	//
+	// A deployment WITH a trust verifier gets a CWT verified only against
+	// an operator-pinned key; resolveStatusListKey refuses anything else in
+	// that configuration. Otherwise serving the same list as a CWT would be
+	// a one-line way around the PDP.
+	if c.keyResolver == nil && c.statusListKey == nil {
+		return nil, errors.New("status list CWT verification requires a key resolver or a configured status_list_key_file; only the JWT path can verify through the trust framework")
+	}
+	key, err := c.resolveStatusListKey(ctx, issuer, uri, kid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve CWT signing key: %w", err)
 	}
@@ -258,68 +562,98 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte)
 		return nil, fmt.Errorf("CWT signature verification failed: %w", verifyErr)
 	}
 
-	// Extract status list from verified claims
-	statusListRaw, ok := claims[65534]
+	// The signature is verified; the claims can now be trusted. Expiry is
+	// checked here because, unlike the JWT path, nothing else does it.
+	if exp, ok := cwtTime(claims[4]); ok && time.Now().After(exp) {
+		return nil, fmt.Errorf("status list token expired at %s", exp.Format(time.RFC3339))
+	}
+
+	// Extract status list from verified claims. The label moved when vc
+	// was aligned with the draft, so both are read - see
+	// tokenstatuslist.CWTStatusListClaim.
+	statusListRaw, ok := tokenstatuslist.CWTStatusListClaim(claims)
 	if !ok {
 		return nil, errors.New("status_list claim not found in CWT")
 	}
 
-	var lstBytes []byte
-	switch sl := statusListRaw.(type) {
-	case map[any]any:
-		for k, v := range sl {
-			switch key := k.(type) {
-			case int:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case int64:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case uint64:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			}
-		}
-	case map[int]any:
-		if b, ok := sl[2].([]byte); ok {
-			lstBytes = b
-		}
-	default:
-		return nil, fmt.Errorf("invalid status_list claim format: %T", statusListRaw)
+	bits, lstBytes, err := tokenstatuslist.CWTStatusListMembers(statusListRaw)
+	if err != nil {
+		return nil, err
 	}
 
-	if lstBytes == nil {
-		return nil, errors.New("lst not found in status_list claim")
-	}
-
-	return tokenstatuslist.DecompressStatuses(lstBytes)
+	return tokenstatuslist.DecompressAndUnpack(lstBytes, bits)
 }
 
-func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte) ([]uint8, error) {
-	tokenString := string(data)
+// cwtTime reads a CWT NumericDate claim, which a CBOR decoder can hand back
+// as any of several integer or float types.
+func cwtTime(raw any) (time.Time, bool) {
+	switch v := raw.(type) {
+	case int64:
+		return time.Unix(v, 0), true
+	case int:
+		return time.Unix(int64(v), 0), true
+	case uint64:
+		return time.Unix(int64(v), 0), true
+	case float64:
+		return time.Unix(int64(v), 0), true
+	default:
+		return time.Time{}, false
+	}
+}
 
-	if c.keyResolver == nil {
-		return nil, errors.New("status list JWT signature verification required but no key resolver configured")
+func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, data []byte) ([]uint8, error) {
+	tokenString := strings.TrimSpace(string(data))
+
+	// Trust-evaluated verification is the authority when configured: the key
+	// comes from the token's own x5c or jwk header and go-trust decides
+	// whether that signer may speak for these credentials.
+	//
+	// Two things take precedence over it, for opposite reasons.
+	//
+	// A PINNED KEY IN SCOPE WINS. status_list_key_file is an operator
+	// statement about WHICH key signs these lists; the trust path would
+	// verify against whatever key the token carries instead, so a status
+	// service that rotated its signing key - or anyone who minted a token
+	// with their own jwk - would be accepted while the operator believed
+	// the pin was enforcing something. That is worse with a permissive
+	// evaluator, but it is wrong with any of them, because the pin is not a
+	// hint.
+	//
+	// A TOKEN THAT NAMES NO KEY cannot take the trust path at all.
+	// JWTTrustVerifier resolves key material from x5c, jwk, a DID, or
+	// kid + JWKS discovery; a token carrying none of those gives it nothing
+	// to resolve and nothing to evaluate, and an operator whose status
+	// service publishes no key material configures status_list_key_file
+	// precisely for that case. Sending such a token down this path anyway
+	// made the pinned key unreachable, so it failed to verify - and
+	// fail_open then accepted a revoked credential.
+	//
+	// Neither is a weakening: with a trust verifier set, resolveStatusListKey
+	// hands back the pinned key or refuses, never the generic resolver, so a
+	// token cannot dodge the PDP by omitting its header or by claiming an
+	// issuer outside the pin's scope.
+	if c.tokenVerifier != nil && !c.pinApplies(statusListTokenIssuer(tokenString)) && jwtHeaderNamesAKey(tokenString) {
+		token, err := c.tokenVerifier.VerifyStatusListToken(ctx, tokenString, uri, c.fallbackIssuer)
+		if err != nil {
+			return nil, err
+		}
+		return c.statusesFromVerifiedJWT(token, uri)
 	}
 
-	// Build a jwt.Keyfunc that delegates to the generic KeyResolver
+	// A pinned key is enough on its own: it is the whole point of
+	// status_list_key_file that a deployment can verify lists from a
+	// service its resolver cannot discover a key for.
+	if c.keyResolver == nil && c.statusListKey == nil {
+		return nil, errors.New("status list JWT signature verification required but no key resolver, pinned key or usable token verifier configured")
+	}
+
+	// Build a jwt.Keyfunc that delegates to the generic KeyResolver. iss is
+	// OPTIONAL per Section 5.1; see resolveStatusListKey.
 	keyFunc := func(token *jwt.Token) (any, error) {
 		claims, _ := token.Claims.(jwt.MapClaims)
 		issuer, _ := claims["iss"].(string)
 		kid, _ := token.Header["kid"].(string)
-		if issuer == "" {
-			return nil, errors.New("status list token missing iss claim")
-		}
-		return c.keyResolver.ResolveKey(ctx, issuer, kid)
+		return c.resolveStatusListKey(ctx, issuer, uri, kid)
 	}
 
 	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{
@@ -335,9 +669,38 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte)
 		return nil, errors.New("invalid JWT token")
 	}
 
+	return c.statusesFromVerifiedJWT(token, uri)
+}
+
+// statusesFromVerifiedJWT applies the checks that follow signature
+// verification, whichever path performed it: typ, sub, and the status_list
+// members. Shared so the trust-evaluated path cannot quietly skip them.
+func (c *StatusListChecker) statusesFromVerifiedJWT(token *jwt.Token, uri string) ([]uint8, error) {
+	// Section 5.1: the typ header MUST be statuslist+jwt. Without this a
+	// token minted for any other purpose by the same issuer - an access
+	// token, an attestation - is accepted as a status list.
+	if typ, _ := token.Header["typ"].(string); !strings.EqualFold(typ, tokenstatuslist.JWTTypHeader) {
+		return nil, fmt.Errorf("status list token has typ %q, expected %q", typ, tokenstatuslist.JWTTypHeader)
+	}
+
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("failed to extract JWT claims")
+	}
+
+	subject, _ := claims["sub"].(string)
+	if err := checkSubject(subject, uri); err != nil {
+		return nil, err
+	}
+
+	// Expiry is checked HERE rather than left to the parser. The
+	// trust-evaluated path goes through JWTTrustVerifier, which parses with
+	// jwt.WithoutClaimsValidation so that trust - not the clock - decides
+	// what to do with the key material; without this an expired status list
+	// would be accepted on that path while being rejected on the other.
+	// The CWT path checks its own exp for the same reason.
+	if exp, err := claims.GetExpirationTime(); err == nil && exp != nil && time.Now().After(exp.Time) {
+		return nil, fmt.Errorf("status list token expired at %s", exp.Time.Format(time.RFC3339))
 	}
 
 	statusListClaim, ok := claims["status_list"].(map[string]any)
@@ -350,7 +713,39 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte)
 		return nil, errors.New("lst not found in status_list claim")
 	}
 
-	return tokenstatuslist.DecodeAndDecompress(lst)
+	bits, err := jsonBits(statusListClaim["bits"])
+	if err != nil {
+		return nil, err
+	}
+
+	return tokenstatuslist.DecodeDecompressAndUnpack(lst, bits)
+}
+
+// jsonBits reads the REQUIRED status_list.bits member. An absent or
+// unreadable one is an error, never a fall back to the default width:
+// guessing returns another credential's status instead of failing.
+func jsonBits(raw any) (int, error) {
+	switch v := raw.(type) {
+	case float64:
+		if v != float64(int(v)) {
+			return 0, fmt.Errorf("status_list bits %v is not an integer", v)
+		}
+		return int(v), nil
+	case int:
+		return v, nil
+	case int64:
+		return int(v), nil
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("status_list bits %q is not an integer: %w", v.String(), err)
+		}
+		return int(i), nil
+	case nil:
+		return 0, errors.New("status_list claim is missing the required bits member")
+	default:
+		return 0, fmt.Errorf("status_list bits has unexpected type %T", raw)
+	}
 }
 
 func mapStatusCode(code uint8) Status {

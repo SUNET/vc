@@ -20,9 +20,14 @@ const (
 	StatusSuspended uint8 = 2 // SUSPENDED (0x02)
 )
 
-// Bits is the number of bits per status entry.
-// We hardcode to 8 bits (1 byte per status) which supports status values 0-255.
-const Bits = 8
+// Bits is the number of bits per status entry this package generates by
+// default.
+//
+// Deprecated: use DefaultBits when you mean "what we generate", and the
+// token's own status_list.bits member when you mean "how to read this list".
+// Decoding a list at a hardcoded width returns another credential's status
+// rather than failing - see bits.go.
+const Bits = DefaultBits
 
 // Media types for Status List Tokens
 const (
@@ -31,21 +36,25 @@ const (
 )
 
 // StatusListClaim represents the status_list claim in the Status List Token (Section 4.2)
-// This structure is used in both JWT and CWT formats for serialization.
+//
+// This is the JWT/JSON shape: Lst is base64url text. The CWT shape, where
+// lst is raw bytes, is CWTStatusList. The cbor tags here name the draft's
+// text keys so the two agree if this struct is ever encoded that way; they
+// used to name integer labels, which the draft's CDDL does not use.
 type StatusListClaim struct {
 	// Bits: REQUIRED. Integer specifying the number of bits per Referenced Token
 	// in the compressed byte array (lst). The allowed values for bits are 1, 2, 4 and 8.
-	Bits int `json:"bits" cbor:"1,keyasint" validate:"required,oneof=1 2 4 8"`
+	Bits int `json:"bits" cbor:"bits" validate:"required,oneof=1 2 4 8"`
 
 	// Lst: REQUIRED. String that contains the status values for all the Referenced Tokens
 	// it conveys statuses for. The value MUST be the base64url-encoded (for JWT) or
 	// raw bytes (for CWT) compressed byte array as specified in Section 4.1.
-	Lst string `json:"lst" cbor:"2,keyasint" validate:"required"`
+	Lst string `json:"lst" cbor:"lst" validate:"required"`
 
 	// AggregationURI: OPTIONAL. String that contains a URI to retrieve the
 	// Status List Aggregation for this type of Referenced Token or Issuer.
 	// See Section 9 for further details.
-	AggregationURI string `json:"aggregation_uri,omitempty" cbor:"3,keyasint,omitempty"`
+	AggregationURI string `json:"aggregation_uri,omitempty" cbor:"aggregation_uri,omitempty"`
 }
 
 // StatusList represents a list of status values and provides methods for
@@ -71,6 +80,19 @@ type StatusList struct {
 
 	// AggregationURI is an optional URI for Status List Aggregation (OPTIONAL)
 	AggregationURI string
+
+	// Bits is the number of bits per entry to encode with (1, 2, 4 or 8).
+	// Zero means DefaultBits. It is published in the token's
+	// status_list.bits member, which is what a verifier reads back.
+	Bits int
+}
+
+// BitsOrDefault returns the configured bits width, or DefaultBits when unset.
+func (sl *StatusList) BitsOrDefault() int {
+	if sl.Bits == 0 {
+		return DefaultBits
+	}
+	return sl.Bits
 }
 
 // New creates a new StatusList with the given statuses.
@@ -122,13 +144,21 @@ func (sl *StatusList) Set(index int, status uint8) error {
 // Compress compresses the status byte array using DEFLATE (zlib) compression
 // as specified in Section 4.1 of the specification.
 func (sl *StatusList) Compress() ([]byte, error) {
-	return CompressStatuses(sl.statuses)
+	packed, err := Pack(sl.statuses, sl.BitsOrDefault())
+	if err != nil {
+		return nil, err
+	}
+	return CompressStatuses(packed)
 }
 
 // CompressAndEncode compresses and encodes as base64url without padding.
 // This is the format used in JWT Status List Tokens (Section 5.1).
 func (sl *StatusList) CompressAndEncode() (string, error) {
-	return CompressAndEncode(sl.statuses)
+	compressed, err := sl.Compress()
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(compressed), nil
 }
 
 // TokenConfig holds configuration for generating a Status List Token (JWT or CWT).
