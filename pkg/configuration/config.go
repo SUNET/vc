@@ -790,12 +790,6 @@ func checkAuthScopes(cfg *model.Cfg) error {
 	return nil
 }
 
-// checkMongoRequirement enforces common.mongo.uri for the services that
-// actually open a MongoDB store.
-//
-// Mongo is the default primary-store backend, so an unset SQL.Backend means
-// Mongo. HA caching has no relational backend yet and always uses Mongo, so
-// it pulls the requirement in regardless of the primary store.
 // pruneForeignSections nils out the service sections this service does not
 // own, so a shared config file will not fail validation on an incomplete
 // sibling stanza.
@@ -874,6 +868,12 @@ func checkStatusListTrustPin(cfg *model.Cfg, serviceName string) error {
 		cfg.Registry.PublicURL, cfg.Registry.PublicURL)
 }
 
+// checkMongoRequirement enforces common.mongo.uri for the services that
+// actually open a MongoDB store.
+//
+// Mongo is the default primary-store backend, so an unset SQL.Backend means
+// Mongo. HA caching has no relational backend yet and always uses Mongo, so
+// it pulls the requirement in regardless of the primary store.
 func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 	requirement := serviceMongoRequirement[serviceName]
 	if requirement == mongoNotRequired {
