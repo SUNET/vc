@@ -27,9 +27,25 @@ type AgeOverThresholdsArgs struct {
 
 // Apply implements Applier.
 func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map[string]any, error) {
-	bd, ok := claims[a.Input].(string)
-	if !ok || bd == "" {
-		return nil, fmt.Errorf("input claim %q missing or not a string", a.Input)
+	// Three different situations, and only one of them is the server's.
+	//
+	// A claim that is ABSENT means this derivation names something no
+	// presentation supplies, which is how the scope was configured and
+	// nothing a Holder can do - so it stays unmarked and is reported as a
+	// server fault.
+	//
+	// A claim that is PRESENT but not a string is what the credential
+	// carried, and an empty string likewise. Both are the Holder's data,
+	// so both must reach the caller marked: the empty one through
+	// AgeOverThresholds, which already says so, and the wrong-typed one
+	// here, because it never gets that far.
+	raw, present := claims[a.Input]
+	if !present {
+		return nil, fmt.Errorf("input claim %q is not present on the credential this derivation reads", a.Input)
+	}
+	bd, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("%w: input claim %q is %T, not a string", ErrInvalidClaimInput, a.Input, raw)
 	}
 	booleans, err := AgeOverThresholds(bd, now, a.Thresholds)
 	if err != nil {
@@ -42,6 +58,17 @@ func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map
 	return out, nil
 }
 
+// ErrInvalidClaimInput marks a derivation that failed because of the
+// CLAIM it was given rather than because of how it was configured or what
+// the server was doing.
+//
+// The distinction is the caller's answer to the wallet. A birthdate that
+// is empty, malformed or in the future is the Holder's data: no amount of
+// retrying changes it, and reporting a server error says the opposite -
+// which is worse than unhelpful once the auth_session has been consumed
+// and there is nothing left to retry with.
+var ErrInvalidClaimInput = errors.New("invalid claim input")
+
 // AgeOverThresholds parses birthdate (ISO YYYY-MM-DD) and returns a map
 // containing, for every threshold N: age_over_N (true if the subject had
 // completed N years at `now`) and over_N_this_year (true if the subject
@@ -51,17 +78,17 @@ func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map
 // Callers pick which thresholds are meaningful for their credential type.
 func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[string]bool, error) {
 	if birthdate == "" {
-		return nil, errors.New("birthdate is empty")
+		return nil, fmt.Errorf("%w: birthdate is empty", ErrInvalidClaimInput)
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
 	bd, err := time.Parse("2006-01-02", birthdate)
 	if err != nil {
-		return nil, fmt.Errorf("invalid birthdate %q: %w", birthdate, err)
+		return nil, fmt.Errorf("%w: invalid birthdate %q: %w", ErrInvalidClaimInput, birthdate, err)
 	}
 	if bd.After(now) {
-		return nil, fmt.Errorf("birthdate %q is in the future", birthdate)
+		return nil, fmt.Errorf("%w: birthdate %q is in the future", ErrInvalidClaimInput, birthdate)
 	}
 	age := now.Year() - bd.Year()
 	ageThisYear := age

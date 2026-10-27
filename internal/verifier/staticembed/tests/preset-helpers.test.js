@@ -108,6 +108,46 @@ describe("groupPresets", () => {
         assert.deepEqual(labels(got.groups[0].presets), ["named", "uncategorized"]);
     });
 
+    // The defect this flag exists for: gdc categorises both of its ZK
+    // presets and features neither, so featured was empty, every preset
+    // went into a group, and the groups started collapsed - a heading, an
+    // empty button list and a "Show more presets" link. Every preset was
+    // one click away and none was visible.
+    it("does not collapse the groups when nothing is featured", () => {
+        const entries = [
+            preset("PID (mdoc) - ZK Proof (Vega)", { category: "ZK Proofs" }),
+            preset("Age Over 18 - ZK Proof (Vega)", { category: "ZK Proofs" }),
+        ];
+        const got = groupPresets(entries, ["ZK Proofs"]);
+
+        assert.deepEqual(got.featured, [], "this test only means anything with nothing featured");
+        assert.equal(got.groups.length, 1, "the presets still group by category");
+        assert.equal(
+            got.collapsible,
+            false,
+            "with nothing to hide them behind, the groups must render at rest",
+        );
+    });
+
+    it("collapses the groups once something is featured", () => {
+        const entries = [
+            preset("everyday", { featured: true }),
+            preset("niche", { category: "ZK Proofs" }),
+        ];
+        const got = groupPresets(entries, ["ZK Proofs"]);
+
+        assert.deepEqual(labels(got.featured), ["everyday"]);
+        assert.equal(got.collapsible, true, "the toggle hides the groups behind the featured ones");
+    });
+
+    // The flat path has no groups to collapse, so the flag says so rather
+    // than leaving the template to infer it from an empty array.
+    it("reports a flat preset list as not collapsible", () => {
+        const got = groupPresets([preset("a"), preset("b")], []);
+        assert.equal(got.groups.length, 0);
+        assert.equal(got.collapsible, false);
+    });
+
     it("does not mutate its input", () => {
         const entries = [preset("B", { order: 2 }), preset("A", { order: 1 })];
         const snapshot = labels(entries);

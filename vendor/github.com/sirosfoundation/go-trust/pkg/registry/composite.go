@@ -174,6 +174,7 @@ func (c *CompositeRegistry) applyLogic(results []compositeResult) *authzen.Evalu
 	// Count agreements and build details
 	var agreedCount, disagreedCount, errorCount int
 	var agreedRegistries, disagreedRegistries []string
+	var positive []*authzen.EvaluationResponse
 	var details []map[string]interface{}
 
 	for _, r := range results {
@@ -191,6 +192,7 @@ func (c *CompositeRegistry) applyLogic(results []compositeResult) *authzen.Evalu
 			disagreedRegistries = append(disagreedRegistries, info.Name)
 		} else if r.response != nil && r.response.Decision {
 			agreedCount++
+			positive = append(positive, r.response)
 			detail["decision"] = true
 			agreedRegistries = append(agreedRegistries, info.Name)
 		} else {
@@ -248,12 +250,17 @@ func (c *CompositeRegistry) applyLogic(results []compositeResult) *authzen.Evalu
 		reason["error"] = fmt.Sprintf("unknown operator: %s", c.operator)
 	}
 
-	return &authzen.EvaluationResponse{
+	resp := &authzen.EvaluationResponse{
 		Decision: decision,
 		Context: &authzen.EvaluationResponseContext{
 			Reason: reason,
 		},
 	}
+	// Every identifier was verified by a child that returned true; carry them
+	// through when the composite as a whole allows (AND: all children, OR,
+	// MAJORITY and QUORUM: the agreeing ones).
+	mergeVerifierIDs(resp, positive)
+	return resp
 }
 
 // SupportedResourceTypes returns the union of all child registry resource types

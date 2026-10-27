@@ -194,6 +194,17 @@ func (cfg *Cfg) SendLegacyJARMEncryptionParams() bool {
 	return BoolVal(cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams, false)
 }
 
+// EmitInvalidTXCodeError reports whether a wrong Transaction Code should be
+// answered with OpenID4VCI 1.1's invalid_tx_code rather than 1.0's
+// invalid_grant. Nil-safe through the whole APIGW chain, so the token
+// endpoint does not have to repeat it.
+func (cfg *Cfg) EmitInvalidTXCodeError() bool {
+	if cfg == nil || cfg.APIGW == nil {
+		return false
+	}
+	return BoolVal(cfg.APIGW.Delivery.OpenID4VCICompat.EmitInvalidTXCodeError, false)
+}
+
 // Common holds the shared configuration used across all services
 type Common struct {
 	// Production enables production mode
@@ -567,6 +578,7 @@ type Issuer struct {
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
 	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
+
 	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
 	// BBS holds blind BBS issuance configuration. Absent disables the
@@ -615,6 +627,86 @@ type Issuer struct {
 	// Consulted only by schemas that declare zk_systems; a deployment
 	// issuing no ZK-provable mdocs never reaches it.
 	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+}
+
+// Seed models a SeedSource may declare.
+//
+// There is one. A "stored" model - a random seed drawn on first sight of
+// a subject and kept - was described here and never implemented, because
+// it needs a per-subject store that nothing on this path has. It is gone
+// rather than left as a refused-at-startup option: a configuration knob
+// that only ever produces an error is a promise the code does not keep.
+const (
+	// SeedModelDerived computes a subject's seed from a secret and the
+	// subject identifiers. Nothing is stored and the seed is recomputable.
+	SeedModelDerived = "derived"
+)
+
+// SeedSource configures one named per-subject seed source.
+//
+// The seed itself is never issued, logged or returned: what reaches a
+// credential is a commitment over it. The issuer keeps the ability to
+// reproduce a subject's seed, which is what makes anything derived from it
+// - a pseudonym, typically - remappable to a person later.
+type SeedSource struct {
+	// Model is how a subject's seed comes about. "derived" is the only
+	// one: the seed is computed from Secret and the subject identifiers,
+	// so nothing is stored and it is recomputable forever.
+	Model string `yaml:"model" validate:"required,oneof=derived" doc_example:"\"derived\""`
+
+	// SecretPath is a file holding the derivation secret, base64url-encoded
+	// (padding and trailing whitespace are tolerated), whose DECODED value
+	// must be at least 32 bytes. Preferred where a file can be mounted,
+	// since it keeps the secret out of the rendered config entirely.
+	//
+	// Base64url rather than raw bytes, matching BBSConfig.SecretKeyPath:
+	// 32 raw bytes in this file decode to 24 or fail outright, which is a
+	// confusing way to find out the format was not what you assumed.
+	// `head -c 32 /dev/urandom | basenc --base64url | tr -d '='` produces
+	// one.
+	//
+	// THE SECRET IS PERMANENT. Every commitment ever written under it is a
+	// function of it, so replacing it gives every subject a new seed and a
+	// new pseudonym, and losing it destroys the ability to reproduce any
+	// seed this deployment has ever issued over. Back it up; do not rotate
+	// it. There is deliberately no key identifier and no rotation
+	// mechanism, because having one would suggest otherwise.
+	SecretPath string `yaml:"secret_path" validate:"omitempty" doc_example:"\"/etc/vc/seed/issuer.key\""`
+
+	// Secret is the derivation secret, base64url-encoded, decoding to at
+	// least 32 bytes.
+	//
+	// NOT SETTABLE IN THE MAIN CONFIGURATION, by design. It is filled from
+	// apigw.seeds.<name>.secret in the SECRETS FILE, the same way Mongo,
+	// SQL and the HA credentials are, so the most permanent secret an
+	// issuer holds never appears in the rendered config.
+	//
+	// This was an inline config field and is deliberately not one any
+	// more. The justification for it was BBSConfig.SecretKey as
+	// precedent, and that field is an exception to the convention rather
+	// than an example of it - following it meant copying the one place
+	// that already sidesteps the custom. A deployment therefore has two
+	// routes: a mounted file via secret_path, or the secrets file.
+	//
+	// Exactly one of secret_path and this must end up set for a derived
+	// source. Both, or neither, is refused at startup rather than resolved
+	// by precedence - a deployment with two sources of truth for this
+	// secret cannot tell which one is live, and an operator editing the
+	// half that is not would see no effect at all.
+	Secret string `yaml:"-"`
+
+	// SeedBytes is the length of the seeds this source produces. 0 means
+	// 16, which is what the nym_auth rulebook specifies.
+	//
+	// It is part of the derivation, not just its output size, so changing
+	// it changes every seed - the same irreversible act as changing the
+	// secret.
+	//
+	// 16 is also the MINIMUM. The seed is the opening of a published
+	// commitment, so a short one is a small search space rather than a
+	// short key: at 1 byte there are 256 possible openings and the
+	// commitment is trivially opened, however strong the secret is.
+	SeedBytes int `yaml:"seed_bytes" validate:"omitempty,min=16,max=64" doc_example:"16"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.
@@ -878,6 +970,77 @@ type Verifier struct {
 	// verification. Only consulted by builds with the "zknative" Go build
 	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+	// ZkKeyCache configures the on-disk Vega verifier-key store. Verifier
+	// only: these keys exist to verify a presented proof, and the issuer
+	// never touches one.
+	ZkKeyCache ZkKeyCacheConfig `yaml:"zk_key_cache,omitempty"`
+}
+
+// ZkKeyCacheConfig configures the decompressed Vega verifier key store.
+//
+// Process-local, in pkg/mdoc's vegaKeyStore, and consulted only by builds
+// carrying the "zknative" Go build tag.
+//
+// A key is ~100MB and the store is keyed by circuit revision, so what this
+// bounds is real disk. It is per PROCESS, not per deployment: under
+// common.ha each verifier instance has its own, since these are immutable
+// public artifacts that gain nothing from being shared and could not go in
+// the Mongo-backed cache anyway (BSON documents cap at 16MiB).
+type ZkKeyCacheConfig struct {
+	// Dir is where the store creates its own subdirectory. Empty means the
+	// OS temp directory, which is right for most deployments. Set it when
+	// the OS temp directory is small or memory-backed - putting a few
+	// hundred MB of verifier keys on a tmpfs gives back the memory this
+	// store exists to stop using.
+	//
+	// The store creates and removes its own subdirectory under this; the
+	// directory itself is left alone.
+	//
+	// A clean shutdown removes that subdirectory. A crash or a SIGKILL
+	// cannot, so each one holds an advisory lock file and every start
+	// sweeps away sibling subdirectories whose lock nobody holds - without
+	// which repeated abnormal restarts would strand up to max_bytes apiece
+	// here, outside the bound this section promises. The sweep needs
+	// flock, so on a platform that has none (Windows) a persistent
+	// directory set here has to be cleaned up from outside the process.
+	Dir string `yaml:"dir,omitempty" doc_example:"\"/var/cache/vc-verifier/zk-keys\""`
+
+	// MaxBytes bounds what the store HOLDS. Peak disk use can exceed it
+	// for as long as a verification still has an evicted key open: that
+	// file is kept until its last holder is finished, because deleting it
+	// would fail a presentation that was already under way. The excess is
+	// bounded by the verifications in flight, one key each.
+	//
+	// MaxBytes bounds what the store keeps on disk. Zero means the package
+	// default, 512MiB - room for about five circuit revisions. A working
+	// set one key larger than the bound makes every request evict the key
+	// the next one needs, which fails quietly: no error, nothing in the
+	// logs but latency.
+	// A negative value is a configuration error, not a smaller bound: the
+	// runtime ignores anything at or below zero, so without this check an
+	// operator who wrote -1 would get the 512MiB default and no indication
+	// that their setting did nothing.
+	// The default tag states the same 512MiB the package falls back to, so
+	// the generated reference reports it instead of "-". Behaviour is
+	// unchanged either way: 512<<20 IS 536870912, so a config that omits
+	// the key gets the same bound whether defaults.Set fills it or the
+	// store applies its own.
+	MaxBytes int64 `yaml:"max_bytes,omitempty" default:"536870912" validate:"omitempty,gte=0" doc_example:"536870912"`
+
+	// Prewarm downloads every currently-active Vega circuit's verifier key
+	// at startup, in the background, instead of leaving the first
+	// presentation of each revision to pay for it inline - while a holder
+	// waits, at the very end of a presentation, after selecting
+	// credentials and signing (SUNET/vc#656).
+	//
+	// Defaults to TRUE, because a build carrying the zknative tag is a
+	// deployment that does ZK verification, and the alternative is N
+	// unlucky users per rollout with load balancing choosing which. Set it
+	// false where startup bandwidth matters more than one holder's
+	// latency, or where the catalog is not reachable from the instance at
+	// boot. A failed warm is logged and never fatal; the key then loads
+	// lazily exactly as it did before.
+	Prewarm *bool `yaml:"prewarm,omitempty" default:"true"`
 }
 
 // ZkCircuitsConfig configures the shared zk-circuits catalog sources
@@ -1195,9 +1358,11 @@ type StaticOIDCClient struct {
 	// Default: "client_secret_basic"
 	TokenEndpointAuthMethod string `yaml:"token_endpoint_auth_method,omitempty" default:"client_secret_basic" validate:"omitempty,oneof=client_secret_basic client_secret_post none"`
 	// GrantTypes is the list of allowed grant types.
-	// Supported values: authorization_code, refresh_token
+	// Supported values: authorization_code - the only grant the verifier-OP's
+	// token endpoint implements and the only one its discovery document
+	// advertises.
 	// Default: ["authorization_code"]
-	GrantTypes []string `yaml:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code refresh_token"`
+	GrantTypes []string `yaml:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
 	// ResponseTypes is the list of allowed response types.
 	// Supported values: code
 	// Default: ["code"]
@@ -1225,16 +1390,16 @@ type OIDCOP struct {
 	// This identifies the verifier as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
 	Issuer string `yaml:"issuer" validate:"required" doc_example:"\"https://verifier.sunet.se\""`
-	// SessionDuration is the session duration in seconds
-	SessionDuration int `yaml:"session_duration" validate:"required" default:"3600"`
+	// SessionDuration is the lifetime in seconds of the verifier_user_session
+	// cookie - the OP's own session with the end user. Distinct from
+	// openid4vp.presentation_timeout, which bounds a single presentation.
+	SessionDuration int `yaml:"session_duration" validate:"required,gt=0" default:"3600"`
 	// CodeDuration is the authorization code duration in seconds
-	CodeDuration int `yaml:"code_duration" validate:"required" default:"300"`
+	CodeDuration int `yaml:"code_duration" validate:"required,gt=0" default:"300"`
 	// AccessTokenDuration is the access token duration in seconds
-	AccessTokenDuration int `yaml:"access_token_duration" validate:"required" default:"3600"`
+	AccessTokenDuration int `yaml:"access_token_duration" validate:"required,gt=0" default:"3600"`
 	// IDTokenDuration is the ID token duration in seconds
-	IDTokenDuration int `yaml:"id_token_duration" validate:"required" default:"3600"`
-	// RefreshTokenDuration is the refresh token duration in seconds
-	RefreshTokenDuration int `yaml:"refresh_token_duration" validate:"required" default:"86400"`
+	IDTokenDuration int `yaml:"id_token_duration" validate:"required,gt=0" default:"3600"`
 	// RequirePKCE is the OP's PKCE policy for CONFIDENTIAL clients.
 	//
 	// Default true, which is what OAuth 2.1 4.1.1, RFC 9700 2.1.1 and the
@@ -1269,7 +1434,7 @@ type OIDCOP struct {
 	EnableUserInfo *bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
-	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
+	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty" validate:"omitempty,dive"`
 
 	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
 	// Modes:
@@ -1357,8 +1522,11 @@ type DynamicRegistrationJWTAuthConfig struct {
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
-	// PresentationTimeout is the presentation timeout in seconds
-	PresentationTimeout int `yaml:"presentation_timeout" validate:"required" default:"300"`
+	// PresentationTimeout is how long, in seconds, a wallet has to complete a
+	// presentation. It is the deadline on both the standalone verification
+	// session and the OIDC authorization session, and the authorization
+	// context is retained for at least this long plus code_duration.
+	PresentationTimeout int `yaml:"presentation_timeout" validate:"required,gt=0" default:"300"`
 	// SupportedCredentials holds the supported credential configurations
 	SupportedCredentials []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	// PresentationRequestsDir is an optional directory with presentation request templates
@@ -1399,6 +1567,27 @@ func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
 		return ""
 	}
 	return c.PresentationRequestsDir
+}
+
+// DefaultPresentationTimeout is the fallback for GetPresentationTimeout, and
+// mirrors the `default:"300"` on OpenID4VPConfig.PresentationTimeout. It is
+// applied when the whole openid4vp section is absent, which is the one case
+// defaults.Set cannot reach.
+const DefaultPresentationTimeout = 300 * time.Second
+
+// GetPresentationTimeout returns how long a wallet has to complete a
+// presentation.
+//
+// Never zero. A missing or nonsensical value falls back to
+// DefaultPresentationTimeout rather than to "no deadline": the callers turn
+// this into a session expiry, and a zero there means the session never
+// expires on its own.
+
+func (c *OpenID4VPConfig) GetPresentationTimeout() time.Duration {
+	if c == nil || c.PresentationTimeout <= 0 {
+		return DefaultPresentationTimeout
+	}
+	return time.Duration(c.PresentationTimeout) * time.Second
 }
 
 // GenerateMetadata generates OAuth2 metadata from the OpenID4VP configuration.
@@ -1835,10 +2024,10 @@ type CredentialOffers struct {
 	// because both are published verbatim - and config load refuses
 	// anything else: issuer metadata is generated from
 	// public_url and declares that as its own `credential_issuer`, so a
-	// wallet resolving an offer to
-	// {credential_issuer}/.well-known/openid-credential-issuer would
-	// otherwise reach an origin serving no metadata, or metadata naming a
-	// different issuer.
+	// wallet resolving an offer - inserting the well-known suffix at the
+	// credential_issuer's host root per RFC 8615, see openid4vci.WellKnownURL -
+	// would otherwise reach an origin serving no metadata, or metadata naming
+	// a different issuer.
 	//
 	// It is still not where offers are RETRIEVED from. A by-reference offer
 	// (`credential_offer_uri`) is built from apigw.public_url, because that
@@ -1861,15 +2050,343 @@ type APIGWDelivery struct {
 	OpenID4VCI OAuthServer `yaml:"openid4vci" validate:"required"`
 	// CredentialOffers holds credential offer wallet configurations
 	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
+
+	// EmitCredentialMetadataOnResponse adds the issued Credential's
+	// credential_metadata to the Credential Response, as OpenID4VCI 1.1
+	// permits (WE BUILD CS-01 §7.5, a MAY on both sides).
+	//
+	// Off by default for size, not for interop: it repeats the scope's
+	// issuer metadata on every issuance, and a 1.0 wallet ignores an
+	// unrecognised member, so emitting it cannot break one. That is also why
+	// this is NOT in OpenID4VCICompat - nothing about it is a
+	// compatibility switch, and it needs no flipping when 1.1 is Final.
+	//
+	// Worth having because of the precedence 1.1 defines: a wallet prefers
+	// what arrives here over the Credential Format's own mechanism, and both
+	// over the published Issuer Metadata. An issuer that wants to say
+	// something about THIS credential has no other way to.
+	EmitCredentialMetadataOnResponse *bool `yaml:"emit_credential_metadata_on_response" default:"false"`
 	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
 	// OpenID4VCI 1.0 requests the way the specification does.
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
+	// InteractiveAuthorization configures OpenID4VCI 1.1's Interactive
+	// Authorization. Absent means the mechanism is not offered at all.
+	InteractiveAuthorization InteractiveAuthorization `yaml:"interactive_authorization" validate:"omitempty"`
 }
 
-// OpenID4VCICompat holds interoperability switches for non-conformant wallets.
+// InteractiveAuthorization configures OpenID4VCI 1.1's Interactive Authorization.
 //
-// Every field defaults to the conformant behaviour, so a deployment that sets
-// none of them is an OpenID4VCI 1.0 deployment.
+// The mechanism lets an Issuer qualify the Holder before issuing, and name
+// what that takes, instead of sending the wallet to a browser and hoping
+// the browser leg establishes enough. The two interactions differ in
+// exactly that respect:
+//
+//   - openid4vp_presentation is browserless. The wallet presents a
+//     Credential over the challenge endpoint itself and no browser is
+//     involved at any point.
+//   - auth_via_web is not. It hands the wallet a request_uri to open in a
+//     browser, and the browser leg - consent, the IdP, the redirect back -
+//     is this server's ordinary one. What Interactive Authorization adds
+//     is that the wallet was TOLD a browser step is required, rather than
+//     discovering it by being redirected.
+//
+// It is OPTIONAL in the specification and in WE BUILD CS-01 §7.9, and it
+// is off here until Enable is set.
+//
+// Most of the fields below exist because OpenID4VCI 1.1 is an editor's
+// draft that contradicts itself, not because an operator should expect to
+// tune them. Two contradictions are recorded as CS-01 NOTES CS01_07 and
+// CS01_08 and reported upstream as openid/OpenID4VCI#811 and #812. Keeping
+// the affected strings in configuration means a resolution either way
+// costs a config change rather than a release, which is the whole reason
+// this profile can be adopted pre-flight at all. Leave them alone unless
+// testing against a counterparty that reads the draft the other way.
+type InteractiveAuthorization struct {
+	// Enable exposes the Authorization Challenge Endpoint and advertises
+	// it in Authorization Server metadata. Its presence there is what
+	// tells a wallet the mechanism is available.
+	Enable *bool `yaml:"enable" default:"false"`
+
+	// RequireInteractiveAuthorization advertises that this server accepts
+	// ONLY Interactive Authorization for issuance.
+	//
+	// It excludes every wallet that does not implement the mechanism, so
+	// it must not be set in a shared deployment while that is the common
+	// case (CS-01 §7.7). Setting it without Enable is refused at config
+	// load: the specification forbids the parameter without the endpoint,
+	// and advertising a requirement for a mechanism this server does not
+	// expose is unusable rather than merely wrong.
+	RequireInteractiveAuthorization *bool `yaml:"require_interactive_authorization" default:"false"`
+
+	// InteractionTypePrefix is the namespace of the interaction type URNs.
+	//
+	// CS01_07: the 1.1 change log records a rename to "iae", which its own
+	// normative text does not apply.
+	InteractionTypePrefix string `yaml:"interaction_type_prefix" default:"urn:openid:dcp:ia:" validate:"omitempty,max=128"`
+
+	// BindingPrefix prefixes the value a presentation is bound to, so that
+	// the audience of an Interactive Authorization presentation cannot be
+	// confused with an ordinary Verifier's.
+	//
+	// CS01_07: the change log says "iae:", the normative text says "ia:".
+	BindingPrefix string `yaml:"binding_prefix" default:"ia:" validate:"omitempty,max=32"`
+
+	// ResponseModeUnencrypted and ResponseModeEncrypted name the two
+	// response modes an Interactive Authorization request may ask for.
+	//
+	// Only the encrypted one is ever asked for - see
+	// InteractiveAuthorization.ResponseMode for why. Its unencrypted
+	// counterpart is configured beside it so that both spellings move
+	// together if the working group renames them.
+	//
+	// CS01_07: the change log says "iae_post".
+	ResponseModeUnencrypted string `yaml:"response_mode_unencrypted" default:"ia_post" validate:"omitempty,max=32"`
+	ResponseModeEncrypted   string `yaml:"response_mode_encrypted" default:"ia_post.jwt" validate:"omitempty,max=32"`
+
+	// MetadataEndpointParameter and MetadataRequireParameter name the two
+	// Authorization Server metadata members.
+	//
+	// CS01_07 lists these alongside the rest, and they are the awkward
+	// ones: the metadata document is SIGNED, so renaming a member after
+	// marshalling would leave the served JSON and the signed claims
+	// disagreeing, and every verifier checking the JWT would fail. Both
+	// documents are therefore produced from one place that applies these
+	// names - see oauth2.AuthorizationServerMetadata.WithInteractiveAuthorizationNames.
+	MetadataEndpointParameter string `yaml:"metadata_endpoint_parameter" default:"authorization_challenge_endpoint" validate:"omitempty,max=128"`
+	MetadataRequireParameter  string `yaml:"metadata_require_parameter" default:"require_interactive_authorization" validate:"omitempty,max=128"`
+
+	// MdocHandoverLabel is the fixed identifier inside the mdoc
+	// SessionTranscript handover for this flow.
+	//
+	// CS01_07 again, and from the other side: the normative mdoc section
+	// spells this one "IAE" while every other normative section says
+	// "ia". Whatever the working group settles on, this is the string that
+	// has to move with it - it is hashed into the transcript, so a
+	// mismatch fails DeviceAuth with nothing to point at.
+	MdocHandoverLabel string `yaml:"mdoc_handover_label" default:"OpenID4VCIIAEHandover" validate:"omitempty,max=64"`
+
+	// SDJWTBindingScope decides what an SD-JWT VC presentation's Key
+	// Binding JWT audience is bound to: the derived Origin of the
+	// Authorization Challenge Endpoint, or the endpoint URL.
+	//
+	// CS01_08: the 1.1 text says derived Origin in the normative sentence
+	// and shows the full endpoint URL in that sentence's own example, and
+	// the other three credential formats all say endpoint URL. CS-01 pins
+	// "origin" for testing, following the normative words over the
+	// example. "endpoint" exists so a run against a counterparty that read
+	// it the other way is a config change.
+	SDJWTBindingScope string `yaml:"sdjwt_binding_scope" default:"origin" validate:"omitempty,oneof=origin endpoint"`
+
+	// AuthSessionTTLSeconds bounds how long one Interactive Authorization
+	// exchange may take.
+	//
+	// Capped at MaxAuthSessionTTLSeconds, because the exchange cannot
+	// outlive the authorization context and ephemeral key it runs on.
+	// Configuring more would advertise a longer exchange than this server
+	// can hold open, and the wallet would come back to find its
+	// auth_session gone with nothing having gone wrong.
+	AuthSessionTTLSeconds int `yaml:"auth_session_ttl_seconds" default:"300" validate:"omitempty,gt=0,lte=600"`
+
+	// InteractionTypesSupported names the interaction types this server
+	// can require, as suffixes joined to InteractionTypePrefix.
+	//
+	// Empty means every type the build implements, which is the right
+	// default: what this server can actually do is a property of the code,
+	// not of configuration. Set it to narrow that - to run an interop test
+	// against one interaction, or to stop offering one whose counterparty
+	// has a known problem.
+	//
+	// Entries are the two SUFFIXES this build implements, not full URNs:
+	// the namespace comes from InteractionTypePrefix, so writing one here
+	// would never match. Restricted to those two because this list can only
+	// ever narrow what the code can do - a typo or an unimplemented name
+	// adds nothing, and silently leaves the affected scope unservable at an
+	// endpoint the metadata still advertises.
+	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,oneof=openid4vp_presentation auth_via_web"`
+}
+
+// MaxAuthSessionTTLSeconds is the longest an Interactive Authorization
+// exchange may be configured to last.
+//
+// It is the TTL of the apigw authorization-context and ephemeral-key
+// caches, which is what the exchange is actually stored in. pkg/model
+// cannot import that package to read it, so the two are tied by
+// TestAuthContextTTLCoversTheLongestAuthSession in internal/apigw/cache
+// instead - shorten one and that test says to lower the other.
+//
+// It is also the bound in AuthSessionTTLSeconds's validate tag, which a Go
+// tag cannot build from a constant; TestMaxAuthSessionTTLMatchesItsTag
+// reads the tag back and compares.
+const MaxAuthSessionTTLSeconds = 600
+
+// AuthorizationChallengePath is the path the Authorization Challenge
+// Endpoint is served at, relative to the Credential Issuer Identifier. It is
+// the spelling OpenID4VCI 1.1's own examples use; nothing in the
+// specification constrains it, because wallets find the endpoint through
+// Authorization Server metadata rather than by construction.
+const AuthorizationChallengePath = "/authorize-challenge"
+
+// The interaction types this build implements, as suffixes joined to
+// InteractionTypePrefix. OpenID4VCI 1.1 defines two and this build
+// implements both; which one a given scope requires is not configurable,
+// because it follows from how the scope is sourced - see
+// Client.interactionTypeForScope.
+const (
+	InteractionOpenID4VPPresentation = "openid4vp_presentation"
+	InteractionAuthViaWeb            = "auth_via_web"
+)
+
+// Enabled reports whether this deployment offers Interactive Authorization.
+func (ia *InteractiveAuthorization) Enabled() bool {
+	return ia != nil && BoolVal(ia.Enable, false)
+}
+
+// Required reports whether this deployment accepts ONLY Interactive
+// Authorization. False unless the mechanism is also enabled: the parameter
+// is forbidden without the endpoint, and a server that advertised the
+// requirement without exposing the endpoint could not be used at all.
+func (ia *InteractiveAuthorization) Required() bool {
+	return ia.Enabled() && BoolVal(ia.RequireInteractiveAuthorization, false)
+}
+
+// ChallengeEndpoint is the absolute URL of this server's Authorization
+// Challenge Endpoint, or the empty string when the mechanism is off - which
+// is what suppresses its advertisement in Authorization Server metadata.
+func (ia *InteractiveAuthorization) ChallengeEndpoint(issuerURL string) string {
+	if !ia.Enabled() {
+		return ""
+	}
+	return strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath
+}
+
+// InteractionType joins suffix to the configured URN namespace.
+func (ia *InteractiveAuthorization) InteractionType(suffix string) string {
+	prefix := "urn:openid:dcp:ia:"
+	if ia != nil && ia.InteractionTypePrefix != "" {
+		prefix = ia.InteractionTypePrefix
+	}
+	return prefix + suffix
+}
+
+// Offers reports whether suffix is an interaction type this deployment is
+// willing to require. An empty InteractionTypesSupported means every type
+// the build implements, so the answer is yes for anything the caller asks
+// about - callers only ask about types they implement.
+func (ia *InteractiveAuthorization) Offers(suffix string) bool {
+	if ia == nil || len(ia.InteractionTypesSupported) == 0 {
+		return true
+	}
+	return slices.Contains(ia.InteractionTypesSupported, suffix)
+}
+
+// ResponseMode names the OpenID4VP response mode an Interactive
+// Authorization request asks for.
+//
+// Always the encrypted one. OpenID4VCI 1.1 permits either, but the response
+// travels back through the Wallet and then through a form parameter on a
+// second request, which is the case Section 8.3 of OpenID4VP exists for;
+// asking for ia_post would hand an unauthenticated intermediary the
+// presented Credential. ResponseModeUnencrypted is configured beside it so
+// that both spellings move together if the working group renames them
+// (CS01_07), not because anything selects it.
+func (ia *InteractiveAuthorization) ResponseMode() string {
+	if ia != nil && ia.ResponseModeEncrypted != "" {
+		return ia.ResponseModeEncrypted
+	}
+	return openid4vp.ResponseModeIAPostJWT
+}
+
+// PresentationAudience is what a presentation answering an Interactive
+// Authorization challenge must be addressed to.
+//
+// The prefix is what keeps it out of the namespace of ordinary Verifier
+// client_ids, and the scope decides whether the derived Origin of the
+// Authorization Challenge Endpoint or its full URL follows - see
+// SDJWTBindingScope for why the draft supports both readings.
+func (ia *InteractiveAuthorization) PresentationAudience(issuerURL string) (string, error) {
+	endpoint := strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath
+
+	prefix := "ia:"
+	if ia != nil && ia.BindingPrefix != "" {
+		prefix = ia.BindingPrefix
+	}
+
+	if ia != nil && ia.SDJWTBindingScope == "endpoint" {
+		return prefix + endpoint, nil
+	}
+
+	// Serialised the way a browser would (RFC 6454 §6.2), not merely
+	// scheme + Host: the wallet derives the audience it binds to from an
+	// origin it canonicalises itself, and compares as a plain string. A
+	// public_url written as https://Issuer.Example:443 is valid
+	// configuration and would otherwise produce an audience no wallet
+	// computes.
+	origin, err := openid4vp.CanonicalOrigin(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %w", err)
+	}
+	return prefix + origin, nil
+}
+
+// ChallengeEndpointOrigin is the derived Origin (RFC 6454 §4) of the
+// Authorization Challenge Endpoint, which is the only value OpenID4VCI 1.1
+// permits in an Interactive Authorization request's expected_origins.
+func (ia *InteractiveAuthorization) ChallengeEndpointOrigin(issuerURL string) (string, error) {
+	origin, err := openid4vp.CanonicalOrigin(strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath)
+	if err != nil {
+		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %w", err)
+	}
+	return origin, nil
+}
+
+// HandoverLabel is the fixed identifier inside the mdoc SessionTranscript
+// handover for this flow.
+//
+// It is hashed into the transcript, so a mismatch fails DeviceAuth with
+// nothing to point at - which is why CS01_07 asks for it to be
+// configurable: the 1.1 draft's normative mdoc section writes IAE where
+// every other normative section writes ia.
+func (ia *InteractiveAuthorization) HandoverLabel() string {
+	if ia != nil && ia.MdocHandoverLabel != "" {
+		return ia.MdocHandoverLabel
+	}
+	return "OpenID4VCIIAEHandover"
+}
+
+// AuthSessionTTL bounds how long one Interactive Authorization exchange may
+// take.
+func (ia *InteractiveAuthorization) AuthSessionTTL() time.Duration {
+	if ia != nil && ia.AuthSessionTTLSeconds > 0 {
+		return time.Duration(ia.AuthSessionTTLSeconds) * time.Second
+	}
+	return 300 * time.Second
+}
+
+// MetadataNames carries the configured spellings of the two Authorization
+// Server metadata members through to the one place that serialises them, so
+// the served JSON and the signed document cannot disagree.
+func (ia *InteractiveAuthorization) MetadataNames() oauth2.MetadataNames {
+	if ia == nil {
+		return oauth2.MetadataNames{}
+	}
+	return oauth2.MetadataNames{
+		AuthorizationChallengeEndpoint:  ia.MetadataEndpointParameter,
+		RequireInteractiveAuthorization: ia.MetadataRequireParameter,
+	}
+}
+
+// OpenID4VCICompat holds switches that change this server's OpenID4VCI behaviour.
+//
+// Two kinds live here, and they point opposite ways. One kind accepts
+// something a non-conformant WALLET sends that the specification does not
+// allow. The other emits something a NEWER specification defines that the
+// published one does not. What they have in common is the default: every
+// field is false, and false is what the currently published specification
+// says, so a deployment that sets none of them is a plain OpenID4VCI 1.0
+// deployment.
+//
+// A field of the second kind names the version that would make it
+// unnecessary, and is deleted when that version is published.
 type OpenID4VCICompat struct {
 	// AcceptNonStandardAuthorizationDetailsArrays accepts two further
 	// encodings of authorization_details in a query string or form body,
@@ -1889,6 +2406,25 @@ type OpenID4VCICompat struct {
 	//
 	// See SUNET/vc#710 for the interop reports that motivated it.
 	AcceptNonStandardAuthorizationDetailsArrays *bool `yaml:"accept_non_standard_authorization_details_arrays" default:"false"`
+
+	// EmitInvalidTXCodeError returns the OpenID4VCI 1.1 `invalid_tx_code`
+	// error for a wrong Transaction Code, instead of 1.0's `invalid_grant`.
+	//
+	// Off by default because 1.1 is not published: it is an editor's draft,
+	// adopted pre-flight by WE BUILD CS-01 §7.4. Turning it on changes what
+	// an unmodified wallet receives on a mistyped PIN, so it is a deliberate,
+	// announced change rather than a silent one - which is also why this is
+	// the only 1.1 item in this struct that needed a switch at all. The rest
+	// are additive.
+	//
+	// Flip it to true, and delete the switch, once OpenID4VCI 1.1 is Final.
+	//
+	// Note what it does NOT change. `invalid_grant` still means the
+	// Pre-Authorized Code itself is finished - unknown, expired, already
+	// redeemed, or invalidated by too many failed attempts - and a wallet
+	// relies on exactly that split to tell a remaining attempt from an
+	// exhausted offer.
+	EmitInvalidTXCodeError *bool `yaml:"emit_invalid_tx_code_error" default:"false"`
 }
 
 // APIGWAuthProviders groups the authentication provider configurations.
@@ -1932,6 +2468,23 @@ type APIGW struct {
 	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://issuer.sunet.se\""`
 	// IssuerClient is the gRPC client config for issuer
+	// Seeds are the named per-subject seed sources this deployment can
+	// use.
+	//
+	// A seed source turns a subject's stable identifiers into that
+	// subject's permanent seed; a credential configuration then names one
+	// to back a commitment claim - see CredentialMetadata.Commitments.
+	// Empty means none is offered, and any scope asking for one refuses
+	// at startup.
+	//
+	// HERE rather than under issuer, which is where it began. The seed is
+	// derived and its commitment injected BEFORE the issuer service is
+	// called, so the issuer receives an ordinary claim and never sees the
+	// derivation secret at all. A secret that only one service needs
+	// belongs in that service's configuration, and keeping it where it is
+	// not used is how it ends up mounted somewhere it need not be.
+	Seeds map[string]*SeedSource `yaml:"seeds" validate:"omitempty,dive" doc_key:"seed source name"`
+
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for vc's own registry
 	// service, which hosts the built-in Token Status List.
@@ -1969,6 +2522,14 @@ type APIGWRateLimit struct {
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
 	// CredentialOfferRequestsPerMinute is the maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20
 	CredentialOfferRequestsPerMinute int `yaml:"credential_offer_requests_per_minute" default:"20"`
+	// AuthorizationChallengeRequestsPerMinute is the maximum Authorization Challenge Endpoint requests per minute per IP. Default: 20
+	//
+	// The endpoint is unauthenticated in the sense that matters here: anyone
+	// who can reach it with a public client's parameters and a fresh DPoP
+	// proof gets an authorization context plus an ephemeral P-256 key
+	// persisted for the whole auth_session lifetime. Request volume is
+	// therefore storage growth, and the limit is what bounds it.
+	AuthorizationChallengeRequestsPerMinute int `yaml:"authorization_challenge_requests_per_minute" default:"20"`
 }
 
 // APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.
@@ -1997,6 +2558,9 @@ type DashboardService struct {
 	Description string `yaml:"description,omitempty"`
 	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
 	Links []DashboardLink `yaml:"links,omitempty" validate:"omitempty,dive"`
+	// Wallet marks this entry as a configured wallet, rendered in its own
+	// section without a health status. Set internally during seeding.
+	Wallet bool `yaml:"-"`
 }
 
 // DashboardLink is a labelled URL shown under a service entry.
@@ -2075,99 +2639,6 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
-}
-
-// SeedDashboardDefaults appends auto-discovered service entries (apigw,
-// issuer, verifier, registry) to cfg.APIGW.Dashboard.Services from the
-// currently populated sibling sections. Operator-supplied entries win:
-// a Name match in Services skips the corresponding default.
-//
-// Intended to be called by the config loader before it nils sibling
-// service sections, so the /dashboard handler has data to render even
-// when it can no longer read cfg.Issuer / cfg.Verifier / cfg.Registry
-// directly.
-func (cfg *Cfg) SeedDashboardDefaults() {
-	if cfg == nil || cfg.APIGW == nil {
-		return
-	}
-
-	have := map[string]bool{}
-	for _, s := range cfg.APIGW.Dashboard.Services {
-		have[s.Name] = true
-	}
-	add := func(s DashboardService) {
-		if s.URL == "" || have[s.Name] {
-			return
-		}
-		cfg.APIGW.Dashboard.Services = append(cfg.APIGW.Dashboard.Services, s)
-	}
-
-	if u := strings.TrimRight(cfg.APIGW.PublicURL, "/"); u != "" {
-		links := []DashboardLink{
-			{Label: "Health", URL: u + "/health", Type: "json"},
-			{Label: "Credential offers", URL: u + "/offers", Type: "page"},
-			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer", Type: "json"},
-			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server", Type: "json"},
-			{Label: "JWKS", URL: u + "/jwks", Type: "json"},
-		}
-		if cfg.APIGW.AdminUIEnable {
-			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui", Type: "page"})
-		}
-		if cfg.APIGW.OpenIDFederation != nil {
-			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation", Type: "page"})
-		}
-		add(DashboardService{
-			Name:        "apigw",
-			URL:         u,
-			Description: "API gateway – credential issuance, OAuth2/OIDC, wallet-facing endpoints.",
-			Links:       links,
-		})
-	}
-
-	if cfg.Issuer != nil {
-		if u := strings.TrimRight(cfg.Issuer.IssuerURL, "/"); u != "" {
-			add(DashboardService{
-				Name:        "issuer",
-				URL:         u,
-				Description: "Credential issuer – signs verifiable credentials.",
-				Links: []DashboardLink{
-					{Label: "Health", URL: u + "/health", Type: "json"},
-					{Label: "JWKS", URL: u + "/jwks", Type: "json"},
-				},
-			})
-		}
-	}
-
-	if cfg.Verifier != nil {
-		if u := strings.TrimRight(cfg.Verifier.PublicURL, "/"); u != "" {
-			add(DashboardService{
-				Name:        "verifier",
-				URL:         u,
-				Description: "Credential verifier – OpenID4VP relying party.",
-				Links: []DashboardLink{
-					{Label: "Health", URL: u + "/health", Type: "json"},
-				},
-			})
-		}
-	}
-
-	if cfg.Registry != nil {
-		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
-			links := []DashboardLink{
-				{Label: "Health", URL: u + "/health", Type: "json"},
-				{Label: "Status lists", URL: u + "/statuslists", Type: "json"},
-			}
-			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
-				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin", Type: "page"})
-			}
-			add(DashboardService{
-				Name:        "registry",
-				URL:         u,
-				Description: "Credential status registry - token status lists.",
-				Links:       links,
-			})
-		}
-	}
 }
 
 // LookupCredentialSources returns full data source information for a credential type
@@ -2314,7 +2785,88 @@ func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
 	})
 }
 
+// CommitmentClaim configures one seed-backed claim.
+//
+// What is written into the credential is commit(seed) - never the seed.
+// The seed is not delivered to the Wallet by this server at all: a derived
+// seed is recomputable whenever it is wanted, so there is no moment at
+// which it has to be handed over to avoid losing it.
+type CommitmentClaim struct {
+	// Seed names the entry in apigw.seeds that backs this claim.
+	//
+	// Required for an issuer-held commitment. A claim whose commitment the
+	// HOLDER computes names no seed source - the issuer never sees that
+	// seed - and is configured with Source instead.
+	Seed string `yaml:"seed,omitempty" validate:"required_without=Source" doc_example:"\"primary\""`
+
+	// Source names a party other than this issuer as the origin of the
+	// value. The only value is "holder": the commitment arrives in the
+	// Credential Request and is written as sent.
+	//
+	// Not implemented here - it needs a record of which commitment a
+	// subject already supplied, and the issuer has no store - so a
+	// configuration naming it is refused at startup.
+	Source string `yaml:"source,omitempty" validate:"omitempty,oneof=holder" doc_example:"\"holder\""`
+
+	// Subjects is an ORDERED list of dotted paths into the document data
+	// naming the stable subject identifiers this claim's seed is derived
+	// from.
+	//
+	// They are the only inputs that separate one person's seed from
+	// another's, so what they point at decides what "the same person"
+	// means for every pseudonym built on this credential.
+	//
+	// A list rather than one path because one identifier is frequently
+	// not an identifier on its own: a national personal number is unique
+	// within its country and a document number within its scheme, so the
+	// country or the scheme has to be derived over as well or two people
+	// in different populations collide. A deployment issuing a Swedish
+	// PID might configure the personnummer alone; one issuing across
+	// member states configures the issuing country and the personnummer,
+	// in that order.
+	//
+	// ORDER IS PART OF THE DERIVATION. ["a","b"] and ["b","a"] are
+	// different seeds, so reordering this list repseudonymises everyone
+	// as surely as changing the secret does. A one-element list derives
+	// exactly what that identifier derived on its own.
+	//
+	// Every path must resolve, to a non-empty string. There is no
+	// fallback and no skipping: deriving over "" would hand every subject
+	// whose identity did not resolve the same seed - and dropping an
+	// absent entry would be worse, since ["a",""] would then derive what
+	// ["a"] derives and hand one subject another subject's pseudonym.
+	Subjects []string `yaml:"subjects,omitempty" validate:"required_with=Seed,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
+
+	// Commit names the commitment function. Empty means "sha-256", which
+	// is the only one registered.
+	Commit string `yaml:"commit,omitempty" validate:"omitempty,oneof=sha-256" doc_example:"\"sha-256\""`
+
+	// Context separates populations that must not share seeds.
+	//
+	// Empty is the ordinary case and the right default: a subject has ONE
+	// seed, so two credential types issued to the same person lead back to
+	// the same person. Setting it per credential would mean they do not.
+	Context string `yaml:"context,omitempty" validate:"omitempty,max=64"`
+
+	// Encoding is how the commitment bytes are written into the document
+	// data. Empty picks by format: base64 for mso_mdoc, whose bstr carrier
+	// is base64 in JSON, and hex for everything else.
+	Encoding string `yaml:"encoding,omitempty" validate:"omitempty,oneof=hex base64" doc_example:"\"hex\""`
+}
+
 type CredentialMetadata struct {
+	// Commitments marks claims of this credential as seed-backed: the
+	// claim's value is a commitment over a per-subject seed rather than a
+	// value from a data source.
+	//
+	// Keyed by where the value goes in the document data the issuer
+	// receives - the element identifier for mso_mdoc, which is flat, and a
+	// dotted path for the other formats.
+	//
+	// Absent means this credential has no such claim and is issued exactly
+	// as it is today.
+	Commitments map[string]*CommitmentClaim `yaml:"commitments,omitempty" json:"-" validate:"omitempty,dive" doc_key:"claim path"`
+
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Used for every format except mso_mdoc.
@@ -3451,16 +4003,27 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 // GenerateMetadata generates OAuth2 metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
+//
+// ia is the deployment's Interactive Authorization configuration, which
+// lives beside this server rather than inside it (it describes the whole
+// delivery path, not one Authorization Server), and is passed in rather
+// than reached for so that a caller without the mechanism can pass nil.
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string, ia *InteractiveAuthorization) *oauth2.AuthorizationServerMetadata {
 	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:                  issuerURL,
-		TokenEndpoint:              cfg.TokenEndpoint,
-		GrantTypes:                 cfg.GrantTypes,
-		WalletAttestationEnabled:   walletAttestationEnabled,
-		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
+		IssuerURL:                       issuerURL,
+		TokenEndpoint:                   cfg.TokenEndpoint,
+		GrantTypes:                      cfg.GrantTypes,
+		WalletAttestationEnabled:        walletAttestationEnabled,
+		AllowedSignatureAlgorithms:      allowedSignatureAlgorithms,
+		AuthorizationChallengeEndpoint:  ia.ChallengeEndpoint(issuerURL),
+		RequireInteractiveAuthorization: ia.Required(),
 	})
 
-	return metadata
+	// Carried on the document rather than applied here, so that the served
+	// JSON and the signed_metadata JWT - produced from this same value at
+	// two different moments - cannot end up spelling these two members
+	// differently. See oauth2.MetadataNames.
+	return metadata.WithInteractiveAuthorizationNames(ia.MetadataNames())
 }
 
 // DeclaredClaimNames returns the top-level claim names this credential type

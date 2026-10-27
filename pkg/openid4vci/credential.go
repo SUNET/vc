@@ -224,6 +224,23 @@ type CredentialResponse struct {
 
 	// NotificationID: OPTIONAL. String identifying an issued Credential that the Wallet includes in the Notification Request as defined in Section 10.1. This parameter MUST NOT be present if credential parameter is not present.
 	NotificationID string `json:"notification_id,omitempty" validate:"required_with=Credentials"`
+
+	// CredentialMetadata: OPTIONAL. Display and usage information for the
+	// Credential(s) just issued, defined by OpenID4VCI 1.1's Credential
+	// Response and identical in shape to the credential_metadata of
+	// Credential Issuer Metadata.
+	//
+	// Its point is precedence. A wallet that receives it here MUST prefer it
+	// over a Credential Format-specific mechanism, which in turn wins over
+	// the credential_metadata published in Issuer Metadata - so an issuer can
+	// say something about THIS credential that its static metadata cannot,
+	// without the wallet having to guess which source is fresher.
+	//
+	// Additive: 1.0 wallets ignore unrecognised members, so emitting it
+	// cannot break one. Emitting it at all is nonetheless opt-in, because it
+	// repeats issuer metadata on every issuance and that is a size question,
+	// not an interop one. See APIGWDelivery.EmitCredentialMetadataOnResponse.
+	CredentialMetadata *CredentialMetadata `json:"credential_metadata,omitempty"`
 }
 
 type Credential struct {

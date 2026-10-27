@@ -97,7 +97,16 @@ func main() {
 		mainLog.Info("EventPublisher disabled in config")
 	}
 
-	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, meter, cfg, log)
+	// Initialize auth providers (SAML, OIDC) before apiv1: its Selector
+	// knows which providers actually started, and the Authorization
+	// Challenge Endpoint needs that to name the interaction a scope
+	// requires - the same answer /authorize gets from it.
+	authProvidersSvc, err := authproviders.New(ctx, &cfg.APIGW.AuthProviders, cacheService.SAMLSession, cacheService.OIDCRPSession, dbService, cacheService.OIDCRPRenewalLock, mainLog)
+	if err != nil {
+		panic(err)
+	}
+
+	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, authProvidersSvc.Selector(), tracer, meter, cfg, log)
 	if err != nil {
 		panic(err)
 	}
@@ -105,14 +114,8 @@ func main() {
 	// Start background refresher for signed metadata (issuer-signed, cached with 1h TTL)
 	apiv1Client.StartSignedMetadataRefresher(ctx)
 
-	// Initialize auth providers (SAML, OIDC)
-	authProvidersSvc, err := authproviders.New(ctx, &cfg.APIGW.AuthProviders, cacheService.SAMLSession, cacheService.OIDCRPSession, dbService, cacheService.OIDCRPRenewalLock, mainLog)
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize data sources (Edu-API, etc.)
-	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cacheService.Document, mainLog)
+	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cfg.APIGW.DataSources.ExternalAPI, cacheService.Document, mainLog)
 	if err != nil {
 		panic(err)
 	}

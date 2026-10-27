@@ -1,5 +1,7 @@
 package openid4vp
 
+import "slices"
+
 // The response modes RequestObject.ResponseMode accepts.
 //
 // The authoritative list for validation is the oneof rule in that field's
@@ -20,16 +22,65 @@ const (
 	ResponseModeDirectPost    = "direct_post"
 	ResponseModeDirectPostJWT = "direct_post.jwt"
 	ResponseModeDCAPIJWT      = "dc_api.jwt"
+
+	// The two Interactive Authorization modes (OpenID4VCI 1.1). The
+	// response goes back to the Authorization Challenge Endpoint the
+	// request arrived from, inside an openid4vp_response parameter, so a
+	// request using either carries NO response_uri.
+	//
+	// Spelled as the normative TEXT of the 1.1 draft spells them. Its
+	// change log claims a rename to iae_post that none of its normative
+	// sections apply, which is reported as openid/OpenID4VCI#811 and
+	// recorded by WE BUILD CS-01 as NOTE CS01_07.
+	//
+	// Constants, not configuration. CS01_07 asks implementations to keep
+	// the spelling switchable, and doing that properly means the
+	// classifier below, this oneof tag and the request builders all
+	// reading one configured value - which belongs with the code that
+	// builds and receives these requests, not here. Until then this is
+	// the normative spelling and nothing pretends otherwise.
+	ResponseModeIAPost    = "ia_post"
+	ResponseModeIAPostJWT = "ia_post.jwt"
 )
 
-// WithDCAPIResponseMode returns a copy of r carrying the response mode the
-// browser's Digital Credentials API requires, and nothing else changed.
+// IsInteractiveAuthorization reports whether mode is one of the two
+// Interactive Authorization response modes, which answer to the
+// Authorization Challenge Endpoint rather than to a response_uri.
+//
+// Matches the constants above, so it recognises the normative spelling
+// only. When the spelling becomes configurable this has to read the same
+// configured values, or a deployment that switched it would find its own
+// requests unclassified.
+func IsInteractiveAuthorization(mode string) bool {
+	return mode == ResponseModeIAPost || mode == ResponseModeIAPostJWT
+}
+
+// WithDCAPIRequest returns a copy of r as the browser's Digital Credentials
+// API requires it, with the three delivery-dependent fields adjusted and
+// nothing else changed.
 //
 // For a session that serves both channels, the two requests must be the same
 // request seen through different delivery paths: everything a wallet checks
-// (client_id, nonce, response_uri, client_metadata, the DCQL query) has to
-// agree, or the channels ask for different things and only one of them is
-// what the user consented to.
+// (client_id, nonce, client_metadata, the DCQL query) has to agree, or the
+// channels ask for different things and only one of them is what the user
+// consented to.
+//
+// The exceptions are response_mode, response_uri and expected_origins, and
+// they are the same exception three times: each says HOW the request is
+// delivered and answered, which is the one thing that does differ.
+//
+// A dc_api response returns inside the browser call, so the request carries
+// no response_uri at all (OpenID4VP 1.0 Appendix A.2). Copying one over
+// named an endpoint this channel is never answered at - a parameter the
+// wallet is entitled to act on.
+//
+// expected_origins is the other direction: a SIGNED dc_api request must
+// carry it (Appendix A.3), because it is what lets the wallet bind the
+// request to the web origin that invoked it. Without it a conforming wallet
+// may refuse the request outright, and one that does not refuse has lost the
+// check that stops a request being replayed from another page. The link
+// channel has no origin to name, which is why this is set here rather than
+// on the object both channels share.
 //
 // A copy of the whole struct rather than a rebuilt literal, so a field added
 // to RequestObject cannot be set on one channel and forgotten on the other.
@@ -44,11 +95,119 @@ const (
 //
 // That suits the only caller, which caches both and serves them read-only.
 // A caller that needs to mutate one wants a deep copy, not this.
-func (r *RequestObject) WithDCAPIResponseMode() *RequestObject {
+func (r *RequestObject) WithDCAPIRequest(expectedOrigin string) *RequestObject {
 	if r == nil {
 		return nil
 	}
 	variant := *r
 	variant.ResponseMode = ResponseModeDCAPIJWT
+
+	// A fresh slice, not an append to the original's: the copy is shallow,
+	// so appending could write into a backing array the link-channel object
+	// still points at.
+	if expectedOrigin != "" {
+		variant.ExpectedOrigins = []string{expectedOrigin}
+	}
+
+	// A dc_api response returns inside the browser call, so the request
+	// carries no response_uri (OpenID4VP 1.0 Appendix A.2). Copying the
+	// direct-post object left one on it: a parameter the wallet is
+	// entitled to act on, naming an endpoint this channel will never be
+	// answered at.
+	//
+	// This is the one field that must NOT survive the copy, and it is the
+	// exception that proves the rest of the doc comment above - everything
+	// else has to agree across the two channels, or they are asking for
+	// different things.
+	variant.ResponseURI = ""
+
 	return &variant
 }
+
+// WithInteractiveAuthorization returns a copy of r as OpenID4VCI 1.1
+// Interactive Authorization requires it.
+//
+// The draft defines the request by difference: "the same as for requests
+// passed to the Digital Credentials API ... except" the response mode, and
+// except that expected_origins, if present, carries only the derived Origin
+// of the Authorization Challenge Endpoint. So this is WithDCAPIRequest with
+// the response mode replaced, and deliberately not a second construction of
+// the same object - the two channels have to stay the same request seen
+// through different delivery paths.
+//
+// Two differences are this build's rather than the draft's, and both
+// narrow the request to what this endpoint will actually accept: one
+// encryption algorithm rather than two, and a query that requires
+// cryptographic holder binding. See the notes at those lines.
+//
+// responseMode is passed in rather than taken from the constants here
+// because its spelling is configurable (CS01_07); it is expected to be one
+// of ResponseModeIAPost or ResponseModeIAPostJWT, or whatever a deployment
+// has renamed those to.
+//
+// The copy is SHALLOW, with the same constraint on callers that
+// WithDCAPIRequest documents: treat both objects as immutable once created.
+func (r *RequestObject) WithInteractiveAuthorization(responseMode, expectedOrigin string) *RequestObject {
+	variant := r.WithDCAPIRequest(expectedOrigin)
+	if variant == nil {
+		return nil
+	}
+	variant.ResponseMode = responseMode
+
+	// Two differences from the browser's request that are not about
+	// delivery. Both NARROW it, and both exist because this endpoint will
+	// refuse what the browser channel would have accepted - a request
+	// that does not say so is a request that lies to the wallet.
+
+	// Advertise only what this channel will actually accept.
+	//
+	// The Digital Credentials API request offers A256GCM and A128GCM, and
+	// a wallet is entitled to pick either. The Authorization Challenge
+	// Endpoint accepts only A256GCM - so a wallet that chose the second
+	// advertised option was refused AFTER its auth_session had been
+	// claimed, which costs it the whole exchange for doing exactly what
+	// the request permitted. Offering one algorithm is the honest form of
+	// accepting one.
+	//
+	// Copied rather than assigned into: the variant shares its
+	// ClientMetadata pointer with the request this was derived from, and
+	// narrowing the base request would change the browser flow too.
+	if variant.ClientMetadata != nil {
+		metadata := *variant.ClientMetadata
+		metadata.EncryptedResponseEncValuesSupported = slices.Clone(InteractiveAuthorizationEncValues)
+		if metadata.AuthorizationEncryptedResponseENC != "" {
+			metadata.AuthorizationEncryptedResponseENC = InteractiveAuthorizationEncValues[0]
+		}
+		variant.ClientMetadata = &metadata
+	}
+
+	// And the query is narrowed the same way, for the same reason.
+	//
+	// The Authorization Challenge Endpoint verifies holder binding: the
+	// whole point of the exchange is to establish WHO is asking for an
+	// issuance, so an unbound credential cannot satisfy it. The query
+	// these requests are built from is shared with the browser channel,
+	// which sets require_cryptographic_holder_binding to false - so
+	// without this the request tells the wallet the binding is optional
+	// and the endpoint then refuses what the wallet was invited to send,
+	// after the user has already consented.
+	//
+	// Narrowing a request rather than widening it: a credential that
+	// satisfies this also satisfies the browser channel's query. The
+	// browser object is not touched, and the two channels still ask for
+	// the same credential - this one says out loud what answering it
+	// requires.
+	variant.DCQLQuery = variant.DCQLQuery.withCryptographicHolderBinding()
+
+	return variant
+}
+
+// InteractiveAuthorizationEncValues is the content encryption an
+// Interactive Authorization response may use, and therefore the only
+// thing its request advertises.
+//
+// One list, read by the request builder and by the endpoint that decrypts
+// the answer, because the two disagreeing is a failure the wallet cannot
+// avoid or diagnose: it picks an advertised algorithm, and is refused for
+// it once its auth_session is already spent.
+var InteractiveAuthorizationEncValues = []string{"A256GCM"}

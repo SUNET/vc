@@ -7,6 +7,7 @@ import {
     escapeHtml,
     escapeSvgValue,
     flattenClaims,
+    initialCredentialSelection,
     renderClaimValueHtml,
     utf8ToBase64,
     valueForSvgPlaceholder,
@@ -21,8 +22,11 @@ import {
  * @typedef {Object} Credential
  * @property {string} vct
  * @property {string} name
+ * @property {string} description
+ * @property {string} issuer
  * @property {string} svg
  * @property {Record<string, ClaimEntry>} claims
+ * @property {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>} rows
  */
 
 /**
@@ -70,6 +74,21 @@ const ParentClaimSchema = v.object({
 /** A presentation claim is either a leaf or a parent with children. */
 const PresentationClaimSchema = v.union([LeafClaimSchema, ParentClaimSchema]);
 
+/**
+ * Display metadata for the credential about to be issued, resolved by the
+ * apigw from the scope's VCTM (or MDDL schema, for mso_mdoc).
+ */
+const CredentialDisplaySchema = v.object({
+    name: v.optional(v.string()),
+    description: v.optional(v.string()),
+    vct: v.optional(v.string()),
+    issuer: v.optional(v.string()),
+});
+
+// Only the three original members are required. credential_display is
+// omitempty on the wire and absent from an apigw that predates it, so the
+// key list is spelled out rather than letting v.required() demand all four
+// - an older backend must render a page without a name, not an error page.
 const UserDataSchema = v.required(v.object({
     svg_template_claims: v.record(v.string(), v.object({
         label: v.string(),
@@ -77,7 +96,8 @@ const UserDataSchema = v.required(v.object({
     })),
     presentation_claims: v.record(v.string(), PresentationClaimSchema),
     redirect_url: v.string(),
-}));
+    credential_display: v.optional(CredentialDisplaySchema),
+}), ["svg_template_claims", "presentation_claims", "redirect_url"]);
 
 /**
  * Due to bfcache some state will persist across
@@ -106,6 +126,17 @@ Alpine.data("app", () => ({
 
     /** @type {Credential[]} */
     credentials: [],
+
+    /**
+     * Index of the selected credential, or null when nothing is selected.
+     *
+     * On the component rather than in a per-row x-data scope, so that
+     * selecting one row clears the previous row's highlight - the old
+     * per-row `checked` was toggled, never cleared, so with more than one
+     * credential every row the holder had ever touched stayed outlined.
+     * @type {number | null}
+     */
+    selectedCredential: null,
 
     /** @type {boolean} */
     loggedIn: false,
@@ -243,6 +274,7 @@ Alpine.data("app", () => ({
 
     async handleIsNotLoggedIn() {
         this.credentials = [];
+        this.selectedCredential = null;
         this.$refs.title.innerText = "Authorization Consent";
     },
 
@@ -298,12 +330,19 @@ Alpine.data("app", () => ({
                 }
             }
 
+            const display = data.credential_display ?? {};
+
             this.credentials.push({
-                vct: "N/A",
-                name: "PID",
+                vct: display.vct ?? "",
+                name: display.name || "Credential",
+                description: display.description ?? "",
+                issuer: display.issuer ?? "",
                 svg,
                 claims: data.presentation_claims,
+                rows: flattenClaims(data.presentation_claims),
             });
+
+            this.selectedCredential = initialCredentialSelection(this.credentials);
 
             const givenName = data.svg_template_claims.given_name?.value;
             if (typeof givenName === "string" && givenName.length > 0) {
@@ -345,6 +384,7 @@ Alpine.data("app", () => ({
                 this.loggedIn = false;
                 this.redirectUrl = null;
                 this.credentials = [];
+                this.selectedCredential = null;
 
                 throw new Error("Unauthorized/session expired");
             }
@@ -413,15 +453,6 @@ Alpine.data("app", () => ({
      */
     renderClaimValue(value) {
         return renderClaimValueHtml(value);
-    },
-
-    /**
-     * Flatten presentation claims into table rows for rendering.
-     * @param {Record<string, ClaimEntry>} claims
-     * @returns {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>}
-     */
-    flattenClaims(claims) {
-        return flattenClaims(claims);
     },
 
     /** @param {string} url */

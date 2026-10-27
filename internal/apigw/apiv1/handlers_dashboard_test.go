@@ -59,6 +59,22 @@ func TestDashboard_ReturnsServicesFromConfig(t *testing.T) {
 	assert.Equal(t, "issuer", reply.Services[1].Name)
 }
 
+func TestDashboard_SplitsWalletsFromServices(t *testing.T) {
+	services := []model.DashboardService{
+		{Name: "apigw", URL: "https://apigw.example.com"},
+		{Name: "Fly Wallet", URL: "https://wallet.example.com", Wallet: true},
+	}
+	c := dashboardTestClient(t, services, nil)
+
+	reply, err := c.Dashboard(t.Context())
+	require.NoError(t, err)
+	require.Len(t, reply.Services, 1)
+	assert.Equal(t, "apigw", reply.Services[0].Name)
+	require.Len(t, reply.Wallets, 1)
+	assert.Equal(t, "Fly Wallet", reply.Wallets[0].Name)
+	assert.Empty(t, reply.Wallets[0].Health, "wallets carry no health status")
+}
+
 func TestDashboard_TitleOverride(t *testing.T) {
 	c := dashboardTestClient(t, nil, nil)
 	c.cfg.APIGW.Dashboard.Title = "Demo Deployment"

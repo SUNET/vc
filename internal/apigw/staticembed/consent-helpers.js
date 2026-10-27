@@ -282,3 +282,19 @@ export function flattenClaims(claims) {
     }
     return rows;
 }
+
+
+/**
+ * Which credential should be selected when the list is first rendered.
+ *
+ * An offer with exactly one credential has nothing to choose between, so
+ * it is preselected and the holder only has to confirm. With more than one
+ * the choice is real and must be made deliberately, so nothing is picked
+ * for them.
+ *
+ * @param {{ length: number }} credentials
+ * @returns {number | null} index, or null for "no selection"
+ */
+export function initialCredentialSelection(credentials) {
+    return credentials?.length === 1 ? 0 : null;
+}

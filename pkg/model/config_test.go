@@ -866,7 +866,7 @@ func TestOAuthServerLoadAndSignMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			metadata := tt.server.GenerateMetadata(ctx, tt.issuerURL, false, nil)
+			metadata := tt.server.GenerateMetadata(ctx, tt.issuerURL, false, nil, nil)
 
 			assert.NotNil(t, metadata)
 			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty before signing")

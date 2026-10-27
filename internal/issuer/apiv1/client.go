@@ -5,12 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -20,6 +18,7 @@ import (
 	"github.com/SUNET/vc/internal/issuer/auditlog"
 	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
@@ -155,6 +154,7 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 	// present but unloadable BBS config means the operator asked for the
 	// format and it is broken, which should not start quietly and fail one
 	// request at a time.
+
 	if err := c.initBBSKeys(); err != nil {
 		return nil, err
 	}
@@ -585,35 +585,12 @@ func bbsKeyMaterial(which, path, inline string) ([]byte, error) {
 	}
 }
 
-// decodeBase64URL decodes a single unpadded base64url value.
-func decodeBase64URL(value string) ([]byte, error) {
-	// Trailing whitespace is what every editor and heredoc leaves behind;
-	// padding is what a standard-base64 tool leaves behind. Neither is a
-	// broken key.
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(value), "="))
-	if err != nil {
-		return nil, fmt.Errorf("not valid base64url: %w", err)
-	}
-	if len(decoded) == 0 {
-		return nil, fmt.Errorf("is empty")
-	}
-	return decoded, nil
-}
+// decodeBase64URL and readBase64URLFile moved to pkg/helpers when the
+// apigw started loading seed derivation secrets written the same way;
+// these two names remain as the issuer's local spelling of them.
+func decodeBase64URL(value string) ([]byte, error) { return helpers.DecodeBase64URL(value) }
 
-// readBase64URLFile reads a file holding a single base64url-encoded value.
-func readBase64URLFile(path string) ([]byte, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	// Trailing newlines are what every editor and every `echo -n`-less
-	// pipeline leaves behind; rejecting them would be a needless trap.
-	decoded, err := decodeBase64URL(string(raw))
-	if err != nil {
-		return nil, fmt.Errorf("%s %w", path, err)
-	}
-	return decoded, nil
-}
+func readBase64URLFile(path string) ([]byte, error) { return helpers.ReadBase64URLFile(path) }
 
 // bbsIssuer is the signer MakeJWP blind-signs with — the native one unless
 // a test has replaced it.

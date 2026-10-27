@@ -91,6 +91,10 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// object with nothing in it - cannot be signed, and finding that out
 	// inside the native signer costs a status list entry that is never
 	// handed back.
+	// Seed-backed claims, before the shape is validated and before
+	// anything is signed: an injected claim is part of the document the
+	// validator has to pass, and part of what gets signed. A no-op for a
+	// scope with no commitments configured.
 	if err := bbs.ValidateDocumentData(req.DocumentData); err != nil {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "document_data "+err.Error())
 	}

@@ -2,7 +2,8 @@ package apiv1
 
 import (
 	"fmt"
-	"net/url"
+
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 // dcAPIOrigin returns the web origin a Digital Credentials API presentation
@@ -26,13 +27,13 @@ func (c *Client) dcAPIOrigin() (string, error) {
 		return "", fmt.Errorf("verifier.public_url is not set, so the DC API origin cannot be determined")
 	}
 
-	parsed, err := url.Parse(raw)
+	// Serialised as a browser would (RFC 6454 §6.2), shared with the
+	// Interactive Authorization audience derivation so the two cannot
+	// drift - both are compared against something a wallet canonicalised
+	// itself, as a plain string.
+	origin, err := openid4vp.CanonicalOrigin(raw)
 	if err != nil {
-		return "", fmt.Errorf("parsing verifier.public_url %q for the DC API origin: %w", raw, err)
+		return "", fmt.Errorf("verifier.public_url: %w", err)
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("verifier.public_url %q has no scheme or host, so it yields no origin", raw)
-	}
-
-	return parsed.Scheme + "://" + parsed.Host, nil
+	return origin, nil
 }

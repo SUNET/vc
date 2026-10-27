@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -57,6 +58,22 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
 		return nil, err
+	}
+
+	// Seed-backed claims, before anything is signed. A no-op for a scope
+	// with no commitments configured, which is every scope in a deployment
+	// that does not use the feature.
+	// The VCTM decides which claims become disclosures, so a commitment
+	// path it does not declare would be signed in the clear - see
+	// CredentialMetadata.checkDisclosable. Parsed here rather than trusted
+	// from configuration, because this is the document actually being
+	// signed.
+	// The same wording the builder's own parse uses, because this now runs
+	// first and an invalid VCTM must be reported the way it always was.
+	vctm := &sdjwtvc.VCTM{}
+	if err := json.Unmarshal(req.VCTM, vctm); err != nil {
+		c.log.Error(err, "failed to parse inline VCTM", "scope", req.Scope)
+		return nil, fmt.Errorf("failed to parse inline VCTM: %w", err)
 	}
 
 	// Build credential options. The VCTM bytes and integrity hash come from

@@ -530,14 +530,21 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// which types were asked for, whether holder binding was required.
 		// Without it here the request object cache is the only copy, and the
 		// verification path cannot see what it is checking against.
-		DCQLQuery:           req.DCQLQuery,
-		Code:                "",
-		RequestURI:          "",
-		WalletURI:           "",
-		Forfeited:           false,
-		State:               state,
-		ClientID:            uiClientID,
-		ExpiresAt:           0,
+		DCQLQuery:  req.DCQLQuery,
+		Code:       "",
+		RequestURI: "",
+		WalletURI:  "",
+		Forfeited:  false,
+		State:      state,
+		ClientID:   uiClientID,
+		// How long the user has to complete the presentation.
+		//
+		// This was 0, and isSessionActive reads 0 as "never expires" - so
+		// the standalone verification session had no deadline of its own
+		// and lived until the auth-context cache evicted it. The key for
+		// this, openid4vp.presentation_timeout, was read nowhere in the
+		// codebase (SUNET/vc#756).
+		ExpiresAt:           time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix(),
 		CodeChallenge:       "",
 		CodeChallengeMethod: "",
 		Consent:             false,
@@ -659,21 +666,8 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
-	// The DC API's own object, identical but for response_mode. A copy rather
-	// than a second literal so the two cannot drift: everything the wallet
-	// checks - client_id, nonce, response_uri, client_metadata, the DCQL
-	// query - has to be the same request seen through a different channel.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
-
-		dcAPIRequestObjectID := uuid.NewString()
-		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
-			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
-		} else if !ok {
-			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
-		}
-
-		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
 		}
@@ -756,21 +750,46 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 	// request each time so the in-tab attempt has a valid request_uri; the
 	// existing entry (if any) times out on its own.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
-		dcAPIRequestObjectID := uuid.NewString()
-		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
-			return nil, false, fmt.Errorf("dc_api request_object persist: %w", err)
-		} else if !ok {
-			return nil, false, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
-		}
-
-		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, false, err
 		}
 	}
 
 	return reply, true, nil
+}
+
+// dcAPIAuthorizationRequest builds the Digital Credentials API form of
+// requestObject, persists it under a fresh id, and returns the
+// authorization request URI the page passes to navigator.credentials.get.
+//
+// The DC API's object is the link channel's object, identical but for how
+// the response is delivered: response_mode, response_uri (which a dc_api
+// request does not carry at all) and expected_origins (which only it
+// carries, and must, being signed). A copy rather than a second literal so
+// the two cannot drift - everything the wallet checks (client_id, nonce,
+// client_metadata, the DCQL query) has to be the same request seen through
+// a different channel.
+//
+// One function because all three callers - the first interaction, a reload
+// that reuses an in-flight session, and a resume - want exactly this, and
+// the only thing that differed between their copies was how many values
+// each returns on the way out.
+func (c *Client) dcAPIAuthorizationRequest(ctx context.Context, requestObject *openid4vp.RequestObject) (string, error) {
+	dcAPIOrigin, err := c.dcAPIOrigin()
+	if err != nil {
+		return "", fmt.Errorf("dc_api request_object: %w", err)
+	}
+	dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
+
+	dcAPIRequestObjectID := uuid.NewString()
+	if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+		return "", fmt.Errorf("dc_api request_object persist: %w", err)
+	} else if !ok {
+		return "", fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+	}
+
+	return dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 }
 
 // isReusableAuthContext reports whether the authorization context still
@@ -795,31 +814,56 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 }
 
 // IsActiveAuthSession reports whether sessionID names an authorization
-// context the verifier currently tracks. Used by /ui/notify to refuse to
-// open an SSE listener for an unknown id, which would otherwise let any
+// context the verifier currently tracks, and when that context's
+// presentation deadline falls. Used by /ui/notify to refuse to open an SSE
+// listener for an unknown id, which would otherwise let any
 // unauthenticated caller inflate notify.Service's broadcaster map.
 //
-// (false, nil) means the lookup succeeded and the id is unknown
-// (ErrNoDocuments) or empty. A non-nil error means the authorization
-// store itself failed; the HTTP endpoint surfaces that as a retryable
-// 5xx so a transient Mongo/Redis error in HA does not get mis-reported
-// as 404 and strand the EventSource reconciliation that would run on
-// retry.
-func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
+// (false, _, nil) means the lookup succeeded and the id is unknown
+// (ErrNoDocuments), empty, or already past its deadline. A non-nil error
+// means the authorization store itself failed; the HTTP endpoint surfaces
+// that as a retryable 5xx so a transient Mongo/Redis error in HA does not
+// get mis-reported as 404 and strand the EventSource reconciliation that
+// would run on retry.
+//
+// An expired context reports inactive rather than active-with-a-past
+// deadline, so a tab that reconnects after the deadline is refused
+// outright instead of being handed a stream that exists only to tell it
+// the session is over. A context that already reached an outcome is the
+// exception twice over: it stays active past its deadline, and it reports
+// NO deadline, because the tab is still owed the result and the stream is
+// how it reconciles one it missed.
+//
+// expiresAt is the Unix second the session stops being usable, or 0 when
+// it has no deadline - a context created before presentation_timeout was
+// read, which is bounded only by cache eviction. The caller uses it to
+// arm the expiry event, so "no deadline" must mean "do not arm", never
+// "expire now".
+func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (active bool, expiresAt int64, err error) {
 	if sessionID == "" {
-		return false, nil
+		return false, 0, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
-			return false, nil
+			return false, 0, nil
 		}
-		return false, err
+		return false, 0, err
 	}
 	if authCtx == nil {
-		return false, nil
+		return false, 0, nil
 	}
-	return true, nil
+	if authSessionIsTerminal(authCtx) {
+		// No deadline for a session that is already over: the stream is
+		// open so the tab can pick up the result it has not seen yet, and
+		// arming the expiry here would close it immediately on a session
+		// whose outcome is sitting there waiting to be read.
+		return true, 0, nil
+	}
+	if sessionExpired(authCtx) {
+		return false, 0, nil
+	}
+	return true, authCtx.ExpiresAt, nil
 }
 
 // CompletedResponseCode returns the VerifierResponseCode set on the
@@ -914,6 +958,16 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 			ResponseCode: authCtx.VerifierResponseCode,
 		}, nil
 	}
+	// Past the presentation deadline there is nothing to resume. Checked
+	// after the completed case, so a finished session still hands back its
+	// response code, and before the request object, which outlives the
+	// deadline by its own floor - without this, a resume reissued the dead
+	// QR and minted a fresh DC API request_uri for a session the
+	// direct-post handlers would then refuse.
+	if sessionExpired(authCtx) {
+		return &UIResumeReply{Status: UIResumeExpired}, nil
+	}
+
 	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
@@ -941,14 +995,7 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 		return nil, err
 	}
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
-		dcAPIRequestObjectID := uuid.NewString()
-		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
-			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
-		} else if !ok {
-			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
-		}
-		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
 		}

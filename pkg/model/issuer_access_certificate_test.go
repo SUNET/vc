@@ -25,7 +25,7 @@ func issuerWithAccessCert(validate bool, key *pki.KeyConfig, allowed ...string) 
 // holding a certificate that would not pass them.
 func TestIssuerValidateAccessCertificate_DisabledByDefault(t *testing.T) {
 	opts := conformantWRPACOptions(t)
-	opts.keyUsage = 0 // would fail the profile
+	opts.policyOID = "" // would fail the profile
 	cert := newWRPACTestCert(t, opts)
 
 	assert.NoError(t, (&Issuer{}).ValidateAccessCertificate(cert, time.Now()),
@@ -48,7 +48,7 @@ func TestIssuerValidateAccessCertificate_Conformant(t *testing.T) {
 // two copies will drift.
 func TestIssuerValidateAccessCertificate_SharesTheVerifierRule(t *testing.T) {
 	opts := conformantWRPACOptions(t)
-	opts.keyUsage = 0
+	opts.policyOID = ""
 	broken := newWRPACTestCert(t, opts)
 
 	issuerErr := issuerWithAccessCert(true, nil).ValidateAccessCertificate(broken, time.Now())

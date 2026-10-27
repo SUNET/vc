@@ -137,6 +137,25 @@ type DatastoreScope struct {
 type AuthScopeEntry struct {
 	// AuthClaims lists the identity claims to extract from this credential type.
 	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1" doc_example:"[given_name, family_name, birth_date]"`
+
+	// IdentityAttributes renames an auth claim to the identity-mapping
+	// attribute it is matched as (given_name, family_name, birth_date or
+	// authentic_source_person_id). Needed when the presented credential
+	// spells the attribute differently - an SD-JWT PID's "birthdate", an
+	// mdoc claim outside org.iso.18013.5.1 such as
+	// "eu.europa.ec.eudi.pid.1.given_name", or a Photo ID's
+	// "org.iso.23220.1.given_name_unicode". An auth claim without an entry is
+	// matched under its own name, as before.
+	IdentityAttributes map[string]string `yaml:"identity_attributes,omitempty" doc_key:"auth claim"`
+
+	// DocumentClaims copies claims of the verified presented credential into
+	// the issued document: presented claim path -> top-level claim of the
+	// issued credential. The copied value overrides the datastore document's
+	// own. A full-date target (MDDL value_type full-date) is normalised to
+	// "YYYY-MM-DD" whatever the source shape (SD-JWT string, mdoc CBOR tag
+	// 1004/0, date-time). Every source claim is added to the DCQL request,
+	// and one that is missing from the presentation fails issuance.
+	DocumentClaims map[string]string `yaml:"document_claims,omitempty" doc_key:"presented claim"`
 }
 
 // AuthScopeNames returns the list of scope keys from AuthScopes.
@@ -355,7 +374,7 @@ func (p PresentationScope) ResolveDefaults(now time.Time) (map[string]any, error
 // Remote defines an external API connection.
 type Remote struct {
 	// Type is the API protocol type
-	Type RemoteType `yaml:"type" validate:"required,oneof=eduapi ooapi"`
+	Type RemoteType `yaml:"type" validate:"required,oneof=eduapi ooapi oeapi"`
 
 	// BaseURL is the base URL of the API endpoint
 	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://api.ladok.se/eduapi\""`
@@ -392,6 +411,7 @@ type RemoteType string
 const (
 	RemoteTypeEduAPI RemoteType = "eduapi"
 	RemoteTypeOOAPI  RemoteType = "ooapi"
+	RemoteTypeOEAPI  RemoteType = "oeapi"
 )
 
 // CredentialSource describes where a credential's data comes from and how the user authenticates.

@@ -75,18 +75,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
 		registerAuth:     func(c *gin.Context) { c.Next() },
-		sessionsOptions: sessions.Options{
-			Path:     "/",
-			Domain:   "",
-			MaxAge:   900,
-			Secure:   false,
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-		},
-	}
-
-	if s.cfg.Verifier.APIServer.TLS.Enable {
-		s.sessionsOptions.Secure = true
+		sessionsOptions:  userSessionOptions(cfg),
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
@@ -124,36 +113,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		return nil, err
 	}
 
-	// Force revalidation of embedded static assets. There is no cache
-	// busting on these URLs, so a browser's heuristic cache can hold onto
-	// an old ES module across a plain reload even after a deploy.
-	s.gin.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
-			c.Header("Cache-Control", "no-cache")
-		}
-		c.Next()
-	})
+	if err := mountStaticAssets(s.gin); err != nil {
+		return nil, err
+	}
 
-	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
-
-	tmpl := template.New("").Funcs(template.FuncMap{
-		"toJSON": func(v any) string {
-			cleaned := cleanUnresolvedMarkersForDisplay(v)
-			b, _ := json.MarshalIndent(cleaned, "", "  ")
-			return string(b)
-		},
-		"json": func(v any) (any, error) {
-			jsonBytes, err := json.Marshal(v)
-			if err != nil {
-				return "", err
-			}
-			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
-		},
-		"claimsTree": func(credential map[string]any) template.HTML {
-			return template.HTML(renderClaimsTree(credential)) //#nosec G203 -- internally generated HTML
-		},
-	})
-	s.gin.SetHTMLTemplate(template.Must(tmpl.ParseFS(staticembed.FS, "*.html")))
+	s.gin.SetHTMLTemplate(htmlTemplates())
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -266,6 +230,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 // Close closing httpserver
 func (s *Service) Close(ctx context.Context) error {
 	s.log.Info("Stopping")
+
+	// Graceful, not just a log line. Shutdown stops accepting connections
+	// and waits for the handlers already running, which is what makes
+	// "the server has stopped" mean anything to whatever is torn down
+	// next - cmd/verifier closes the Vega verifier-key store after this,
+	// and a verification still in flight has a key file it is about to
+	// open (SUNET/vc#656 review).
+	//
+	// Bounded by the caller's context. An error is returned rather than
+	// swallowed, but it is not fatal: the process is exiting either way,
+	// and the key store refuses to delete a pinned file regardless.
+	if err := s.server.Shutdown(ctx); err != nil {
+		s.log.Error(err, "graceful shutdown did not complete")
+		return err
+	}
 	return nil
 }
 
@@ -401,4 +380,108 @@ func cleanUnresolvedMarkersForDisplay(v any) any {
 	default:
 		return v
 	}
+}
+
+// defaultUserSessionMaxAge is the lifetime of the verifier-OP's user session
+// cookie when oidc_provider is absent. It is the value this was hardcoded at.
+const defaultUserSessionMaxAge = 900
+
+// userSessionMaxAge is the lifetime, in seconds, of the verifier_user_session
+// cookie - the OP's own session with the end user.
+//
+// oidc_provider.session_duration is the key named for this, and it was read
+// nowhere: the cookie was pinned at 900 seconds whatever an operator wrote
+// (SUNET/vc#756). Its documented default is 3600, so a deployment that never
+// touched the key now gets the hour its configuration has always said it
+// would, rather than fifteen minutes.
+// userSessionOptions builds the cookie options for verifier_user_session.
+//
+// Kept whole and in one place so the cookie's lifetime can be read back in a
+// test. Spread across the constructor, nothing observed what MaxAge ended up
+// as, which is how it stayed pinned at 900 seconds while the key meant to
+// set it went unread (SUNET/vc#756).
+func userSessionOptions(cfg *model.Cfg) sessions.Options {
+	secure := false
+	if cfg != nil && cfg.Verifier != nil {
+		secure = cfg.Verifier.APIServer.TLS.Enable
+	}
+
+	return sessions.Options{
+		Path:     "/",
+		Domain:   "",
+		MaxAge:   userSessionMaxAge(cfg),
+		Secure:   secure,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+func userSessionMaxAge(cfg *model.Cfg) int {
+	if cfg == nil || cfg.Verifier == nil {
+		return defaultUserSessionMaxAge
+	}
+	if op := cfg.Verifier.Outbound.OIDCProvider; op != nil && op.SessionDuration > 0 {
+		return op.SessionDuration
+	}
+	return defaultUserSessionMaxAge
+}
+
+// staticCacheHeaders tags a response under prefix with the ETag of the file
+// it is about to serve, and asks the browser to revalidate rather than
+// assume.
+//
+// Set BEFORE the file server runs, which is what makes the conditional
+// request work: net/http's serveContent reads the ETag back off the
+// response header when it evaluates If-None-Match, so a handler that has
+// already set one gets 304 handling for free and does not have to
+// implement it.
+//
+// A path with no entry is left alone rather than given a fabricated
+// validator - there is no such file, and the file server will say so.
+func staticCacheHeaders(prefix string, etags map[string]string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if p := c.Request.URL.Path; strings.HasPrefix(p, prefix) {
+			if etag, ok := etags[strings.TrimPrefix(p, strings.TrimSuffix(prefix, "/"))]; ok {
+				c.Header("ETag", etag)
+				c.Header("Cache-Control", "public, no-cache")
+			}
+		}
+		c.Next()
+	}
+}
+
+// mountStaticAssets serves /static with content-hash ETags so a redeploy is not
+// masked by a browser's cache; embed.FS reports no modification time, so
+// without an ETag there is no validator. See webvendor.StaticETags.
+func mountStaticAssets(engine *gin.Engine) error {
+	assets := webvendor.Overlay(staticembed.FS)
+	etags, err := webvendor.StaticETags(assets)
+	if err != nil {
+		return err
+	}
+	engine.Use(staticCacheHeaders("/static/", etags))
+	engine.StaticFS("/static", http.FS(assets))
+	return nil
+}
+
+// htmlTemplates parses the embedded HTML with the view helpers the templates call.
+func htmlTemplates() *template.Template {
+	tmpl := template.New("").Funcs(template.FuncMap{
+		"toJSON": func(v any) string {
+			cleaned := cleanUnresolvedMarkersForDisplay(v)
+			b, _ := json.MarshalIndent(cleaned, "", "  ")
+			return string(b)
+		},
+		"json": func(v any) (any, error) {
+			jsonBytes, err := json.Marshal(v)
+			if err != nil {
+				return "", err
+			}
+			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
+		},
+		"claimsTree": func(credential map[string]any) template.HTML {
+			return template.HTML(renderClaimsTree(credential)) //#nosec G203 -- internally generated HTML
+		},
+	})
+	return template.Must(tmpl.ParseFS(staticembed.FS, "*.html"))
 }

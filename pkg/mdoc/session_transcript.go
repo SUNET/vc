@@ -124,3 +124,84 @@ func BuildOID4VPDCAPISessionTranscript(origin, nonce string, readerPublicKeyJWKT
 	}
 	return transcript, nil
 }
+
+// BuildOID4VCIIAESessionTranscript builds the SessionTranscript for a
+// presentation that answers an OpenID4VCI 1.1 Interactive Authorization
+// challenge.
+//
+//	SessionTranscript = [
+//	  null,                                     // DeviceEngagementBytes
+//	  null,                                     // EReaderKeyBytes
+//	  [handoverLabel, SHA256(handoverInfo)],
+//	]
+//	handoverInfo = [challengeEndpoint, nonce, responseEncryptionJWKThumbprint]
+//
+// What distinguishes it from the other two handovers in this file: the
+// Authorization Challenge Endpoint takes the place the response URI holds
+// in the redirect flow and the calling origin holds in the DC API one, and
+// it comes FIRST. There is no client_id member. The endpoint is the plain
+// URL and MUST NOT carry the "ia:" prefix that the same value wears when
+// it is an SD-JWT VC audience - the prefix keeps that audience out of an
+// ordinary Verifier's namespace, and a hash input needs no such help.
+//
+// responseEncryptionJWKThumbprint is the RFC 7638 thumbprint of the public
+// key the response is encrypted to, which is required for the ia_post.jwt
+// response mode. It encodes as CBOR null for plain ia_post, where there is
+// no such key; the array is three elements either way. The draft explains
+// what that buys: it does not stop a third party re-encrypting the
+// response, but it makes the substitution detectable.
+//
+// handoverLabel is a parameter rather than a constant because the 1.1
+// draft disagrees with itself about the spelling - its normative mdoc
+// section writes IAE where every other normative section writes ia
+// (WE BUILD CS-01 NOTE CS01_07, openid/OpenID4VCI#811). It is hashed into
+// the transcript, so a mismatch fails DeviceAuth with nothing to point at,
+// which is exactly the kind of disagreement worth being able to settle by
+// configuration.
+//
+// Unlike the two above, this one IS verified against the specification's
+// own bytes: the 1.1 draft publishes hex for the handover info, the
+// handover and the finished transcript, and TestIAESessionTranscriptMatchesTheSpecVectors
+// reproduces all three. That also settled a real ambiguity - the CDDL
+// names the hashed value OpenID4VCIIAEHandoverInfoBytes and defines it as
+// `bstr .cbor`, which reads as the byte-string-wrapped form, but the
+// published hash is over the bare CBOR encoding.
+func BuildOID4VCIIAESessionTranscript(handoverLabel, challengeEndpoint, nonce string, responseEncryptionJWKThumbprint []byte) ([]byte, error) {
+	if handoverLabel == "" {
+		return nil, fmt.Errorf("mdoc: interactive authorization session transcript requires a handover label")
+	}
+	if challengeEndpoint == "" {
+		// The endpoint is what binds the presentation to the server that
+		// issued the challenge - the defence against one Authorization
+		// Server relaying another's. An empty one hashes cleanly and binds
+		// nothing.
+		return nil, fmt.Errorf("mdoc: interactive authorization session transcript requires the authorization challenge endpoint")
+	}
+	if nonce == "" {
+		// Section 14.2 of OpenID4VP: the nonce is what ties the
+		// presentation to this exchange rather than a replayed one.
+		return nil, fmt.Errorf("mdoc: interactive authorization session transcript requires the request nonce")
+	}
+
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+
+	var jwkThumbprint any
+	if responseEncryptionJWKThumbprint != nil {
+		jwkThumbprint = responseEncryptionJWKThumbprint
+	}
+
+	handoverInfo, err := encoder.Marshal([]any{challengeEndpoint, nonce, jwkThumbprint})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode interactive authorization handoverInfo: %w", err)
+	}
+	handoverInfoDigest := sha256.Sum256(handoverInfo)
+
+	transcript, err := encoder.Marshal([]any{nil, nil, []any{handoverLabel, handoverInfoDigest[:]}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode interactive authorization SessionTranscript: %w", err)
+	}
+	return transcript, nil
+}

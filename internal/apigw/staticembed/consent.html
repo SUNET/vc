@@ -108,33 +108,70 @@
             </template>
             <template x-if="!loading && loggedIn">
                 <div class="space-y-4 md:space-y-6">
-                    <p>Select the credential you wish to retrieve by clicking on it:</p>
+                    <p x-text="credentials.length === 1
+                        ? 'You are about to receive this credential:'
+                        : 'Select the credential you wish to retrieve by clicking on it:'"></p>
                     <form x-ref="credentialSelectionForm" @submit.prevent="handleCredentialSelection">
                         <div class="relative">
-                            <template x-for="(credential, index) in credentials">
-                                <div x-data="{ checked: false }">
-                                    <div class="vc-radio flex items-center cursor-pointer">
-                                        <input name="credential" type="radio" :id="`credential:${index}`" :value="credential.vct" @change="checked = !checked; console.log(checked)" required class="peer h-4 w-4 cursor-pointer appearance-none rounded-full dark:bg-gray-800 border border-slate-400 transition-all bg-white" id="html">
+                            <template x-for="(credential, index) in credentials" :key="index">
+                                <div>
+                                    <!-- With one credential there is nothing to
+                                         choose between, so the radio is hidden
+                                         AND de-required: a `required` control
+                                         inside a display:none subtree cannot be
+                                         focused, so the browser blocks submit
+                                         with a validation message it has nowhere
+                                         to show. -->
+                                    <div class="vc-radio flex items-center cursor-pointer" x-show="credentials.length > 1">
+                                        <input name="credential" type="radio" :id="`credential:${index}`" :value="credential.vct"
+                                               :checked="selectedCredential === index"
+                                               :required="credentials.length > 1"
+                                               @change="selectedCredential = index"
+                                               class="peer h-4 w-4 cursor-pointer appearance-none rounded-full dark:bg-gray-800 border border-slate-400 transition-all bg-white">
                                         <span class="absolute bg-primary dark:bg-primary-light w-2.5 h-2.5 rounded-full opacity-0 peer-checked:opacity-100 transition-opacity duration-200 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
                                         </span>
                                     </div>
-                                    <label :for="`credential:${index}`" class="vc-radio-label radio block cursor-pointer" :class="{ 'outline-3 outline-double outline-primary-light bg-primary-light bg-opacity-10': checked }">
+                                    <label :for="`credential:${index}`" class="vc-radio-label radio block cursor-pointer" :class="{ 'outline-3 outline-double outline-primary-light bg-primary-light bg-opacity-10': credentials.length > 1 && selectedCredential === index }">
                                         <div class="block">
                                             <img x-show="credential.svg" class="vc-credential-card mb-2" width="829" height="504" :src="credential.svg" alt="">
-                                            <table class="table-auto w-full">
-                                                <tbody>
-                                                    <template x-for="row of flattenClaims(credential.claims)">
-                                                        <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
-                                                            <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold break-words min-w-0' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top break-words min-w-0' : 'p-2 text-sm text-left align-top break-words min-w-0')"
-                                                                x-text="row.label"
-                                                                :colspan="row.isHeader ? 2 : 1"></th>
-                                                            <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top break-words min-w-0" x-html="renderClaimValue(row.value)"></td>
-                                                        </tr>
-                                                    </template>
-                                                </tbody>
-                                            </table>
+                                            <p class="text-base font-semibold break-words" x-text="credential.name"></p>
+                                            <p x-show="credential.description" class="text-sm opacity-70 break-words" x-text="credential.description"></p>
+                                            <dl class="mt-2 text-sm">
+                                                <template x-if="credential.issuer">
+                                                    <div class="flex gap-2 py-0.5">
+                                                        <dt class="opacity-60 shrink-0">Issuer</dt>
+                                                        <dd class="vc-wrap-anywhere min-w-0" x-text="credential.issuer"></dd>
+                                                    </div>
+                                                </template>
+                                                <template x-if="credential.vct">
+                                                    <div class="flex gap-2 py-0.5">
+                                                        <dt class="opacity-60 shrink-0">Type</dt>
+                                                        <dd class="vc-wrap-anywhere min-w-0" x-text="credential.vct"></dd>
+                                                    </div>
+                                                </template>
+                                            </dl>
                                         </div>
                                     </label>
+                                    <!-- Sibling of the label, not nested in it: an
+                                         interactive <details> inside a <label>
+                                         violates the label content model and lets
+                                         "Show details" toggle the radio. -->
+                                    <details class="vc-claim-details mt-3">
+                                        <summary class="text-sm font-medium text-primary dark:text-primary-light"
+                                                 x-text="`Show details (${credential.rows.length})`"></summary>
+                                        <table class="vc-claims-table table-auto w-full mt-2">
+                                            <tbody>
+                                                <template x-for="row of credential.rows">
+                                                    <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
+                                                        <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top font-normal' : 'p-2 text-sm text-left align-top font-normal')"
+                                                            x-text="row.label"
+                                                            :colspan="row.isHeader ? 2 : 1"></th>
+                                                        <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top" x-html="renderClaimValue(row.value)"></td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </details>
                                 </div>
                             </template>
                         </div>

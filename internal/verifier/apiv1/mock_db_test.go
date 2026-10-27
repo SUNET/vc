@@ -134,14 +134,13 @@ func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBSer
 				PublicURL: "https://verifier.example.com",
 				Outbound: model.VerifierOutbound{
 					OIDCProvider: &model.OIDCOP{
-						Issuer:               "https://verifier.example.com",
-						SubjectType:          "public",
-						SubjectSalt:          "test-salt",
-						SessionDuration:      900,   // 15 minutes
-						CodeDuration:         600,   // 10 minutes
-						AccessTokenDuration:  3600,  // 1 hour
-						IDTokenDuration:      3600,  // 1 hour
-						RefreshTokenDuration: 86400, // 24 hours
+						Issuer:              "https://verifier.example.com",
+						SubjectType:         "public",
+						SubjectSalt:         "test-salt",
+						SessionDuration:     900,  // 15 minutes
+						CodeDuration:        600,  // 10 minutes
+						AccessTokenDuration: 3600, // 1 hour
+						IDTokenDuration:     3600, // 1 hour
 					},
 				},
 			},

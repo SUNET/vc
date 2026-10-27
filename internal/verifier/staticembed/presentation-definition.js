@@ -9,6 +9,7 @@ import {
 import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
+import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -404,8 +405,10 @@ function clearStoredResponseCode() {
  *
  * @param {string | undefined} sessionID
  * @param {(redirectURI: string) => void} onRedirect
+ * @param {() => void} onExpired Called when the server says the session's
+ *   presentation deadline has passed and nothing more will arrive.
  */
-function setupNotifyListener(sessionID, onRedirect) {
+function setupNotifyListener(sessionID, onRedirect, onExpired) {
     console.log("Setting up SSE notify listener");
     const notifyURL = new URL("/ui/notify", baseUrl);
     if (sessionID) {
@@ -441,6 +444,16 @@ function setupNotifyListener(sessionID, onRedirect) {
         eventSource.close();
         onRedirect(redirectURI);
     };
+
+    // The server's one-shot expiry notice. Without it a tab that is just
+    // waiting for a wallet never learns that its deadline passed: it makes
+    // no requests of its own, so it would sit on a live connection showing
+    // a QR code the verifier has already stopped accepting.
+    eventSource.addEventListener("expired", () => {
+        console.log("SSE session expired");
+        eventSource.close();
+        onExpired();
+    });
 
     eventSource.onerror = (error) => {
         console.error("SSE connection error:", error);
@@ -480,7 +493,7 @@ Alpine.data("app", () => ({
     presetCategoryOrder: [],
 
     /**
-     * @type {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
+     * @type {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[], collapsible: boolean }}
      * The grouped, sorted view the template renders. Derived from
      * predefinedPresentationDefinitions and presetCategoryOrder, and
      * computed once where those are set rather than on every read: the
@@ -489,7 +502,7 @@ Alpine.data("app", () => ({
      * catalog every time. Both inputs are assigned in exactly one place
      * (loadMetadata), which is why this needs no cache key or invalidation.
      */
-    groupedPresetData: { featured: [], groups: [] },
+    groupedPresetData: { featured: [], groups: [], collapsible: false },
 
     /** @type {boolean} Whether the non-featured/categorized preset groups are expanded. */
     showMorePresets: false,
@@ -521,6 +534,13 @@ Alpine.data("app", () => ({
     /** @type {boolean} True when a stored response_code refers to a result
      * the server no longer has (credential cache TTL expired). */
     verificationExpired: false,
+
+    /** @type {boolean} Whether the presentation session itself ran out of
+     * time while this page was waiting for a wallet. Distinct from
+     * verificationExpired, which is about a RESULT the server no longer
+     * holds: here there is no result and never will be, and the only way
+     * forward is to start a new request. */
+    sessionExpired: false,
 
     async init() {
         await this.lookupCredentialsList();
@@ -743,17 +763,22 @@ Alpine.data("app", () => ({
         this.dcApiVerified = false;
         this.verificationResult = null;
         this.verificationExpired = false;
+        this.sessionExpired = false;
         clearStoredSessionID();
         clearStoredResponseCode();
     },
 
     /**
-     * Commit the same-device intent before the browser leaves for a web
-     * wallet or launches a native wallet via custom scheme. direct_post
-     * reads this flag to decide whether to return redirect_uri, and a
-     * fire-and-forget fetch here would race the wallet's response: keepalive
-     * only guarantees the request goes out, not that the server has
-     * persisted it before direct_post reads the auth context. Await it.
+     * Record the same-device intent and hand the request to the wallet.
+     *
+     * direct_post reads that flag to decide whether to return
+     * redirect_uri, and what it costs to record it differs by link, which
+     * is why the handoff itself lives in wallet-handoff.js - see the
+     * reasoning at the top of that file. In short: a web wallet replaces
+     * this page, so the POST is confirmed first and a failure falls back
+     * to a second tab; a custom scheme launches an app and must not be
+     * preceded by any await at all, so the POST goes out through
+     * sendBeacon and the page stays where it is.
      *
      * The POST carries the session_id returned by /ui/interaction so the
      * flag lands on this presentation's authorization context. The server's
@@ -761,12 +786,6 @@ Alpine.data("app", () => ({
      * explicit id, a second tab that opened /ui/interaction after this one
      * would silently claim the cookie and this click would mark the wrong
      * session.
-     *
-     * On failure, hand the wallet URL to a tab that was opened synchronously
-     * from the click, so the popup blocker still sees a live user gesture
-     * (transient activation would already be gone after the awaited fetch).
-     * The current tab (and its live SSE) survives to deliver the response
-     * through the cross-device channel instead.
      *
      * Do NOT close the SSE here: a same-tab navigation tears it down on its
      * own, and a custom-scheme launch leaves the tab open and still needing
@@ -777,40 +796,15 @@ Alpine.data("app", () => ({
             return;
         }
         event.preventDefault();
-        const url = event.currentTarget.href;
-        // Opened inside the click so the browser still counts a live user
-        // activation when the fallback runs after the awaited fetch.
-        // No `noopener`: that feature makes window.open return null and
-        // then we would not be able to close or navigate the placeholder.
-        // Severed manually below (opener = null) before any navigation.
-        const fallbackWindow = globalThis.open("", "_blank");
-        try {
-            const res = await fetch(new URL("/verification/session-preference", baseUrl).toString(), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    session_id: this.presentationDefinition?.session_id ?? loadStoredSessionID(),
-                    wallet_follows_redirect: true,
-                }),
-            });
-            if (!res.ok) {
-                throw new Error(`session-preference returned ${res.status}`);
-            }
-            if (fallbackWindow && !fallbackWindow.closed) {
-                fallbackWindow.close();
-            }
-            globalThis.location.href = url;
-        } catch (err) {
-            console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
-            if (fallbackWindow && !fallbackWindow.closed) {
-                try { fallbackWindow.opener = null; } catch { /* cross-origin after nav */ }
-                fallbackWindow.location.href = url;
-            } else {
-                // Popup blocker denied the pre-opened tab; last-resort try
-                // (likely blocked too, but worth attempting).
-                globalThis.open(url, "_blank", "noopener");
-            }
-        }
+        await handOffToWallet(
+            event.currentTarget.href,
+            new URL("/verification/session-preference", baseUrl).toString(),
+            {
+                session_id: this.presentationDefinition?.session_id ?? loadStoredSessionID(),
+                wallet_follows_redirect: true,
+            },
+            browserHandoffEnv(),
+        );
     },
 
     /** @param {SubmitEvent} event */
@@ -1042,6 +1036,7 @@ Alpine.data("app", () => ({
             this.notifyEventSource = setupNotifyListener(
                 sessionID,
                 (redirectURI) => { this.handleRedirectURI(redirectURI); },
+                () => { this.handleSessionExpired(); },
             );
             // Close the race between /ui/resume (or sendDcqlQuery) reading
             // "pending" and this SSE subscription becoming live. Firing on
@@ -1244,6 +1239,20 @@ Alpine.data("app", () => ({
     },
 
     /**
+     * The session's presentation deadline passed while this page waited.
+     * Drop the stored id - there is nothing to resume to - and show the
+     * notice, so the QR screen stops offering a code the verifier will
+     * refuse.
+     */
+    handleSessionExpired() {
+        this.notifyEventSource = null;
+        clearStoredSessionID();
+        this.presentationDefinition = null;
+        this.redirectUris = null;
+        this.sessionExpired = true;
+    },
+
+    /**
      * Re-materialize the QR / wallet-link screen from a /ui/resume reply.
      * credentialsList and credentialAttributes are set to the sentinel
      * empty objects handleSelectPredefinedPresentationDefinition uses, so
@@ -1291,6 +1300,7 @@ Alpine.data("app", () => ({
         clearStoredSessionID();
         this.verificationResult = null;
         this.verificationExpired = false;
+        this.sessionExpired = false;
         this.dcApiVerified = false;
         this.credentialAttributes = null;
         this.dcqlQuery = null;

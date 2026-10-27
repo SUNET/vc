@@ -58,7 +58,12 @@ func run() int {
 }
 
 func verify(req zkvegaworker.Request) (*zkvegaworker.VerifyResult, error) {
-	vk, err := zknative_vega.NewVerifierKey(req.VerifierKeyBytes)
+	keyBytes, err := req.VerifierKey()
+	if err != nil {
+		return nil, err
+	}
+
+	vk, err := zknative_vega.NewVerifierKey(keyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("loading verifier key: %w", err)
 	}

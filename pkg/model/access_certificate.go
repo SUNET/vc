@@ -18,11 +18,10 @@ import (
 // participating in an ARF trust framework can leave it disabled and are
 // unaffected.
 type AccessCertificate struct {
-	// Validate enforces the WRPAC certificate profile at startup: keyUsage
-	// must include nonRepudiation (contentCommitment), subjectAltName must
-	// carry contact information (URI or email), and certificatePolicies must
-	// contain a WRPAC policy OID. Startup fails when the certificate does
-	// not conform.
+	// Validate enforces the WRPAC certificate profile at startup:
+	// subjectAltName must carry contact information (URI or email), and
+	// certificatePolicies must contain a WRPAC policy OID. Startup fails
+	// when the certificate does not conform.
 	Validate bool `yaml:"validate,omitempty"`
 	// AllowedPolicyOIDs optionally narrows which WRPAC certificate policy
 	// OIDs are accepted, for a deployment that must assert a specific
@@ -79,7 +78,7 @@ func (a *AccessCertificate) ValidateCertificate(leaf *x509.Certificate, now time
 			leaf.NotAfter.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 	}
 
-	// WRPAC profile conformance: keyUsage, SAN contact info, policy OID.
+	// WRPAC profile conformance: SAN contact info, policy OID.
 	if err := rpcert.NewWRPACProfile().ValidateCredential(leaf); err != nil {
 		return fmt.Errorf("access certificate does not conform to the WRPAC profile: %w", err)
 	}
@@ -173,11 +172,10 @@ func (v *Verifier) CheckPublicURLMatchesCertificate(leaf *x509.Certificate) erro
 // credential key, logging a warning. That keeps an existing single-key
 // deployment booting across an upgrade rather than failing on start.
 type IssuerAccessCertificate struct {
-	// Validate enforces the WRPAC certificate profile at startup: keyUsage
-	// must include nonRepudiation (contentCommitment), subjectAltName must
-	// carry contact information (URI or email), and certificatePolicies must
-	// contain a WRPAC policy OID. Startup fails when the certificate does
-	// not conform.
+	// Validate enforces the WRPAC certificate profile at startup:
+	// subjectAltName must carry contact information (URI or email), and
+	// certificatePolicies must contain a WRPAC policy OID. Startup fails
+	// when the certificate does not conform.
 	Validate bool `yaml:"validate,omitempty"`
 	// AllowedPolicyOIDs optionally narrows which WRPAC certificate policy
 	// OIDs are accepted, for a deployment that must assert a specific

@@ -9,9 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
+
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/jellydator/ttlcache/v3"
 )
@@ -210,14 +211,14 @@ func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string)
 	joinedErr = errors.Join(joinedErr, fmt.Errorf("openid-credential-issuer: %w", err))
 
 	// 3. Try .well-known/openid-configuration (OIDC Discovery) → jwks_uri
-	rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(baseURL, "openid-configuration"), issuerURL)
+	rawKeys, err = r.tryOAuthMetadata(ctx, openid4vci.WellKnownURL(baseURL, "openid-configuration"), issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
 	joinedErr = errors.Join(joinedErr, fmt.Errorf("openid-configuration: %w", err))
 
 	// 4. Try .well-known/oauth-authorization-server (RFC 8414) → jwks_uri
-	rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(baseURL, "oauth-authorization-server"), issuerURL)
+	rawKeys, err = r.tryOAuthMetadata(ctx, openid4vci.WellKnownURL(baseURL, "oauth-authorization-server"), issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
@@ -230,7 +231,7 @@ func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string)
 // The well-known URL is constructed per RFC 8615 §3: the well-known string is inserted
 // between the host component and the path component of the issuer URL.
 func (r *JWKSKeyResolver) tryJWTVCIssuerMetadata(ctx context.Context, baseURL, issuerURL string) ([]json.RawMessage, error) {
-	metadataURL := buildWellKnownURL(baseURL, "jwt-vc-issuer")
+	metadataURL := openid4vci.WellKnownURL(baseURL, "jwt-vc-issuer")
 	var metadata jwtVCIssuerMetadata
 	if _, err := r.fetchJSON(ctx, metadataURL, &metadata); err != nil {
 		return nil, err
@@ -247,7 +248,7 @@ func (r *JWKSKeyResolver) tryJWTVCIssuerMetadata(ctx context.Context, baseURL, i
 // authorization_servers to find an OAuth AS with a jwks_uri.
 func (r *JWKSKeyResolver) tryCredentialIssuerMetadata(ctx context.Context, baseURL string) ([]json.RawMessage, error) {
 	var ciMeta credentialIssuerMetadata
-	if _, err := r.fetchJSON(ctx, baseURL+"/.well-known/openid-credential-issuer", &ciMeta); err != nil {
+	if _, err := r.fetchJSON(ctx, openid4vci.WellKnownURL(baseURL, "openid-credential-issuer"), &ciMeta); err != nil {
 		return nil, err
 	}
 
@@ -260,11 +261,11 @@ func (r *JWKSKeyResolver) tryCredentialIssuerMetadata(ctx context.Context, baseU
 
 	for _, asURL := range asURLs {
 		asBase := strings.TrimRight(asURL, "/")
-		rawKeys, err := r.tryOAuthMetadata(ctx, buildWellKnownURL(asBase, "oauth-authorization-server"), asURL)
+		rawKeys, err := r.tryOAuthMetadata(ctx, openid4vci.WellKnownURL(asBase, "oauth-authorization-server"), asURL)
 		if err == nil {
 			return rawKeys, nil
 		}
-		rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(asBase, "openid-configuration"), asURL)
+		rawKeys, err = r.tryOAuthMetadata(ctx, openid4vci.WellKnownURL(asBase, "openid-configuration"), asURL)
 		if err == nil {
 			return rawKeys, nil
 		}
@@ -377,30 +378,6 @@ func (r *JWKSKeyResolver) fetchJSON(ctx context.Context, url string, target any)
 	}
 
 	return target, nil
-}
-
-// buildWellKnownURL constructs a well-known URL per RFC 8615 §3.
-// The well-known suffix is inserted between the host and path components of the entity URL.
-// For example, with suffix "jwt-vc-issuer":
-//
-//	https://example.com           → https://example.com/.well-known/jwt-vc-issuer
-//	https://example.com/tenant/1  → https://example.com/.well-known/jwt-vc-issuer/tenant/1
-func buildWellKnownURL(entity, suffix string) string {
-	entity = strings.TrimSuffix(entity, "/")
-
-	parsed, err := url.Parse(entity)
-	if err != nil || parsed.Host == "" {
-		// Best-effort fallback: just append
-		return entity + "/.well-known/" + suffix
-	}
-
-	path := strings.TrimPrefix(parsed.Path, "/")
-	base := parsed.Scheme + "://" + parsed.Host
-
-	if path == "" {
-		return base + "/.well-known/" + suffix
-	}
-	return base + "/.well-known/" + suffix + "/" + path
 }
 
 // Stop stops the cache's automatic expiration goroutine.

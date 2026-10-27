@@ -16,6 +16,23 @@ type MetadataConfig struct {
 	// intersection with the deployment's Trust.AllowedSignatureAlgorithms.
 	// Empty means: advertise the full built-in set.
 	AllowedSignatureAlgorithms []string
+
+	// AuthorizationChallengeEndpoint, when set, advertises Interactive
+	// Authorization. Empty means the mechanism is not offered and neither
+	// parameter is emitted.
+	AuthorizationChallengeEndpoint string
+
+	// RequireInteractiveAuthorization advertises that this server accepts
+	// only Interactive Authorization.
+	//
+	// Setting it without AuthorizationChallengeEndpoint is DROPPED here,
+	// not reported: this function cannot return an error, and a document
+	// advertising a requirement for a mechanism it does not expose is
+	// unusable by every wallet that reads it. The combination is refused
+	// with a message wherever the metadata is validated - the struct
+	// carries excluded_without, which also covers the signing path that
+	// never passes through here.
+	RequireInteractiveAuthorization bool
 }
 
 // walletAttestationBaseALGs is the built-in set supported by the evaluator;
@@ -48,7 +65,22 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		}
 	}
 
+	// require_interactive_authorization MUST NOT appear without the
+	// endpoint. Dropped rather than emitted here, because this function
+	// cannot report an error and a document advertising a requirement for
+	// a mechanism it does not expose is unusable by every wallet that
+	// reads it.
+	//
+	// This is the second line of defence, not the only one: the field
+	// carries excluded_without on the struct, so the combination is also
+	// refused wherever the metadata is validated - including the signing
+	// path, which unmarshals a configured document straight into this
+	// type and never passes through here.
+	requireIA := cfg.RequireInteractiveAuthorization && cfg.AuthorizationChallengeEndpoint != ""
+
 	return &AuthorizationServerMetadata{
+		AuthorizationChallengeEndpoint:                cfg.AuthorizationChallengeEndpoint,
+		RequireInteractiveAuthorization:               requireIA,
 		Issuer:                                        cfg.IssuerURL,
 		AuthorizationEndpoint:                         cfg.IssuerURL + "/authorize",
 		TokenEndpoint:                                 cfg.TokenEndpoint,
