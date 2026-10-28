@@ -63,11 +63,22 @@ func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
 		require.NotContainsf(t, out, value, "the %s reached the log", what)
 	}
 
-	// And the guard is worth having: the shape this replaced does leak.
+	// The shape this replaced is now safe too, because
+	// AuthorizationContext redacts itself (pkg/cache/authcontext_log.go).
+	//
+	// That is the stronger guarantee and the reason the redaction exists:
+	// naming fields protects this call site, MarshalLog protects the ones
+	// nobody has written yet. An earlier version of this test asserted
+	// that the old shape still leaked, as proof it was testing something;
+	// adding the redaction made that assertion fire, which is the guard
+	// working rather than breaking.
 	log.Debug("UserLookup", "auth", ctx)
-	leaked, err := os.ReadFile(filepath.Join(dir, "probe.log"))
+	after, err := os.ReadFile(filepath.Join(dir, "probe.log"))
 	require.NoError(t, err)
-	require.Containsf(t, string(leaked), secrets["access token"],
-		"if this no longer leaks, the logger stopped rendering structs and this test is checking nothing")
-	require.True(t, strings.Contains(string(leaked), secrets["refresh token"]))
+	for what, value := range secrets {
+		require.NotContainsf(t, string(after), value,
+			"the %s reached the log even through the redacting path", what)
+	}
+	require.True(t, strings.Contains(string(after), "has_access_token"),
+		"the redacted form should still say whether a token existed")
 }
