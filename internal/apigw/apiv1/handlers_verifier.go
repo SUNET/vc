@@ -81,7 +81,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	c.log.Debug("Signed JWT", "jwt", reply)
+	// The signed request object carries this exchange's nonce. Its
+	// length is what the line was for: telling a signature that
+	// produced nothing from one that produced something.
+	c.log.Debug("Signed JWT", "jwt_bytes", len(reply))
 
 	return reply, nil
 }
@@ -285,7 +288,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")
 	}
 
-	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
+	// The field was always named for the KEYS; it was passing the whole
+	// map, so the presented credentials went into the log in the clear.
+	c.log.Debug("VP Response received", "vp_token", vpResponse.VPTokenSummary(), "scope", authCtx.Scopes)
 	outcome, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, &vpResponse, issuanceAuthBinding{
 		Audience:              authCtx.ClientID,
 		MdocSessionTranscript: c.directPostSessionTranscript(authCtx, privateEphemeralJWK),
@@ -472,7 +477,9 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		}
 	}
 	if vpToken == "" {
-		c.log.Error(nil, "VP Token not found for any credential query", "available_keys", vpResponse.VPToken)
+		// At ERROR, so this one did not need debug logging enabled to
+		// put a holder's presented credential in the log.
+		c.log.Error(nil, "VP Token not found for any credential query", "available", vpResponse.VPTokenSummary())
 		return nil, errors.New("VP Token not found for any configured credential query")
 	}
 
