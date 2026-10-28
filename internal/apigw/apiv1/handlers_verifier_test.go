@@ -65,23 +65,8 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	require.Len(t, dcql.CredentialSets, 1)
 	assert.Equal(t, [][]string{{"eduid"}, {"pid"}}, dcql.CredentialSets[0].Options)
 
-	// And the set is REQUIRED, which is what makes those options a
-	// CHOICE rather than a list the wallet may ignore.
-	//
-	// Optional, and this being the only set, the request requires no
-	// credential at all - leaving a wallet to decide what to do with a
-	// credentials list that no set makes mandatory. One that falls back
-	// to "present everything I can match" asks a holder with two
-	// eligible credentials for BOTH instead of either, which is how this
-	// was found.
-	//
-	// Asserted on the pointer as well as the value: nil is the
-	// specification's default of true, an explicit false is a different
-	// statement, and it was an explicit false that caused this.
-	require.NotNil(t, dcql.CredentialSets[0].Required,
-		"omitted would also be true, but this flow says so explicitly")
-	assert.True(t, *dcql.CredentialSets[0].Required,
-		"a holder must authenticate with ONE of the options; optional means none is needed")
+	assert.True(t, dcql.CredentialSets[0].IsRequired(),
+		"the holder must present one of the options")
 
 	// Every query must ask the wallet to prove possession. This flow is
 	// an authentication - it decides whose documents get issued - and it

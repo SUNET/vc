@@ -16,14 +16,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// Verified presentation claims cross the cache between the presentation
-// and the credential request, and under HA that cache is Mongo. These
-// pin that what is stored survives the trip, because the failure is
-// invisible to every in-process test: the memory store hands back the
-// value it was given, so the same claims issue fine on one backend and
-// are refused on the other.
-//
-// See SUNET/vc#865.
+// Verified claims cross the cache between the presentation and the
+// credential request, and under HA that cache is Mongo. The memory store
+// returns values as given, so these tests round-trip claims through BSON.
+// SUNET/vc#865.
 
 // bsonRoundTrip is what a Mongo-backed AuthContext.Update followed by the
 // access-token lookup does to a claims map.
@@ -50,8 +46,8 @@ func presentedShapes() map[string]any {
 	}
 }
 
-// The bug: without normalisation a CBOR tag becomes a bson.D, and the
-// derivation that reads it at issuance refuses it.
+// A raw cbor.Tag comes back from BSON as a bson.D, which normaliseFullDate
+// refuses.
 func TestARawCborTagDoesNotSurviveTheCache(t *testing.T) {
 	back := bsonRoundTrip(t, presentedShapes())
 
@@ -60,8 +56,8 @@ func TestARawCborTagDoesNotSurviveTheCache(t *testing.T) {
 	assert.Contains(t, err.Error(), "bson.D")
 }
 
-// The fix: every LEAF is converted before it is stored, so the trip
-// changes none of them.
+// documentObject converts every leaf, so the round trip changes none of
+// them.
 func TestNormalisedLeafClaimsSurviveTheCacheUnchanged(t *testing.T) {
 	storable, err := documentObject(presentedShapes())
 	require.NoError(t, err, "every shape an mdoc can present must be storable")
@@ -72,7 +68,7 @@ func TestNormalisedLeafClaimsSurviveTheCacheUnchanged(t *testing.T) {
 			"claim %q must read back as the value that was stored", claim)
 	}
 
-	// And still means the same date at issuance, by every route into it.
+	// Each date still normalises to the same day.
 	for _, claim := range []string{"full_date", "tdate", "epoch", "timestamp"} {
 		got, err := normaliseFullDate(back[claim])
 		require.NoErrorf(t, err, "claim %q must still normalise after the cache", claim)
@@ -80,17 +76,9 @@ func TestNormalisedLeafClaimsSurviveTheCacheUnchanged(t *testing.T) {
 	}
 }
 
-// What this change does NOT fix, recorded so the next person does not
-// assume it did.
-//
-// A nested object is stored as a BSON sub-document and read back as a
-// bson.D, whatever its leaves are. That is the decoder's choice on the
-// way OUT, so no normalisation on the way IN can prevent it - and it
-// matters for SD-JWT VC, whose claims nest where an mdoc's do not.
-//
-// Asserted rather than left implicit: if a decoder registry later makes
-// sub-documents come back as map[string]any, this test fails and says so,
-// which is the point at which the gap closes.
+// A nested object reads back from BSON as a bson.D whatever its leaves
+// are: the decoder decides that on the way out. SD-JWT VC claims nest, so
+// they need a decoder registry; this test fails once one is in place.
 func TestNestedObjectsStillChangeTypeAcrossTheCache(t *testing.T) {
 	storable, err := documentObject(map[string]any{
 		"identity": map[string]any{"birthdate": "1990-01-15"},
@@ -103,9 +91,7 @@ func TestNestedObjectsStillChangeTypeAcrossTheCache(t *testing.T) {
 		"a sub-document still reads back as bson.D; the leaves inside it are intact, the container is not")
 }
 
-// In-process and after-storage must agree. That they did not is the whole
-// of the bug: a presentation that issues on a single node is refused under
-// HA, with a message naming the date rather than the storage.
+// Each claim reads the same in process and after storage.
 func TestIssuanceDoesNotDependOnTheCacheBackend(t *testing.T) {
 	storable, err := documentObject(presentedShapes())
 	require.NoError(t, err)
@@ -118,8 +104,7 @@ func TestIssuanceDoesNotDependOnTheCacheBackend(t *testing.T) {
 	}
 }
 
-// A tag the build cannot represent is refused where the claim can still
-// be named, rather than stored and found unreadable at issuance.
+// documentObject refuses a tag it cannot represent, before storage.
 func TestAnUnrepresentableTagIsRefusedBeforeStorage(t *testing.T) {
 	_, err := documentObject(map[string]any{
 		"odd": cbor.Tag{Number: 42, Content: "whatever this is"},
@@ -128,9 +113,7 @@ func TestAnUnrepresentableTagIsRefusedBeforeStorage(t *testing.T) {
 	assert.Contains(t, err.Error(), "CBOR tag")
 }
 
-// The call site, not just the conversion: what finalisePresentationVerification
-// PERSISTS must already be storable. Without the normalisation at that
-// boundary a cbor.Tag reaches authCtx.VerifiedClaims and this fails.
+// finalisePresentationVerification persists only storable claims.
 func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) {
 	c := &Client{
 		log: logger.NewSimple("test"),
@@ -164,7 +147,7 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 		"a cbor.Tag must not reach the cache: it has no BSON representation and comes back unreadable (type was %T)", stored)
 	assert.Equal(t, "1990-01-15", stored)
 
-	// And it is still the same date once the cache has had it.
+	// The stored date still normalises after a BSON round trip.
 	got, err := normaliseFullDate(bsonRoundTrip(t, authCtx.VerifiedClaims)["eu.europa.ec.eudi.pid.1.birth_date"])
 	require.NoError(t, err, "the whole point: issuance must still read it after storage")
 	assert.Equal(t, "1990-01-15", got)

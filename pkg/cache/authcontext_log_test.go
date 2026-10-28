@@ -12,12 +12,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
-// Logging a secret-bearing struct must be safe FROM ANY CALL SITE, which
-// is what MarshalLog buys over naming fields by hand: the next caller
-// that hands the whole object to the logger gets the redaction too.
-//
-// Asserted on what is written to the log file, because the failure is in
-// the rendering and every one of these call sites looks harmless.
+// logAndRead logs kv at debug level and returns the written log file.
 func logAndRead(t *testing.T, msg string, kv ...any) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -49,7 +44,7 @@ func TestAnAuthorizationContextRedactsItselfInALog(t *testing.T) {
 		VerifiedClaims: map[string]any{"personal_administrative_number": secrets["a verified claim"]},
 	}
 
-	// The whole struct, the way several call sites still hand it over.
+	// The whole struct, as several call sites log it.
 	out := logAndRead(t, "ctx", "auth", ctx)
 
 	for what, value := range secrets {
@@ -75,8 +70,7 @@ func TestATokenResponseRedactsItselfInALog(t *testing.T) {
 	require.Contains(t, out, "nym_auth")
 }
 
-// A nil pointer must not panic a log call: a logger that crashes the
-// handler is worse than the leak it was added to prevent.
+// A nil pointer logs without panicking.
 func TestRedactionHandlesNil(t *testing.T) {
 	require.NotPanics(t, func() {
 		logAndRead(t, "nil", "auth", (*cache.AuthorizationContext)(nil), "reply", (*openid4vci.TokenResponse)(nil))

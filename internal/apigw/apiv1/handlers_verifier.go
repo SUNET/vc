@@ -81,9 +81,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	// The signed request object carries this exchange's nonce. Its
-	// length is what the line was for: telling a signature that
-	// produced nothing from one that produced something.
+	// The request object carries this exchange's nonce: log its length only.
 	c.log.Debug("Signed JWT", "jwt_bytes", len(reply))
 
 	return reply, nil
@@ -288,8 +286,6 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")
 	}
 
-	// The field was always named for the KEYS; it was passing the whole
-	// map, so the presented credentials went into the log in the clear.
 	c.log.Debug("VP Response received", "vp_token", vpResponse.VPTokenSummary(), "scope", authCtx.Scopes)
 	outcome, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, &vpResponse, issuanceAuthBinding{
 		Audience:              authCtx.ClientID,
@@ -477,8 +473,6 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		}
 	}
 	if vpToken == "" {
-		// At ERROR, so this one did not need debug logging enabled to
-		// put a holder's presented credential in the log.
 		c.log.Error(nil, "VP Token not found for any credential query", "available", vpResponse.VPTokenSummary())
 		return nil, errors.New("VP Token not found for any configured credential query")
 	}
@@ -825,31 +819,9 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
 				Options: options,
-				// REQUIRED, and this is the whole point of the set.
-				//
-				// The options above are the alternatives - one per auth
-				// scope, so a holder may authenticate with any acceptable
-				// credential. Marking the set optional says the wallet
-				// need not satisfy ANY of them, and since this is the
-				// only set, the request then requires nothing at all: a
-				// wallet is left to guess what to do with a credentials
-				// list no set makes mandatory, and one that falls back to
-				// "present everything I can match" asks the holder for
-				// every credential at once instead of a choice between
-				// them.
-				//
-				// Observed exactly that way: a holder with both an
-				// SD-JWT PID and an mDL was asked for BOTH rather than
-				// offered either.
-				//
-				// The false was never a decision. It was the zero value
-				// of a plain bool field, and 8ec063ad turned the field
-				// into a *bool and preserved it - which converted "not
-				// set" into "explicitly false", the distinction that
-				// field's own comment exists to keep.
-				//
-				// buildIssuanceAuthChallengeDCQL, which builds the same
-				// kind of request for the challenge endpoint, says true.
+				// The options are alternatives, one per auth scope. As the
+				// only set, an optional one would make the request
+				// require no credential.
 				Required: new(true),
 			},
 		},

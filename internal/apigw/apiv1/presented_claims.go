@@ -178,20 +178,9 @@ func normaliseFullDate(v any) (string, error) {
 	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
 }
 
-// epochFullDate converts a CBOR tag 1 epoch, refusing the values that
-// would convert into a different date instead of failing.
-//
-// uint64 is NOT int64: 18446744073709551615 wraps to -1 and dates to
-// 1969-12-31, a verified birth date silently replaced by a plausible
-// one. And a negative fraction truncates TOWARD ZERO, so -0.5 became
-// 1970-01-01 when the second it falls in is 1969-12-31; seconds since
-// the epoch floor, they do not round to it.
-// epochTime returns the instant a CBOR tag 1 carries, if v is one.
-//
-// Separate from epochFullDate because the two want different things from
-// the same tag: issuance wants the DATE, and the cache boundary wants a
-// value that survives being stored. Both go through time.Unix in UTC, so
-// they cannot disagree about which day it is.
+// epochTime returns the UTC instant a CBOR tag 1 carries, if v is one.
+// epochFullDate reads the same tag as a date; both use time.Unix in UTC,
+// so they agree on the day.
 func epochTime(v any) (time.Time, bool) {
 	tag, ok := v.(cbor.Tag)
 	if p, isPtr := v.(*cbor.Tag); isPtr {
@@ -224,6 +213,14 @@ func epochTime(v any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// epochFullDate converts a CBOR tag 1 epoch, refusing the values that
+// would convert into a different date instead of failing.
+//
+// uint64 is NOT int64: 18446744073709551615 wraps to -1 and dates to
+// 1969-12-31, a verified birth date silently replaced by a plausible
+// one. And a negative fraction truncates TOWARD ZERO, so -0.5 became
+// 1970-01-01 when the second it falls in is 1969-12-31; seconds since
+// the epoch floor, they do not round to it.
 func epochFullDate(content any) (string, error) {
 	switch n := content.(type) {
 	case uint64:
@@ -296,12 +293,9 @@ func documentValue(v any) (any, error) {
 		if s, ok := claimString(typed); ok {
 			return s, nil
 		}
-		// A tag 1 epoch is the one other date shape an mdoc can carry,
-		// and normaliseFullDate accepts it - so it has to survive this
-		// conversion too, or normalising on the way INTO the cache
-		// would refuse a presentation that issues fine without one.
-		// Rendered as the timestamp string a time.Time becomes, which
-		// normaliseFullDate parses back to the same UTC date.
+		// normaliseFullDate also accepts a tag 1 epoch: store it as the
+		// timestamp string a time.Time becomes, which parses back to the
+		// same UTC date.
 		if t, ok := epochTime(typed); ok {
 			return jsonTimestamp(t)
 		}

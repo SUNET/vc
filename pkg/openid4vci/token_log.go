@@ -1,20 +1,9 @@
 package openid4vci
 
-// MarshalLog returns what a TokenResponse may appear as in a log.
-//
-// Never access_token, refresh_token or c_nonce. The first two are bearer
-// credentials, and the nonce is what binds a key proof to this exchange -
-// a reader of the log who has all three can mint credential requests as
-// the wallet.
-//
-// Implemented on the type rather than fixed at the call sites because a
-// reply is logged whole in several places and the next one will be too;
-// zapr invokes logr.Marshaler before it reflects over a value, so this
-// decides the representation for all of them at once.
-//
-// What remains answers the operational questions - did a token come back,
-// for what scope, how long is it good for - without answering "what is
-// it".
+// MarshalLog returns the non-secret fields of a TokenResponse for logging:
+// token type, scope, state, expiries, the number of authorization details,
+// and whether each token and the c_nonce are set. zapr calls it for every
+// call site that logs a TokenResponse.
 func (t *TokenResponse) MarshalLog() any {
 	if t == nil {
 		return nil

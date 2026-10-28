@@ -1,31 +1,12 @@
 package cache
 
-// Secret-bearing types render redacted in a log, wherever they are
-// logged from.
-//
-// Naming safe fields at each call site works until the next call site.
-// This repository had fourteen places handing a whole request, reply or
-// context to the logger, and the ones that leaked were not obviously
-// different from the ones that did not - the leak is in what the struct
-// happens to carry, which is invisible at the call site.
-//
-// zapr invokes logr.Marshaler before it reflects over a value
-// (vendor/github.com/go-logr/zapr/zapr.go, invokeMarshaler), so a type
-// that implements MarshalLog decides its own log representation once,
-// for every caller that exists now or later.
+// Secret-bearing types implement logr.Marshaler, so every call site that
+// logs them gets the redacted form: zapr calls MarshalLog before it
+// reflects over a value.
 
-// MarshalLog returns what an AuthorizationContext may appear as in a log.
-//
-// Never the credentials it carries - Token.AccessToken, AccessToken,
-// RefreshToken, IDToken, Code, TXCode, VPToken - and never
-// VerifiedClaims, which are the holder's own data. A token in a log is a
-// replayable credential, and a log outlives the token's usefulness to its
-// owner but not to a reader of the log.
-//
-// What is left is what a log is for: which session, what state, which
-// scopes, and whether the secret-bearing fields were populated at all -
-// the last of those answers "did the token endpoint run" without
-// answering "with what".
+// MarshalLog returns the non-secret fields of an AuthorizationContext for
+// logging: session, status, scopes, client, expiry, whether each token and
+// the code are set, and the names of the verified claims.
 func (a *AuthorizationContext) MarshalLog() any {
 	if a == nil {
 		return nil
@@ -43,9 +24,7 @@ func (a *AuthorizationContext) MarshalLog() any {
 	}
 }
 
-// claimKeys names the verified claims without their values: which claims
-// a presentation supplied is operationally useful, what they say is the
-// holder's business.
+// claimKeys returns the names of the verified claims.
 func claimKeys(claims map[string]any) []string {
 	if len(claims) == 0 {
 		return nil

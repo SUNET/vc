@@ -12,16 +12,8 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 )
 
-// An AuthorizationContext is not a log value.
-//
-// It carries live credentials - Token.AccessToken, AccessToken,
-// RefreshToken, IDToken, Code, TXCode, VPToken - and the holder's
-// verified claims. Handing the struct to the logger renders every
-// exported field, so one `log.Debug("auth", ctx)` puts bearer tokens in
-// the log of any deployment running at debug level.
-//
-// Asserted on what is actually WRITTEN rather than on the call site,
-// because the failure is in the rendering: the call looks harmless.
+// The test reads the written log back, because a leak shows only in the
+// rendering.
 func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
 	dir := t.TempDir()
 	log, err := logger.New("probe", dir, false)
@@ -51,7 +43,7 @@ func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
 		},
 	}
 
-	// What the handler logs, written the way the handler writes it.
+	// UserLookup's log line.
 	log.Debug("UserLookup", "session_id", ctx.SessionID, "status", ctx.Status, "scopes", ctx.Scopes)
 
 	written, err := os.ReadFile(filepath.Join(dir, "probe.log"))
@@ -63,15 +55,7 @@ func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
 		require.NotContainsf(t, out, value, "the %s reached the log", what)
 	}
 
-	// The shape this replaced is now safe too, because
-	// AuthorizationContext redacts itself (pkg/cache/authcontext_log.go).
-	//
-	// That is the stronger guarantee and the reason the redaction exists:
-	// naming fields protects this call site, MarshalLog protects the ones
-	// nobody has written yet. An earlier version of this test asserted
-	// that the old shape still leaked, as proof it was testing something;
-	// adding the redaction made that assertion fire, which is the guard
-	// working rather than breaking.
+	// The whole context, redacted by AuthorizationContext.MarshalLog.
 	log.Debug("UserLookup", "auth", ctx)
 	after, err := os.ReadFile(filepath.Join(dir, "probe.log"))
 	require.NoError(t, err)

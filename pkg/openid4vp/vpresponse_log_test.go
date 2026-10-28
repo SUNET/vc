@@ -12,12 +12,8 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
-// A presented credential is the most sensitive thing that crosses this
-// service, and it was going into the log whole - at DEBUG from the
-// verification path, and at ERROR when no query matched, which did not
-// even need debug logging enabled.
-//
-// Asserted on what is written, because the failure is in the rendering.
+// The test reads the written log back, because a leak shows only in the
+// rendering.
 func TestAVPTokenIsNeverLoggedWhole(t *testing.T) {
 	const presentation = "eyJhbGciOiJFUzI1NiJ9.SD-JWT-PRESENTATION~disclosure~disclosure"
 
@@ -30,7 +26,7 @@ func TestAVPTokenIsNeverLoggedWhole(t *testing.T) {
 	log, err := logger.New("probe", dir, false)
 	require.NoError(t, err)
 
-	// Both shapes: the summary a caller passes, and the whole struct.
+	// The summary a caller passes, and the whole struct.
 	log.Debug("VP Response received", "vp_token", response.VPTokenSummary())
 	log.Debug("whole", "response", response)
 
@@ -40,12 +36,11 @@ func TestAVPTokenIsNeverLoggedWhole(t *testing.T) {
 	assert.NotContains(t, string(out), presentation, "the presented credential reached the log")
 	assert.NotContains(t, string(out), "SD-JWT-PRESENTATION")
 
-	// What a reader still gets: which query answered, and how big.
+	// The query id and the state remain.
 	assert.Contains(t, string(out), "pid_1_8", "the query id is what the line is for")
 	assert.Contains(t, string(out), "state-1")
 }
 
-// The summary answers the questions the logs around it were asking.
 func TestVPTokenSummaryDescribesTheShape(t *testing.T) {
 	response := &openid4vp.VPResponse{VPToken: map[string][]string{
 		"pid_1_8":  {"abc", "defgh"},

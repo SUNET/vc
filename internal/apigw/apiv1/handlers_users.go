@@ -74,15 +74,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		return nil, err
 	}
 
-	// Named fields, never the whole context.
-	//
-	// AuthorizationContext carries live credentials - Token.AccessToken,
-	// AccessToken, RefreshToken, IDToken, Code, TXCode, VPToken - and the
-	// holder's verified claims. Handing the struct to the logger renders
-	// every exported field, so this one line put bearer tokens and an
-	// authorization code in the log of any deployment running at debug
-	// level. A token in a log is a replayable credential, and the log
-	// outlives the token's usefulness to its owner but not to a reader.
+	// The context carries tokens and verified claims: log named fields only.
 	c.log.Debug("UserLookup", "session_id", authorizationContext.SessionID,
 		"status", authorizationContext.Status, "scopes", authorizationContext.Scopes)
 
@@ -118,9 +110,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			c.log.Error(err, "no usable document in cache")
 			return nil, err
 		}
-		// The scope names, not the documents: a document is the
-		// holder's own data, and there is nothing here that reading it
-		// back answers which the count and the scopes do not.
+		// Documents are the holder's data: log their count and scopes.
 		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource,
 			"document_count", len(docs), "scopes", slices.Sorted(maps.Keys(docs)))
 
