@@ -824,8 +824,33 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		Credentials: credentialQueries,
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
-				Options:  options,
-				Required: new(false),
+				Options: options,
+				// REQUIRED, and this is the whole point of the set.
+				//
+				// The options above are the alternatives - one per auth
+				// scope, so a holder may authenticate with any acceptable
+				// credential. Marking the set optional says the wallet
+				// need not satisfy ANY of them, and since this is the
+				// only set, the request then requires nothing at all: a
+				// wallet is left to guess what to do with a credentials
+				// list no set makes mandatory, and one that falls back to
+				// "present everything I can match" asks the holder for
+				// every credential at once instead of a choice between
+				// them.
+				//
+				// Observed exactly that way: a holder with both an
+				// SD-JWT PID and an mDL was asked for BOTH rather than
+				// offered either.
+				//
+				// The false was never a decision. It was the zero value
+				// of a plain bool field, and 8ec063ad turned the field
+				// into a *bool and preserved it - which converted "not
+				// set" into "explicitly false", the distinction that
+				// field's own comment exists to keep.
+				//
+				// buildIssuanceAuthChallengeDCQL, which builds the same
+				// kind of request for the challenge endpoint, says true.
+				Required: new(true),
 			},
 		},
 	}, nil
