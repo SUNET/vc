@@ -152,3 +152,45 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 	require.NoError(t, err, "the whole point: issuance must still read it after storage")
 	assert.Equal(t, "1990-01-15", got)
 }
+
+// The refusal must not echo the claim back.
+//
+// documentValue names the offending value in its error - an integer
+// outside the exact JSON range is reported WITH the integer - so
+// wrapping that error into the response would return a holder's claim
+// to the caller over HTTP, from the one function whose job is keeping
+// claims where they belong.
+func TestTheUnrepresentableClaimRefusalCarriesNoClaimValue(t *testing.T) {
+	c := &Client{
+		log: logger.NewSimple("test"),
+		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+			"pid_mdoc": {Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
+		}}},
+		cacheService: &apigwcache.Service{
+			AuthContext: apigwcache.NewTestMemoryStore(10 * time.Minute),
+			Document:    apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute),
+		},
+	}
+	authCtx := &pkgcache.AuthorizationContext{SessionID: "sess-leak"}
+	require.NoError(t, c.cacheService.AuthContext.Create(t.Context(), authCtx))
+
+	// An integer JSON cannot carry exactly: documentValue refuses it and
+	// names it. 9007199254740993 is 2^53+1.
+	const secret = "9007199254740993"
+	pScope := model.PresentationScope{
+		FromScope: "pid_mdoc",
+		RequiredClaims: map[string][]string{
+			"eu.europa.ec.eudi.pid.1.personal_administrative_number": nil,
+		},
+	}
+	presented := map[string]any{
+		"docType": "eu.europa.ec.eudi.pid.1",
+		"eu.europa.ec.eudi.pid.1.personal_administrative_number": int64(9007199254740993),
+	}
+
+	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented)
+	require.Error(t, err, "a value the document cannot carry must be refused")
+	assert.NotContainsf(t, err.Error(), secret,
+		"the refusal returned the holder's claim to the caller: %v", err)
+	assert.Contains(t, err.Error(), "cannot be carried through to issuance")
+}

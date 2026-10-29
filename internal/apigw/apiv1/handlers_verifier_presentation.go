@@ -75,8 +75,21 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// with no storable form is refused here, where it can still be named.
 	storable, err := documentObject(verified)
 	if err != nil {
+		// The REASON goes to the log, never to the caller.
+		//
+		// documentValue names the offending value in its error - an
+		// integer outside the exact JSON range is reported with the
+		// integer in it - so returning the wrapped error to the wallet
+		// would echo a holder's claim back over HTTP, in the one place
+		// that is supposed to be keeping claims out of places they do
+		// not belong.
+		//
+		// The caller gets the fact and nothing else; an operator gets
+		// the detail from the log, where the session id is.
+		c.log.Error(err, "a presented claim cannot be carried through to issuance",
+			"session_id", authCtx.SessionID)
 		return helpers.NewErrorDetailsWithStatus("unrepresentable_claim",
-			fmt.Sprintf("a presented claim cannot be carried through to issuance: %v", err), 400)
+			"a presented claim cannot be carried through to issuance", 400)
 	}
 
 	authCtx.VerifiedClaims = storable
