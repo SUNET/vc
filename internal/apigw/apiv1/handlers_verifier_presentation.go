@@ -69,7 +69,30 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		// its namespace-qualified literal key; SD-JWT always nests.
 		setClaimPath(sourceFormat, verified, presented, claim, val)
 	}
-	authCtx.VerifiedClaims = verified
+	// The claims cross the cache before issuance, and a Mongo cache
+	// round-trips them through BSON, which has no form for a cbor.Tag (a
+	// decoded mdoc date). Convert them to storable values first. A claim
+	// with no storable form is refused here, where it can still be named.
+	storable, err := documentObject(verified)
+	if err != nil {
+		// The REASON goes to the log, never to the caller.
+		//
+		// documentValue names the offending value in its error - an
+		// integer outside the exact JSON range is reported with the
+		// integer in it - so returning the wrapped error to the wallet
+		// would echo a holder's claim back over HTTP, in the one place
+		// that is supposed to be keeping claims out of places they do
+		// not belong.
+		//
+		// The caller gets the fact and nothing else; an operator gets
+		// the detail from the log, where the session id is.
+		c.log.Error(err, "a presented claim cannot be carried through to issuance",
+			"session_id", authCtx.SessionID)
+		return helpers.NewErrorDetailsWithStatus("unrepresentable_claim",
+			"a presented claim cannot be carried through to issuance", 400)
+	}
+
+	authCtx.VerifiedClaims = storable
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		return serverFault(fmt.Errorf("failed to persist verified claims: %w", err))
 	}
@@ -88,9 +111,9 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// A derivation targeting a dotted path would otherwise write its result
 	// into the holder's verified claims. buildPresentationDocument already
 	// clones for the same reason.
-	previewData := credential.CloneNestedClaims(verified)
+	previewData := credential.CloneNestedClaims(storable)
 	now := time.Now()
-	derived, err := credential.ApplyDerivations(pScope.Derivations, verified, now)
+	derived, err := credential.ApplyDerivations(pScope.Derivations, storable, now)
 	if err != nil {
 		// Not every derivation failure is ours. A scope deriving age from
 		// a required birthdate gets whatever the credential carried, and a

@@ -3,7 +3,9 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -72,7 +74,9 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		return nil, err
 	}
 
-	c.log.Debug("UserLookup", "auth", authorizationContext)
+	// The context carries tokens and verified claims: log named fields only.
+	c.log.Debug("UserLookup", "session_id", authorizationContext.SessionID,
+		"status", authorizationContext.Status, "scopes", authorizationContext.Scopes)
 
 	redirectResult, err := buildAuthorizationRedirectURL(authorizationContext.WalletURI, authorizationContext.Code, authorizationContext.State, c.cfg.APIGW.PublicURL)
 	if err != nil {
@@ -106,7 +110,9 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			c.log.Error(err, "no usable document in cache")
 			return nil, err
 		}
-		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource, "docs", docs)
+		// Documents are the holder's data: log their count and scopes.
+		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource,
+			"document_count", len(docs), "scopes", slices.Sorted(maps.Keys(docs)))
 
 	case model.AuthProviderSAML, model.AuthProviderOIDC:
 		// For SAML/OIDC, documents are stored in the VCI session cache by the

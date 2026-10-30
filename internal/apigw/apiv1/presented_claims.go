@@ -178,6 +178,41 @@ func normaliseFullDate(v any) (string, error) {
 	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
 }
 
+// epochTime returns the UTC instant a CBOR tag 1 carries, if v is one.
+// epochFullDate reads the same tag as a date; both use time.Unix in UTC,
+// so they agree on the day.
+func epochTime(v any) (time.Time, bool) {
+	tag, ok := v.(cbor.Tag)
+	if p, isPtr := v.(*cbor.Tag); isPtr {
+		if p == nil {
+			return time.Time{}, false
+		}
+		tag, ok = *p, true
+	}
+	if !ok || tag.Number != 1 {
+		return time.Time{}, false
+	}
+	switch n := tag.Content.(type) {
+	case uint64:
+		if n > math.MaxInt64 {
+			return time.Time{}, false
+		}
+		return time.Unix(int64(n), 0).UTC(), true
+	case int64:
+		return time.Unix(n, 0).UTC(), true
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return time.Time{}, false
+		}
+		seconds := math.Floor(n)
+		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
+			return time.Time{}, false
+		}
+		return time.Unix(int64(seconds), 0).UTC(), true
+	}
+	return time.Time{}, false
+}
+
 // epochFullDate converts a CBOR tag 1 epoch, refusing the values that
 // would convert into a different date instead of failing.
 //
@@ -257,6 +292,12 @@ func documentValue(v any) (any, error) {
 	case cbor.Tag, *cbor.Tag:
 		if s, ok := claimString(typed); ok {
 			return s, nil
+		}
+		// normaliseFullDate also accepts a tag 1 epoch: store it as the
+		// timestamp string a time.Time becomes, which parses back to the
+		// same UTC date.
+		if t, ok := epochTime(typed); ok {
+			return jsonTimestamp(t)
 		}
 		return nil, fmt.Errorf("value of type %T is a CBOR tag this build cannot represent", v)
 
