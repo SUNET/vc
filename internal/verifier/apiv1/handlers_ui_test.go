@@ -464,6 +464,24 @@ func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 			},
 		},
 		{
+			name: "parent kept when children are only disclosed with it",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("awardingBody")}, SD: "always"},
+				{Path: []*string{new("awardingBody"), new("legalName")}, SD: "never", Mandatory: true},
+				{Path: []*string{new("awardingBody"), new("legalIdentifier")}, SD: "never"},
+				{Path: []*string{new("learningOutcomes")}, SD: "always"},
+				{Path: []*string{new("learningOutcomes"), nil, new("title")}, SD: "never"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("awardingBody")}},
+				{Path: []*string{new("learningOutcomes")}},
+			},
+			expectedPaths: [][]*string{
+				{new("awardingBody")},
+				{new("learningOutcomes")},
+			},
+		},
+		{
 			name: "mixed: array and simple claims coexist",
 			vctmClaims: []sdjwtvc.Claim{
 				{Path: []*string{new("given_name")}},

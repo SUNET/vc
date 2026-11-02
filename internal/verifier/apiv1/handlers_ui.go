@@ -1099,7 +1099,8 @@ func ptrPathToStringPath(path []*string) []string {
 // augmentDCQLFromVCTM enriches the DCQL query using VCTM metadata.
 // It:
 //   - Replaces parent object paths with their nested sub-paths when the VCTM
-//     defines children (e.g. ["address"] → ["address", "street_address"]).
+//     defines children (e.g. ["address"] → ["address", "street_address"]),
+//     unless a child is sd "never" and so only disclosed with its parent.
 //   - Removes redundant parent paths when an array-element path is also present
 //     (e.g. removes ["nationalities"] when ["nationalities", null] exists),
 //     because sending both causes wallets to disclose only the parent array
@@ -1116,10 +1117,15 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 
 		// Collect nested object sub-paths from VCTM (paths with len>=2 where all elements are non-nil)
 		childPaths := make(map[string][][]*string) // parentKey -> list of child paths
+		atomicParents := make(map[string]bool)
 		for _, vc := range meta.VCTM.Claims {
 			if len(vc.Path) >= 2 && vc.Path[0] != nil && vc.Path[len(vc.Path)-1] != nil {
 				parentKey := claimPtrPathKey(vc.Path[:1])
 				childPaths[parentKey] = append(childPaths[parentKey], vc.Path)
+				// sd "never" children ride inside the parent's disclosure, so request the parent.
+				if vc.SD == "never" {
+					atomicParents[parentKey] = true
+				}
 			}
 		}
 
@@ -1151,7 +1157,7 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 
 			// Check for nested object children from VCTM
 			children, ok := childPaths[parentKey]
-			if !ok {
+			if !ok || atomicParents[parentKey] {
 				continue
 			}
 			parentsToRemove[parentKey] = true
