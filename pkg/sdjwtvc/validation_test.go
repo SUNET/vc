@@ -397,6 +397,11 @@ func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
 			outcomes: []any{},
 		},
 		{
+			name:     "mandatory leaf is null",
+			outcomes: []any{map[string]any{"title": nil, "description": "b"}},
+			missing:  []string{"$.learningOutcomes[*].title"},
+		},
+		{
 			name:     "element missing both fields",
 			outcomes: []any{map[string]any{}},
 			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},

@@ -169,7 +169,8 @@ func lookupPath(current any, path []*string) (any, bool) {
 			values := make([]any, 0, len(arr))
 			for _, item := range arr {
 				v, ok := lookupPath(item, path[i+1:])
-				if !ok {
+				// A null leaf would hide inside the slice from validateClaimValue's nil check.
+				if !ok || v == nil {
 					return nil, false
 				}
 				values = append(values, v)
