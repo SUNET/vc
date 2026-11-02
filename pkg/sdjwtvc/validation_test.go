@@ -366,6 +366,78 @@ func TestValidateClaims_ArrayValues(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
+	outcomes := "learningOutcomes"
+	title := "title"
+	description := "description"
+
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: []*string{&outcomes}, SD: "always", Mandatory: true},
+			{Path: []*string{&outcomes, nil, &title}, SD: "never", Mandatory: true},
+			{Path: []*string{&outcomes, nil, &description}, SD: "never", Mandatory: true},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		outcomes []any
+		missing  []string
+	}{
+		{
+			name: "all elements complete",
+			outcomes: []any{
+				map[string]any{"title": "a", "description": "b"},
+				map[string]any{"title": "c", "description": "d"},
+			},
+		},
+		{
+			name:     "empty array",
+			outcomes: []any{},
+		},
+		{
+			name:     "element missing both fields",
+			outcomes: []any{map[string]any{}},
+			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},
+		},
+		{
+			name: "second element missing description",
+			outcomes: []any{
+				map[string]any{"title": "a", "description": "b"},
+				map[string]any{"title": "c"},
+			},
+			missing: []string{"$.learningOutcomes[*].description"},
+		},
+		{
+			name:     "element is not an object",
+			outcomes: []any{"a"},
+			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			docData, err := json.Marshal(map[string]any{"learningOutcomes": tt.outcomes})
+			require.NoError(t, err)
+
+			err = ValidateDocument(docData, vctm)
+			if len(tt.missing) == 0 {
+				assert.NoError(t, err)
+				return
+			}
+
+			var verrs *ValidationErrors
+			require.ErrorAs(t, err, &verrs)
+			var fields []string
+			for _, e := range verrs.Errors {
+				fields = append(fields, e.Field)
+			}
+			assert.ElementsMatch(t, tt.missing, fields)
+		})
+	}
+}
+
 func TestValidateClaimPaths_StrictMode_Success(t *testing.T) {
 	givenName := "given_name"
 	familyName := "family_name"
