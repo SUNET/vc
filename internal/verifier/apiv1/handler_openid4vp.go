@@ -116,7 +116,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Sign the request object with X.509 certificate chain for x509_san_dns verification
-	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+	signedJWT, err := c.wireRequestObject(requestObject).Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "Failed to sign request object")
 		return "", err
@@ -293,4 +293,19 @@ type SessionPollResponse struct {
 // falling through to the unencrypted branch.
 func responseModeRequiresEncryption(responseMode string) bool {
 	return strings.HasSuffix(responseMode, ".jwt")
+}
+
+// wireRequestObject returns the request object as it is sent to the wallet.
+//
+// With openid4vp_compat.compact_w3c_type_values it is a copy whose W3C
+// type_values are compact terms, for wallets that match a credential's own
+// type array. The object passed in is never modified: the cached request
+// object and the session keep the expanded form the response check matches.
+func (c *Client) wireRequestObject(requestObject *openid4vp.RequestObject) *openid4vp.RequestObject {
+	if requestObject == nil || requestObject.DCQLQuery == nil || !c.cfg.CompactW3CTypeValues() {
+		return requestObject
+	}
+	wire := *requestObject
+	wire.DCQLQuery = requestObject.DCQLQuery.WithCompactW3CTypeValues()
+	return &wire
 }
