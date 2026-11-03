@@ -93,13 +93,13 @@ func (r Request) E2() ([32]byte, error) {
 
 // VerifierInput returns SHA-256 of the bare verifier_id.
 //
-// The BARE identifier - "verifier.example" - per nym_auth_rulebook PR
-// #7. verifier_id_type is agreed out of band between wallet and verifier
-// and is not hashed, and the prefixed Client Identifier is the form that
-// rulebook marks MUST NOT. A prefixed value is refused rather than
-// stripped, for the reason in pkg/nymauth.checkVerifierID: hashing it
-// yields a pseudonym no Verifier reports, so a comparison simply never
-// matches and the subject looks innocent.
+// The published identifier including its prefix -
+// "x509_san_dns:verifier.example" or "semantic_id:<identifier>" - per
+// rulebook v0.4. Rulebook v0.4 defines exactly those two forms, and
+// CheckVerifierID refuses anything else rather than hashing it: a
+// value nobody agreed the meaning of produces a pseudonym no other
+// implementation reports, which matches nothing and reads as an
+// innocent subject.
 func VerifierInput(verifierID string) ([32]byte, error) {
 	if err := nymauth.CheckVerifierID(verifierID); err != nil {
 		return [32]byte{}, err

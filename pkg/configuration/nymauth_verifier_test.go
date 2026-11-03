@@ -24,21 +24,27 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	sum := sha256.Sum256([]byte(content))
 
-	return &model.Cfg{Verifier: &model.Verifier{NymAuth: model.NymAuthVerifier{
-		Enable:     true,
-		VerifierID: "verifier.example",
-		Circuits: model.NymAuthCircuits{Allow: []model.NymAuthCircuit{{
-			SystemID:       nymauth.SystemLongfellowNymAuth,
-			Config:         nymauth.ConfigKnownOffenderMatchingSSC,
-			HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
-			SigCircuitID:   "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb",
-			BlockEncHash:   6983,
-			BlockEncSig:    4679,
-			ArtifactPath:   path,
-			ArtifactSHA256: hex.EncodeToString(sum[:]),
-			ArtifactBytes:  int64(len(content)),
-		}}},
-	}}}
+	return &model.Cfg{Verifier: &model.Verifier{
+		// A PDP is part of a valid nym_auth configuration, not an
+		// extra: the issuer key comes from the holder's own chain,
+		// so without one there is nothing that says the key belongs
+		// to a real issuer.
+		Trust: model.TrustConfig{PDPURL: "https://pdp.example/access/v1/evaluation"},
+		NymAuth: model.NymAuthVerifier{
+			Enable:     true,
+			VerifierID: "x509_san_dns:verifier.example",
+			Circuits: model.NymAuthCircuits{Allow: []model.NymAuthCircuit{{
+				SystemID:       nymauth.SystemLongfellowNymAuth,
+				Config:         nymauth.ConfigKnownOffenderMatchingSSC,
+				HashCircuitID:  "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729",
+				SigCircuitID:   "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb",
+				BlockEncHash:   6983,
+				BlockEncSig:    4679,
+				ArtifactPath:   path,
+				ArtifactSHA256: hex.EncodeToString(sum[:]),
+				ArtifactBytes:  int64(len(content)),
+			}}},
+		}}}
 }
 
 // Every one of these would otherwise surface as a REFUSED PROOF, with
@@ -46,12 +52,21 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 	require.NoError(t, checkNymAuthVerifier(nymAuthCfg(t)), "the fixture must be valid")
 
-	t.Run("a prefixed Client Identifier as the verifier_id", func(t *testing.T) {
-		// Hashing it yields a pseudonym no other implementation
-		// reports, so a comparison never matches and the subject
-		// looks innocent.
+	t.Run("a prefixed Client Identifier is the verifier_id", func(t *testing.T) {
+		// Accepted under v0.4: the verifier_id is hashed exactly as
+		// published, prefix included, and the archive's reference
+		// pseudonyms are computed from that form. This was refused
+		// until 2026-10-20, when the rule reversed.
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.VerifierID = "x509_san_dns:verifier.example"
+		assert.NoError(t, checkNymAuthVerifier(cfg))
+	})
+
+	t.Run("a prefix with no identifier after it", func(t *testing.T) {
+		// Names no Verifier, so it is refused - the one thing the
+		// reversal did not change.
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.VerifierID = "x509_san_dns:"
 		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "verifier_id")
 	})
 
@@ -245,4 +260,54 @@ func TestLegacyZkpReqConfigurationNamesAreRefused(t *testing.T) {
 		ProofSystemValues: []string{"longfellow-libzk-v1"},
 	}}
 	assert.NoError(t, checkNymAuthVerifier(cfg))
+}
+
+// A bare DNS name as verifier_id must stop startup.
+//
+// It was the CORRECT value until 2026-10-20, so every configuration
+// written before the reversal still carries one - and after the
+// reversal nothing was left checking the shape, so such a deployment
+// started cleanly and produced pseudonyms no Verifier reports. A
+// wrong answer about a person, with no error anywhere.
+//
+// Found by sirosid-dev starting a gdc image with exactly the value
+// below. Rulebook v0.4 defines two forms and no others, so anything
+// starting with neither is refused rather than hashed.
+func TestBareVerifierIDIsRefusedAtStartup(t *testing.T) {
+	for _, bare := range []string{
+		"sirosid-gdc-vc-verifier.fly.dev", // the value that started cleanly
+		"verifier.example",
+		"https://verifier.example",
+		"x509_hash:abcd",                // a real Client Identifier Prefix, but not one of the two
+		"X509_SAN_DNS:verifier.example", // v0.4 normalises nothing, case included
+	} {
+		t.Run(bare, func(t *testing.T) {
+			cfg := nymAuthCfg(t)
+			cfg.Verifier.NymAuth.VerifierID = bare
+
+			err := checkNymAuthVerifier(cfg)
+			require.Error(t, err, "a value that is neither defined form must not start")
+			assert.Contains(t, err.Error(), "x509_san_dns:", "the message names the accepted forms")
+			assert.Contains(t, err.Error(), "semantic_id:")
+		})
+	}
+
+	// A value that looks like a host gets the fix spelled out, since
+	// that is the mistake and the operator should not have to infer
+	// it from the list of forms.
+	cfg := nymAuthCfg(t)
+	cfg.Verifier.NymAuth.VerifierID = "sirosid-gdc-vc-verifier.fly.dev"
+	assert.ErrorContains(t, checkNymAuthVerifier(cfg),
+		`"x509_san_dns:sirosid-gdc-vc-verifier.fly.dev"`,
+		"a DNS-shaped value should be told what it probably meant")
+
+	// Both defined forms start.
+	for _, good := range []string{
+		"x509_san_dns:sirosid-gdc-vc-verifier.fly.dev",
+		"semantic_id:age-over-18-check",
+	} {
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.NymAuth.VerifierID = good
+		assert.NoErrorf(t, checkNymAuthVerifier(cfg), "%q is a defined form", good)
+	}
 }
