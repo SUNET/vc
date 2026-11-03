@@ -308,6 +308,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkZkpReqPresetsAskForSomething(cfg); err != nil {
+		return nil, err
+	}
+
 	if err := checkPresetValidationProfiles(cfg); err != nil {
 		return nil, err
 	}

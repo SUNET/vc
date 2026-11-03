@@ -90,7 +90,7 @@ func TestEveryPublishedPresetFieldSurvivesTheBrowserSchema(t *testing.T) {
 // Spelled out as to WHICH fields rather than derived, because which ones
 // are DCQL-relevant is not something the Go types say: validations
 // deliberately goes no further than the UI.
-func TestCircuitZkReqReachesThePostedQuery(t *testing.T) {
+func TestZkpReqReqReachesThePostedQuery(t *testing.T) {
 	js := presentationDefinitionJS(t)
 
 	uiName := jsonName(t, reflect.TypeOf(UIPresetCredential{}), "Req")
@@ -121,6 +121,18 @@ func TestCircuitZkReqReachesThePostedQuery(t *testing.T) {
 	require.NoError(t, err)
 	require.Containsf(t, string(helpers), "c."+wireName+" = cred."+uiName,
 		"dcqlCredentialFromPreset must map the metadata's %q onto the query's %q", uiName, wireName)
+
+	// The item key, which is the half that broke the live operator UI:
+	// the schema validated `id` while the server published `fn_id`, so
+	// parsing /ui/metadata threw and the page never left its spinner.
+	itemName := jsonName(t, reflect.TypeOf(openid4vp.ReqItem{}), "FnID")
+	source, err := os.ReadFile(filepath.Join("..", "staticembed", "req-schema.js"))
+	require.NoError(t, err)
+	check := between(t, string(source), "export const reqSchema", "\n);")
+	require.Containsf(t, check, "item."+itemName,
+		"req-schema.js must check the item key %q, which is what ReqItem publishes", itemName)
+	require.NotContains(t, check, "item.id",
+		"req-schema.js still checks the pre-v0.4 item key id, which the server no longer publishes")
 }
 
 // jsonName is a field's wire name, from its json tag.

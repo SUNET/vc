@@ -1,4 +1,4 @@
-// Unit tests for the circuit_zk `req` schema. Runs under Node's built-in
+// Unit tests for the zkp_req `req` schema. Runs under Node's built-in
 // test runner (`node --test`).
 
 import { describe, it } from "node:test";
@@ -119,7 +119,7 @@ describe("reqSchema", () => {
             [],
             [{ fn_id: "f", return: "h" }],
             [{ fn_id: "f", return: "h", params: {} }],
-            [{ fn_id: "pseudonym", return: "n", params: { config: "c" } },
+            [{ fn_id: "pseudonym", return: "n", params: { config: "c", ver: 1, prf: "sha-256" } },
              { fn_id: "age_check", return: "a", params: { ge: "2008-10-10" } }],
         ]) {
             assert.equal(
@@ -128,5 +128,29 @@ describe("reqSchema", () => {
                 `must accept ${JSON.stringify(good)}`,
             );
         }
+    });
+});
+
+// The item key moved from `id` to `fn_id` in rulebook v0.4, and this
+// fixture was not moved with it - which is the only reason the schema
+// kept passing while it validated a shape the server had stopped
+// publishing. The live operator UI then threw on /ui/metadata and never
+// left its spinner.
+//
+// Both directions are pinned, because either one alone goes stale the
+// same way: the published shape is accepted, and the shape it replaced
+// is refused rather than quietly tolerated.
+describe("reqSchema and the v0.4 item key", () => {
+    const item = { return: "nym", params: { config: "known-offender-matching-ssc" } };
+
+    it("accepts the fn_id the server publishes", () => {
+        const result = v.safeParse(reqSchema, [{ fn_id: "pseudonym", ...item }]);
+        assert.equal(result.success, true);
+    });
+
+    it("refuses the pre-v0.4 id", () => {
+        const result = v.safeParse(reqSchema, [{ id: "pseudonym", ...item }]);
+        assert.equal(result.success, false);
+        assert.match(result.issues[0].message, /fn_id/);
     });
 });
