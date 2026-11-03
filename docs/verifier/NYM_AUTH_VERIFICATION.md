@@ -100,8 +100,42 @@ Longfellow and Vega for the same configuration:
           # ... the Vega artifact
 ```
 
-Offer both in `system_id_values` and the wallet chooses between them.
-This Verifier refuses any `system_id` it did not offer, and refuses at
+Offering both means naming both in `preferred_vp_formats`, and in
+**both** of its arrays:
+
+```yaml
+  preferred_vp_formats:
+    zkp_req:
+      system_id_values:
+        - urn:circuits:longfellow:nym_auth:v1
+        - urn:circuits:vega:nym_auth:v1
+      proof_system_values: ["longfellow-libzk-v1", "vega-v1"]
+```
+
+`proof_system_values` names the proof **system** each offered circuit
+belongs to, which is a different string from its `system_id`. The alias
+`urn:circuits:vega:nym_auth:v1` belongs to the proof system `vega-v1`,
+and the catalog's own id for the same entry (`nymauth-vega-mdoc-v1`) is
+a third string again; see `Systems` in
+[`pkg/nymauth/systems.go`](../../pkg/nymauth/systems.go).
+
+Both arrays travel to the wallet and both are applied, so adding the
+Vega alias to `system_id_values` while leaving
+`proof_system_values: ["longfellow-libzk-v1"]` offers a circuit the
+wallet is then not permitted to choose. The Vega capability is dropped
+on the proof-system filter, the holder is offered Longfellow alone, and
+nothing is refused and nothing is logged — the configuration reads as
+if both were on offer.
+
+Leaving `proof_system_values` out altogether is the other correct
+answer: an **absent** array is no filter at all, and `system_id_values`
+already says which circuits this Verifier accepts. (An **empty** array
+is not the same thing — that is a filter nothing matches.) What must
+not be left behind is a filter naming fewer proof systems than the
+circuits beside it.
+
+The wallet chooses between whatever survives both filters. This
+Verifier refuses any `system_id` it did not offer, and refuses at
 startup any entry whose `system_id` it does not recognise rather than
 guessing a default.
 
