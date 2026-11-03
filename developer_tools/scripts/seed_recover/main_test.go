@@ -77,13 +77,13 @@ func TestLoadSeedSourceReadsTheSecretsFile(t *testing.T) {
 func TestPSCIsRefusedRatherThanComputedFromTheWrongSeed(t *testing.T) {
 	seedValue := bytes.Repeat([]byte{7}, 16)
 
-	_, err := computePseudonym(nymauth.ConfigKnownOffenderMatchingPSC, seedValue, "verifier.example", "", "")
+	_, err := computePseudonym(nymauth.ConfigKnownOffenderMatchingPSC, seedValue, "x509_san_dns:verifier.example", "", "")
 	require.Error(t, err, "this tool does not hold the holder's private_seed")
 	assert.Contains(t, err.Error(), "holder-held")
 
 	// The ssc configuration it CAN reproduce still works, or the
 	// refusal above would be indistinguishable from refusing everything.
-	got, err := computePseudonym(nymauth.ConfigKnownOffenderMatchingSSC, seedValue, "verifier.example", "", "")
+	got, err := computePseudonym(nymauth.ConfigKnownOffenderMatchingSSC, seedValue, "x509_san_dns:verifier.example", "", "")
 	require.NoError(t, err)
 	assert.Len(t, got, 32)
 }

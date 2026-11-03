@@ -47,7 +47,7 @@ func run() error {
 		subjects        subjectList
 		derivContext    = flag.String("context", "", "the derivation context, if the credential configuration sets one")
 		pseudonymConfig = flag.String("pseudonym-config", "", "nym_auth pseudonym configuration to compute, e.g. known-offender-matching-ssc")
-		verifierID      = flag.String("verifier-id", "", "the BARE verifier_id, e.g. verifier.example - not the prefixed client_id")
+		verifierID      = flag.String("verifier-id", "", "the whole verifier_id, prefix included and hashed as given, e.g. x509_san_dns:verifier.example or semantic_id:<identifier>")
 		verifierContext = flag.String("verifier-context", "", "verifier_context, required for account-recovery-ssc")
 		userValue       = flag.String("user-value", "", "the user-supplied linking value, for user-managed-pseudonym-xsite-ssc")
 		expect          = flag.String("expect", "", "a pseudonym in hex to compare against; exit 0 on a match, 2 on a mismatch")
