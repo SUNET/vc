@@ -563,3 +563,22 @@ func TestDocLookupSessionID(t *testing.T) {
 		})
 	}
 }
+
+// The credential configuration's proof_types_supported decides which key
+// proof types a request may use.
+func TestRequireAdvertisedProofType(t *testing.T) {
+	c := &Client{issuerMetadata: &openid4vci.CredentialIssuerMetadataParameters{
+		CredentialConfigurationsSupported: map[string]openid4vci.CredentialConfigurationsSupported{
+			"pid": {ProofTypesSupported: map[string]openid4vci.ProofsTypesSupported{
+				"jwt":         {ProofSigningAlgValuesSupported: []string{"ES256"}},
+				"attestation": {ProofSigningAlgValuesSupported: []string{"ES256"}},
+			}},
+		},
+	}}
+
+	require.NoError(t, c.requireAdvertisedProofType("pid", "jwt"))
+
+	var vciErr *openid4vci.Error
+	require.ErrorAs(t, c.requireAdvertisedProofType("pid", "di_vp"), &vciErr)
+	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
+}

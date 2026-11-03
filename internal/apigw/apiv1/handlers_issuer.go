@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -413,6 +414,9 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 	} else {
 		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "proof or proofs parameter is required"}
+	}
+	if err := c.requireAdvertisedProofType(scope, req.ProofType()); err != nil {
+		return nil, err
 	}
 
 	// Resolve the expected c_nonce: extract nonce from the proof and check if
@@ -844,6 +848,20 @@ func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cac
 	c.log.Debug("credential request selected a configuration other than the first authorized scope",
 		"configuration_id", configurationID, "first_authorized_scope", scope)
 	return configurationID, configurationID, format, nil
+}
+
+// requireAdvertisedProofType accepts a key proof of a type the credential
+// configuration lists in proof_types_supported (OpenID4VCI 1.0, Section
+// 12.2.4).
+func (c *Client) requireAdvertisedProofType(scope, proofType string) error {
+	advertised := c.issuerMetadata.CredentialConfigurationsSupported[scope].ProofTypesSupported
+	if _, ok := advertised[proofType]; ok {
+		return nil
+	}
+	return &openid4vci.Error{
+		Err:              openid4vci.ErrInvalidProof,
+		ErrorDescription: fmt.Sprintf("credential configuration %q takes key proofs of type %s", scope, strings.Join(slices.Sorted(maps.Keys(advertised)), ", ")),
+	}
 }
 
 // sameCredentialFormat reports whether two format identifiers name the same
