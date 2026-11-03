@@ -797,10 +797,12 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, format)
 		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
-			ID:       authScope,
-			Format:   format,
-			Multiple: false,
-			Meta:     meta,
+			ID:     authScope,
+			Format: format,
+			// Multiple is left unset too: it is a *bool on this branch,
+			// and nil is the specification's default of false - the same
+			// request main sent explicitly.
+			Meta: meta,
 			// Left unset, which is the specification's default of TRUE.
 			//
 			// It said false, which told every wallet that a presentation

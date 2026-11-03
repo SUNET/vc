@@ -72,7 +72,7 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 			// read off a query the single-query fallback guessed at.
 			scope := c.oidcScopeFor(session, queryID)
 			requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
-			if !ok || !requested.Multiple {
+			if !ok || !requested.AllowsMultiple() {
 				return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", len(tokens))
 			}
 		}

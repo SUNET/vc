@@ -372,6 +372,19 @@ gated by the `zk_verifier` config block.
   wire protocol and `docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md` for a real
   wire-format addition Vega's verification needed (flagged there, not yet
   raised with multipaz upstream).
+- **nym_auth** - the pseudonym circuits, a *second* C ABI of the same
+  zk-cred-longfellow build (`include/zk_cred_longfellow_nymauth.h`,
+  bound in `pkg/nymauth/verifier/zknative`). `make zk-native-lib` stages
+  both headers and requires both: a stage carrying only the mdoc header
+  is refused rather than silently building without pseudonym support.
+  The request a proof is checked against - and the rule that none of it
+  may come from the holder's response - lives in
+  `pkg/nymauth/verifier`, which builds without cgo; only the proof check
+  itself is behind the tag.
+
+  `ZK_CRED_LONGFELLOW_REF` is pinned to a commit of that crate's
+  `feat/nymauth-prove` branch, because the nym_auth C ABI is not on its
+  `main` yet. Move the pin to a `main` SHA once that branch lands.
 
 Setup:
 
@@ -400,9 +413,9 @@ LD_LIBRARY_PATH=$(pwd)/third_party/zk-cred-longfellow/lib:$(pwd)/third_party/zk-
   PATH=$(pwd)/bin:$PATH \
   ./bin/vc_verifier-zknative
 
-# ...or run pkg/mdoc's zknative-tagged tests directly (covers both
-# systems; make test-zknative sets the loader path for both libraries
-# itself):
+# ...or run the zknative-tagged tests directly (pkg/mdoc for both ZK
+# systems, pkg/nymauth for the pseudonym circuits; make test-zknative
+# sets the loader path for both libraries itself):
 make test-zknative
 ```
 

@@ -112,3 +112,32 @@ export function groupPresets(entries, categoryOrder) {
         collapsible: featured.length > 0,
     };
 }
+
+/**
+ * One preset credential as the DCQL query member it is posted as.
+ *
+ * Two names for one list, and getting them the wrong way round is silent.
+ * The metadata endpoint serves the requested calculations as `req`
+ * (UIPresetCredential.Req), and the DCQL query that is posted names the
+ * same list `_req` (CredentialQuery.Req, `pkg/openid4vp/dcql.go`). The
+ * shared vectors pin it: `err_req_not_underscore` is a query carrying
+ * `req`, and it is refused as `req_missing_or_empty`.
+ *
+ * It is silent because a zkp_req query discloses nothing of its own -
+ * every value comes from a function named in the list - so a query that
+ * lost the list asks the wallet for nothing, gets nothing back, and reads
+ * as a wallet that declined.
+ *
+ * Here rather than inline in the picker so it can be tested without a DOM
+ * or Alpine, the same reason as everything else in this file.
+ *
+ * @param {any} cred one credential of a preset, as /ui/metadata serves it
+ * @returns {any} the credential as the DCQL query carries it
+ */
+export function dcqlCredentialFromPreset(cred) {
+    /** @type {any} */
+    const c = { id: cred.id, format: cred.format, meta: cred.meta };
+    if (cred.claims) c.claims = cred.claims;
+    if (cred.req) c._req = cred.req;
+    return c;
+}
