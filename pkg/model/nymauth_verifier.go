@@ -13,27 +13,52 @@ type NymAuthVerifier struct {
 	// by any of this existing.
 	Enable bool `yaml:"enable" doc_example:"true"`
 
-	// VerifierID is the BARE verifier_id this Verifier is known by,
-	// and SHA-256 of it is verifier_input - the value that scopes
-	// every pseudonym to this Verifier.
+	// VerifierID is the verifier_id this Verifier is known by, and
+	// SHA-256 of it is verifier_input - the value that scopes every
+	// pseudonym to this Verifier.
 	//
-	// CONFIGURED, and never derived from client_id. verifier_id_type
-	// is agreed out of band in the trust framework and is not on the
-	// wire, so there is nothing in a request to derive it from; and
-	// the prefixed Client Identifier is the form nym_auth_rulebook
-	// PR #7 marks MUST NOT. Deriving it would produce a pseudonym no
-	// other implementation reports, so a comparison would simply never
-	// match and the subject would look innocent.
+	// CONFIGURED, and never derived from client_id. Rulebook v0.4
+	// defines exactly two forms and the whole string is hashed,
+	// prefix included:
 	//
-	// For an x509_san_dns Verifier this is the dNSName with no prefix;
-	// for a semantic one it is the whole "semantic_id:<identifier>"
-	// value, which IS the identifier and not a prefix. See
-	// pkg/nymauth.CheckVerifierID.
-	VerifierID string `yaml:"verifier_id,omitempty" validate:"required_if=Enable true" doc_example:"\"verifier.example\""`
+	//	x509_san_dns:<dns name>
+	//	semantic_id:<identifier>
+	//
+	// Nothing is stripped and nothing is normalised, case included. A
+	// value that is neither form is refused at startup: the BARE DNS
+	// name was the correct value until 2026-10-20, so a configuration
+	// written before then still carries one, and hashing it produces
+	// a pseudonym no other implementation reports - a wrong answer
+	// about a person rather than an error anyone sees.
+	//
+	// See pkg/nymauth.CheckVerifierID.
+	VerifierID string `yaml:"verifier_id,omitempty" validate:"required_if=Enable true" doc_example:"\"x509_san_dns:verifier.example\""`
 
 	// Circuits is where the circuit builds this Verifier will load
 	// come from.
 	Circuits NymAuthCircuits `yaml:"circuits,omitempty"`
+
+	// ProofTimeSkewSeconds and ProofTimeMaxAgeSeconds bound how far a
+	// presentation's proof_time may be from this verifier's clock.
+	//
+	// T is the PROVER'S: the circuit binds all 20 bytes of it into
+	// its public inputs, so only the prover knows which second it
+	// proved at. This window is what makes accepting its value safe -
+	// without one a holder could replay a proof made long ago,
+	// against a credential since revoked, or one made with a clock
+	// set forward.
+	//
+	// Outside the window is REFUSED, never clamped: verifying against
+	// a T the prover did not use cannot succeed, and would report the
+	// wrong reason when it failed.
+	//
+	// Zero means the shared recommendation - 60 seconds of skew into
+	// the future, 600 seconds of age. They are recommendations and
+	// not protocol constants: the tolerance is this verifier's to
+	// set, and a deployment that has not thought about it should
+	// behave the way other implementations assume.
+	ProofTimeSkewSeconds   int `yaml:"proof_time_skew_seconds,omitempty" doc_example:"60"`
+	ProofTimeMaxAgeSeconds int `yaml:"proof_time_max_age_seconds,omitempty" doc_example:"600"`
 }
 
 // NymAuthCircuits configures which circuit builds may be loaded, and

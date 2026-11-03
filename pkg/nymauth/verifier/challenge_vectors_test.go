@@ -49,7 +49,7 @@ type challengeVectors struct {
 // or a stale copy after the upstream file moves - would turn that
 // cross-implementation check into a self-consistency check that passes
 // while the verifier and the provers disagree.
-const challengeVectorsSHA256 = "a0984c6c99ca9a2c761b37a7cc86bf2ae2c9ddbf18e04fb5e6469d3c552c41a8"
+const challengeVectorsSHA256 = "697d016b6232249dce9f96b2a20c370bc1f5cd9941ffe59a784e4bb827baad41"
 
 func loadChallengeVectors(t *testing.T) challengeVectors {
 	t.Helper()

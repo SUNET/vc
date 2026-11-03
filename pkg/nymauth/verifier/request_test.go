@@ -21,7 +21,7 @@ func testRequest(t *testing.T) Request {
 	bounds, err := AgeCheck{GE: "2000-01-01"}.Bounds()
 	require.NoError(t, err)
 
-	input, err := VerifierInput("verifier.example")
+	input, err := VerifierInput("x509_san_dns:verifier.example")
 	require.NoError(t, err)
 
 	transcript, err := MdocSessionTranscript("https://verifier.example", "pOA0oqEAhLnqug2r7Ve4tQ", nil)
@@ -80,20 +80,24 @@ func TestRequestDerivesThePinnedChallengeDigest(t *testing.T) {
 		"challenge-vectors.json, verifier 1")
 }
 
-// verifier_input is SHA-256 of the BARE verifier_id, and the rulebook's
-// worked digest is what proves it - not our own output.
-func TestVerifierInputIsTheBareIDsDigest(t *testing.T) {
-	got, err := VerifierInput("verifier.example")
+// verifier_input is SHA-256 of the verifier_id exactly as published,
+// prefix included. The archive's own reference value is what proves
+// it - not our own output.
+func TestVerifierInputIsThePublishedIDsDigest(t *testing.T) {
+	got, err := VerifierInput("x509_san_dns:verifier.example")
 	require.NoError(t, err)
-	assert.Equal(t, "be6a6400", hex.EncodeToString(got[:])[:8],
-		"nym_auth_rulebook PR #7's MUST digest for the bare verifier_id")
+	assert.Equal(t, "6eae85a0", hex.EncodeToString(got[:])[:8],
+		"rulebook v0.4's MUST digest, and the archive's verifier_input for this client_id")
 
-	// The prefixed Client Identifier is the form that rulebook marks
-	// MUST NOT, and it is refused rather than stripped: hashing it
-	// yields a pseudonym no Verifier reports, so a comparison never
-	// matches and the subject looks innocent.
-	_, err = VerifierInput("x509_san_dns:verifier.example")
-	assert.Error(t, err, "a Client Identifier is not a verifier_id")
+	// The PREFIXED form is what v0.4 hashes, and it is what the
+	// archive's own reference pseudonyms are computed from. The bare
+	// DNS name derives too - it is a different verifier_id, not an
+	// invalid one - and the two give different digests, which is the
+	// point of hashing exactly as published.
+	prefixed, err := VerifierInput("x509_san_dns:verifier.example")
+	require.NoError(t, err, "the prefixed form is a verifier_id under v0.4")
+	assert.Equal(t, "6eae85a0", hex.EncodeToString(prefixed[:])[:8],
+		"v0.4's digest, and the archive's verifier_input")
 
 	// "semantic_id:" is NOT one of those. The rulebook says it is part
 	// of the `semantic` verifier_id value and not a Client Identifier
