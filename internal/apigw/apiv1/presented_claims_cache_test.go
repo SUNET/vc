@@ -4,9 +4,7 @@ import (
 	"testing"
 	"time"
 
-	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -113,20 +111,20 @@ func TestAnUnrepresentableTagIsRefusedBeforeStorage(t *testing.T) {
 	assert.Contains(t, err.Error(), "CBOR tag")
 }
 
+// newMdocPresentationTestClient is newPresentationTestClient with a
+// pid_mdoc scope, and a stored context for sessionID.
+func newMdocPresentationTestClient(t *testing.T, sessionID string) (*Client, *pkgcache.AuthorizationContext) {
+	t.Helper()
+	c := newPresentationTestClient(t)
+	c.cfg.Common.CredentialMetadata["pid_mdoc"] = &model.CredentialMetadata{
+		Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1",
+	}
+	return c, seedAuthCtx(t, c, sessionID)
+}
+
 // finalisePresentationVerification persists only storable claims.
 func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) {
-	c := &Client{
-		log: logger.NewSimple("test"),
-		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
-			"pid_mdoc": {Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
-		}}},
-		cacheService: &apigwcache.Service{
-			AuthContext: apigwcache.NewTestMemoryStore(10 * time.Minute),
-			Document:    apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute),
-		},
-	}
-	authCtx := &pkgcache.AuthorizationContext{SessionID: "sess-mdoc"}
-	require.NoError(t, c.cacheService.AuthContext.Create(t.Context(), authCtx))
+	c, authCtx := newMdocPresentationTestClient(t, "sess-mdoc")
 
 	pScope := model.PresentationScope{
 		FromScope: "pid_mdoc",
@@ -161,18 +159,7 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 // to the caller over HTTP, from the one function whose job is keeping
 // claims where they belong.
 func TestTheUnrepresentableClaimRefusalCarriesNoClaimValue(t *testing.T) {
-	c := &Client{
-		log: logger.NewSimple("test"),
-		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
-			"pid_mdoc": {Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
-		}}},
-		cacheService: &apigwcache.Service{
-			AuthContext: apigwcache.NewTestMemoryStore(10 * time.Minute),
-			Document:    apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute),
-		},
-	}
-	authCtx := &pkgcache.AuthorizationContext{SessionID: "sess-leak"}
-	require.NoError(t, c.cacheService.AuthContext.Create(t.Context(), authCtx))
+	c, authCtx := newMdocPresentationTestClient(t, "sess-leak")
 
 	// An integer JSON cannot carry exactly: documentValue refuses it and
 	// names it. 9007199254740993 is 2^53+1.

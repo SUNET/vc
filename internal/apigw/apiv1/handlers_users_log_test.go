@@ -3,18 +3,21 @@ package apiv1
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
-// The test reads the written log back, because a leak shows only in the
-// rendering.
-func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
+// Drives UserLookup and reads the written log back, because a leak shows
+// only in the rendering.
+func TestUserLookupLogsNoSecretsOrHolderData(t *testing.T) {
 	dir := t.TempDir()
 	log, err := logger.New("probe", dir, false)
 	require.NoError(t, err)
@@ -28,23 +31,44 @@ func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
 		"tx code":             "TX-998877",
 		"vp token":            "VP-presented",
 		"a verified claim":    "PAN-198001011234",
-	}
-	ctx := &cache.AuthorizationContext{
-		SessionID:    "sess-1",
-		AccessToken:  secrets["access token"],
-		RefreshToken: secrets["refresh token"],
-		IDToken:      secrets["id token"],
-		Code:         secrets["authorization code"],
-		TXCode:       secrets["tx code"],
-		VPToken:      secrets["vp token"],
-		Token:        &cache.Token{AccessToken: secrets["nested access token"]},
-		VerifiedClaims: map[string]any{
-			"personal_administrative_number": secrets["a verified claim"],
-		},
+		"a document claim":    "DOC-19900115",
 	}
 
-	// UserLookup's log line.
-	log.Debug("UserLookup", "session_id", ctx.SessionID, "status", ctx.Status, "scopes", ctx.Scopes)
+	c := &Client{
+		log: log,
+		cfg: &model.Cfg{APIGW: &model.APIGW{PublicURL: "https://issuer.example"}},
+		cacheService: &apigwcache.Service{
+			AuthContext: apigwcache.NewTestMemoryStore(10 * time.Minute),
+			Document:    apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute),
+		},
+	}
+	require.NoError(t, c.cacheService.AuthContext.Create(t.Context(), &cache.AuthorizationContext{
+		SessionID:            "sess-1",
+		RequestURI:           "urn:request:1",
+		VerifierResponseCode: "resp-1",
+		WalletURI:            "https://wallet.example/cb",
+		AccessToken:          secrets["access token"],
+		RefreshToken:         secrets["refresh token"],
+		IDToken:              secrets["id token"],
+		Code:                 secrets["authorization code"],
+		TXCode:               secrets["tx code"],
+		VPToken:              secrets["vp token"],
+		Token:                &cache.Token{AccessToken: secrets["nested access token"], ExpiresAt: time.Now().Add(time.Hour).Unix()},
+		VerifiedClaims:       map[string]any{"personal_administrative_number": secrets["a verified claim"]},
+	}))
+	c.cacheService.Document.Set(t.Context(), "sess-1", map[string]*model.CompleteDocument{
+		"pid": {
+			Meta:         &model.MetaData{AuthenticSource: "pid"},
+			DocumentData: map[string]any{"birth_date": secrets["a document claim"]},
+		},
+	})
+
+	_, err = c.UserLookup(t.Context(), &vcclient.UserLookupRequest{
+		AuthProvider: model.AuthProviderOpenID4VP,
+		RequestURI:   "urn:request:1",
+		ResponseCode: "resp-1",
+	})
+	require.NoError(t, err)
 
 	written, err := os.ReadFile(filepath.Join(dir, "probe.log"))
 	require.NoError(t, err)
@@ -54,15 +78,4 @@ func TestAnAuthorizationContextIsNeverLoggedWhole(t *testing.T) {
 	for what, value := range secrets {
 		require.NotContainsf(t, out, value, "the %s reached the log", what)
 	}
-
-	// The whole context, redacted by AuthorizationContext.MarshalLog.
-	log.Debug("UserLookup", "auth", ctx)
-	after, err := os.ReadFile(filepath.Join(dir, "probe.log"))
-	require.NoError(t, err)
-	for what, value := range secrets {
-		require.NotContainsf(t, string(after), value,
-			"the %s reached the log even through the redacting path", what)
-	}
-	require.True(t, strings.Contains(string(after), "has_access_token"),
-		"the redacted form should still say whether a token existed")
 }

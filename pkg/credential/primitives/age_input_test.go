@@ -31,6 +31,23 @@ func TestAgeOverThresholds_InvalidInputIsMarkedAsSuch(t *testing.T) {
 	}
 }
 
+// The error reaches logs, so it names the constraint and not the birthdate.
+func TestAgeOverThresholds_ErrorCarriesNoBirthdate(t *testing.T) {
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
+	for name, birthdate := range map[string]string{
+		"malformed":     "19900115-x",
+		"in the future": "2030-01-15",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := AgeOverThresholds(birthdate, now, []int{18})
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), birthdate)
+			assert.NotRegexp(t, `[0-9]{4}`, err.Error())
+		})
+	}
+}
+
 // And a usable birthdate is not marked, so the classification cannot
 // swallow a real failure.
 func TestAgeOverThresholds_ValidInputIsNotMarked(t *testing.T) {

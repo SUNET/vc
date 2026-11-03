@@ -175,7 +175,7 @@ func normaliseFullDate(v any) (string, error) {
 		// wallet happened to choose. One instant, one issued date.
 		return fullDate(d.UTC())
 	}
-	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
+	return "", errors.New("a date claim is neither a full-date nor a date-time")
 }
 
 // epochTime returns the UTC instant a CBOR tag 1 carries, if v is one.
@@ -246,18 +246,18 @@ func epochFullDate(content any) (string, error) {
 	switch n := content.(type) {
 	case uint64:
 		if n > math.MaxInt64 {
-			return "", fmt.Errorf("epoch %d is beyond the representable range", n)
+			return "", errors.New("an epoch date claim is beyond the representable range")
 		}
 		return fullDate(time.Unix(int64(n), 0).UTC())
 	case int64:
 		return fullDate(time.Unix(n, 0).UTC())
 	case float64:
 		if math.IsNaN(n) || math.IsInf(n, 0) {
-			return "", fmt.Errorf("epoch %v is not a number", n)
+			return "", errors.New("an epoch date claim is not a finite number")
 		}
 		seconds := math.Floor(n)
 		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
-			return "", fmt.Errorf("epoch %v is beyond the representable range", n)
+			return "", errors.New("an epoch date claim is beyond the representable range")
 		}
 		return fullDate(time.Unix(int64(seconds), 0).UTC())
 	}
@@ -274,7 +274,7 @@ func epochFullDate(content any) (string, error) {
 // and no verifier reading it gets the date the holder presented.
 func fullDate(t time.Time) (string, error) {
 	if year := t.Year(); year < 1 || year > 9999 {
-		return "", fmt.Errorf("year %d is outside the range an RFC 3339 full-date can express", year)
+		return "", errors.New("a date claim's year is outside the range an RFC 3339 full-date can express")
 	}
 	return t.Format(time.DateOnly), nil
 }

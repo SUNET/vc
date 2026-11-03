@@ -54,6 +54,15 @@ func TestAnAuthorizationContextRedactsItselfInALog(t *testing.T) {
 	require.Contains(t, out, "has_access_token", "whether a token exists is useful; its value is not")
 	require.Contains(t, out, "personal_administrative_number",
 		"the claim NAMES are useful and are not the holder's data; the values are")
+	for _, flag := range []string{"has_id_token", "has_tx_code", "has_vp_token"} {
+		require.Contains(t, out, flag)
+	}
+}
+
+func TestVerifiedClaimKeysAreSorted(t *testing.T) {
+	ctx := &cache.AuthorizationContext{VerifiedClaims: map[string]any{"c": 1, "a": 2, "b": 3}}
+	got := ctx.MarshalLog().(map[string]any)["verified_claim_keys"]
+	require.Equal(t, []string{"a", "b", "c"}, got)
 }
 
 func TestATokenResponseRedactsItselfInALog(t *testing.T) {
