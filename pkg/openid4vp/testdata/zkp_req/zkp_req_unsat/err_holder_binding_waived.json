@@ -1,0 +1,25 @@
+{
+  "description": "require_cryptographic_holder_binding false.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ],
+    "require_cryptographic_holder_binding": false
+  },
+  "expect": {
+    "error": "holder_binding_waived"
+  }
+}

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -760,24 +761,49 @@ func (s *MongoStore) ResumeIssuerState(ctx context.Context, issuerState string, 
 	}
 
 	filter := bson.M{"issuer_state": issuerState}
-	update := bson.M{
-		mongoUnset: bson.M{"issuer_state": ""},
-		// Field for field what IssuerStateResume.applyTo writes in the
-		// memory store; the two have to stay in step or an issuance
-		// resumes differently depending on which backend is configured.
-		"$set": bson.M{
-			"auth_session":                 resume.AuthSession,
-			"auth_session_dpop_thumbprint": resume.AuthSessionDPoPThumbprint,
-			"wallet_client_id":             resume.WalletClientID,
-			"redirect_url":                 resume.WalletURI,
-			"code_challenge":               resume.CodeChallenge,
-			"code_challenge_method":        resume.CodeChallengeMethod,
-			"dcql_query":                   resume.DCQLQuery,
-			"ephemeral_encryption_key_id":  resume.EphemeralEncryptionKeyID,
-			"expires_at":                   resume.ExpiresAt,
-			"created_at":                   resume.CreatedAt,
-		},
+	unset := bson.M{"issuer_state": ""}
+
+	// Field for field what IssuerStateResume.applyTo writes in the
+	// memory store; the two have to stay in step or an issuance
+	// resumes differently depending on which backend is configured.
+	set := bson.M{
+		"auth_session":                 resume.AuthSession,
+		"auth_session_dpop_thumbprint": resume.AuthSessionDPoPThumbprint,
+		"wallet_client_id":             resume.WalletClientID,
+		"redirect_url":                 resume.WalletURI,
+		"code_challenge":               resume.CodeChallenge,
+		"code_challenge_method":        resume.CodeChallengeMethod,
+		"dcql_query":                   resume.DCQLQuery,
+		"ephemeral_encryption_key_id":  resume.EphemeralEncryptionKeyID,
+		"expires_at":                   resume.ExpiresAt,
+		"created_at":                   resume.CreatedAt,
 	}
+
+	// The query is stored twice and both copies move together.
+	//
+	// MarshalBSON writes dcql_query_exact beside dcql_query and
+	// UnmarshalBSON PREFERS it, so an update that moved only the
+	// document form would leave the exact copy the prepared issuance
+	// wrote sitting there - and the resumed context, which is decoded
+	// from the document this update returns, would come back carrying
+	// the query the resume had just replaced. Writing the text here is
+	// also what keeps the resumed query's numbers: the $set value goes
+	// through the same BSON encoder that rounds a req param beyond
+	// int64 or float64.
+	if resume.DCQLQuery != nil {
+		encoded, err := json.Marshal(resume.DCQLQuery)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resume issuer_state: encoding the dcql query: %w", err)
+		}
+		set["dcql_query_exact"] = string(encoded)
+	} else {
+		// Removed, not left behind. A resume that carries no query is a
+		// resume to no query, and an exact copy that outlived it would
+		// be read back in preference to the absence.
+		unset["dcql_query_exact"] = ""
+	}
+
+	update := bson.M{mongoUnset: unset, "$set": set}
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
 	var resumed AuthorizationContext

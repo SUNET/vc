@@ -6,9 +6,10 @@ import {
     getBestSupportedProtocol,
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
-import { groupPresets } from "./preset-helpers.js";
+import { dcqlCredentialFromPreset, groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
+import { reqSchema } from "./req-schema.js";
 import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
@@ -124,6 +125,13 @@ const metadataResponseSchema = v.object({
                 vct_values: v.optional(v.array(v.string())),
                 doctype_value: v.optional(v.string()),
                 type_values: v.optional(v.array(v.array(v.string()))),
+                // source_format is the stored attestation a zkp_req
+                // proof is made over, and is REQUIRED for that format:
+                // the wallet's matcher refuses a meta without one
+                // (invalid_meta). Undeclared here it would be stripped
+                // like doctype_value once was, and the request would
+                // reach the wallet unanswerable.
+                source_format: v.optional(v.string()),
                 // zk_system_type entries are a flat {id, system, ...params}
                 // string-keyed object on the wire (ZKSystemTypeSpec's own
                 // MarshalJSON flattens params to the top level, no nested
@@ -140,6 +148,19 @@ const metadataResponseSchema = v.object({
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
             }))),
+            // req is the zkp_req format's requested calculations. A
+            // query in that format discloses nothing - every value comes
+            // from a function named here - so a stripped req asks the
+            // wallet for nothing and gets nothing back, which reads as a
+            // wallet fault. Its params are inputs to a proof and are
+            // passed through exactly as configured; see req-schema.js for
+            // why this validates without rebuilding them.
+            //
+            // `req` on THIS side: the preset is the verifier's own
+            // configuration surface and keeps the key the YAML uses. The
+            // posted DCQL below uses the wire member `_req`. The copy
+            // from one to the other is the only place they meet.
+            req: v.optional(reqSchema),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
                 path: v.array(v.string()),
@@ -168,11 +189,23 @@ const dcqlQueryCredentialSchema = v.object({
         vct_values: v.optional(v.array(v.string())),
         doctype_value: v.optional(v.string()),
         type_values: v.optional(v.array(v.array(v.string()))),
+        source_format: v.optional(v.string()),
         zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
     }),
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
+    // The same schema as the metadata one above, and the same reason:
+    // this is the query that is actually posted, so a parameter dropped
+    // here never reaches the wallet at all.
+    //
+    // `_req`, not `req`: this object is a DCQL credential query, and
+    // v0.4 names the member `_req` on the wire. The server reads it into
+    // CredentialQuery.Req, whose tag is `_req`, and encoding/json does
+    // not match `req` to that tag - it drops it, leaving a zkp_req query
+    // with no items. No error anywhere: the request goes out asking the
+    // wallet for nothing.
+    _req: v.optional(reqSchema),
 });
 
 const credentialSetQuerySchema = v.object({
@@ -644,12 +677,7 @@ Alpine.data("app", () => ({
 
         // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
         const dcqlInput = {
-            credentials: (preset.credentials || []).map((/** @type {any} */ cred) => {
-                /** @type {any} */
-                const c = { id: cred.id, format: cred.format, meta: cred.meta };
-                if (cred.claims) c.claims = cred.claims;
-                return c;
-            }),
+            credentials: (preset.credentials || []).map(dcqlCredentialFromPreset),
         };
 
         const result = v.safeParse(dcqlQuerySchema, dcqlInput);
