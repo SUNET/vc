@@ -847,7 +847,7 @@ func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 // array this model cannot hold is an unmodelled shape rather than an
 // ordinary invalid query.
 //
-// Only req. A zkp_req request carries its arguments there, the
+// Only _req. A zkp_req request carries its arguments there, the
 // rulebook is moving, and the vendored conformance set includes negative
 // vectors - a numeric item id, array-valued params - that exist to be
 // SENT. Without this they were accepted by NewRawCredentialQuery and

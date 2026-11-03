@@ -81,7 +81,7 @@ ZK_CRED_LONGFELLOW_REPO ?= https://github.com/sirosfoundation/zk-cred-longfellow
 # non-canonical simple values, which is what the current vectors
 # (sha256 697d016b) require; its copy of challenge-vectors.json is
 # byte-identical to the vendored one.
-ZK_CRED_LONGFELLOW_REF  ?= e09fdcd16252c9043e50032c3ae1cc4259ed7d08
+ZK_CRED_LONGFELLOW_REF  ?= 495d704eb1f7167f3f66717c133d2e1ec5e2127d
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
@@ -95,7 +95,7 @@ ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 # staged from this same ref, so the library and the fixture it is
 # checked against move together; pin it if that stops being true.
 ZK_CRED_VEGA_REPO ?= https://github.com/sirosfoundation/zk-cred-vega.git
-ZK_CRED_VEGA_REF  ?= main
+ZK_CRED_VEGA_REF  ?= v0.0.7
 ZK_CRED_VEGA_CHECKOUT := third_party/.zk-cred-vega-src
 ZK_CRED_VEGA_STAGE    := third_party/zk-cred-vega
 

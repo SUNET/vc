@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"time"
 
@@ -83,6 +84,12 @@ func (c *Client) verifyCircuitZkScope(
 		return nil, c.zkpReqError(scope, "zkp_req presentation refused", err, "query_id", query.ID)
 	}
 
+	channel := circuitZkChannelFor(dcAPI)
+	if err := checkCircuitZkResponseMode(channel, authCtx); err != nil {
+		c.log.Error(err, "zkp_req response mode refused", "scope", scope, "channel", channel)
+		return nil, fmt.Errorf("scope %s: %w", scope, err)
+	}
+
 	thumbprint, err := c.readerKeyThumbprint(ctx, authCtx, scope)
 	if err != nil {
 		return nil, err
@@ -95,17 +102,11 @@ func (c *Client) verifyCircuitZkScope(
 		}
 	}
 
-	session, err := c.circuitZkSessionFor(authCtx, circuitZkChannelFor(dcAPI), origin, authCtx.ClientID, authCtx.Nonce,
+	session, err := c.circuitZkSessionFor(authCtx, channel, origin, authCtx.ClientID, authCtx.Nonce,
 		responseURI, query.Meta.DoctypeValue, thumbprint)
 	if err != nil {
 		return nil, c.zkpReqError(scope, "cannot build the zkp_req session transcript", err, "dc_api", dcAPI)
 	}
-
-	// T and where it came from, before any proof is checked. A
-	// time-binding mismatch is otherwise indistinguishable from a bad
-	// proof, and this line is what tells the two apart in a log.
-	c.log.Debug("zkp_req proof time", "scope", scope,
-		"t", session.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", session.NowSource)
 
 	credentials := make([]sdjwtvc.CredentialCache, 0, len(presentations))
 	for _, presentation := range presentations {
@@ -134,6 +135,14 @@ func (c *Client) verifyCircuitZkScope(
 		presentationSession.Now = proofTime
 		presentationSession.NowSource = proofTimeSource
 
+		// T and where it came from, before the proof is checked. A
+		// time-binding mismatch is otherwise indistinguishable from a
+		// bad proof, and this line is what tells the two apart in a
+		// log. Per presentation, because T is.
+		c.log.Debug("zkp_req proof time", "scope", scope, "system_id", presentation.SystemID,
+			"t", presentationSession.Now.UTC().Format(openid4vp.ProofTimeLayout),
+			"t_source", presentationSession.NowSource)
+
 		issuerKey, err := c.circuitZkIssuerKey(ctx, presentation, presentationSession.DocType, time.Now())
 		if err != nil {
 			return nil, c.zkpReqError(scope, "no trusted issuer key for the zkp_req presentation", err,
@@ -144,10 +153,11 @@ func (c *Client) verifyCircuitZkScope(
 		if err != nil {
 			return nil, c.zkpReqError(scope, "zkp_req proof did not verify", err,
 				"system_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey),
-				"t", presentationSession.Now.UTC().Format("2006-01-02T15:04:05Z"), "t_source", presentationSession.NowSource)
+				"t", presentationSession.Now.UTC().Format(openid4vp.ProofTimeLayout),
+				"t_source", presentationSession.NowSource)
 		}
 		c.log.Info("zkp_req proof verified", "scope", scope,
-			"circuit_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey))
+			"system_id", presentation.SystemID, "issuer_key", issuerKeyThumbprint(issuerKey))
 
 		credentials = append(credentials, circuitZkCredential(scope, presentation, verified))
 	}
@@ -155,6 +165,44 @@ func (c *Client) verifyCircuitZkScope(
 	c.log.Info("zkp_req presentation verified", "scope", scope,
 		"presentations", len(presentations), "doc_type", session.DocType)
 	return credentials, nil
+}
+
+// checkCircuitZkResponseMode refuses a redirect presentation whose
+// response was not encrypted.
+//
+// Over a redirect the response travels to response_uri through
+// whatever the holder's browser and network are, so nym_auth requires
+// direct_post.jwt: the pseudonym is a stable identifier for a person
+// across that verifier's sessions, and sending one in the clear hands
+// it to anything on the path.
+//
+// The transcript builder refuses this too - its thumbprint is
+// required, and an unencrypted response has none - but it refuses it
+// as "the reader key thumbprint is 0 bytes", which reads as a
+// plumbing failure rather than as the configuration mistake it is.
+// Checked here so the message names the actual problem.
+//
+// The DC API channel is deliberately not checked: a response returned
+// inside navigator.credentials.get never crosses the network, and its
+// handover takes a null thumbprint for exactly that case.
+//
+// Drafted against nym_auth_rulebook#9, which is an UNMERGED draft -
+// cited for where the reasoning is written down, not as text that
+// must exist. The enforceable part of it is in the shared vectors: a
+// null thumbprint is in rejects_redirect.
+func checkCircuitZkResponseMode(channel circuitZkChannel, authCtx *cache.AuthorizationContext) error {
+	if channel != channelOpenID4VP {
+		return nil
+	}
+	if authCtx == nil {
+		return errors.New("zkp_req: no session for this presentation, so its response mode cannot be established")
+	}
+	if authCtx.ResponseMode != openid4vp.ResponseModeDirectPostJWT {
+		return fmt.Errorf("zkp_req: this presentation arrived by redirect with response_mode %q; nym_auth requires %q there, "+
+			"because a pseudonym sent to response_uri in the clear is readable by anything on the path",
+			authCtx.ResponseMode, openid4vp.ResponseModeDirectPostJWT)
+	}
+	return nil
 }
 
 // circuitZkCredential renders a verified presentation as claims.
@@ -168,8 +216,16 @@ func (c *Client) verifyCircuitZkScope(
 // binary value we publish is spelled that way.
 func circuitZkCredential(scope string, presentation openid4vp.ZkpPresentation, verified map[string][]byte) sdjwtvc.CredentialCache {
 	claims := map[string]any{
-		"circuit_id":   presentation.SystemID,
-		"proof_system": presentation.SystemID,
+		// system_id alone. A v0.4 presentation carries no proof
+		// system and no circuit id: the system is named by system_id,
+		// and the verifier's registry maps it to a proof system.
+		"system_id": presentation.SystemID,
+	}
+	if presentation.HasProofTime {
+		// The T the proof was checked against, as the prover spelled
+		// it. Published because a consumer comparing two pseudonyms
+		// may need to know how old each one's proof is.
+		claims["proof_time"] = presentation.ProofTimeText
 	}
 	for handle, pseudonym := range verified {
 		claims[handle] = base64.RawURLEncoding.EncodeToString(pseudonym)
