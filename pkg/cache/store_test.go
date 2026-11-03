@@ -144,6 +144,179 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Nil(t, second)
 	})
 
+	// An outcome is claimed once, on both backends.
+	//
+	// In Mongo the check is a filter and in memory it is a branch under the
+	// lock, so the two can agree in the unit tests and still disagree on the
+	// cases that only a document store has - above all an omitted field: a
+	// session that never had a response code has no verifier_response_code
+	// MEMBER, not an empty one, and a predicate written for "" alone would
+	// match nothing and refuse every first claim.
+	t.Run("ClaimOutcome", func(t *testing.T) {
+		open := func(t *testing.T, sessionID, state string) {
+			t.Helper()
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID: sessionID,
+				State:     state,
+				Status:    SessionStatusAwaitingPresentation,
+			}))
+			// Never written, so in a document store it is absent rather
+			// than empty. This is the shape the first claim has to match.
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: sessionID})
+			require.NoError(t, err)
+			require.Empty(t, stored.VerifierResponseCode)
+			require.False(t, HasOutcome(stored), "the premise: nothing has answered yet")
+		}
+
+		t.Run("an unanswered session admits the first claim", func(t *testing.T) {
+			open(t, "contract-outcome-1", "contract-outcome-state-1")
+
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID:            "contract-outcome-1",
+				State:                "contract-outcome-state-1",
+				Status:               SessionStatusCompleted,
+				VerifierResponseCode: "contract-response-1",
+			})
+			require.NoError(t, err)
+			assert.True(t, won, "a session with no outcome must admit one")
+
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-1"})
+			require.NoError(t, err)
+			assert.Equal(t, SessionStatusCompleted, stored.Status)
+			assert.Equal(t, "contract-response-1", stored.VerifierResponseCode)
+
+			// And the second is told it lost, without changing anything.
+			won, err = store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-1",
+				State:     "contract-outcome-state-1",
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			})
+			require.NoError(t, err)
+			assert.False(t, won, "a session that has answered must not answer twice")
+
+			after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-1"})
+			require.NoError(t, err)
+			assert.Equal(t, SessionStatusCompleted, after.Status, "the loser must not overwrite the winner")
+			assert.Equal(t, "contract-response-1", after.VerifierResponseCode)
+			assert.Empty(t, after.Error)
+		})
+
+		// A response code with a status that is NOT terminal still counts:
+		// the code is minted as a presentation completes, so the browser has
+		// already been handed something to fetch with.
+		t.Run("a response code alone shuts the claim out", func(t *testing.T) {
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID:            "contract-outcome-2",
+				State:                "contract-outcome-state-2",
+				Status:               SessionStatusAwaitingPresentation,
+				VerifierResponseCode: "contract-response-2",
+			}))
+
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-2",
+				State:     "contract-outcome-state-2",
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			})
+			require.NoError(t, err)
+			assert.False(t, won)
+
+			after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-2"})
+			require.NoError(t, err)
+			assert.Equal(t, "contract-response-2", after.VerifierResponseCode)
+			assert.Empty(t, after.Error)
+		})
+
+		t.Run("a terminal status shuts the claim out", func(t *testing.T) {
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-3",
+				State:     "contract-outcome-state-3",
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			}))
+
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID:            "contract-outcome-3",
+				State:                "contract-outcome-state-3",
+				Status:               SessionStatusCompleted,
+				VerifierResponseCode: "contract-response-3",
+			})
+			require.NoError(t, err)
+			assert.False(t, won, "a declined session must not be completed afterwards")
+
+			after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-3"})
+			require.NoError(t, err)
+			assert.Equal(t, SessionStatusError, after.Status)
+			assert.Empty(t, after.VerifierResponseCode)
+		})
+
+		// A session nobody has heard of is a lost claim, not an error: the
+		// caller needs to know it did not record an outcome, and that is all.
+		t.Run("an unknown session loses without erroring", func(t *testing.T) {
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-nobody",
+				Status:    SessionStatusCompleted,
+			})
+			require.NoError(t, err)
+			assert.False(t, won)
+		})
+
+		t.Run("exactly one of many concurrent claims wins", func(t *testing.T) {
+			open(t, "contract-outcome-4", "contract-outcome-state-4")
+
+			const claimants = 16
+			var wins atomic.Int32
+			var start sync.WaitGroup
+			var done sync.WaitGroup
+			start.Add(1)
+
+			for i := range claimants {
+				done.Add(1)
+				go func(i int) {
+					defer done.Done()
+					outcome := &AuthorizationContext{
+						SessionID: "contract-outcome-4",
+						State:     "contract-outcome-state-4",
+					}
+					// Half claim the way a decline does and half the way a
+					// completed presentation does; either must shut the
+					// other out.
+					if i%2 == 0 {
+						outcome.Status = SessionStatusError
+						outcome.Error = "access_denied"
+					} else {
+						outcome.Status = SessionStatusCompleted
+						outcome.VerifierResponseCode = fmt.Sprintf("contract-response-4-%d", i)
+					}
+					start.Wait()
+					won, err := store.ClaimOutcome(ctx, outcome)
+					assert.NoError(t, err)
+					if won {
+						wins.Add(1)
+					}
+				}(i)
+			}
+
+			start.Done()
+			done.Wait()
+			assert.Equal(t, int32(1), wins.Load(), "exactly one claimant may record an outcome")
+
+			// The winner's fields moved together, not a mixture of both.
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-4"})
+			require.NoError(t, err)
+			require.True(t, HasOutcome(stored))
+			if stored.Status == SessionStatusError {
+				assert.Equal(t, "access_denied", stored.Error)
+				assert.Empty(t, stored.VerifierResponseCode, "a declined session has no response code to hand out")
+			} else {
+				assert.Equal(t, SessionStatusCompleted, stored.Status)
+				assert.NotEmpty(t, stored.VerifierResponseCode)
+				assert.Empty(t, stored.Error)
+			}
+		})
+	})
+
 	t.Run("GetByQueryFields", func(t *testing.T) {
 		result, err := store.Get(ctx, &AuthorizationContext{State: "state-1"})
 		require.NoError(t, err)
@@ -841,4 +1014,93 @@ func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
 	assert.True(t, after.Forfeited,
 		"a consumed code must not be resurrected by a caller that read before it was consumed")
 	assert.Equal(t, "some-provider", after.AuthProvider, "and the caller's own change must still land")
+}
+
+// Exactly one outcome is recorded, however many arrive at once.
+//
+// This is the race the verifier had: a wallet's error response and the
+// presentation it was racing each read the session, each found it still open,
+// and each saved its own copy. The last write won and the first outcome was
+// erased - after it had already been reported to the browser.
+func TestClaimOutcomeAdmitsExactlyOneWinner(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	const sessionID = "racing-session"
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "racing-state",
+		Status:    SessionStatusAwaitingPresentation,
+	}))
+
+	const claimants = 32
+	var wins atomic.Int32
+	var start sync.WaitGroup
+	var done sync.WaitGroup
+	start.Add(1)
+
+	for i := range claimants {
+		done.Add(1)
+		go func(i int) {
+			defer done.Done()
+			outcome := &AuthorizationContext{
+				SessionID: sessionID,
+				State:     "racing-state",
+			}
+			// Half claim the way a decline does, half the way a completed
+			// presentation does - both are outcomes, and either must shut
+			// the other out.
+			if i%2 == 0 {
+				outcome.Status = SessionStatusError
+				outcome.Error = "access_denied"
+			} else {
+				outcome.Status = SessionStatusCompleted
+				outcome.VerifierResponseCode = fmt.Sprintf("response-%d", i)
+			}
+
+			start.Wait()
+			won, err := store.ClaimOutcome(ctx, outcome)
+			assert.NoError(t, err)
+			if won {
+				wins.Add(1)
+			}
+		}(i)
+	}
+
+	start.Done()
+	done.Wait()
+
+	assert.Equal(t, int32(1), wins.Load(), "exactly one claimant may record an outcome")
+
+	// And the stored session carries the winner's outcome, not a mixture of
+	// both: the fields move together or not at all.
+	stored, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	require.True(t, HasOutcome(stored), "the session must end up answered")
+	if stored.Status == SessionStatusError {
+		assert.Equal(t, "access_denied", stored.Error)
+		assert.Empty(t, stored.VerifierResponseCode, "a declined session has no response code to hand out")
+	} else {
+		assert.Equal(t, SessionStatusCompleted, stored.Status)
+		assert.NotEmpty(t, stored.VerifierResponseCode)
+		assert.Empty(t, stored.Error)
+	}
+
+	// A late claimant is told it lost rather than erroring, and changes
+	// nothing.
+	before := *stored
+	won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "racing-state",
+		Status:    SessionStatusError,
+		Error:     "too_late",
+	})
+	require.NoError(t, err)
+	assert.False(t, won)
+
+	after, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, before.Status, after.Status)
+	assert.Equal(t, before.Error, after.Error)
+	assert.Equal(t, before.VerifierResponseCode, after.VerifierResponseCode)
 }

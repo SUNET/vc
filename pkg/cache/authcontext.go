@@ -838,6 +838,53 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 		})
 }
 
+// ClaimOutcome records a final outcome on a still-unanswered session.
+// See AuthContextStore.ClaimOutcome.
+//
+// One mutation under the lock: the stored document is read, checked and
+// replaced without releasing it, so a second caller finds the outcome
+// already there and is told it lost.
+func (c *MemoryStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error) {
+	if doc == nil {
+		return false, errors.New("document cannot be nil")
+	}
+	if doc.SessionID == "" {
+		return false, errors.New("sessionID is required")
+	}
+	// Validated before anything is touched, as MongoStore does, so a
+	// malformed replacement leaves the session claimable. The wallet's
+	// error_description reaches here as wallet-controlled input.
+	if err := doc.Validate(); err != nil {
+		return false, fmt.Errorf("validation failed: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(doc.SessionID)
+	if item == nil {
+		// A lost claim, not an error, and the same answer MongoStore
+		// gives for the same thing. The session can vanish while a
+		// presentation is being verified - a TTL expiry is exactly as
+		// long as verification takes - and a caller that got a 500 here
+		// and ErrSessionAlreadyAnswered from the other backend would be
+		// debugging the cache rather than the race. What the caller needs
+		// to know is whether it recorded an outcome; it did not. Re-read
+		// the session to tell "gone" from "answered" apart.
+		return false, nil
+	}
+	if HasOutcome(item.Value()) {
+		return false, nil
+	}
+
+	// Stale indices go first, exactly as Update does it.
+	c.deleteIndices(item.Value())
+	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
+	c.updateIndices(doc)
+
+	return true, nil
+}
+
 // ClaimIssuerState atomically replaces the issuer-initiated handle with the
 // exchange that claims it. See AuthContextStore.ClaimIssuerState.
 //
