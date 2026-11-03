@@ -13,11 +13,21 @@ import (
 // logging: session, status, scopes, client, expiry, whether each token and
 // code is set, and the names of the verified claims.
 //
-// Pointer receiver so a nil context (e.g. a failed Get) logs as null.
-func (a *AuthorizationContext) MarshalLog() any {
-	if a == nil {
-		return nil
-	}
+// VALUE receiver, so the redaction applies however the context is spelled
+// at the call site. A pointer receiver covers only the pointer: logging
+// *authCtx - one character away from authCtx, and indistinguishable from
+// it in review - puts zapr on the reflection path instead, where it walks
+// the struct and prints the access token, the refresh token and every
+// verified claim. A pointer's method set contains its value methods, so
+// this covers both spellings and changes nothing at any call site that
+// passes a pointer.
+//
+// The cost is the nil pointer, which used to render as null and now
+// dereferences inside this method; zapr recovers that and records the
+// panic in place of the field. That is the right way round. A nil context
+// carries no secret, so the worst case is an unhelpful log line, while
+// the case the value receiver covers carries all of them.
+func (a AuthorizationContext) MarshalLog() any {
 	return map[string]any{
 		"session_id":          a.SessionID,
 		"status":              a.Status,

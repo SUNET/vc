@@ -79,6 +79,47 @@ func TestATokenResponseRedactsItselfInALog(t *testing.T) {
 	require.Contains(t, out, "nym_auth")
 }
 
+// The same redaction, through a dereferenced value.
+//
+// This is what the value receivers buy. `*authCtx` is one character away
+// from `authCtx` at a call site and indistinguishable from it in review;
+// under a pointer receiver zapr finds no MarshalLog in the value's method
+// set, falls back to reflecting over the struct, and prints every field.
+func TestRedactionAppliesToADereferencedValue(t *testing.T) {
+	t.Run("an authorization context", func(t *testing.T) {
+		ctx := cache.AuthorizationContext{
+			SessionID:    "sess-2",
+			AccessToken:  "AT-dereferenced",
+			RefreshToken: "RT-dereferenced",
+			VerifiedClaims: map[string]any{
+				"personal_administrative_number": "PAN-198001011234",
+			},
+		}
+
+		out := logAndRead(t, "ctx", "auth", ctx)
+
+		require.NotContains(t, out, "AT-dereferenced", "the access token reached the log")
+		require.NotContains(t, out, "RT-dereferenced", "the refresh token reached the log")
+		require.NotContains(t, out, "PAN-198001011234", "the claim value reached the log")
+		require.Contains(t, out, "sess-2", "the session id is what the line is for")
+		require.Contains(t, out, "has_access_token")
+	})
+
+	t.Run("a token response", func(t *testing.T) {
+		reply := openid4vci.TokenResponse{
+			AccessToken: "AT-value", TokenType: "DPoP",
+			CNonce: "NONCE-value", RefreshToken: "RT-value",
+		}
+
+		out := logAndRead(t, "Token endpoint", "reply", reply)
+
+		require.NotContains(t, out, "AT-value", "the access token reached the log")
+		require.NotContains(t, out, "NONCE-value", "the c_nonce reached the log")
+		require.NotContains(t, out, "RT-value", "the refresh token reached the log")
+		require.Contains(t, out, "DPoP")
+	})
+}
+
 // A nil pointer logs without panicking.
 func TestRedactionHandlesNil(t *testing.T) {
 	require.NotPanics(t, func() {

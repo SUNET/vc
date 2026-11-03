@@ -41,6 +41,36 @@ func TestAVPTokenIsNeverLoggedWhole(t *testing.T) {
 	assert.Contains(t, string(out), "state-1")
 }
 
+// And through a dereferenced value, which is how three handlers hold it.
+//
+// handler_oidc.go, handlers_verification.go and handlers_verifier.go each
+// declare `vpResponse := openid4vp.VPResponse{}`, and vpTokensForScope
+// takes one as a value parameter - so logging the value rather than a
+// pointer is not a hypothetical slip here, it is the spelling already in
+// hand. Under a pointer receiver that line would print the holder's
+// presented credentials in full.
+func TestAVPTokenIsNeverLoggedWholeAsAValue(t *testing.T) {
+	const presentation = "eyJhbGciOiJFUzI1NiJ9.SD-JWT-VALUE~disclosure~disclosure"
+
+	response := openid4vp.VPResponse{
+		State:   "state-2",
+		VPToken: map[string][]string{"pid_1_8": {presentation}},
+	}
+
+	dir := t.TempDir()
+	log, err := logger.New("probe", dir, false)
+	require.NoError(t, err)
+	log.Debug("whole", "response", response)
+
+	out, err := os.ReadFile(filepath.Join(dir, "probe.log"))
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(out), presentation, "the presented credential reached the log")
+	assert.NotContains(t, string(out), "SD-JWT-VALUE")
+	assert.Contains(t, string(out), "pid_1_8", "the query id is what the line is for")
+	assert.Contains(t, string(out), "state-2")
+}
+
 func TestVPTokenSummaryDescribesTheShape(t *testing.T) {
 	response := &openid4vp.VPResponse{VPToken: map[string][]string{
 		"pid_1_8":  {"abc", "defgh"},

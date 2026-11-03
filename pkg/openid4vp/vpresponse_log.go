@@ -20,10 +20,15 @@ func (v *VPResponse) VPTokenSummary() map[string][]int {
 
 // MarshalLog returns the log form of a VPResponse: its state and
 // VPTokenSummary.
-func (v *VPResponse) MarshalLog() any {
-	if v == nil {
-		return nil
-	}
+//
+// Value receiver, and this is the one where it matters most: three
+// handlers hold a VPResponse as a value rather than a pointer
+// (handler_oidc.go, handlers_verification.go, handlers_verifier.go) and
+// vpTokensForScope takes one as a value parameter, so the dereferenced
+// spelling is not hypothetical here - it is what the code already has in
+// hand. A vp_token holds the holder's presented credentials in the
+// clear. See cache.AuthorizationContext.MarshalLog for the nil trade.
+func (v VPResponse) MarshalLog() any {
 	return map[string]any{
 		"state":    v.State,
 		"vp_token": v.VPTokenSummary(),
