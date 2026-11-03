@@ -60,10 +60,7 @@ func TestKnownOffenderMatchingPerVerifier(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, first, other)
 
-	// Two bare identifiers that differ at all are unrelated identities.
-	// (This used to assert that the rulebook's two PREFIXED forms of one
-	// Relying Party were unrelated; the prefix is no longer hashed, so
-	// what is left is the plain property that different ids differ.)
+	// Two verifier_ids that differ at all are unrelated identities.
 	nearby, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "x509_san_dns:rp.example.semantic")
 	require.NoError(t, err)
 	assert.NotEqual(t, first, nearby)
@@ -150,16 +147,6 @@ func TestSeedLengthIsFixedByTheRulebook(t *testing.T) {
 // Verifier actually reported would never match, and the operator would
 // conclude the subject is not the one they are looking for. A wrong
 // answer, not an error.
-// The hashed verifier input is the BARE verifier_id.
-//
-// This test used to assert the opposite - that a prefixed Client
-// Identifier was the form to hash - and it was wrong. The rulebook
-// states the bare form with worked digests and marks the prefixed one
-// MUST NOT; verifier_id_type is agreed out of band and is not hashed.
-// Hashing the prefix produces a 32-byte value indistinguishable from a
-// correct pseudonym that no Verifier will ever report, so a remapping
-// loop would simply never match and an operator would conclude the
-// subject is innocent.
 func TestVerifierInputIsThePrefixedVerifierID(t *testing.T) {
 	// The rulebook's worked digests, recomputed here rather than
 	// copied as opaque constants: if either moves, this says which.
@@ -194,10 +181,6 @@ func TestVerifierInputIsThePrefixedVerifierID(t *testing.T) {
 		assert.Errorf(t, err, "account recovery must refuse %q too", bad)
 	}
 
-	// Bare identifiers, including ones that merely CONTAIN a colon -
-	// the guard is about the Client Identifier Prefix, not about
-	// punctuation.
-	//
 	// The two forms rulebook v0.4 defines, hashed exactly as
 	// published. What follows the marker is opaque: the rulebook
 	// constrains the form, not the identifier inside it.
@@ -216,8 +199,8 @@ func TestVerifierInputIsThePrefixedVerifierID(t *testing.T) {
 	// And a semantic verifier_id is hashed WHOLE: the digest is over
 	// "semantic_id:rp.example", not over "x509_san_dns:rp.example".
 	semantic := sha256.Sum256([]byte("semantic_id:rp.example"))
-	identifierOnly := sha256.Sum256([]byte("x509_san_dns:rp.example"))
-	require.NotEqual(t, semantic, identifierOnly)
+	x509Form := sha256.Sum256([]byte("x509_san_dns:rp.example"))
+	require.NotEqual(t, semantic, x509Form)
 	gotSemantic, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, "semantic_id:rp.example")
 	require.NoError(t, err)
 	wantSemantic, err := Pseudonym(ConfigKnownOffenderMatchingSSC, testSeed, nullInput, semantic[:])

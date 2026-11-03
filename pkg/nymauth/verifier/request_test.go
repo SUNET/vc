@@ -89,15 +89,9 @@ func TestVerifierInputIsThePublishedIDsDigest(t *testing.T) {
 	assert.Equal(t, "6eae85a0", hex.EncodeToString(got[:])[:8],
 		"rulebook v0.4's MUST digest, and the archive's verifier_input for this client_id")
 
-	// The PREFIXED form is what v0.4 hashes, and it is what the
-	// archive's own reference pseudonyms are computed from. The bare
-	// DNS name derives too - it is a different verifier_id, not an
-	// invalid one - and the two give different digests, which is the
-	// point of hashing exactly as published.
-	prefixed, err := VerifierInput("x509_san_dns:verifier.example")
-	require.NoError(t, err, "the prefixed form is a verifier_id under v0.4")
-	assert.Equal(t, "6eae85a0", hex.EncodeToString(prefixed[:])[:8],
-		"v0.4's digest, and the archive's verifier_input")
+	// The bare DNS name is in neither v0.4 form, so it is refused rather than hashed.
+	_, err = VerifierInput("verifier.example")
+	assert.Error(t, err, "a bare DNS name is not a verifier_id under v0.4")
 
 	// "semantic_id:" is NOT one of those. The rulebook says it is part
 	// of the `semantic` verifier_id value and not a Client Identifier

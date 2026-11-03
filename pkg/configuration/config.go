@@ -438,7 +438,7 @@ func checkLegacyCredentialResponseEncryption(cfg *model.Cfg) error {
 // At config load, because every failure it catches would otherwise
 // surface as a REFUSED PROOF: an allowlist with two builds for one
 // configuration, an artifact that is not the one allowed, a
-// verifier_id that is a Client Identifier rather than the bare value.
+// verifier_id in neither of the two forms rulebook v0.4 defines.
 // Each of those produces a pseudonym nobody reports or a circuit that
 // will not load, and an operator looking at a failed presentation has
 // no reason to suspect the configuration.

@@ -118,8 +118,8 @@ const (
 // pseudonym.json carries client_id "x509_san_dns:verifier.example" with
 // verifier_input 6eae85a0..., which is the prefixed digest.
 //
-// What is refused is a value that names no Verifier: an empty one, or a
-// marker with nothing after it. Those hash cleanly - every wrong value
+// What is refused is a value that names no Verifier: an empty one, a
+// marker with nothing after it, or one in neither form. Those hash cleanly - every wrong value
 // here does - and a 32-byte digest from a meaningless input is
 // indistinguishable from a correct one, so a remapping loop comparing
 // against a Verifier's real pseudonym would simply never match and the
@@ -211,9 +211,9 @@ func looksLikeDNSName(value string) bool {
 //
 // prover_input is null; verifier_input is SHA256(verifier_id).
 //
-// verifierID is the published identifier - "x509_san_dns:verifier.example" - including the
-// Client Identifier prefix and without verifier_id_type, which is agreed
-// out of band and not hashed. See checkVerifierID.
+// verifierID is the published identifier, prefix included -
+// "x509_san_dns:verifier.example" - and without verifier_id_type, which
+// is agreed out of band and not hashed. See checkVerifierID.
 func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byte, error) {
 	switch config {
 	case ConfigKnownOffenderMatchingSSC, ConfigKnownOffenderMatchingPSC:

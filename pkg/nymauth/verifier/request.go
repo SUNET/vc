@@ -73,9 +73,8 @@ type Request struct {
 	// input of its own: it is what makes e2 this credential type's.
 	DocType string
 
-	// VerifierInput is SHA-256 of the BARE verifier_id - never the
-	// prefixed Client Identifier, never client_id as it appears in the
-	// request. See VerifierInput.
+	// VerifierInput is SHA-256 of the configured verifier_id, prefix
+	// included - never derived from client_id. See VerifierInput.
 	VerifierInput [32]byte
 }
 
@@ -91,7 +90,7 @@ func (r Request) E2() ([32]byte, error) {
 	return MdocChallengeDigest(r.SessionTranscript, r.DocType)
 }
 
-// VerifierInput returns SHA-256 of the bare verifier_id.
+// VerifierInput returns SHA-256 of the verifier_id exactly as published.
 //
 // The published identifier including its prefix -
 // "x509_san_dns:verifier.example" or "semantic_id:<identifier>" - per
