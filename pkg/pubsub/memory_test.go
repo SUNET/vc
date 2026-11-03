@@ -199,10 +199,10 @@ func TestService_HAWithoutRedisFallsBackToMemory(t *testing.T) {
 
 func TestParseBackend(t *testing.T) {
 	for in, want := range map[string]Backend{
-		"":        BackendMemory,
-		"memory":  BackendMemory,
-		"redis":   BackendRedis,
-		"valkey":  BackendValkey,
+		"":         BackendMemory,
+		"memory":   BackendMemory,
+		"redis":    BackendRedis,
+		"valkey":   BackendValkey,
 		"nonsense": BackendMemory,
 	} {
 		assert.Equal(t, want, ParseBackend(in), "ParseBackend(%q)", in)

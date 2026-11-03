@@ -1,0 +1,33 @@
+{
+  "description": "system_id_values holds a non-string.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "zkp_req": {
+        "system_id_values": [
+          1
+        ]
+      }
+    }
+  },
+  "expect": {
+    "error": "invalid_client_metadata"
+  }
+}
