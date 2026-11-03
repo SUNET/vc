@@ -122,7 +122,7 @@ func TransactionDataForCredential(raw []string, queryID string) ([]string, error
 // UncoveredTransactionData returns the entries that no answered credential
 // query references. A response that never committed to one of them has not
 // authorized it, so the caller must refuse.
-func UncoveredTransactionData(raw []string, answeredQueryIDs []string) ([]string, error) {
+func UncoveredTransactionData(raw, answeredQueryIDs []string) ([]string, error) {
 	dec, err := decodeTransactionData(raw)
 	if err != nil {
 		return nil, err
@@ -147,9 +147,8 @@ func txError(format string, args ...any) error {
 }
 
 // allowedHashAlgs returns the set the wallet was allowed to use for the KB-JWT:
-// entries' request lists and returns the set the wallet was allowed to use:
-// the intersection of the entries' lists, with an entry that sent no list
-// allowing only the sha-256 default.
+// the intersection of the entries' request lists, with an entry that sent no
+// list allowing only the sha-256 default.
 func allowedHashAlgs(entries []decodedTransactionData) []string {
 	var allowed []string
 	for i, e := range entries {

@@ -166,7 +166,6 @@ func (c *Client) buildPaymentTransactionData(p *UIPaymentRequest, dcql *openid4v
 // and link, and dc_api.jwt for the Digital Credentials API variant when that
 // is enabled. The response arrives at one endpoint whichever was used, so a
 // TS12 KB-JWT may echo either. Recorded on the session at issuance.
-// TS12 KB-JWT may echo either.
 func (c *Client) issuedResponseModes() []string {
 	modes := []string{openid4vp.ResponseModeDirectPostJWT}
 	if c.cfg.Verifier.DigitalCredentials.Enable {
