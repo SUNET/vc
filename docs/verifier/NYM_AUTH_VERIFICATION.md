@@ -370,8 +370,17 @@ deviation and the limit, because the next question is always "by how much".
 
 Be precise about what that buys, because it is narrower than it looks.
 The circuit checks the MSO's validity period **at T**, so what the window
-prevents is a holder choosing a T inside an expired credential's validity
-period: backdating past expiry. That is the whole of it.
+does is *bound* backdating, not prevent it. A holder may choose any T
+within `proof_time_max_age_seconds` of now, and the circuit will happily
+check an expired MSO against a T from while it was still valid. So a
+credential that expired less than one window ago still proves: at the
+recommended 600 seconds, one that expired a minute ago is good for
+another nine.
+
+Shortening the window shortens that residual with it, and it never
+reaches zero - a prover needs some time to produce a proof and send it,
+and that time is exactly the margin. Treat expiry as enforced to within
+`proof_time_max_age_seconds`, not to the second.
 
 It does **nothing** about revocation, and tightening it does not help. A
 holder sends `proof_time = now` with every request, which is inside any
