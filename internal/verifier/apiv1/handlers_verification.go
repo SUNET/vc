@@ -852,11 +852,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Record the jti values last, after every check has passed: claiming one
 	// earlier would let a fabricated or otherwise refused response use it up.
+	// Until the completion is persisted they are released on any failure, so
+	// a backend error does not turn a retry of the same response into a replay.
+	var claimedJTIs []string
+	completed := false
+	defer func() {
+		if !completed {
+			for _, jti := range claimedJTIs {
+				c.cacheService.UsedJTI.Delete(context.WithoutCancel(ctx), jti)
+			}
+		}
+	}()
 	for _, jti := range presentedJTIs {
 		if err := c.claimJTI(ctx, jti); err != nil {
 			c.log.Error(err, "jti not accepted")
 			return nil, err
 		}
+		claimedJTIs = append(claimedJTIs, jti)
 	}
 
 	// Flatten per-scope credentials into ordered slice for caching
@@ -891,6 +903,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		c.log.Error(err, "failed to persist completion marker on authorization context", "session_id", authCtx.SessionID)
 		return nil, err
 	}
+	completed = true
 
 	// Notify AFTER credentials are cached so the browser can fetch them
 	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})

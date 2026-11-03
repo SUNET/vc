@@ -7,14 +7,17 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/SUNET/vc/internal/verifier/notify"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -290,6 +293,29 @@ func TestVerificationDirectPost_TS12LaterRefusalDoesNotBurnTheJTI(t *testing.T) 
 	fresh, err := r.client.cacheService.UsedJTI.SetNX(ctx, "later-refusal-jti", true)
 	require.NoError(t, err)
 	assert.True(t, fresh, "the jti of a refused response must still be unclaimed")
+}
+
+// A backend write failing after the jti was claimed must release it, so the
+// same response can be submitted again once the backend recovers.
+func TestVerificationDirectPost_TS12PersistenceFailureReleasesTheJTI(t *testing.T) {
+	r := newTS12Rig(t)
+	credentials := r.client.cacheService.Credential
+	r.client.cacheService.Credential = failingSetNXCache[[]sdjwtvc.CredentialCache]{Cache: credentials}
+
+	err := r.post(r.kbClaims("persist-fail-jti"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "credential cache persist")
+
+	r.client.cacheService.Credential = credentials
+	require.NoError(t, r.post(r.kbClaims("persist-fail-jti")))
+}
+
+type failingSetNXCache[V any] struct {
+	cache.Cache[V]
+}
+
+func (failingSetNXCache[V]) SetNX(context.Context, string, V) (bool, error) {
+	return false, errors.New("test: backend unavailable")
 }
 
 type denyAllEvaluator struct{}
