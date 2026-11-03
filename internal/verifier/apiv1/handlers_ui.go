@@ -1100,7 +1100,8 @@ func ptrPathToStringPath(path []*string) []string {
 // It:
 //   - Replaces parent object paths with their nested sub-paths when the VCTM
 //     defines children (e.g. ["address"] → ["address", "street_address"]),
-//     unless a child is sd "never" and so only disclosed with its parent.
+//     unless a child is sd "never" and so only disclosed with its parent; the
+//     parent is then kept and only its other children are added.
 //   - Removes redundant parent paths when an array-element path is also present
 //     (e.g. removes ["nationalities"] when ["nationalities", null] exists),
 //     because sending both causes wallets to disclose only the parent array
@@ -1118,6 +1119,7 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 		// Collect nested object sub-paths from VCTM (paths with len>=2 where all elements are non-nil)
 		childPaths := make(map[string][][]*string) // parentKey -> list of child paths
 		atomicParents := make(map[string]bool)
+		independentChildren := make(map[string][][]*string)
 		for _, vc := range meta.VCTM.Claims {
 			if len(vc.Path) >= 2 && vc.Path[0] != nil && vc.Path[len(vc.Path)-1] != nil {
 				parentKey := claimPtrPathKey(vc.Path[:1])
@@ -1125,6 +1127,8 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 				// sd "never" children ride inside the parent's disclosure, so request the parent.
 				if vc.SD == "never" {
 					atomicParents[parentKey] = true
+				} else {
+					independentChildren[parentKey] = append(independentChildren[parentKey], vc.Path)
 				}
 			}
 		}
@@ -1157,10 +1161,15 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 
 			// Check for nested object children from VCTM
 			children, ok := childPaths[parentKey]
-			if !ok || atomicParents[parentKey] {
+			if !ok {
 				continue
 			}
-			parentsToRemove[parentKey] = true
+			if atomicParents[parentKey] {
+				// Keep the parent, but separately disclosed siblings still need requesting.
+				children = independentChildren[parentKey]
+			} else {
+				parentsToRemove[parentKey] = true
+			}
 			for _, childPath := range children {
 				childKey := claimPtrPathKey(childPath)
 				if !existing[childKey] {
