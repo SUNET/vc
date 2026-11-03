@@ -309,10 +309,28 @@ func walkPath(data map[string]any, path []*string) any {
 	if len(path) == 0 || path[0] == nil {
 		return nil
 	}
-	var current any = data
-	for _, seg := range path {
+	return walkFrom(data, path)
+}
+
+// walkFrom is walkPath from an arbitrary node. A null segment followed by
+// more path resolves the rest in each array element and returns the values.
+func walkFrom(current any, path []*string) any {
+	for i, seg := range path {
 		if seg == nil {
-			return normalizeEmpty(current) // array wildcard — return the array as-is
+			if i == len(path)-1 {
+				return normalizeEmpty(current) // array wildcard — return the array as-is
+			}
+			arr, ok := current.([]any)
+			if !ok {
+				return nil
+			}
+			values := make([]any, 0, len(arr))
+			for _, item := range arr {
+				if v := walkFrom(item, path[i+1:]); v != nil {
+					values = append(values, v)
+				}
+			}
+			return normalizeEmpty(values)
 		}
 		m, ok := current.(map[string]any)
 		if !ok {

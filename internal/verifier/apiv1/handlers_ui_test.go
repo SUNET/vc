@@ -464,6 +464,54 @@ func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 			},
 		},
 		{
+			name: "parent kept when children are only disclosed with it",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("awardingBody")}, SD: "always"},
+				{Path: []*string{new("awardingBody"), new("legalName")}, SD: "never", Mandatory: true},
+				{Path: []*string{new("awardingBody"), new("legalIdentifier")}, SD: "never"},
+				{Path: []*string{new("learningOutcomes")}, SD: "always"},
+				{Path: []*string{new("learningOutcomes"), nil, new("title")}, SD: "never"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("awardingBody")}},
+				{Path: []*string{new("learningOutcomes")}},
+			},
+			expectedPaths: [][]*string{
+				{new("awardingBody")},
+				{new("learningOutcomes")},
+			},
+		},
+		{
+			name: "mixed object: parent kept and separately disclosed child added",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("address")}, SD: "always"},
+				{Path: []*string{new("address"), new("street")}, SD: "never"},
+				{Path: []*string{new("address"), new("city")}, SD: "always"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("address")}},
+			},
+			expectedPaths: [][]*string{
+				{new("address")},
+				{new("address"), new("city")},
+			},
+		},
+		{
+			name: "mixed array: parent kept and separately disclosed element field added",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("degrees")}, SD: "always"},
+				{Path: []*string{new("degrees"), nil, new("type")}, SD: "never"},
+				{Path: []*string{new("degrees"), nil, new("date")}, SD: "always"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("degrees")}},
+			},
+			expectedPaths: [][]*string{
+				{new("degrees")},
+				{new("degrees"), nil, new("date")},
+			},
+		},
+		{
 			name: "mixed: array and simple claims coexist",
 			vctmClaims: []sdjwtvc.Claim{
 				{Path: []*string{new("given_name")}},

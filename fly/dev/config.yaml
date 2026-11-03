@@ -128,24 +128,21 @@ verifier:
     "Micro-credential":
       credentials:
         microcredential:
-          # Only request claims the issued credential actually carries: DCQL
-          # treats every requested claim as required for a match, so asking for
-          # WE BUILD optional claims the test data omits makes the wallet find
-          # no matching credential.
-          exclude_claims:
-            - path: ["attestation_legal_category"]
-            - path: ["trust_anchor"]
-            - path: ["cryptographically_bound_to"]
-            - path: ["dateOfBirth"]
-            - path: ["placeOfBirth"]
-            - path: ["citizenshipCountry"]
-            - path: ["nationalID"]
-            - path: ["registeredAddress"]
-            - path: ["mail"]
-            - path: ["nationalQualificationsFrameworkLevel"]
-            - path: ["educationLevelDescriptor"]
-            - path: ["awardingBodyAddress"]
-            - path: ["additionalNote"]
+          # DCQL needs every requested claim present, so request only the
+          # rulebook mandatory attributes plus ECTS, which the test data carries.
+          claims:
+            - path: ["identifier"]
+            - path: ["title"]
+            - path: ["givenName"]
+            - path: ["familyName"]
+            - path: ["issuerCountry"]
+            - path: ["awardingBody"]
+            - path: ["issuanceDate"]
+            - path: ["learningOutcomes"]
+            - path: ["ECTS"]
+            - path: ["typeOfAssessment"]
+            - path: ["formOfParticipation"]
+            - path: ["qualityAssurance"]
     "eduID":
       credentials:
         eduid:
