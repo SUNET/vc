@@ -27,6 +27,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/google/uuid"
 )
 
 // ResolveIdentifier resolves an identifier string from authentication claims.
@@ -517,23 +519,24 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Seed-backed claims, before anything is signed and before the issuer
-	// service is called at all.
-	//
-	// HERE rather than in each of the four signing paths inside the
-	// issuer, which is where this began. One call site means one place
-	// that decides what a commitment is worth, and the SIGNING FORMAT is
-	// in hand - which the issuer-side version had to be told separately,
-	// and got wrong when a caller named a scope configured for another
-	// format. The issuer now receives ssc as an ordinary claim and never
-	// sees a derivation secret.
-	//
-	// A no-op for a scope with no commitments configured, which is every
-	// scope in a deployment that does not use the feature.
-	documentData, err = c.injectCommitments(ctx, scope, format, documentData)
+	// Credential Auxiliary Data, before anything is signed: the
+	// commitments go into the document, and the openings into the
+	// response.
+	fromWallet, err := walletAuxiliaryData(req)
 	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", scope)
 		return nil, err
+	}
+	derivations, sourceClaims := c.sourceDerivations(scope, authContext, document.DocumentData)
+	documentData, toWallet, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
+	if err != nil {
+		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)
+		return nil, err
+	}
+	if len(toWallet) > 0 && req.CredentialResponseEncryption == nil {
+		return nil, &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidEncryptionParameters,
+			ErrorDescription: "this credential sends an opening: request credential_response_encryption",
+		}
 	}
 
 	var credentials []openid4vci.Credential
@@ -581,7 +584,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 
-	return c.newCredentialResponse(credentials, scope, configurationID), nil
+	return c.newCredentialResponse(credentials, scope, configurationID, toWallet), nil
 }
 
 // newCredentialResponse assembles the Credential Response.
@@ -590,11 +593,35 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 // call. Assembling it inline meant the only coverage of what goes into it
 // was a test of the pieces, and deleting a field from the literal left
 // every such test green while the field vanished from the wire.
-func (c *Client) newCredentialResponse(credentials []openid4vci.Credential, scope, configurationID string) *openid4vci.CredentialResponse {
-	return &openid4vci.CredentialResponse{
+func (c *Client) newCredentialResponse(credentials []openid4vci.Credential, scope, configurationID string, toWallet []openid4vci.AuxiliaryDataEntry) *openid4vci.CredentialResponse {
+	response := &openid4vci.CredentialResponse{
 		Credentials:        credentials,
 		CredentialMetadata: c.credentialMetadataForResponse(scope, configurationID),
 	}
+	if len(toWallet) == 0 {
+		return response
+	}
+
+	response.AddAuxiliaryData(toWallet...)
+
+	// A notification_id is required with a delivered opening: it is how
+	// the wallet reports a failed commitment check, and a wallet that
+	// fails closed on a response carrying a secret without one refuses
+	// the whole delivery.
+	//
+	// The seed-delivery path this replaces minted one at the same point
+	// and for the same reason. Credential Auxiliary Data moved the
+	// delivery and did not bring it, so every auxiliary-data issuance
+	// was refused by the client - which is why it is minted HERE, beside
+	// the AddAuxiliaryData that makes it necessary, rather than anywhere
+	// a later change could separate the two.
+	//
+	// Minted rather than demanded, because nothing else on this path
+	// sets one and refusing would make the feature unreachable.
+	if response.NotificationID == "" {
+		response.NotificationID = uuid.NewString()
+	}
+	return response
 }
 
 // credentialMetadataForResponse returns the credential_metadata to echo on

@@ -73,11 +73,11 @@ func TestCredentialMetadataForResponse(t *testing.T) {
 func TestNewCredentialResponseCarriesTheMetadata(t *testing.T) {
 	credentials := []openid4vci.Credential{{Credential: "ey..."}}
 
-	on := credMetaClient(t, true).newCredentialResponse(credentials, "pid", "")
+	on := credMetaClient(t, true).newCredentialResponse(credentials, "pid", "", nil)
 	require.Equal(t, credentials, on.Credentials)
 	assert.Equal(t, "Personal ID", displayName(t, on.CredentialMetadata))
 
-	off := credMetaClient(t, false).newCredentialResponse(credentials, "pid", "")
+	off := credMetaClient(t, false).newCredentialResponse(credentials, "pid", "", nil)
 	require.Equal(t, credentials, off.Credentials)
 	assert.Nil(t, off.CredentialMetadata)
 }

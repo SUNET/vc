@@ -216,14 +216,17 @@ type AuthorizationContext struct {
 	// same-device web wallet. ProcessDirectPost then returns redirect_uri so
 	// the wallet can send the browser back to the RP. Cross-device flows
 	// leave this false; the /authorize page poller performs the redirect.
-	WalletFollowsRedirect  bool           `json:"wallet_follows_redirect,omitempty" bson:"wallet_follows_redirect,omitempty"`
-	CodeExpiresAt          int64          `json:"code_expires_at,omitempty" bson:"code_expires_at,omitempty"`                 // Unix timestamp
-	AccessTokenExpiresAt   int64          `json:"access_token_expires_at,omitempty" bson:"access_token_expires_at,omitempty"` // Unix timestamp
-	RefreshToken           string         `json:"refresh_token,omitempty" bson:"refresh_token,omitempty" validate:"omitempty,max=4096,printascii"`
-	RefreshTokenExpiresAt  int64          `json:"refresh_token_expires_at,omitempty" bson:"refresh_token_expires_at,omitempty"` // Unix timestamp
-	VerifiedClaims         map[string]any `json:"verified_claims,omitempty" bson:"verified_claims,omitempty"`
-	VPToken                string         `json:"vp_token,omitempty" bson:"vp_token,omitempty" validate:"omitempty,max=65536,printascii"`
-	PresentationSubmission any            `json:"presentation_submission,omitempty" bson:"presentation_submission,omitempty"`
+	WalletFollowsRedirect bool           `json:"wallet_follows_redirect,omitempty" bson:"wallet_follows_redirect,omitempty"`
+	CodeExpiresAt         int64          `json:"code_expires_at,omitempty" bson:"code_expires_at,omitempty"`                 // Unix timestamp
+	AccessTokenExpiresAt  int64          `json:"access_token_expires_at,omitempty" bson:"access_token_expires_at,omitempty"` // Unix timestamp
+	RefreshToken          string         `json:"refresh_token,omitempty" bson:"refresh_token,omitempty" validate:"omitempty,max=4096,printascii"`
+	RefreshTokenExpiresAt int64          `json:"refresh_token_expires_at,omitempty" bson:"refresh_token_expires_at,omitempty"` // Unix timestamp
+	VerifiedClaims        map[string]any `json:"verified_claims,omitempty" bson:"verified_claims,omitempty"`
+	// PresentedScope is the credential scope of the presentation
+	// VerifiedClaims came from, one of the presentation scope's from.
+	PresentedScope         string `json:"presented_scope,omitempty" bson:"presented_scope,omitempty" validate:"omitempty,max=128,printascii"`
+	VPToken                string `json:"vp_token,omitempty" bson:"vp_token,omitempty" validate:"omitempty,max=65536,printascii"`
+	PresentationSubmission any    `json:"presentation_submission,omitempty" bson:"presentation_submission,omitempty"`
 
 	// OpenID4VP fields (wallet interaction)
 	EphemeralEncryptionKeyID string          `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
