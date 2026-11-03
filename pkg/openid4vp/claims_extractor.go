@@ -73,8 +73,8 @@ func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken
 // (per OID4VP §6.3). Claims from all credentials are merged into a single map;
 // credential query IDs are processed in sorted order for deterministic output.
 func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vpToken string) (map[string]any, error) {
-	var dcqlResponse map[string][]string
-	if err := json.Unmarshal([]byte(vpToken), &dcqlResponse); err != nil {
+	dcqlResponse, err := parseDCQLEnvelope(vpToken)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse DCQL vp_token as map[string][]string: %w", err)
 	}
 
@@ -461,8 +461,8 @@ func PartitionTokens(vpToken string) (w3c, other map[string][]string) {
 	}
 
 	if trimmed[0] == '{' && !isW3CDocument(trimmed) {
-		var envelope map[string][]string
-		if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+		envelope, err := parseDCQLEnvelope(trimmed)
+		if err != nil {
 			// Not an envelope this function can read. Reporting it as one
 			// unclassified token keeps "something arrived" true, which is
 			// what a caller deciding whether to refuse needs.
@@ -528,6 +528,31 @@ func jsonDocumentToken(token string) (string, bool) {
 		return strings.TrimSpace(decoded), true
 	}
 	return "", false
+}
+
+// parseDCQLEnvelope reads a DCQL vp_token response: query ids mapped to arrays
+// of the presentations that answer them. A presentation is a string, or for a
+// W3C credential a JSON object (OpenID4VP 1.0 section 8.1), which comes back as
+// its compact JSON text so every later step sees the one shape. An empty array
+// is returned as it is; refusing it is the caller's call.
+func parseDCQLEnvelope(vpToken string) (map[string][]string, error) {
+	var raw map[string][]json.RawMessage
+	if err := json.Unmarshal([]byte(vpToken), &raw); err != nil {
+		return nil, err
+	}
+	envelope := make(map[string][]string, len(raw))
+	for queryID, elements := range raw {
+		var tokens []string
+		for i, element := range elements {
+			token, err := presentationToken(element)
+			if err != nil {
+				return nil, fmt.Errorf("%q[%d]: %w", queryID, i, err)
+			}
+			tokens = append(tokens, token)
+		}
+		envelope[queryID] = tokens
+	}
+	return envelope, nil
 }
 
 // isW3CDocument reports whether a JSON object is a W3C VC 2.0 credential or

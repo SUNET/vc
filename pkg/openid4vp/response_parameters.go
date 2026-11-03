@@ -1,7 +1,9 @@
 package openid4vp
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -15,6 +17,9 @@ type VPResponse struct {
 // UnmarshalJSON implements custom JSON unmarshaling for VPResponse.
 // Handles the different vp_token formats wallets may send:
 //   - DCQL object: {"credential_id": "token"} or {"credential_id": ["token1", "token2"]}
+//   - W3C presentations: a presentation is a JSON object, not a string
+//     (OpenID4VP 1.0 section 8.1), so {"credential_id": [{...}]} is accepted
+//     and the object is carried on as its compact JSON text
 //   - Single string: "token" (mapped to first scope or "_default" key)
 //
 // A vp_token that carries no token is refused however it is spelled - null, an
@@ -47,33 +52,11 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw.VPToken, &obj); err == nil {
 		for key, val := range obj {
-			// Try as string first
-			var s string
-			if err := json.Unmarshal(val, &s); err == nil {
-				if s == "" {
-					return fmt.Errorf("vp_token[%q]: empty token", key)
-				}
-				v.VPToken[key] = []string{s}
-				continue
+			tokens, err := presentationTokens(val)
+			if err != nil {
+				return fmt.Errorf("vp_token[%q]: %w", key, err)
 			}
-			// Try as array of strings
-			var arr []string
-			if err := json.Unmarshal(val, &arr); err == nil {
-				// A key present with nothing under it is not a presentation.
-				// null and [] both arrive here, and both named a credential
-				// the wallet then did not supply.
-				if len(arr) == 0 {
-					return fmt.Errorf("vp_token[%q]: no token", key)
-				}
-				for i, token := range arr {
-					if token == "" {
-						return fmt.Errorf("vp_token[%q][%d]: empty token", key, i)
-					}
-				}
-				v.VPToken[key] = arr
-				continue
-			}
-			return fmt.Errorf("vp_token[%q]: expected string or array of strings", key)
+			v.VPToken[key] = tokens
 		}
 		// JSON null unmarshals into a map WITHOUT error, leaving a nil map -
 		// so "vp_token": null reached here having passed the emptiness check
@@ -97,6 +80,63 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 	}
 
 	return fmt.Errorf("vp_token: expected JSON object (map of credential ID to token) or a plain string, got unsupported type")
+}
+
+// presentationTokens reads what one credential query was answered with: a
+// string, a JSON object or an array of either.
+//
+// OpenID4VP 1.0 section 8.1 makes the presentation for a W3C VC (ldp_vc) a JSON
+// object, where an SD-JWT or an mdoc is a string. The rest of the verifier
+// holds every presentation as a string and recognises a W3C document by its
+// content, so an object is carried on as its JSON text with the whitespace
+// removed. Nothing else is rewritten: the member order and the values stay as
+// the wallet sent them.
+//
+// A query answered with nothing is refused however it is spelled - null, [],
+// an empty string - because it names a credential the wallet did not supply.
+func presentationTokens(raw json.RawMessage) ([]string, error) {
+	var elements []json.RawMessage
+	isArray := json.Unmarshal(raw, &elements) == nil
+	switch {
+	case !isArray:
+		// A single string or a single object.
+		elements = []json.RawMessage{raw}
+	case len(elements) == 0:
+		return nil, errors.New("no token")
+	}
+
+	tokens := make([]string, 0, len(elements))
+	for i, element := range elements {
+		token, err := presentationToken(element)
+		if err != nil {
+			if isArray {
+				return nil, fmt.Errorf("[%d]: %w", i, err)
+			}
+			return nil, err
+		}
+		tokens = append(tokens, token)
+	}
+	return tokens, nil
+}
+
+func presentationToken(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, trimmed); err != nil {
+			return "", fmt.Errorf("presentation object: %w", err)
+		}
+		return compact.String(), nil
+	}
+
+	var s string
+	if err := json.Unmarshal(trimmed, &s); err != nil {
+		return "", errors.New("expected a string, a JSON object or an array of those")
+	}
+	if s == "" {
+		return "", errors.New("empty token")
+	}
+	return s, nil
 }
 
 type ResponseParameters struct {
