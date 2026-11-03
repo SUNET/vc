@@ -1,0 +1,19 @@
+{
+  "description": "Normative item with no id.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "return": "h"
+      }
+    ]
+  },
+  "expect": {
+    "error": "item_missing_function_id"
+  }
+}

@@ -41,7 +41,7 @@ const SeedBytes = 16
 // after it and produce a different pseudonym.
 var nullInput = make([]byte, 32)
 
-// Pseudonym computes pseudonym-v1-sha256:
+// Pseudonym computes pseudonym:
 //
 //	pseudonym = SHA256(DST || seed || prover_input || verifier_input)
 //	DST       = "nym_auth/v1/<config>", UTF-8
@@ -100,64 +100,108 @@ const (
 // checkVerifierID refuses an identifier no conforming Verifier could have
 // reported.
 //
-// The hashed input is the BARE verifier_id - "verifier.example" for an
-// x509_san_dns Verifier, "semantic_id:<identifier>" for a semantic one -
-// never the prefixed Client Identifier and never client_id as it appears
-// in the request. verifier_id_type is agreed out of band and is not
-// hashed.
+// The hashed input is the verifier_id EXACTLY AS PUBLISHED, prefix and
+// all: "x509_san_dns:verifier.example" for an x509_san_dns Verifier,
+// "semantic_id:<identifier>" for a semantic one. Nothing is stripped
+// and nothing is normalised - not case, not a trailing dot.
 //
-// "Bare" is about the Client Identifier Prefix, not about colons. A
-// semantic verifier_id carries "semantic_id:" as part of its own value
-// and is hashed whole; refusing it would leave semantic deployments
-// unable to derive verifier_input at all.
+// WHICH RULEBOOK: v0.4, and the archive circuits agree with it. This is
+// the REVERSE of what this function did until 2026-10-20, when it
+// hashed the bare DNS name and refused the prefixed form. Both readings
+// have been written down at different times, so the worked digests are
+// here to settle which one this code implements:
 //
-// WHICH RULEBOOK: nym_auth_rulebook PR #7, "verifier_input: SHA-256 over
-// the bare verifier_id, never the prefixed client_id" (stacked on #5).
-// Pinned explicitly because the published v0.3 on that repo's main says
-// the opposite - its matching and account-recovery formulas hash the
-// full prefixed identifier - so a reader comparing this against main
-// will find a contradiction rather than a bug. #7 supersedes it, states
-// the rule with worked digests, and marks the prefixed form MUST NOT:
+//	SHA256("x509_san_dns:verifier.example") = 6eae85a0...6bab   (MUST)
+//	SHA256("verifier.example")              = be6a6400...4a41   (MUST NOT)
 //
-//	SHA256("verifier.example")              = be6a6400...4a41   (MUST)
-//	SHA256("x509_san_dns:verifier.example") = 6eae85a0...6bab   (MUST NOT)
+// The archive's own reference values are the tie-breaker: its
+// pseudonym.json carries client_id "x509_san_dns:verifier.example" with
+// verifier_input 6eae85a0..., which is the prefixed digest.
 //
-// #7 also records that the nym_auth circuits SPEC section 3 still shows
-// the prefixed form and that its reference values need regenerating; the
-// prefix is not bound inside the circuit, which takes verifier_input as
-// a 32-byte digest public input, so a conforming verifier passing the
-// bare digest verifies against current circuit builds.
-//
-// So a PREFIXED value is refused here, which is the opposite of what this
-// function did when it was written against the earlier reading. The
-// reason for refusing rather than stripping is unchanged: hashing
-// whatever it is given succeeds and returns a 32-byte pseudonym
+// What is refused is a value that names no Verifier: an empty one, or a
+// marker with nothing after it. Those hash cleanly - every wrong value
+// here does - and a 32-byte digest from a meaningless input is
 // indistinguishable from a correct one, so a remapping loop comparing
-// against a Verifier's real pseudonym would simply never match, and the
+// against a Verifier's real pseudonym would simply never match and the
 // operator would conclude the subject is not the one they are looking
 // for. A wrong answer, not an error.
 //
-// Stripping the prefix would be the tempting repair and is worse: it
-// would accept a caller that is confused about which value it holds, and
-// a caller confused about that is one whose OTHER inputs deserve a second
-// look.
+// CheckVerifierID is checkVerifierID for callers outside this package -
+// the verifier side, which derives verifier_input from the same value
+// and must refuse the same inputs. One rule, one implementation: a
+// second copy is how the issuer and the verifier end up hashing
+// different things and blaming each other's pseudonyms.
+func CheckVerifierID(verifierID string) error { return checkVerifierID(verifierID) }
+
 func checkVerifierID(verifierID string) error {
 	if verifierID == "" {
 		return fmt.Errorf("nymauth: no verifier_id")
 	}
-	if strings.HasPrefix(verifierID, VerifierIDX509SANDNS) {
-		return fmt.Errorf("nymauth: verifier_id %q carries the Client Identifier prefix %q; "+
-			"the hashed input is the bare verifier_id, and hashing the prefixed form yields a pseudonym no Verifier reports",
-			verifierID, VerifierIDX509SANDNS)
+
+	// Rulebook v0.4 defines exactly TWO forms. Anything else is
+	// refused rather than hashed.
+	//
+	// This is the half that went missing when the rule reversed on
+	// 2026-10-20. Before, a bare DNS name was the correct value and
+	// the prefixed form was refused; after, the prefixed form is
+	// correct - and nothing was left checking the shape at all, so a
+	// configuration still carrying the old bare value started
+	// cleanly and produced pseudonyms no Verifier reports. Found by
+	// sirosid-dev starting a gdc image with
+	// "sirosid-gdc-vc-verifier.fly.dev" configured.
+	//
+	// Fail closed, and no normalisation: the rulebook names two
+	// forms, so a third is a value nobody agreed the meaning of.
+	for _, prefix := range []string{VerifierIDX509SANDNS, VerifierIDSemantic} {
+		if verifierID == prefix {
+			// The marker with nothing after it names no Verifier. It
+			// hashes cleanly, like every other wrong value here, so
+			// it is refused rather than turned into a pseudonym
+			// nobody reports.
+			return fmt.Errorf("nymauth: verifier_id %q is the %s prefix with no identifier after it",
+				verifierID, strings.TrimSuffix(prefix, ":"))
+		}
+		if strings.HasPrefix(verifierID, prefix) {
+			return nil
+		}
 	}
-	if verifierID == VerifierIDSemantic {
-		// The semantic form with nothing after the colon names no
-		// Verifier. It hashes cleanly, like every other wrong value
-		// here, so it is refused rather than turned into a pseudonym
-		// nobody reports.
-		return fmt.Errorf("nymauth: verifier_id %q is the semantic form with no identifier after it", verifierID)
+
+	// A value that looks like a host is the likely mistake, and the
+	// likely fix is one prefix - so say it, rather than leaving the
+	// operator to infer it from the list of forms.
+	hint := ""
+	if looksLikeDNSName(verifierID) {
+		hint = fmt.Sprintf("; it looks like a DNS name, so the verifier_id is probably %q",
+			VerifierIDX509SANDNS+verifierID)
 	}
-	return nil
+	return fmt.Errorf("nymauth: verifier_id %q starts with neither %q nor %q, and rulebook v0.4 defines no other form%s",
+		verifierID, VerifierIDX509SANDNS, VerifierIDSemantic, hint)
+}
+
+// looksLikeDNSName reports whether a value is plausibly a hostname
+// someone forgot to prefix: dot-separated labels of letters, digits
+// and hyphens, and nothing else.
+//
+// Only used to add a hint to a refusal, so a false negative costs a
+// sentence and a false positive costs nothing - it is never a reason
+// to accept a value.
+func looksLikeDNSName(value string) bool {
+	if value == "" || strings.ContainsAny(value, ":/ ") || !strings.Contains(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // KnownOffenderMatching computes the pseudonym a Verifier identified by
@@ -167,7 +211,7 @@ func checkVerifierID(verifierID string) error {
 //
 // prover_input is null; verifier_input is SHA256(verifier_id).
 //
-// verifierID is the BARE identifier - "verifier.example" - without the
+// verifierID is the published identifier - "x509_san_dns:verifier.example" - including the
 // Client Identifier prefix and without verifier_id_type, which is agreed
 // out of band and not hashed. See checkVerifierID.
 func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byte, error) {
