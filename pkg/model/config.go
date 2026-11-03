@@ -106,7 +106,25 @@ type Mongo struct {
 	// component matches the secret-detection patterns some review and diff
 	// tools apply, and they redact it and then report the redaction as a
 	// malformed URI.
-	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017/vc\""`
+	//
+	// A database path in the URI (mongodb://host/<db>) does NOT choose where
+	// data is stored: the driver only uses it as the default authSource.
+	// The databases each service writes to are set by APIGWDatabaseName,
+	// VerifierDatabaseName, RegistryDatabaseName and HA.CacheDatabaseName.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017\""`
+	// APIGWDatabaseName is the MongoDB database the apigw keeps its
+	// datastore, identity mappings, credential offers and dynamic client
+	// registrations in. Deployments sharing one MongoDB server must each set
+	// their own, or they read and write each other's documents.
+	APIGWDatabaseName string `yaml:"apigw_database_name" default:"vc"`
+	// VerifierDatabaseName is the MongoDB database the verifier keeps its
+	// OIDC client registrations in. Deployments sharing one MongoDB server
+	// must each set their own.
+	VerifierDatabaseName string `yaml:"verifier_database_name" default:"verifier"`
+	// RegistryDatabaseName is the MongoDB database the registry keeps its
+	// token status lists and credential subjects in. Deployments sharing one
+	// MongoDB server must each set their own.
+	RegistryDatabaseName string `yaml:"registry_database_name" default:"vc_registry"`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
@@ -124,6 +142,8 @@ type HAConfig struct {
 	// Enable enables HA mode; when true caches are backed by MongoDB instead of in-memory storage.
 	Enable bool `yaml:"enable" default:"false"`
 	// CacheDatabaseName is the MongoDB database name used for caches.
+	// Deployments sharing one MongoDB server must each set their own: it
+	// also holds each service's shared secrets, keyed only by service name.
 	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
 	// PubSub configures the optional pub/sub backend (Redis or Valkey)
 	// used for cross-node notifications in HA mode - today just the

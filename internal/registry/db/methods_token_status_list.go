@@ -55,7 +55,7 @@ func NewTokenStatusListColl(ctx context.Context, collName string, service *Servi
 		Service: service,
 	}
 
-	c.Coll = c.Service.MongoClient.Database(databaseName).Collection(collName)
+	c.Coll = c.Service.MongoClient.Database(c.Service.cfg.Common.Mongo.RegistryDatabaseName).Collection(collName)
 
 	if err := c.createIndex(ctx); err != nil {
 		return nil, err

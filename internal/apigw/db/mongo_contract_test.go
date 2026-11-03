@@ -3,9 +3,12 @@ package db
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -17,9 +20,17 @@ import (
 // shared test suite rather than three separate ones.
 func newTestServiceWithMongo(t *testing.T, client *mongo.Client) *Service {
 	t.Helper()
+	return newTestServiceWithMongoDatabase(t, client, "vc")
+}
+
+// newTestServiceWithMongoDatabase is newTestServiceWithMongo with the apigw
+// database name chosen by the caller.
+func newTestServiceWithMongoDatabase(t *testing.T, client *mongo.Client, database string) *Service {
+	t.Helper()
 	log := testsupport.TestLogger(t)
 	tracer := tracertest.New(t, nil, log, "apigw-db-mongo-contract-test")
-	return &Service{MongoClient: client, tracer: tracer, log: log}
+	cfg := &model.Cfg{Common: &model.Common{Mongo: model.Mongo{APIGWDatabaseName: database}}}
+	return &Service{MongoClient: client, cfg: cfg, tracer: tracer, log: log}
 }
 
 func TestCredentialOfferColl_Mongo(t *testing.T) {
@@ -51,7 +62,7 @@ func TestIdentityMappingsColl_Mongo(t *testing.T) {
 	svc := newTestServiceWithMongo(t, client)
 	store := &IdentityMappingsColl{
 		Service: svc,
-		Coll:    client.Database("vc").Collection("identity_mappings"),
+		Coll:    client.Database(svc.cfg.Common.Mongo.APIGWDatabaseName).Collection("identity_mappings"),
 		log:     testsupport.TestLogger(t),
 	}
 	require.NoError(t, store.createIndex(t.Context()))
@@ -66,7 +77,7 @@ func TestDatastoreColl_Mongo(t *testing.T) {
 	svc := newTestServiceWithMongo(t, client)
 	store := &DatastoreColl{
 		Service: svc,
-		Coll:    client.Database("vc").Collection("datastore"),
+		Coll:    client.Database(svc.cfg.Common.Mongo.APIGWDatabaseName).Collection("datastore"),
 		log:     testsupport.TestLogger(t),
 	}
 	require.NoError(t, store.createIndex(t.Context()))
@@ -78,4 +89,36 @@ func startMongoContainerForTest(t *testing.T) (*mongo.Client, func()) {
 	t.Helper()
 	_, client, cleanup := testsupport.StartMongoContainer(t)
 	return client, cleanup
+}
+
+// Two deployments sharing one MongoDB server are kept apart only by their
+// apigw_database_name. Before it existed every apigw wrote to "vc", so one
+// deployment could read the other's credential offers.
+func TestCredentialOfferColl_Mongo_DatabaseNameIsolates(t *testing.T) {
+	client, cleanup := startMongoContainerForTest(t)
+	defer cleanup()
+
+	storeA, err := NewCredentialOfferColl(t.Context(), "credential_offer", newTestServiceWithMongoDatabase(t, client, "tenant_a"), testsupport.TestLogger(t))
+	require.NoError(t, err)
+	storeB, err := NewCredentialOfferColl(t.Context(), "credential_offer", newTestServiceWithMongoDatabase(t, client, "tenant_b"), testsupport.TestLogger(t))
+	require.NoError(t, err)
+
+	require.NoError(t, storeA.Save(t.Context(), &CredentialOfferDocument{
+		UUID: "offer-a",
+		CredentialOfferParameters: openid4vci.CredentialOfferParameters{
+			CredentialIssuer:           "https://a.example.com",
+			CredentialConfigurationIDs: []string{"pid"},
+		},
+	}))
+
+	got, err := storeA.Get(t.Context(), "offer-a")
+	require.NoError(t, err)
+	assert.Equal(t, "https://a.example.com", got.CredentialOfferParameters.CredentialIssuer)
+
+	_, err = storeB.Get(t.Context(), "offer-a")
+	assert.Error(t, err, "tenant_b must not see an offer saved by tenant_a")
+
+	names, err := client.ListDatabaseNames(t.Context(), map[string]any{"name": "vc"})
+	require.NoError(t, err)
+	assert.Empty(t, names, "nothing may be written to the legacy \"vc\" database when another name is configured")
 }
