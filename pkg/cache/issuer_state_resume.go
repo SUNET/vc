@@ -65,6 +65,12 @@ func (r *IssuerStateResume) applyTo(doc *AuthorizationContext) {
 	doc.CodeChallenge = r.CodeChallenge
 	doc.CodeChallengeMethod = r.CodeChallengeMethod
 	doc.DCQLQuery = r.DCQLQuery
+	// Derived from DCQLQuery, exactly as MarshalBSON treats it. Cleared
+	// rather than carried so that the two stores answer the same way: in
+	// Mongo the exact copy is rewritten or unset by the same update, and
+	// a stale one left here would be a difference between the backends
+	// waiting for someone to persist this context.
+	doc.DCQLQueryExact = ""
 	doc.EphemeralEncryptionKeyID = r.EphemeralEncryptionKeyID
 	doc.ExpiresAt = r.ExpiresAt
 	doc.CreatedAt = r.CreatedAt
