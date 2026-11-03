@@ -133,3 +133,15 @@ func CheckProofTimeTolerance(proofTime, now time.Time, skew, maxAge time.Duratio
 	}
 	return nil
 }
+
+// RenderProofTimeOrPanic is RenderProofTime for a time.Time already
+// known to be in range - this century, in practice. It panics rather
+// than returning an error so a caller with a literal instant does not
+// have to handle one it cannot hit.
+func RenderProofTimeOrPanic(t time.Time) string {
+	text, err := RenderProofTime(t.UTC().Unix())
+	if err != nil {
+		panic("openid4vp: proof_time out of range: " + err.Error())
+	}
+	return text
+}

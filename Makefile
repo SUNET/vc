@@ -85,16 +85,23 @@ ZK_CRED_LONGFELLOW_REF  ?= e09fdcd16252c9043e50032c3ae1cc4259ed7d08
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
-# Vega (zk-cred-vega): the second native ZK library, linked only into
-# cmd/zkvegaverifyworker (subprocess-isolated from the verifier). Shares
-# ZKNATIVE_TAG.
+# Vega (zk-cred-vega): the second native ZK library. Linked into
+# cmd/zkvegaverifyworker, which is subprocess-isolated and carries the
+# mdoc ZK/PPID path, AND - since the nym_auth backend - into the
+# verifier itself, in process, the way Longfellow's nym_auth verifier
+# already is. Shares ZKNATIVE_TAG.
+#
+# Unpinned, unlike Longfellow above. The nym_auth test vectors are
+# staged from this same ref, so the library and the fixture it is
+# checked against move together; pin it if that stops being true.
 ZK_CRED_VEGA_REPO ?= https://github.com/sirosfoundation/zk-cred-vega.git
 ZK_CRED_VEGA_REF  ?= main
 ZK_CRED_VEGA_CHECKOUT := third_party/.zk-cred-vega-src
 ZK_CRED_VEGA_STAGE    := third_party/zk-cred-vega
 
-# The verifier links Longfellow and execs zkvegaverifyworker (Vega); both
-# libraries must be reachable at load time.
+# The verifier links BOTH - Longfellow and Vega, each with an in-process
+# nym_auth verifier - and also execs zkvegaverifyworker for the mdoc Vega
+# path. Both libraries must be reachable at load time.
 ZKNATIVE_LD_PATH := $(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib:$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib
 
 ZK_CRED_BBS_REPO     ?= https://github.com/sirosfoundation/zk-cred-bbs.git
@@ -505,8 +512,14 @@ zk-native-lib-vega-ensure: _check-native-host ## Stage zk-cred-vega only when it
 
 test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run the zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
+	@# internal/verifier/... is here because the circuit_zk proof check
+	@# lives in internal/verifier/apiv1/circuit_zk_native_cgo.go, behind
+	@# the same tag. build-verifier-zknative compiled it and nothing ran
+	@# it, which is how a predicate-only presentation came to verify
+	@# without its proof being looked at - the stub refuses everything,
+	@# so no default-build test can reach that code.
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
-		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/...
+		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/... ./internal/verifier/...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
@@ -827,7 +840,13 @@ docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test t
 # Optional Feature Builds (with build tags)
 # ==============================================================================
 
-build-verifier-zknative: bbs-native-lib-ensure zk-native-lib-ensure ## Build verifier with native ZK/PPID proof verification
+# Vega is a prerequisite here too, now that the verifier links it
+# directly: pkg/nymauth/verifier/zknative_vega carries its own cgo
+# directives against $(ZK_CRED_VEGA_STAGE), so an unstaged Vega is a
+# linker error in the middle of a build rather than a missing feature.
+# The flags below name only Longfellow because that is the one with no
+# package-level directive; both libraries are found either way.
+build-verifier-zknative: bbs-native-lib-ensure zk-native-lib-ensure zk-native-lib-vega-ensure ## Build verifier with native ZK/PPID proof verification
 	$(info Building verifier with native ZK/PPID proof verification)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/include" \
