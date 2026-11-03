@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"go.opentelemetry.io/otel/codes"
@@ -218,6 +219,29 @@ func (s *Service) endpointDatastoreBulkUpload(ctx context.Context, c *gin.Contex
 func (s *Service) endpointDatastorePreAuthOffer(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastorePreAuthOffer")
 	defer span.End()
+
+	// An anonymous admin session is not an authenticated principal, and
+	// this endpoint mints a credential offer.
+	//
+	// checkPreAuthOfferExposure refuses a CONFIGURATION that would leave
+	// no authenticated principal, but a cookie issued before the
+	// configuration changed stays valid for its lifetime - session keys
+	// persist across restarts in HA deployments - and SessionOrAPIAuth
+	// accepts it in place of a bearer token. So enabling OIDC, or
+	// disabling the UI with JWKS enabled, lets startup pass while the
+	// cookies handed out beforehand still work, and allow_preauth_offer
+	// then widens what they can mint to the login-gated scopes.
+	//
+	// Same guard as endpointPrepareIssuance, for the same reason: the
+	// startup check and the request check are both needed, and neither
+	// is sufficient alone.
+	if isAnonymousAdminSession(c) {
+		err := helpers.NewErrorDetailsWithStatus("anonymous_session_not_allowed",
+			"an anonymous admin session cannot create a pre-authorized offer", http.StatusForbidden)
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "anonymous admin session refused")
+		return nil, err
+	}
 
 	request := &apiv1.DatastorePreAuthOfferRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
