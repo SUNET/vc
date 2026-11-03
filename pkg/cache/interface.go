@@ -64,6 +64,30 @@ type AuthContextStore interface {
 	// ForfeitAuthorizationCode marks an authorization code as used and returns the updated context.
 	ForfeitAuthorizationCode(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
 
+	// ClaimOutcome atomically records a FINAL outcome on a session that
+	// does not already have one, and reports whether this call is the one
+	// that recorded it.
+	//
+	// The caller passes the whole document it wants stored, as
+	// ClaimIssuerState does. false with a nil error means the session had
+	// already reached an outcome and nothing was written - the caller
+	// lost the race and must not act as though it won: no notification,
+	// because the browser has already been told something else.
+	//
+	// A session that is GONE is false with a nil error too, not an error.
+	// A session can expire while a presentation is being verified, and
+	// both backends have to answer that the same way or the same race
+	// produces a 500 on one and a clean refusal on the other. The caller
+	// is being told it did not record an outcome, which is what it needs;
+	// one that must tell "gone" from "already answered" re-reads.
+	//
+	// Checking HasOutcome and then calling Save cannot do this. The two
+	// are separated by the whole of credential verification in one of the
+	// callers, and nothing holds the session across them: the memory
+	// store hands out the stored pointer and the Mongo store replaces
+	// unconditionally, so the loser's write lands on top of the winner's.
+	ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error)
+
 	// ClaimAuthSession atomically takes the Interactive Authorization handle
 	// off the context it names and returns that context as it was BEFORE
 	// the handle was removed.
