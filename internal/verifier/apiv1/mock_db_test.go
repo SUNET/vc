@@ -164,6 +164,7 @@ func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBSer
 			AuthContext:            cache.NewTestMemoryStore(15 * time.Minute),
 			EphemeralEncryptionKey: cache.NewTestMemoryCache[jwk.Key](10 * time.Minute),
 			RequestObject:          cache.NewTestMemoryCache[*openid4vp.RequestObject](5 * time.Minute),
+			UsedJTI:                cache.NewTestMemoryCache[bool](15 * time.Minute),
 			Credential:             cache.NewTestMemoryCache[[]sdjwtvc.CredentialCache](5 * time.Minute),
 		},
 		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),

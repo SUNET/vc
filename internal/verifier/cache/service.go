@@ -42,6 +42,9 @@ type Service struct {
 	Credential             Cache[[]sdjwtvc.CredentialCache]
 	EphemeralEncryptionKey Cache[jwk.Key]
 	RequestObject          Cache[*openid4vp.RequestObject]
+	// UsedJTI records the jti of every accepted EC TS12 SCA presentation so
+	// the same KB-JWT cannot be submitted twice.
+	UsedJTI Cache[bool]
 
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
@@ -79,6 +82,12 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.RequestObject, err = pkgcache.NewGenericCache[*openid4vp.RequestObject](cs, ctx, "verifier_request_objects", presentationScopedTTL(cfg, 5*time.Minute), pkgcache.WithDecoder(requestObjectDecoder)); err != nil {
 		return nil, fmt.Errorf("cache: request_objects: %w", err)
+	}
+
+	// The nonce already ties a KB-JWT to one session, so a jti only has to be
+	// remembered as long as the session can still accept a response.
+	if s.UsedJTI, err = pkgcache.NewGenericCache[bool](cs, ctx, "verifier_used_jti", presentationScopedTTL(cfg, 15*time.Minute)); err != nil {
+		return nil, fmt.Errorf("cache: used_jti: %w", err)
 	}
 
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).

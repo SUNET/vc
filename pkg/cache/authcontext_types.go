@@ -231,6 +231,17 @@ type AuthorizationContext struct {
 	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	// TransactionData holds the transaction_data entries exactly as sent in
+	// the request: base64url strings, in request order. OpenID4VP 1.0
+	// Appendix B hashes the string as received, so validation must use these
+	// bytes and never a re-encoding of a decoded object.
+	TransactionData []string `json:"transaction_data,omitempty" bson:"transaction_data,omitempty"`
+	// TransactionDataResponseModes are the response_mode values the request
+	// objects for this session were issued with. An EC TS12 KB-JWT echoes the
+	// response_mode of the request, so it is checked against what was issued
+	// at the time, not against whatever the receiving node is configured with
+	// now.
+	TransactionDataResponseModes []string `json:"transaction_data_response_modes,omitempty" bson:"transaction_data_response_modes,omitempty"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//
