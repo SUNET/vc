@@ -16,7 +16,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/gin-contrib/cors v1.7.9
-	github.com/gin-contrib/gzip v1.2.8
+	github.com/gin-contrib/gzip v1.2.9
 	github.com/gin-contrib/sessions v1.1.2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-jose/go-jose/v4 v4.1.6

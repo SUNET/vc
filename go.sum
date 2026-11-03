@@ -97,8 +97,8 @@ github.com/gabriel-vasile/mimetype v1.4.16 h1:5izNFuvA37st1dDRAcA7TtmngBmRgiIPDm
 github.com/gabriel-vasile/mimetype v1.4.16/go.mod h1:3oFFwxX8kTklZwzIl2aQEDZT0lKY8xH92ST88bAwba4=
 github.com/gin-contrib/cors v1.7.9 h1:69rz5YU6PW7XlQ4VPXacl77ldFiUvR0E0bmEqmbq86w=
 github.com/gin-contrib/cors v1.7.9/go.mod h1:KTqiTA5HzlWPgVz7p4tolzAuptzGO7DEJn/CbklG0nU=
-github.com/gin-contrib/gzip v1.2.8 h1:wDb1thtVsSUe+126xHdgLiWcZqHdWXiBzdZj2yhdUM8=
-github.com/gin-contrib/gzip v1.2.8/go.mod h1:OiNBR7FxAwHN3iwoDtjj2RlypuONCk48zmtagvASfrc=
+github.com/gin-contrib/gzip v1.2.9 h1:MPyIubgLF/o5A4ni90weaQV0Oji7JTQto7QBVqWtmmY=
+github.com/gin-contrib/gzip v1.2.9/go.mod h1:vLBq0o7y73JpE7m1pngAK/BPaVB7EU56R2gQP1yCgbo=
 github.com/gin-contrib/sessions v1.1.2 h1:utWRqOHT/kbqxxqF/mtutV9wfGLi1+uu5YuvWUhj/Ow=
 github.com/gin-contrib/sessions v1.1.2/go.mod h1:qRxYwA/TYJw0wv28oFzs4gY/8G8z69id862SNgX9Gmw=
 github.com/gin-contrib/sse v1.1.2 h1:MU2fgl1RrdYTMcgJLtz2kJF+vPg3xrqaaKfUUU18tCo=
