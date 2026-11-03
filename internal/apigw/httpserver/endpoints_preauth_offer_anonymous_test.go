@@ -39,7 +39,7 @@ func (o *offerAPI) DatastorePreAuthOffer(_ context.Context, r *apiv1.DatastorePr
 // OIDC (or disabling the UI with JWKS enabled) lets startup pass while those
 // cookies still work. With allow_preauth_offer in play, what they can mint now
 // includes the login-gated scopes, so the endpoint has to refuse them itself.
-func TestEndpointDatastorePreAuthOffer_RefusesAnAnonymousAdminSession(t *testing.T) {
+func TestEndpointDatastorePreAuthOffer_AnonymousSessionAndScopeCollisions(t *testing.T) {
 	ctx := t.Context()
 
 	log, err := logger.New("preauth-offer-anonymous-test", t.TempDir(), true)
@@ -47,7 +47,23 @@ func TestEndpointDatastorePreAuthOffer_RefusesAnAnonymousAdminSession(t *testing
 	tracer, err := trace.NewForTesting(ctx, "preauth-offer-anonymous-test", log)
 	require.NoError(t, err)
 
-	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	cfg := &model.Cfg{
+		Common: &model.Common{},
+		APIGW: &model.APIGW{
+			DataSources: model.DataSources{
+				Datastore: model.DatastoreConfig{
+					Scopes: map[string]model.DatastoreScope{
+						// No login of its own: an anonymous admin session is
+						// the supported way to offer this one.
+						"twin": {AuthProvider: model.AuthProviderPreAuth},
+						// Login-gated, opened to offers for an AUTHENTICATED
+						// operator by the flag. Not for an anonymous one.
+						"diploma": {AuthProvider: model.AuthProviderOIDC, AllowPreAuthOffer: true},
+					},
+				},
+			},
+		},
+	}
 	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
 	require.NoError(t, err)
 
@@ -65,11 +81,10 @@ func TestEndpointDatastorePreAuthOffer_RefusesAnAnonymousAdminSession(t *testing
 	})
 	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "datastore/preauth-offer", http.StatusOK, s.endpointDatastorePreAuthOffer)
 
-	offer := func(subject string) *httptest.ResponseRecorder {
+	offer := func(subject, body string) *httptest.ResponseRecorder {
 		login := httptest.NewRecorder()
 		engine.ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/login?subject="+subject, nil))
 
-		body := `{"scope":"diploma","authentic_source":"source","document_id":"doc"}`
 		req := httptest.NewRequest(http.MethodPost, "/datastore/preauth-offer", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		for _, c := range login.Result().Cookies() {
@@ -80,14 +95,46 @@ func TestEndpointDatastorePreAuthOffer_RefusesAnAnonymousAdminSession(t *testing
 		return w
 	}
 
-	w := offer(anonymousAdminSubject)
-	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-	assert.Nil(t, api.seen, "an anonymous session must not reach DatastorePreAuthOffer")
+	const (
+		twinBody    = `{"scope":"twin","authentic_source":"SUNET","document_id":"doc-1"}`
+		diplomaBody = `{"scope":"diploma","authentic_source":"SUNET","document_id":"doc-1"}`
+	)
 
-	api.seen = nil
-	w = offer("alice")
-	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.NotNil(t, api.seen, "an authenticated session must still be served")
+	// The workflow that must survive: admin UI on, no OIDC, a preauth twin.
+	// /ui/login grants the anonymous session on purpose, and
+	// checkPreAuthOfferExposure lets that configuration start.
+	t.Run("an anonymous session may still offer a genuine preauth scope", func(t *testing.T) {
+		api.seen = nil
+		w := offer(anonymousAdminSubject, twinBody)
+		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.NotNil(t, api.seen)
+		assert.Equal(t, "twin", api.seen.Scope)
+	})
+
+	t.Run("an anonymous session may not offer a flagged login-gated scope", func(t *testing.T) {
+		api.seen = nil
+		w := offer(anonymousAdminSubject, diplomaBody)
+		assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		assert.Nil(t, api.seen, "an anonymous session must not reach DatastorePreAuthOffer for a login-gated scope")
+	})
+
+	t.Run("an authenticated session may offer the flagged scope", func(t *testing.T) {
+		api.seen = nil
+		w := offer("alice", diplomaBody)
+		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.NotNil(t, api.seen)
+		assert.Equal(t, "diploma", api.seen.Scope)
+	})
+
+	// The authorization middleware reads the exact key "scope" and would see
+	// the twin; encoding/json takes the LAST member case-insensitively and
+	// would bind "diploma". Authorized for one scope, acted on for another.
+	t.Run("a body naming the scope twice is refused, not resolved", func(t *testing.T) {
+		api.seen = nil
+		w := offer("alice", `{"scope":"twin","Scope":"diploma","authentic_source":"SUNET","document_id":"doc-1"}`)
+		assert.NotEqual(t, http.StatusOK, w.Code, "an ambiguous body must not be acted on: %s", w.Body.String())
+		assert.Nil(t, api.seen, "neither reading may reach the handler")
+	})
 }
 
 // The admin UI hides its Offer action for any scope missing from this list,
