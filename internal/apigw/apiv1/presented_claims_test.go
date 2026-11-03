@@ -1144,3 +1144,58 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		})
 	}
 }
+
+// A tag 1 epoch may carry a fraction, and the fraction is part of the instant.
+// Flooring it to the second moves the timestamp - and the moved value is what
+// gets cached and copied into an issued document, as if the holder had proved
+// it. The direction differs by sign, which is why both are here: seconds
+// FLOOR (see epochFullDate), so a negative epoch's remainder is still
+// positive and -0.5 is 1969-12-31T23:59:59.5Z, not ...:59Z and not ...:58.5Z.
+func TestAFractionalEpochKeepsItsFraction(t *testing.T) {
+	for name, tc := range map[string]struct {
+		content any
+		want    string
+	}{
+		"half a second after the epoch":  {0.5, "1970-01-01T00:00:00.5Z"},
+		"half a second before it":        {-0.5, "1969-12-31T23:59:59.5Z"},
+		"a quarter second before it":     {-0.25, "1969-12-31T23:59:59.75Z"},
+		"a whole second, as a float":     {1.0, "1970-01-01T00:00:01Z"},
+		"a negative whole second":        {-1.0, "1969-12-31T23:59:59Z"},
+		"an integer epoch is unaffected": {int64(632361600), "1990-01-15T00:00:00Z"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := documentValue(cbor.Tag{Number: 1, Content: tc.content})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// The refusal reason reaches a log, so it must not carry the holder's claim
+// value: the value is exactly what this copy exists to keep out of places it
+// does not belong, and an identifier rejected for being too large is still an
+// identifier. What an operator needs is WHICH claim and WHY, and both survive
+// - documentObject names the member, and the reason names the constraint.
+func TestARefusedClaimDoesNotPutItsValueInTheError(t *testing.T) {
+	tooBig, ok := new(big.Int).SetString("18446744073709551617", 10)
+	require.True(t, ok)
+
+	for name, claim := range map[string]any{
+		"an int64 past 2^53":    int64(9007199254740993),
+		"a uint64 past 2^53":    uint64(9007199254740993),
+		"a float64 past 2^53":   float64(9007199254740994),
+		"a json.Number":         json.Number("9007199254740993"),
+		"an unparseable number": json.Number("9007199254740993x"),
+		"a bignum value":        *tooBig,
+		"a bignum pointer":      tooBig,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := documentObject(map[string]any{"identifier": claim})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "identifier",
+				"the operator still has to learn which claim was refused")
+			require.NotRegexp(t, `[0-9]{6,}`, err.Error(),
+				"no run of digits long enough to be the claim value, in any formatting of it: %s", err.Error())
+		})
+	}
+}

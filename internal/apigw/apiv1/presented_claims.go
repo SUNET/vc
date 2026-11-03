@@ -208,7 +208,14 @@ func epochTime(v any) (time.Time, bool) {
 		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
 			return time.Time{}, false
 		}
-		return time.Unix(int64(seconds), 0).UTC(), true
+		// The fraction is part of the instant, and dropping it moves the
+		// timestamp: 0.5 would store as ...00:00:00Z and -0.5 as
+		// 1969-12-31T23:59:59Z, each a verified value silently changed.
+		// Seconds FLOOR (epochFullDate's comment has why), so the
+		// remainder is always in [0,1) and the nanoseconds are positive
+		// for a negative epoch too.
+		nanos := int64(math.Round((n - seconds) * float64(time.Second)))
+		return time.Unix(int64(seconds), nanos).UTC(), true
 	}
 	return time.Time{}, false
 }
@@ -373,12 +380,12 @@ func documentValue(v any) (any, error) {
 
 	case int64:
 		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
-			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
+			return nil, errors.New("an integer claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 		}
 		return typed, nil
 	case uint64:
 		if typed > maxExactJSONInt {
-			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
+			return nil, errors.New("an integer claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 		}
 		return typed, nil
 
@@ -396,7 +403,7 @@ func documentValue(v any) (any, error) {
 			return nil, err
 		}
 		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
-			return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", typed)
+			return nil, errors.New("a number claim beyond ±2^53 exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value")
 		}
 		return typed, nil
 
@@ -470,11 +477,11 @@ func bignumValue(n *big.Int) (any, error) {
 		return nil, errors.New("a claim value of nil *big.Int is not a number this document can carry")
 	}
 	if !n.IsInt64() {
-		return nil, fmt.Errorf("%s cannot be carried exactly through the issued document, where numbers are float64", n)
+		return nil, errors.New("a bignum claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 	}
 	v := n.Int64()
 	if v > maxExactJSONInt || v < -maxExactJSONInt {
-		return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", v)
+		return nil, errors.New("a bignum claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 	}
 	return v, nil
 }
@@ -484,19 +491,19 @@ func bignumValue(n *big.Int) (any, error) {
 func numberValue(n json.Number) (any, error) {
 	if i, err := n.Int64(); err == nil {
 		if i > maxExactJSONInt || i < -maxExactJSONInt {
-			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", i)
+			return nil, errors.New("an integer claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 		}
 		return i, nil
 	}
 	f, err := n.Float64()
 	if err != nil {
-		return nil, fmt.Errorf("a claim value of %q is not a number this document can carry", n.String())
+		return nil, errors.New("a claim value that does not parse as a number cannot be carried in this document")
 	}
 	if err := refuseNonFinite(f); err != nil {
 		return nil, err
 	}
 	if f > maxExactJSONInt || f < -maxExactJSONInt {
-		return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", f)
+		return nil, errors.New("a number claim beyond ±2^53 exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value")
 	}
 	return f, nil
 }
