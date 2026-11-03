@@ -242,6 +242,21 @@ type AuthorizationContext struct {
 	// at the time, not against whatever the receiving node is configured with
 	// now.
 	TransactionDataResponseModes []string `json:"transaction_data_response_modes,omitempty" bson:"transaction_data_response_modes,omitempty"`
+	// Error and ErrorDescription record an Authorization Error Response
+	// the Wallet returned instead of a presentation - most often
+	// access_denied, which OpenID4VP 1.0 section 8.5 defines as covering
+	// a lack of End-User consent.
+	//
+	// Recorded rather than merely logged, because a declined request is
+	// an OUTCOME. Without it the session has no terminal state at all:
+	// /ui/completion reports pending until the cache evicts the context,
+	// so the relying party waits for an answer the user already gave.
+	//
+	// ErrorDescription is the Wallet's own text and is bounded and
+	// printable-checked like every other field here: it crosses from a
+	// wallet into a verifier's UI.
+	Error            string `json:"error,omitempty" bson:"error,omitempty" validate:"omitempty,max=64,printascii"`
+	ErrorDescription string `json:"error_description,omitempty" bson:"error_description,omitempty" validate:"omitempty,max=512"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//

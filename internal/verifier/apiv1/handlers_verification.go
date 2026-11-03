@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -75,6 +77,29 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 type VerificationDirectPostRequest struct {
 	Response string `json:"response"  form:"response"`
+
+	// Error, ErrorDescription and State carry an Authorization Error
+	// Response - the Wallet answering the request with a refusal
+	// instead of a presentation.
+	//
+	// OpenID4VP 1.0 section 8.3.1: "If a Wallet is unable to generate an
+	// encrypted response, it MAY send an error response without
+	// encryption as per Section 8.2." So a PLAIN error form is
+	// conformant even when the request asked for direct_post.jwt, and
+	// section 8.2's own example is exactly these three parameters
+	// posted as a form.
+	//
+	// Section 5.6 says both successful and error responses SHOULD use
+	// the supplied Response Mode, so an error may also arrive encrypted
+	// inside Response. Both are accepted; see directPostError.
+	//
+	// Until these existed a decline bound to an empty struct and the
+	// handler went looking for a JWE header in "", which failed as
+	// "unexpected end of JSON input" - a 500 for the one outcome that
+	// is not an error at all, with the session left pending forever.
+	Error            string `json:"error,omitempty" form:"error"`
+	ErrorDescription string `json:"error_description,omitempty" form:"error_description"`
+	State            string `json:"state,omitempty" form:"state"`
 	// DCAPI marks a response returned inside a navigator.credentials.get
 	// call and forwarded here by the verifier's own page, rather than POSTed
 	// by a wallet reached through request_uri. The two bind their mdoc
@@ -98,10 +123,162 @@ type VerificationDirectPostResponse struct {
 	// the browser back to the verifier. Cross-device flows omit it: the
 	// still-open verifier tab is nudged over SSE instead.
 	RedirectURI string `json:"redirect_uri,omitempty"`
+
+	// Declined marks a recorded Authorization Error Response, and exists
+	// for the Digital Credentials API flow.
+	//
+	// There the browser forwards the wallet's response itself and reads
+	// this reply directly - there is no SSE connection, because the page
+	// never had to wait for one. An empty 200 is indistinguishable from a
+	// successful presentation to that caller, so a declined request
+	// reported "Presentation verified successfully". The network flow
+	// does not need the discriminator (the wallet already knows what it
+	// sent) and ignores an unknown member, per OpenID4VP.
+	//
+	// Set ONLY when this call recorded the refusal. A decline arriving
+	// for a session that already reached an outcome does not set it:
+	// first outcome wins, so that session is not declined, and saying so
+	// would hand the browser the opposite of what /ui/resume reports.
+	Declined bool `json:"declined,omitempty"`
+
+	// Error and ErrorDescription echo the recorded refusal so the DC API
+	// page can show the same message the SSE path delivers.
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"error_description,omitempty"`
+}
+
+// directPostError records an Authorization Error Response and ends the
+// session.
+//
+// The point is the ENDING. A declined request is an outcome the relying
+// party is entitled to, and before this the only thing that happened was
+// a log line: the session stayed pending until the cache evicted it, so
+// a user who pressed "no" left the verifier waiting for an answer they
+// had already given.
+//
+// state is validated against a live session (OpenID4VP 1.0 section
+// 14.3.2: the Verifier SHOULD check that state corresponds to a recent
+// Authorization Request). An unknown state is refused rather than
+// ignored - accepting one would let anyone who can reach response_uri
+// end a session they know nothing about, and silently ignoring one
+// would leave the real session pending while answering 200.
+//
+// Nothing of the wallet's text is echoed back to the caller: the reply
+// carries only the redirect, and the error reaches the operator through
+// the session, not through this response body.
+func (c *Client) directPostError(ctx context.Context, code, description, state string) (*VerificationDirectPostResponse, error) {
+	if state == "" {
+		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
+			"an error response must carry the state of the request it answers", http.StatusBadRequest)
+	}
+
+	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{State: state})
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments) || (err == nil && authCtx == nil):
+		// Deliberately the same answer as a state that never existed:
+		// whether a given state is live is not something this endpoint
+		// should confirm to an unauthenticated caller.
+		c.log.Warn("direct_post error response for an unknown state", "error", code)
+		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
+			"state does not correspond to a request this verifier is waiting for", http.StatusBadRequest)
+	case err != nil:
+		// A backend that cannot answer is NOT an unknown state. Saying
+		// 400 here would tell a wallet its own request was malformed
+		// during a Mongo outage, and the real session would stay
+		// pending with nobody retrying. 503 is the honest answer and
+		// names no backend detail.
+		c.log.Error(err, "could not look up the session for a direct_post error response", "error", code)
+		return nil, helpers.NewErrorDetailsWithStatus("temporarily_unavailable",
+			"the session could not be looked up; retry", http.StatusServiceUnavailable)
+	}
+
+	if sessionExpired(authCtx) {
+		c.log.Info("direct_post error response for an expired session", "state", state, "error", code)
+		return nil, ErrSessionExpired
+	}
+
+	// First outcome wins. Without this a late error overwrites a
+	// completed session while its VerifierResponseCode survives, so
+	// /ui/completion reports "declined" and /ui/resume reports
+	// "complete" for the same session - two answers, both from stored
+	// state, with no way to tell which happened.
+	if authSessionIsTerminal(authCtx) {
+		c.log.Info("direct_post error response for a session that already reached an outcome",
+			"state", state, "error", code, "status", authCtx.Status)
+		return &VerificationDirectPostResponse{}, nil
+	}
+
+	c.log.Warn("the wallet returned an error response instead of a presentation",
+		"state", state, "error", code, "session_id", authCtx.SessionID)
+
+	// Mutate a COPY. MemoryStore.Get hands back the stored pointer
+	// itself, and Save validates after these assignments - so a wallet
+	// sending an error_description past the model's 512-byte bound
+	// would fail the save with the live session already carrying the
+	// rejected value and a terminal status, while a Mongo-backed
+	// deployment kept the old one. The description is wallet-controlled
+	// input, which is exactly the kind that finds that edge.
+	updated := *authCtx
+	updated.Status = cache.SessionStatusError
+	updated.Error = code
+	updated.ErrorDescription = description
+
+	// Claimed, not saved, for the same reason the presentation path
+	// claims: the terminal check above read the session a moment ago and
+	// a presentation may have completed since. The check stays as a cheap
+	// early-out, but THIS is the one that decides.
+	won, err := c.cacheService.AuthContext.ClaimOutcome(ctx, &updated)
+	if err != nil {
+		c.log.Error(err, "failed to record the wallet's error response", "state", state)
+		return nil, err
+	}
+	if !won {
+		c.log.Info("direct_post error response for a session that reached an outcome first",
+			"state", state, "error", code)
+		return &VerificationDirectPostResponse{}, nil
+	}
+	authCtx = &updated
+
+	// The same nudge a presentation sends, so a waiting UI learns now
+	// rather than on its next poll. The browser is told the outcome, not
+	// the wallet's prose.
+	c.notify.Submit(authCtx.SessionID, map[string]string{"error": code})
+
+	// OpenID4VP 1.0 section 8.2 allows the Response URI to return
+	// redirect_uri for an error response, and the engine reads it back
+	// (go-wallet-backend internal/engine/oid4vp.go submitErrorResponse),
+	// so a same-device decline can still land the user somewhere.
+	// Omitted here: where a declined flow should send the browser is a
+	// verifier UX decision, and inventing one would send users to a page
+	// nobody designed. 200 is what the engine already tolerates.
+	//
+	// The body says declined, for the DC API caller that reads this reply
+	// instead of waiting on SSE; see the type's comment.
+	return &VerificationDirectPostResponse{
+		Declined:         true,
+		Error:            code,
+		ErrorDescription: description,
+	}, nil
 }
 
 func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDirectPostRequest) (*VerificationDirectPostResponse, error) {
 	c.log.Debug("Verification direct-post")
+
+	// A refusal, before anything looks for a JWE. An error response
+	// carries no `response`, so every step below it - the KID, the
+	// ephemeral key, the decryption - is looking for something that was
+	// never sent.
+	if req.Error != "" && req.Response == "" {
+		return c.directPostError(ctx, req.Error, req.ErrorDescription, req.State)
+	}
+
+	// Neither a presentation nor an error is a malformed request, and
+	// it is the caller's to fix. It used to reach GetKID and come back
+	// as a 500.
+	if req.Response == "" {
+		return nil, helpers.NewErrorDetailsWithStatus("invalid_request",
+			"the response carries neither a presentation nor an error", http.StatusBadRequest)
+	}
 
 	// Extract KID from JWE header
 	kid, err := req.GetKID()
@@ -124,6 +301,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if err != nil {
 		c.log.Error(err, "failed to decrypt JWE")
 		return nil, err
+	}
+
+	// An error response returned the way section 5.6 says it SHOULD be -
+	// "Both successful and error responses SHOULD be returned using the
+	// supplied Response Mode" - so for direct_post.jwt it arrives
+	// encrypted, inside the same envelope a presentation would use.
+	//
+	// Checked before the presentation parse rather than after it fails,
+	// because an error response legitimately has no vp_token and would
+	// otherwise be reported as a malformed presentation.
+	var encryptedError struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+		State            string `json:"state"`
+	}
+	if err := json.Unmarshal(decryptedJWE, &encryptedError); err == nil && encryptedError.Error != "" {
+		return c.directPostError(ctx, encryptedError.Error, encryptedError.ErrorDescription, encryptedError.State)
 	}
 
 	// Parse response parameters using openid4vp
@@ -149,6 +343,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if sessionExpired(authCtx) {
 		c.log.Info("Verification direct post for an expired session", "state", vpResponse.State)
 		return nil, ErrSessionExpired
+	}
+
+	// The other direction of "first outcome wins". A presentation that
+	// lands after the session was answered - the user declined and the
+	// wallet sent anyway, or a response is replayed - would otherwise
+	// write a VerifierResponseCode while Error and the terminal status
+	// stay put, and the two UI endpoints would then disagree about what
+	// happened. Refused rather than ignored: the wallet is handing over
+	// credentials, and a 200 would say they were accepted.
+	if authSessionIsTerminal(authCtx) {
+		c.log.Info("Verification direct post for a session that already reached an outcome",
+			"state", vpResponse.State, "status", authCtx.Status)
+		return nil, ErrSessionAlreadyAnswered
 	}
 
 	// Generate response code
@@ -898,11 +1105,42 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// an SSE stream whose only message has already been delivered). The
 	// VerifierResponseCode is already a per-completion value and is also
 	// what identifies the cached credentials for the callback.
-	authCtx.VerifierResponseCode = responseCode
-	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+	// A COPY carries the response code, for the reason GetSnapshot's
+	// comment gives: MemoryStore.Get hands back the STORED pointer, so
+	// setting the field on authCtx would put the outcome into the store
+	// before anything had claimed it - and ClaimOutcome would then find
+	// the session already answered, by this very call.
+	claimed := *authCtx
+	claimed.VerifierResponseCode = responseCode
+
+	// Claimed, not saved. The check at the top of this handler read the
+	// session before credential verification ran, and verification takes
+	// as long as it takes - a decline arriving in that window recorded its
+	// outcome, told the browser, and was then erased by this write, which
+	// carries the authCtx as it was read. The session ended up complete
+	// with the refusal gone, after the user had been shown the refusal.
+	//
+	// One operation in the store decides it, and the loser does not
+	// notify: the browser has already been told the other thing.
+	won, err := c.cacheService.AuthContext.ClaimOutcome(ctx, &claimed)
+	if err != nil {
 		c.log.Error(err, "failed to persist completion marker on authorization context", "session_id", authCtx.SessionID)
 		return nil, err
 	}
+	if !won {
+		// The credentials cached above stay: they are keyed by a response
+		// code nothing will hand out, and the cache evicts them. Issuing
+		// the redirect instead would point the browser at a result for a
+		// session that answered something else.
+		c.log.Info("the session reached an outcome while this presentation was being verified",
+			"session_id", authCtx.SessionID)
+		return nil, ErrSessionAlreadyAnswered
+	}
+	authCtx = &claimed
+	// After the claim, not before: a presentation that LOST the race did
+	// not complete, so its jti values are released by the deferred
+	// cleanup rather than burned. Setting this on the way past would
+	// leave a jti consumed by a response that recorded nothing.
 	completed = true
 
 	// Notify AFTER credentials are cached so the browser can fetch them

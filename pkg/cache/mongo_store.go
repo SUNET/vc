@@ -705,6 +705,52 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	return &claimed, nil
 }
 
+// ClaimOutcome records a final outcome on a still-unanswered session.
+// See AuthContextStore.ClaimOutcome.
+//
+// The filter is the check: one FindOneAndReplace on a session whose stored
+// status is not terminal and which carries no verifier response code. A
+// second caller matches nothing and is told it lost, with no document
+// written - which is the behaviour a read-then-Save could not give,
+// because between the read and the save the other request has already
+// replaced the document.
+func (s *MongoStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error) {
+	if doc == nil || doc.SessionID == "" {
+		return false, errors.New("document with session_id is required")
+	}
+	if err := doc.Validate(); err != nil {
+		return false, fmt.Errorf("validation failed: %w", err)
+	}
+
+	terminal := bson.A{}
+	for _, status := range []SessionStatus{
+		SessionStatusCodeIssued, SessionStatusTokenIssued,
+		SessionStatusCompleted, SessionStatusError, SessionStatusExpired,
+	} {
+		terminal = append(terminal, status)
+	}
+
+	// omitempty means a session with no response code has no such field
+	// at all, so "unset or empty" is both halves of the $in.
+	filter := bson.M{
+		"session_id":             doc.SessionID,
+		"status":                 bson.M{"$nin": terminal},
+		"verifier_response_code": bson.M{"$in": bson.A{nil, ""}},
+	}
+
+	err := s.coll.FindOneAndReplace(ctx, filter, *doc).Err()
+	switch {
+	case errors.Is(err, mongo.ErrNoDocuments):
+		// Either the session is gone or it already has an outcome. Both
+		// mean this caller did not record one, which is what it needs to
+		// know; the caller re-reads if it needs to tell them apart.
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("failed to claim the session outcome: %w", err)
+	}
+	return true, nil
+}
+
 // ClaimIssuerState atomically replaces the issuer-initiated handle with the
 // exchange that claims it. See AuthContextStore.ClaimIssuerState.
 //
