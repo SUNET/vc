@@ -25,11 +25,6 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 	sum := sha256.Sum256([]byte(content))
 
 	return &model.Cfg{Verifier: &model.Verifier{
-		// A PDP is part of a valid nym_auth configuration, not an
-		// extra: the issuer key comes from the holder's own chain,
-		// so without one there is nothing that says the key belongs
-		// to a real issuer.
-		Trust: model.TrustConfig{PDPURL: "https://pdp.example/access/v1/evaluation"},
 		NymAuth: model.NymAuthVerifier{
 			Enable:     true,
 			VerifierID: "x509_san_dns:verifier.example",
@@ -184,6 +179,19 @@ func TestNymAuthVerifierDisabledWithAHalfWrittenEntryStillLoads(t *testing.T) {
 	if err != nil {
 		assert.NotContains(t, err.Error(), "nym_auth",
 			"a disabled feature must not hold up startup over an entry nothing will read")
+	}
+}
+
+func TestNymAuthProofTimeWindowRefusesNegativeValues(t *testing.T) {
+	for field, set := range map[string]func(*model.NymAuthVerifier){
+		"verifier.nym_auth.proof_time_skew_seconds":    func(n *model.NymAuthVerifier) { n.ProofTimeSkewSeconds = -1 },
+		"verifier.nym_auth.proof_time_max_age_seconds": func(n *model.NymAuthVerifier) { n.ProofTimeMaxAgeSeconds = -1 },
+	} {
+		cfg := nymAuthCfg(t)
+		set(&cfg.Verifier.NymAuth)
+		err := helpers.Check(t.Context(), cfg, cfg, logger.NewSimple("test"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), field)
 	}
 }
 
