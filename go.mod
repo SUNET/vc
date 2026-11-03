@@ -14,7 +14,7 @@ require (
 	github.com/creasty/defaults v1.11.0
 	github.com/crewjam/saml v0.5.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
-	github.com/fxamacker/cbor/v2 v2.9.6
+	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/gin-contrib/cors v1.7.9
 	github.com/gin-contrib/gzip v1.2.8
 	github.com/gin-contrib/sessions v1.1.2
