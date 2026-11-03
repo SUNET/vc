@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const unreachableContextURL = "https://ctx.invalid/never-resolves.jsonld"
+
 // serveContext publishes a JSON-LD context and returns its URL. The loader
 // refuses to dial loopback, so the document is pinned directly - what these
 // tests exercise is the consistency checking, not the fetch.
@@ -149,10 +151,7 @@ func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
 	// was unavailable. It serves no MakeVC20 request and dereferences
 	// nothing from this list.
 	t.Run("the verifier does not pin the issuer's allowlist", func(t *testing.T) {
-		unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
-		t.Cleanup(unreachable.Close)
-
-		cfg := &model.Cfg{Issuer: &model.Issuer{JSONLDContextAllowlist: []string{unreachable.URL}}}
+		cfg := &model.Cfg{Issuer: &model.Issuer{JSONLDContextAllowlist: []string{unreachableContextURL}}}
 
 		require.Error(t, resolveW3CContexts(cfg, "issuer", log),
 			"the issuer does dereference this list, so an unloadable entry still fails its boot")
@@ -234,8 +233,8 @@ func TestCheckIssuerContextAllowlist(t *testing.T) {
 // of the allowlist - and only then refused it, by which time the request had
 // been made.
 //
-// The order is only observable through a context that CANNOT be resolved: an
-// unregistered loopback URL, which the loader refuses to dial. Run
+// The order is only observable through a context that CANNOT be resolved:
+// a reserved .invalid URL, which the loader refuses to resolve. Run
 // allowlist-first and the error names the allowlist; run resolution first
 // and it names the failed load. A resolvable context would produce the same
 // message either way, which is how the first version of this test passed
@@ -244,18 +243,14 @@ func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
 	log := logger.NewSimple("test")
 	const diplomaIRI = "https://example.org/diploma#DiplomaCredential"
 
-	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/ld+json")
-		_, _ = w.Write([]byte(`{"@context":{"DiplomaCredential":"` + diplomaIRI + `"}}`))
-	}))
-	t.Cleanup(unreachable.Close)
+	const unreachable = unreachableContextURL
 
 	cfgWithAllowlist := func(allowlist []string) *model.Cfg {
 		return &model.Cfg{
 			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{"diploma": {
 				Format:               openid4vp.FormatLdpVCDCQL,
 				CredentialTypes:      []string{"DiplomaCredential"},
-				CredentialContexts:   []string{unreachable.URL},
+				CredentialContexts:   []string{unreachable},
 				CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, diplomaIRI}},
 			}}},
 			Issuer: &model.Issuer{JSONLDContextAllowlist: allowlist},
@@ -272,7 +267,7 @@ func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
 	// Allowlisted, the same context is dereferenced and the fetch is what
 	// fails. That is the contrast that makes the assertion above mean
 	// something: both gates are live, and only their order decides.
-	err = w3cStartupChecks(cfgWithAllowlist([]string{unreachable.URL}), "issuer", log)
+	err = w3cStartupChecks(cfgWithAllowlist([]string{unreachable}), "issuer", log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not be loaded")
 
