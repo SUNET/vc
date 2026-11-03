@@ -94,6 +94,7 @@ type TypeRegistry struct {
 	sliceAliases  map[string]string   // named slice type -> element type name (e.g. "RedirectURIs" -> "string")
 	scalarAliases map[string]string   // named scalar type -> underlying type (e.g. "BindingEnforcement" -> "string")
 	enumValues    map[string][]string // named type -> ordered list of const values (e.g. "BindingEnforcement" -> ["enforce", "warn", "disabled"])
+	instances     []genericInstance   // aliases of generic struct instantiations, registered once their package is parsed
 	fset          *token.FileSet
 }
 
@@ -121,7 +122,7 @@ func (r *TypeRegistry) ParseDir(dir string) error {
 			r.extractEnumConsts(file)
 		}
 	}
-	return nil
+	return r.resolveInstances()
 }
 
 func (r *TypeRegistry) Lookup(name string) *StructDef {
@@ -165,63 +166,117 @@ func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 			continue
 		}
 		for _, spec := range genDecl.Specs {
-			ts := spec.(*ast.TypeSpec)
-
-			// Handle struct types
-			if st, ok := ts.Type.(*ast.StructType); ok {
-				doc := ""
-				if ts.Doc != nil {
-					doc = commentText(ts.Doc)
-				} else if genDecl.Doc != nil {
-					doc = commentText(genDecl.Doc)
-				}
-				def := &StructDef{Name: ts.Name.Name, Doc: doc, PkgName: pkgName}
-				r.parseFields(st, def, pkgName)
-				// Register under the pkg-qualified key always; collapse the
-				// simple-name entry to a nil sentinel on cross-package
-				// collision. A sentinel (rather than a delete) is sticky:
-				// a third package with the same identifier cannot reclaim
-				// the simple name after two prior packages collided and
-				// erased it, which would make the lookup silently resolve
-				// to that latecomer.
-				if existing, present := r.types[ts.Name.Name]; present {
-					if existing != nil && existing.PkgName != pkgName {
-						r.types[ts.Name.Name] = nil
-					}
-				} else {
-					r.types[ts.Name.Name] = def
-				}
-				r.types[pkgName+"."+ts.Name.Name] = def
-				continue
-			}
-
-			// Handle named map types (e.g., type Clients map[string]*Client)
-			if mt, ok := ts.Type.(*ast.MapType); ok {
-				valName := resolveTypeName(mt.Value)
-				if valName != "" {
-					// Store package-qualified value type name so we resolve the correct struct
-					qualifiedValName := pkgName + "." + valName
-					r.mapAliases[ts.Name.Name] = qualifiedValName
-					r.mapAliases[pkgName+"."+ts.Name.Name] = qualifiedValName
-				}
-			}
-
-			// Handle named slice types (e.g., type RedirectURIs []string)
-			if at, ok := ts.Type.(*ast.ArrayType); ok {
-				elemName := typeExprStr(at.Elt)
-				r.sliceAliases[ts.Name.Name] = elemName
-				r.sliceAliases[pkgName+"."+ts.Name.Name] = elemName
-			}
-
-			// Handle named scalar types (e.g., type BindingEnforcement string)
-			if ident, ok := ts.Type.(*ast.Ident); ok {
-				if ident.Name == "string" {
-					r.scalarAliases[ts.Name.Name] = "string"
-					r.scalarAliases[pkgName+"."+ts.Name.Name] = "string"
-				}
-			}
+			r.extractType(spec.(*ast.TypeSpec), genDecl, pkgName)
 		}
 	}
+}
+
+// extractType records one type declaration by its kind.
+func (r *TypeRegistry) extractType(ts *ast.TypeSpec, genDecl *ast.GenDecl, pkgName string) {
+	if generic := instantiatedGeneric(ts); generic != "" {
+		r.instances = append(r.instances, genericInstance{name: ts.Name.Name, generic: generic, doc: typeDoc(ts, genDecl), pkgName: pkgName})
+		return
+	}
+	switch t := ts.Type.(type) {
+	case *ast.StructType:
+		def := &StructDef{Name: ts.Name.Name, Doc: typeDoc(ts, genDecl), PkgName: pkgName}
+		r.parseFields(t, def, pkgName)
+		r.register(def)
+	case *ast.MapType:
+		// A named map type (e.g., type Clients map[string]*Client)
+		if valName := resolveTypeName(t.Value); valName != "" {
+			// Store package-qualified value type name so we resolve the correct struct
+			qualifiedValName := pkgName + "." + valName
+			r.mapAliases[ts.Name.Name] = qualifiedValName
+			r.mapAliases[pkgName+"."+ts.Name.Name] = qualifiedValName
+		}
+	case *ast.ArrayType:
+		// A named slice type (e.g., type RedirectURIs []string)
+		elemName := typeExprStr(t.Elt)
+		r.sliceAliases[ts.Name.Name] = elemName
+		r.sliceAliases[pkgName+"."+ts.Name.Name] = elemName
+	case *ast.Ident:
+		// A named scalar type (e.g., type BindingEnforcement string)
+		if t.Name == "string" {
+			r.scalarAliases[ts.Name.Name] = "string"
+			r.scalarAliases[pkgName+"."+ts.Name.Name] = "string"
+		}
+	}
+}
+
+// typeDoc is the doc comment of a type declaration, or of its group.
+func typeDoc(ts *ast.TypeSpec, genDecl *ast.GenDecl) string {
+	switch {
+	case ts.Doc != nil:
+		return commentText(ts.Doc)
+	case genDecl.Doc != nil:
+		return commentText(genDecl.Doc)
+	}
+	return ""
+}
+
+// register records a struct under its pkg-qualified name, and under its
+// simple name until another package uses that name.
+//
+// A cross-package collision collapses the simple-name entry to a nil
+// sentinel. A sentinel (rather than a delete) is sticky: a third package
+// with the same identifier cannot reclaim the simple name after two prior
+// packages collided and erased it, which would make the lookup silently
+// resolve to that latecomer.
+func (r *TypeRegistry) register(def *StructDef) {
+	if existing, present := r.types[def.Name]; present {
+		if existing != nil && existing.PkgName != def.PkgName {
+			r.types[def.Name] = nil
+		}
+	} else {
+		r.types[def.Name] = def
+	}
+	r.types[def.PkgName+"."+def.Name] = def
+}
+
+// genericInstance is an alias of a generic struct's instantiation,
+// type A = G[T].
+type genericInstance struct {
+	name    string
+	generic string
+	doc     string
+	pkgName string
+}
+
+// instantiatedGeneric returns G for an alias type A = G[T] of a generic
+// type of the same package.
+func instantiatedGeneric(ts *ast.TypeSpec) string {
+	if !ts.Assign.IsValid() {
+		return ""
+	}
+	var base ast.Expr
+	switch t := ts.Type.(type) {
+	case *ast.IndexExpr:
+		base = t.X
+	case *ast.IndexListExpr:
+		base = t.X
+	default:
+		return ""
+	}
+	if ident, ok := base.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return ""
+}
+
+// resolveInstances registers each alias of a generic struct's
+// instantiation as a struct with the alias's name and doc and the generic
+// struct's fields.
+func (r *TypeRegistry) resolveInstances() error {
+	for _, inst := range r.instances {
+		generic := r.types[inst.pkgName+"."+inst.generic]
+		if generic == nil {
+			return fmt.Errorf("%s.%s instantiates %s, which is no struct of its package", inst.pkgName, inst.name, inst.generic)
+		}
+		r.register(&StructDef{Name: inst.name, Doc: inst.doc, Fields: generic.Fields, PkgName: inst.pkgName})
+	}
+	r.instances = nil
+	return nil
 }
 
 // extractEnumConsts extracts typed string constants for enum display.
@@ -1082,11 +1137,9 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 				buf.WriteString(fmt.Sprintf("%s  %s\n", prefix, f.Tag.DocExample))
 			default:
 				// A map whose VALUE is a struct needs its fields under the
-				// key, not a scalar beside it. Emitting "<key>: \"<value>\""
-				// for issuer.seeds produced an example that cannot be
-				// loaded at all - the type wants an object with a secret
-				// in it - so anyone copying the documented shape broke
-				// their configuration.
+				// key. Emitting "<key>: \"<value>\"" for it produces an
+				// example that cannot be loaded at all, so anyone copying
+				// the documented shape breaks their configuration.
 				valueDef := reg.Lookup(resolveTypeName(mapType.Value))
 				if valueDef != nil && len(valueDef.Fields) > 0 {
 					buf.WriteString(fmt.Sprintf("%s  %s:\n", prefix, keyPH))

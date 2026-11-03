@@ -13,7 +13,7 @@ import (
 func presentationCfg(derivations ...primitives.Derivation) *model.Cfg {
 	return &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
 		Presentation: model.PresentationConfig{Scopes: map[string]model.PresentationScope{
-			"diploma": {FromScope: "eduid", Derivations: derivations},
+			"diploma": {From: map[string]model.PresentedCredential{"eduid": {Derivations: derivations}}},
 		}},
 	}}}
 }
