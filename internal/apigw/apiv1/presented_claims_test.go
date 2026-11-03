@@ -1162,12 +1162,37 @@ func TestAFractionalEpochKeepsItsFraction(t *testing.T) {
 		"a whole second, as a float":     {1.0, "1970-01-01T00:00:01Z"},
 		"a negative whole second":        {-1.0, "1969-12-31T23:59:59Z"},
 		"an integer epoch is unaffected": {int64(632361600), "1990-01-15T00:00:00Z"},
+		// A tenth of a nanosecond before the epoch. Rounding the fraction
+		// would reach 1,000,000,000ns and carry into the next second,
+		// landing on 1970-01-01 - a different DATE from the one
+		// epochFullDate gives the same value, copied into issuance.
+		"just before midnight, sub-nanosecond": {-1e-10, "1969-12-31T23:59:59.999999999Z"},
+		"the last nanosecond of 1969":          {-1e-9, "1969-12-31T23:59:59.999999999Z"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := documentValue(cbor.Tag{Number: 1, Content: tc.content})
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
+	}
+}
+
+// The invariant behind the flooring: for the same tag 1 value, the timestamp
+// path and the full-date path must name the same DAY. They are two readings of
+// one presented claim, and a verified birth date that depends on which target
+// the scope asked for is the bug this whole file exists to prevent.
+func TestATimestampAndAFullDateAgreeOnTheDay(t *testing.T) {
+	for _, epoch := range []float64{-1e-10, -1e-9, -0.5, -1, 0, 0.5, 632361600.25} {
+		date, err := normaliseFullDate(cbor.Tag{Number: 1, Content: epoch})
+		require.NoError(t, err)
+
+		stamp, err := documentValue(cbor.Tag{Number: 1, Content: epoch})
+		require.NoError(t, err)
+
+		text, ok := stamp.(string)
+		require.True(t, ok, "a timestamp claim is stored as text, got %T", stamp)
+		require.Equal(t, date, text[:len(date)],
+			"epoch %v dates to %s as a full-date but %s as a timestamp", epoch, date, text)
 	}
 }
 

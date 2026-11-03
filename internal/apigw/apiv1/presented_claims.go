@@ -214,7 +214,21 @@ func epochTime(v any) (time.Time, bool) {
 		// Seconds FLOOR (epochFullDate's comment has why), so the
 		// remainder is always in [0,1) and the nanoseconds are positive
 		// for a negative epoch too.
-		nanos := int64(math.Round((n - seconds) * float64(time.Second)))
+		//
+		// The nanoseconds floor as well, rather than round. Rounding can
+		// reach 1,000,000,000, which time.Unix carries into the NEXT
+		// second - so -1e-10, an instant a tenth of a nanosecond before
+		// the epoch, would become 1970-01-01T00:00:00Z while
+		// epochFullDate normalises the same value to 1969-12-31. Two
+		// paths, two dates, from one presented claim. Flooring keeps the
+		// instant inside the second it belongs to and keeps the two
+		// agreeing; sub-nanosecond precision is lost either way, and
+		// losing it downward is the only direction that cannot change
+		// the date.
+		nanos := int64(math.Floor((n - seconds) * float64(time.Second)))
+		if nanos > int64(time.Second)-1 {
+			nanos = int64(time.Second) - 1
+		}
 		return time.Unix(int64(seconds), nanos).UTC(), true
 	}
 	return time.Time{}, false
