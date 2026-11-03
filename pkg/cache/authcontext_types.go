@@ -259,13 +259,28 @@ type AuthorizationContext struct {
 	// cannot read an old document-valued query, and an old replica cannot
 	// read a new string-valued one, so a session bouncing between
 	// versions fails intermittently for as long as the rollout lasts.
-	// Written alongside and preferred on read, it is safe either way -
+	// Written alongside and preferred on read, neither direction fails -
 	// an old replica ignores a field it does not model and keeps the
 	// behaviour it already had, and a new one gets the exact copy
 	// whenever there is one.
 	//
+	// What that does not give you is exactness DURING the rollout. The
+	// store replaces whole documents - MongoStore.Update is a ReplaceOne -
+	// so an old replica writing a session for any reason at all drops
+	// this field simply by not having it, and a new replica reading that
+	// session afterwards finds only the rounded dcql_query.
+	//
+	// Nothing on this side can prevent that: the field is discarded by a
+	// binary built before it existed. What can be said is how far it
+	// degrades, which is exactly as far as the behaviour every replica
+	// had before this change - the rounded query - so no session is
+	// worse off than it was. A deployment that needs a req param beyond
+	// int64 or float64 to survive has to finish its rollout before
+	// relying on it; until then exactness is best effort.
+	//
 	// Once every replica writes this, dcql_query can be dropped. That is
-	// a separate change, and it needs the rollout to have finished.
+	// a separate change, and it needs the rollout to have finished - for
+	// this reason as much as the obvious one.
 	DCQLQueryExact string `json:"-" bson:"dcql_query_exact,omitempty"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
