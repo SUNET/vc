@@ -65,6 +65,9 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	require.Len(t, dcql.CredentialSets, 1)
 	assert.Equal(t, [][]string{{"eduid"}, {"pid"}}, dcql.CredentialSets[0].Options)
 
+	assert.True(t, dcql.CredentialSets[0].IsRequired(),
+		"the holder must present one of the options")
+
 	// Every query must ask the wallet to prove possession. This flow is
 	// an authentication - it decides whose documents get issued - and it
 	// once sent require_cryptographic_holder_binding: false, telling

@@ -1,6 +1,7 @@
 package primitives
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -11,7 +12,7 @@ import (
 func YYYYMMDDToISO(s string) (string, error) {
 	t, err := time.Parse("20060102", s)
 	if err != nil {
-		return "", fmt.Errorf("invalid YYYYMMDD date %q: %w", s, err)
+		return "", errors.New("value is not a valid YYYYMMDD date")
 	}
 	return t.Format("2006-01-02"), nil
 }
