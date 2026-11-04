@@ -1,0 +1,141 @@
+{
+  "description": "Shared test vectors of the nym_auth mdoc challenge (SPEC.md section 3): the SessionTranscript (the transcript seed) and e2, the SHA-256 of the device-authentication message. Byte-identical in zk-cred-vega and zk-cred-longfellow. min_nonce_chars is the shortest nonce derive accepts.",
+  "version": 1,
+  "min_nonce_chars": 16,
+  "derive": [
+    {
+      "name": "circuits archive, verifier 1 (credential/pseudonym.json mdoc.challenge_digest)",
+      "origin": "https://verifier.example",
+      "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": null,
+      "session_transcript_hex": "83f6f682764f70656e4944345650444341504948616e646f766572582019fb903434402eb496b9a26aefcd28e9c84f0cf27ca6521f71c3f678e080075e",
+      "challenge_digest_hex": "7eea0f8e073961c3e82e9562e0f79edaa66dbfc17eaf0ac0596a987733516dd9"
+    },
+    {
+      "name": "circuits archive, verifier 2",
+      "origin": "https://other-verifier.example",
+      "nonce": "6YfsJcysIReLorHGvKlsFQ",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": null,
+      "session_transcript_hex": "83f6f682764f70656e4944345650444341504948616e646f76657258200524632d721bfc7b18198a85f7520ac74ffa3cbf1616aedc08ecc7c0e5ce3245",
+      "challenge_digest_hex": "eadaee812dc8e402826de50dc020634bc92bbac24bf25fbbd479c98cec9e1784"
+    },
+    {
+      "name": "encrypted response, JWK thumbprint 0x11*32",
+      "origin": "https://verifier.example",
+      "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "session_transcript_hex": "83f6f682764f70656e4944345650444341504948616e646f766572582098a74db4c57a62c35763573aa80ce0583c9556e27bddca7c7172eaf38285fd4c",
+      "challenge_digest_hex": "59481f3b8d5ddc29777522b268170f5bc4cba969e5344de22d33857677550724"
+    },
+    {
+      "name": "another docType",
+      "origin": "https://wallet.example:8443",
+      "nonce": "0123456789abcdefghijkl",
+      "doc_type": "org.iso.18013.5.1.mDL",
+      "jwk_thumbprint_hex": null,
+      "session_transcript_hex": "83f6f682764f70656e4944345650444341504948616e646f76657258207c22b0ab8bbff263e3a840c86d73bcb3240a4dd392845c16ccad3693414f84c7",
+      "challenge_digest_hex": "e8f15c878ec7b47b1af7b17a0b9eef1d7709a4eb2ae5033f198b362e97197d8e"
+    }
+  ],
+  "digest": [
+    {
+      "name": "siros-sdk-kotlin CatalogCircuitZkProverTest fixture: [null, null, \"handover\"] (red-team RT-6 e2)",
+      "session_transcript_hex": "83f6f66868616e646f766572",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "challenge_digest_hex": "205f22807094a72eb2846bacf4218375f7b6e51f2bfd49713a857f713b64d1a0"
+    }
+  ],
+  "rejects": [
+    {
+      "name": "empty origin",
+      "op": "derive",
+      "origin": "",
+      "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": null
+    },
+    {
+      "name": "empty nonce",
+      "op": "derive",
+      "origin": "https://verifier.example",
+      "nonce": "",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": null
+    },
+    {
+      "name": "15-character nonce",
+      "op": "derive",
+      "origin": "https://verifier.example",
+      "nonce": "abcdefghijklmno",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": null
+    },
+    {
+      "name": "empty docType",
+      "op": "derive",
+      "origin": "https://verifier.example",
+      "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+      "doc_type": "",
+      "jwk_thumbprint_hex": null
+    },
+    {
+      "name": "31-byte JWK thumbprint",
+      "op": "derive",
+      "origin": "https://verifier.example",
+      "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+      "jwk_thumbprint_hex": "11111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "empty transcript",
+      "op": "digest",
+      "session_transcript_hex": "",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript that is not a 3-item array",
+      "op": "digest",
+      "session_transcript_hex": "82f6f6",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript with trailing bytes",
+      "op": "digest",
+      "session_transcript_hex": "83f6f66868616e646f76657200",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "truncated transcript",
+      "op": "digest",
+      "session_transcript_hex": "83f6f66868616e646f76",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript whose third item is a text string with invalid UTF-8",
+      "op": "digest",
+      "session_transcript_hex": "83f6f661ff",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript whose third item is the simple value 0 in the non-canonical long form",
+      "op": "digest",
+      "session_transcript_hex": "83f6f6f800",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "transcript whose third item is the simple value 24 in the non-canonical long form",
+      "op": "digest",
+      "session_transcript_hex": "83f6f6f818",
+      "doc_type": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    {
+      "name": "empty docType for a transcript",
+      "op": "digest",
+      "session_transcript_hex": "83f6f66868616e646f766572",
+      "doc_type": ""
+    }
+  ]
+}

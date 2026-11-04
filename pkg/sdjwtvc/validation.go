@@ -150,22 +150,32 @@ func getClaimValue(claims map[string]any, path []*string) (any, bool) {
 		return nil, false
 	}
 
-	current := any(claims)
+	return lookupPath(claims, path)
+}
 
+// lookupPath walks path from current. A null element selects every array
+// element; the remaining path must then resolve in each of them, and the
+// per-element values are returned as a slice.
+func lookupPath(current any, path []*string) (any, bool) {
 	for i, pathElement := range path {
 		if pathElement == nil {
-			// null in path means "all array elements" - validate this is an array
 			arr, ok := current.([]any)
 			if !ok {
 				return nil, false
 			}
-			// For validation purposes, we just check the array exists
-			// Individual elements will be validated separately
 			if i == len(path)-1 {
 				return arr, true
 			}
-			// Can't traverse further with null path element
-			return nil, false
+			values := make([]any, 0, len(arr))
+			for _, item := range arr {
+				v, ok := lookupPath(item, path[i+1:])
+				// A null leaf would hide inside the slice from validateClaimValue's nil check.
+				if !ok || v == nil {
+					return nil, false
+				}
+				values = append(values, v)
+			}
+			return values, true
 		}
 
 		key := *pathElement

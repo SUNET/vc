@@ -1,0 +1,10 @@
+{
+  "description": "Valid JSON but not an object.",
+  "query": [
+    1,
+    2
+  ],
+  "expect": {
+    "error": "query_not_parseable"
+  }
+}

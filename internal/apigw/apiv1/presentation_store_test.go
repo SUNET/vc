@@ -25,8 +25,10 @@ func TestVerifiedMDocClaimsIssueAfterTheMongoStore(t *testing.T) {
 		birthDate: cbor.Tag{Number: mdoc.TagDate, Content: "1990-01-15"},
 	}, map[string][]string{birthDate: nil})
 	require.NoError(t, err)
+	storable, err := documentObject(verified)
+	require.NoError(t, err)
 
-	raw, err := bson.Marshal(&cache.AuthorizationContext{SessionID: "s", PresentedScope: "pid_mdoc", VerifiedClaims: verified})
+	raw, err := bson.Marshal(&cache.AuthorizationContext{SessionID: "s", PresentedScope: "pid_mdoc", VerifiedClaims: storable})
 	require.NoError(t, err)
 	var stored cache.AuthorizationContext
 	require.NoError(t, bson.Unmarshal(raw, &stored))

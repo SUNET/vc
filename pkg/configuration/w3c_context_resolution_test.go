@@ -149,10 +149,12 @@ func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
 	// was unavailable. It serves no MakeVC20 request and dereferences
 	// nothing from this list.
 	t.Run("the verifier does not pin the issuer's allowlist", func(t *testing.T) {
-		unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
-		t.Cleanup(unreachable.Close)
-
-		cfg := &model.Cfg{Issuer: &model.Issuer{JSONLDContextAllowlist: []string{unreachable.URL}}}
+		// Do not use httptest here: its 127.0.0.1:<port> URLs can collide with a
+		// prior serveContext entry still held in the process-wide loader cache
+		// (ttlcache.NoTTL), so resolveW3CContexts would succeed for the issuer
+		// and this subtest flakes (#873). .invalid never resolves and is never cached.
+		const unloadable = "https://ctx.invalid/verifier-does-not-pin-issuer-allowlist.jsonld"
+		cfg := &model.Cfg{Issuer: &model.Issuer{JSONLDContextAllowlist: []string{unloadable}}}
 
 		require.Error(t, resolveW3CContexts(cfg, "issuer", log),
 			"the issuer does dereference this list, so an unloadable entry still fails its boot")
@@ -243,19 +245,17 @@ func TestCheckIssuerContextAllowlist(t *testing.T) {
 func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
 	log := logger.NewSimple("test")
 	const diplomaIRI = "https://example.org/diploma#DiplomaCredential"
-
-	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/ld+json")
-		_, _ = w.Write([]byte(`{"@context":{"DiplomaCredential":"` + diplomaIRI + `"}}`))
-	}))
-	t.Cleanup(unreachable.Close)
+	// A never-resolving URL (not httptest): port reuse can leave a prior
+	// serveContext entry in the global loader cache and hide the allowlist-first
+	// ordering this test pins (#873).
+	const unreachable = "https://ctx.invalid/allowlist-before-fetch.jsonld"
 
 	cfgWithAllowlist := func(allowlist []string) *model.Cfg {
 		return &model.Cfg{
 			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{"diploma": {
 				Format:               openid4vp.FormatLdpVCDCQL,
 				CredentialTypes:      []string{"DiplomaCredential"},
-				CredentialContexts:   []string{unreachable.URL},
+				CredentialContexts:   []string{unreachable},
 				CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, diplomaIRI}},
 			}}},
 			Issuer: &model.Issuer{JSONLDContextAllowlist: allowlist},
@@ -272,7 +272,7 @@ func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
 	// Allowlisted, the same context is dereferenced and the fetch is what
 	// fails. That is the contrast that makes the assertion above mean
 	// something: both gates are live, and only their order decides.
-	err = w3cStartupChecks(cfgWithAllowlist([]string{unreachable.URL}), "issuer", log)
+	err = w3cStartupChecks(cfgWithAllowlist([]string{unreachable}), "issuer", log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not be loaded")
 
