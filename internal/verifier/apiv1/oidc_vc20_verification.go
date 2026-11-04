@@ -2,10 +2,13 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/keyresolver"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 )
@@ -306,7 +309,10 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, resolver trust.KeyRes
 // false is honoured here too. A scope whose query cannot be recovered fails
 // closed: binding is REQUIRED, which is the OpenID4VP default.
 func (c *Client) vc20HandlerForOIDC(resolver trust.KeyResolver, session *cache.AuthorizationContext, scope string) (*openid4vp.VC20Handler, error) {
-	opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
+	opts := []openid4vp.VC20HandlerOption{
+		openid4vp.WithVC20KeyResolver(resolver),
+		openid4vp.WithVC20HolderKeyResolver(newHolderKeyResolver(resolver)),
+	}
 
 	// requestedQueryExact, not requestedQuery. Turning binding OFF is a
 	// relaxation, so the query has to be one this scope actually names -
@@ -396,4 +402,29 @@ func (c *Client) oidcScopeFor(session *cache.AuthorizationContext, queryID strin
 		return queryID
 	}
 	return ""
+}
+
+// holderKeyResolver resolves the key that signed a presentation. A holder's
+// did:key or did:jwk holds its key in the identifier, so it is read from there:
+// the question for a holder is whether this key signed the exchange, which the
+// signature settles, and no trust registry lists a holder. Every other method
+// goes to the trust-backed resolver, as before. The issuer's key never comes
+// through here: it is always the trust resolver's.
+type holderKeyResolver struct {
+	local    openid4vp.VC20KeyResolver
+	fallback trust.KeyResolver
+}
+
+func newHolderKeyResolver(fallback trust.KeyResolver) *holderKeyResolver {
+	return &holderKeyResolver{
+		local:    keyresolver.NewVC20ResolverAdapter(keyresolver.NewLocalResolver()),
+		fallback: fallback,
+	}
+}
+
+func (r *holderKeyResolver) ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error) {
+	if strings.HasPrefix(verificationMethod, "did:key:") || strings.HasPrefix(verificationMethod, "did:jwk:") {
+		return r.local.ResolveKey(ctx, verificationMethod)
+	}
+	return r.fallback.ResolveKey(ctx, verificationMethod)
 }

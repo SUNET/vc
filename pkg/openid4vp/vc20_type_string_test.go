@@ -1,6 +1,11 @@
 package openid4vp
 
 import (
+	"context"
+	"crypto"
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,5 +55,48 @@ func TestPresentationTypeAsString(t *testing.T) {
 		_, err := h.VerifyAndExtract(t.Context(), vc)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "bare credential")
+	})
+}
+
+type denyingResolver struct{}
+
+func (denyingResolver) ResolveKey(context.Context, string) (crypto.PublicKey, error) {
+	return nil, errors.New("resolution denied: no registry returned positive match")
+}
+
+type fixedResolver struct{ key crypto.PublicKey }
+
+func (r fixedResolver) ResolveKey(context.Context, string) (crypto.PublicKey, error) {
+	return r.key, nil
+}
+
+// TestHolderKeyResolverIsSeparate: the key of a presentation's own proof comes
+// from the holder resolver when one is set, and the issuer's resolver is not
+// asked. With only the (denying) trust-backed resolver, a holder's did:key is
+// refused at key resolution; with a holder resolver the check goes on to the
+// signature, which this unsigned document then fails - a later step.
+func TestHolderKeyResolverIsSeparate(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	vp := `{"@context":["https://www.w3.org/ns/credentials/v2"],"type":"VerifiablePresentation",
+		"holder":"did:key:z6Mk","verifiableCredential":{"type":["VerifiableCredential"]},
+		"proof":{"type":"DataIntegrityProof","cryptosuite":"eddsa-rdfc-2022","proofPurpose":"authentication",
+		  "challenge":"nonce","domain":"verifier","verificationMethod":"did:key:z6Mk#z6Mk","proofValue":"zabc"}}`
+
+	t.Run("one resolver for both: the holder key is refused", func(t *testing.T) {
+		h := mustHandler(t, WithVC20KeyResolver(denyingResolver{}), WithVC20PresentationBinding("nonce", "verifier"))
+		_, err := h.VerifyAndExtract(t.Context(), vp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "resolving holder key")
+	})
+
+	t.Run("a holder resolver is used for the holder proof", func(t *testing.T) {
+		h := mustHandler(t, WithVC20KeyResolver(denyingResolver{}), WithVC20HolderKeyResolver(fixedResolver{pub}),
+			WithVC20PresentationBinding("nonce", "verifier"))
+		_, err := h.VerifyAndExtract(t.Context(), vp)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "resolving holder key")
+		assert.NotContains(t, err.Error(), "resolution denied")
 	})
 }

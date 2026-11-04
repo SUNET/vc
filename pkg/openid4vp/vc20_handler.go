@@ -61,12 +61,15 @@ func (r *StaticVC20KeyResolver) ResolveKey(ctx context.Context, verificationMeth
 
 // VC20Handler handles W3C VC 2.0 Data Integrity credentials in OpenID4VP flows.
 type VC20Handler struct {
-	keyResolver     VC20KeyResolver
-	trustedIssuers  map[string]bool
-	checkRevocation bool
-	clock           func() time.Time
-	allowedSkew     time.Duration
-	signerConfig    *VC20SignerConfig
+	keyResolver VC20KeyResolver
+	// holderKeyResolver resolves the key of a presentation's own proof. Unset,
+	// keyResolver does.
+	holderKeyResolver VC20KeyResolver
+	trustedIssuers    map[string]bool
+	checkRevocation   bool
+	clock             func() time.Time
+	allowedSkew       time.Duration
+	signerConfig      *VC20SignerConfig
 
 	// Presentation binding. A W3C VP proves holder binding with a proof over
 	// the presentation carrying the verifier's challenge and domain; without
@@ -83,6 +86,20 @@ type VC20HandlerOption func(*VC20Handler)
 func WithVC20KeyResolver(resolver VC20KeyResolver) VC20HandlerOption {
 	return func(h *VC20Handler) {
 		h.keyResolver = resolver
+	}
+}
+
+// WithVC20HolderKeyResolver sets the resolver for the key that signed a
+// presentation, apart from the resolver for the issuer's key.
+//
+// The two questions differ. The issuer's key is trusted or it is not, and a
+// trust service answers that. The holder's key only has to be the one that
+// signed this exchange: nobody vouches for a holder, and a self-certifying
+// identifier such as a did:key carries its key in itself. Sending it to a
+// trust registry makes every holder fail, because no registry lists one.
+func WithVC20HolderKeyResolver(resolver VC20KeyResolver) VC20HandlerOption {
+	return func(h *VC20Handler) {
+		h.holderKeyResolver = resolver
 	}
 }
 
@@ -781,10 +798,14 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 	if vm == "" {
 		return "", errors.New("presentation proof has no verificationMethod")
 	}
-	if h.keyResolver == nil {
+	resolver := h.holderKeyResolver
+	if resolver == nil {
+		resolver = h.keyResolver
+	}
+	if resolver == nil {
 		return "", errors.New("no key resolver configured for presentation verification")
 	}
-	holderKey, err := h.keyResolver.ResolveKey(ctx, vm)
+	holderKey, err := resolver.ResolveKey(ctx, vm)
 	if err != nil {
 		return "", fmt.Errorf("resolving holder key %q: %w", vm, err)
 	}
