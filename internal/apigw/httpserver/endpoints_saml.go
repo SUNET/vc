@@ -212,12 +212,12 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// that only the external API returns).
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
 		if derivs := s.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-			derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
+			derived, replaced, derr := credential.ApplyDerivationsReplacing(derivs, claims, time.Now(), nil)
 			if derr != nil {
 				span.SetStatus(codes.Error, derr.Error())
 				return nil, fmt.Errorf("SAML derivations failed: %w", derr)
 			}
-			credential.MergeDerived(claims, derived, derivs)
+			credential.MergeDerived(claims, derived, replaced)
 		}
 	}
 

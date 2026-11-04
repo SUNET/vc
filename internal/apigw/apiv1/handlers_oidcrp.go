@@ -245,12 +245,12 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// birthdate that only the external API returns).
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
 		if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-			derived, derr := credential.ApplyDerivations(derivs, cc.identity, time.Now())
+			derived, replaced, derr := credential.ApplyDerivationsReplacing(derivs, cc.identity, time.Now(), nil)
 			if derr != nil {
 				span.SetStatus(codes.Error, derr.Error())
 				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
 			}
-			credential.MergeDerived(cc.identity, derived, derivs)
+			credential.MergeDerived(cc.identity, derived, replaced)
 		}
 	}
 

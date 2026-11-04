@@ -364,11 +364,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// output feeds the next, so a dependent derivation must
 				// read the verified value rather than one a previous step
 				// computed over it.
-				derived, err := credential.ApplyDerivationsPinned(derivs, docData, time.Now(), proved)
+				derived, replaced, err := credential.ApplyDerivationsReplacing(derivs, docData, time.Now(), proved)
 				if err != nil {
 					return nil, err
 				}
-				credential.MergeDerived(docData, derived, derivs)
+				credential.MergeDerived(docData, derived, replaced)
 
 				// Reapplied last. The configuration says these claims come
 				// from the presentation, so they win - but a derivation

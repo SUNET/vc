@@ -36,12 +36,30 @@ func TestCopyReplacesAnExistingObject(t *testing.T) {
 		"nested":   map[string]any{"other": "kept", "alias_name": "old"},
 	}
 
-	out, err := ApplyDerivations(list, claims, time.Now())
+	out, replaced, err := ApplyDerivationsReplacing(list, claims, time.Now(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"name": "ALICE"}, out["alias"])
 
 	doc := CloneNestedClaims(claims)
-	MergeDerived(doc, out, list)
+	MergeDerived(doc, out, replaced)
 	assert.Equal(t, map[string]any{"name": "ALICE"}, doc["alias"], "the obsolete field is gone")
 	assert.Equal(t, map[string]any{"other": "kept", "alias_name": "ALICE"}, doc["nested"], "siblings of a leaf copy stay")
+}
+
+// A copy whose input is absent writes nothing, so it clears nothing, even
+// when a later step writes under its output path.
+func TestASkippedCopyClearsNothing(t *testing.T) {
+	list := []primitives.Derivation{
+		{Copy: &primitives.CopyArgs{Input: "missing", Output: "identity"}},
+		{Lowercase: &primitives.LowercaseArgs{Input: "identity.name"}},
+	}
+	claims := map[string]any{"identity": map[string]any{"name": "ALICE", "country": "SE"}}
+
+	out, replaced, err := ApplyDerivationsReplacing(list, claims, time.Now(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, replaced, "the copy wrote nothing")
+
+	doc := CloneNestedClaims(claims)
+	MergeDerived(doc, out, replaced)
+	assert.Equal(t, map[string]any{"name": "alice", "country": "SE"}, doc["identity"])
 }

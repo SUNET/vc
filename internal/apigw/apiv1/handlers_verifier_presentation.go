@@ -106,7 +106,7 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// clones for the same reason.
 	previewData := credential.CloneNestedClaims(storable)
 	now := time.Now()
-	derived, err := credential.ApplyDerivations(accepted.Derivations, storable, now)
+	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, storable, now, nil)
 	if err != nil {
 		// Not every derivation failure is ours. A scope deriving age from
 		// a required birthdate gets whatever the credential carried, and a
@@ -122,7 +122,7 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		}
 		return serverFault(fmt.Errorf("failed to apply derivations for preview: %w", err))
 	}
-	credential.MergeDerived(previewData, derived, accepted.Derivations)
+	credential.MergeDerived(previewData, derived, replaced)
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {
 		return serverFault(fmt.Errorf("failed to resolve defaults for preview: %w", err))

@@ -35,11 +35,11 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	verified := storedClaims(authCtx.VerifiedClaims)
 	doc := credential.CloneNestedClaims(verified)
 
-	derived, err := credential.ApplyDerivations(accepted.Derivations, verified, now)
+	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, verified, now, nil)
 	if err != nil {
 		return nil, err
 	}
-	credential.MergeDerived(doc, derived, accepted.Derivations)
+	credential.MergeDerived(doc, derived, replaced)
 
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {
