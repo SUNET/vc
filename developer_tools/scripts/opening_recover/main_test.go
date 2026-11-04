@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// A config without common or apigw is refused with an error, not a panic.
+func TestAConfigWithoutCommonIsRefused(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("apigw: {}\n"), 0o600))
+
+	code, err := run(t.Context(), []string{"-config", configPath, "-scope", "nym_auth", "-input", "x"}, io.Discard)
+	require.Error(t, err)
+	assert.Equal(t, exitError, code)
+}
 
 // Sources with different input counts cannot share one -input list, so
 // -source selects the one to reproduce.

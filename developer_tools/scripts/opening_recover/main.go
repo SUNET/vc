@@ -181,7 +181,7 @@ type entry struct {
 // keyedOpening is an hkdf or hmac opening, which the tool reproduces.
 type keyedOpening struct {
 	where   string
-	opening primitives.KeyedOpening
+	opening primitives.ValueOpener
 }
 
 // underivedOpening is an opening with nothing to derive, and where it
@@ -195,8 +195,11 @@ type underivedOpening struct {
 // to_wallet entry when path is empty. A non-empty source limits it to that
 // source scope.
 func findEntry(cfg *model.Cfg, scope, source string, path []string) (*entry, error) {
+	if cfg.Common == nil || cfg.APIGW == nil {
+		return nil, fmt.Errorf("scope %q configures no auxiliary_data: the config needs common and apigw sections", scope)
+	}
 	meta := cfg.Common.CredentialMetadata[scope]
-	if meta == nil || meta.AuxiliaryData == nil || cfg.APIGW == nil {
+	if meta == nil || meta.AuxiliaryData == nil {
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data", scope)
 	}
 	toWallet := meta.AuxiliaryData.ToWallet
