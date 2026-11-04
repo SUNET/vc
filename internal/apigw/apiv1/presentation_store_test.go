@@ -45,3 +45,36 @@ func TestVerifiedMDocClaimsIssueAfterTheMongoStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"birth_date": "1990-01-15"}, doc)
 }
+
+// A map or array element passes only the fields its MDDL Elements declare.
+func TestFilterAgainstMDDLDropsUndeclaredNestedFields(t *testing.T) {
+	schema := &mdoc.MDDLSchema{Claims: map[string]mdoc.NamespaceClaims{"ns": {
+		"identity": {ValueType: "map", Elements: map[string]mdoc.ClaimMetadata{
+			"given_name": {ValueType: "tstr"},
+			"born":       {ValueType: "full-date"},
+		}},
+		"privileges": {ValueType: "array", Elements: map[string]mdoc.ClaimMetadata{
+			"category": {ValueType: "tstr"},
+		}},
+		"free_form": {ValueType: "map"},
+	}}}
+	doc := map[string]any{
+		"identity": map[string]any{"given_name": "Alex", "born": "1990-01-15", "personal_administrative_number": "pan-1"},
+		"privileges": []any{
+			map[string]any{"category": "B", "secret": "x"},
+			"not-a-map",
+		},
+		"free_form": map[string]any{"kept": true},
+	}
+
+	out, err := filterAgainstMDDL(doc, schema)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{
+		"identity":   map[string]any{"given_name": "Alex", "born": "1990-01-15"},
+		"privileges": []any{map[string]any{"category": "B"}, "not-a-map"},
+		"free_form":  map[string]any{"kept": true},
+	}, out)
+
+	_, err = filterAgainstMDDL(map[string]any{"identity": "flat"}, schema)
+	require.Error(t, err, "a declared map holding a string is refused")
+}
