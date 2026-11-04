@@ -34,8 +34,9 @@ func presetCfg(scopeCfg *model.VerificationPresetScope) *model.Cfg {
 
 func conformingScope() *model.VerificationPresetScope {
 	return &model.VerificationPresetScope{
-		Format:   openid4vp.FormatZkpReq,
-		Validate: openid4vp.ProfileNymAuth,
+		Format:       openid4vp.FormatZkpReq,
+		Validate:     openid4vp.ProfileNymAuth,
+		SourceFormat: openid4vp.SourceFormatMsoMdoc,
 		Req: []openid4vp.ReqItem{{
 			FnID:   openid4vp.FunctionPseudonym,
 			Return: "nym-123",
@@ -75,6 +76,18 @@ func TestPresetProfileReadsMetaFromCredentialMetadata(t *testing.T) {
 	err := checkPresetValidationProfiles(cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "doctype_value")
+}
+
+// The profile judges what the UI publishes, and the UI publishes the
+// scope's source_format - so a preset that omits it is reported at startup,
+// rather than shipped as a button every wallet refuses as invalid_meta.
+func TestPresetProfileRequiresSourceFormat(t *testing.T) {
+	scope := conformingScope()
+	scope.SourceFormat = ""
+
+	err := checkPresetValidationProfiles(presetCfg(scope))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source_format")
 }
 
 // Opt-in. A preset that names no profile is not judged, because a

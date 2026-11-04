@@ -78,6 +78,7 @@ const (
 //	      credentials:
 //	        nym_auth:
 //	          format: circuit_zk
+//	          source_format: mso_mdoc
 //	          validate: nym_auth     # optional
 //	          req:
 //	            - id: pseudonym

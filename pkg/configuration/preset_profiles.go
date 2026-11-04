@@ -73,6 +73,10 @@ func presetQuery(cfg *model.Cfg, scope string, scopeCfg *model.VerificationPrese
 	if len(scopeCfg.ZKSystemType) > 0 {
 		query.Meta.ZKSystemType = scopeCfg.ZKSystemType
 	}
+	// Only circuit_zk carries it, matching what the UI publishes.
+	if openid4vp.IsZkpReqFormat(query.Format) {
+		query.Meta.SourceFormat = scopeCfg.SourceFormat
+	}
 	// The UI drops a circuit_zk scope's claims entirely, so judging them
 	// here would report a conflict the wire never carries. Everything
 	// else keeps them, because for those formats the claims ARE the query.

@@ -88,6 +88,12 @@ func validateNymAuth(query CredentialQuery) error {
 		return fmt.Errorf("meta.doctype_value is %q; the %s rulebook defines this credential as %q",
 			query.Meta.DoctypeValue, ProfileNymAuth, nymAuthDoctype)
 	}
+	// Presence only. Wallets refuse a query without it as invalid_meta, but
+	// the value is not judged: ok_source_format_not_judged.json passes a
+	// reserved one, and the specifications are still moving.
+	if query.Meta.SourceFormat == "" {
+		return fmt.Errorf("meta.source_format is required by the %s rulebook, and wallets refuse a query without it as invalid_meta", ProfileNymAuth)
+	}
 	// The shared matcher vectors list an explicit false among the
 	// well-formed-but-rulebook-unsatisfiable requests
 	// (ok_satisfiability_not_judged.json): the planner passes it and the

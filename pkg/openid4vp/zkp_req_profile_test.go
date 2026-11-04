@@ -12,7 +12,7 @@ import (
 func nymQuery(items ...ReqItem) CredentialQuery {
 	return CredentialQuery{
 		ID: "nym_attestation", Format: FormatZkpReq,
-		Meta: MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
+		Meta: MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1", SourceFormat: SourceFormatMsoMdoc},
 		Req:  items,
 	}
 }
@@ -183,6 +183,33 @@ func TestNymAuthProfilePinsTheDoctype(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			query := nymQuery(conforming)
 			query.Meta.DoctypeValue = tc.doctype
+
+			err := ValidateProfile(ProfileNymAuth, query)
+			if tc.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// source_format is REQUIRED by the rulebook, so the profile asks for it -
+// but only for its presence. A reserved value must still pass, as the shared
+// vector ok_source_format_not_judged.json expects.
+func TestNymAuthProfileRequiresSourceFormatButDoesNotJudgeIt(t *testing.T) {
+	conforming := pseudonymItem(map[string]any{"config": "known-offender-matching-ssc"})
+
+	for _, tc := range []struct{ name, sourceFormat, want string }{
+		{"mso_mdoc", SourceFormatMsoMdoc, ""},
+		{"bbs_cd", SourceFormatBbsCd, ""},
+		{"a reserved value", "reserved_future_format", ""},
+		{"absent", "", "meta.source_format is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := nymQuery(conforming)
+			query.Meta.SourceFormat = tc.sourceFormat
 
 			err := ValidateProfile(ProfileNymAuth, query)
 			if tc.want == "" {
