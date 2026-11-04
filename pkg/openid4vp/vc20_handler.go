@@ -291,6 +291,13 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract credential from VP: %w", err)
 		}
+		// The signature shows who signed this exchange. Binding means the
+		// signer is who the credential was issued to.
+		if h.requireHolderBinding {
+			if err := checkSubjectBinding(credMap, holder); err != nil {
+				return nil, fmt.Errorf("presentation is not bound to the credential's subject: %w", err)
+			}
+		}
 	} else if h.requireHolderBinding {
 		// A bare credential proves issuance, not presentation. Accepting one
 		// where binding was required is exactly the replay this guards.
@@ -855,8 +862,51 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 		return "", fmt.Errorf("unsupported cryptosuite %q for a presentation proof", cryptosuite)
 	}
 
-	holder, _ := vpMap["holder"].(string)
-	return holder, nil
+	// What is returned is the identifier the signature was verified under, not
+	// the presentation's own "holder" member, which the presenter writes. A
+	// presenter who signs with one key and names another as holder is refused.
+	signer := didOf(vm)
+	if claimed, _ := vpMap["holder"].(string); claimed != "" && didOf(claimed) != signer {
+		return "", fmt.Errorf("presentation names holder %q but is signed by %q", claimed, signer)
+	}
+	return signer, nil
+}
+
+// didOf is a verification method or DID URL without its fragment.
+func didOf(id string) string {
+	did, _, _ := strings.Cut(id, "#")
+	return did
+}
+
+// checkSubjectBinding requires the signer of a presentation to be a subject of
+// the credential it carries: credentialSubject.id (or one of several) names the
+// signer's DID. A credential that names no subject has nothing to bind to, and
+// is refused: otherwise anyone holding a copy could present it under a key of
+// their own.
+func checkSubjectBinding(credMap map[string]any, signer string) error {
+	var subjects []any
+	switch cs := credMap["credentialSubject"].(type) {
+	case map[string]any:
+		subjects = []any{cs}
+	case []any:
+		subjects = cs
+	}
+	named := false
+	for _, sub := range subjects {
+		m, _ := sub.(map[string]any)
+		id, _ := m["id"].(string)
+		if id == "" {
+			continue
+		}
+		named = true
+		if didOf(id) == signer {
+			return nil
+		}
+	}
+	if !named {
+		return errors.New("the credential names no subject (credentialSubject.id) to bind the presenter to")
+	}
+	return fmt.Errorf("the presentation is signed by %q, which is not a subject of the credential", signer)
 }
 
 // verifyECDSA2019 verifies a credential with ecdsa-rdfc-2019 cryptosuite.

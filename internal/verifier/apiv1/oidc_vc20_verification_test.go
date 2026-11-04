@@ -296,7 +296,7 @@ func w3cOIDCFixture(t *testing.T) (*Client, []byte, func(t *testing.T, nonce, do
 	created, err := issuerHandler.CreateCredential(ctx, &openid4vp.VC20CreateRequest{
 		Types:              []string{"UniversityDegreeCredential"},
 		AdditionalContexts: []string{degreeContext},
-		Subject:            map[string]any{"id": "did:example:subject", "degree": "Master of Science"},
+		Subject:            map[string]any{"id": "did:example:holder", "degree": "Master of Science"},
 	})
 	require.NoError(t, err)
 
