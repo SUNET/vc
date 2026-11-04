@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -77,6 +78,55 @@ func TestCircuitZkPresetPublishesReq(t *testing.T) {
 	assert.Equal(t, "eu.europa.ec.eudi.nym_auth.1", credential.Meta.DoctypeValue,
 		"circuit_zk is matched on doctype_value, like the mdoc it proves over")
 	require.Equal(t, nymReq, credential.Req)
+}
+
+// A circuit_zk query without meta.source_format is refused by wallets as
+// invalid_meta, and the picker posts back whatever meta /ui/metadata served.
+// So the configured value must be on the wire, and only for circuit_zk.
+func TestCircuitZkPresetPublishesSourceFormat(t *testing.T) {
+	cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{
+		Format:       openid4vp.FormatZkpReq,
+		Req:          nymReq,
+		SourceFormat: openid4vp.SourceFormatMsoMdoc,
+	}, nil)
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+	require.Len(t, reply.Presets["Nym"].Credentials, 1)
+
+	wire, err := json.Marshal(reply.Presets["Nym"].Credentials[0].Meta)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"doctype_value":"eu.europa.ec.eudi.nym_auth.1","source_format":"mso_mdoc"}`, string(wire))
+}
+
+func TestSourceFormatIsOmittedForOtherFormats(t *testing.T) {
+	schema := &mdoc.MDDLSchema{Format: "mso_mdoc", DocType: "eu.europa.ec.eudi.pid.1"}
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {Format: "mso_mdoc", MDDL: schema, Attributes: schema.Attributes()},
+			},
+		},
+		Verifier: &model.Verifier{
+			Presets: map[string]model.PresetDefinition{
+				"ZK": {Credentials: model.VerificationPreset{"pid": &model.VerificationPresetScope{
+					Format:       openid4vp.FormatMsoMdocZk,
+					ZKSystemType: []openid4vp.ZKSystemTypeSpec{{ID: "circuit-1", System: "longfellow"}},
+					SourceFormat: openid4vp.SourceFormatMsoMdoc,
+				}}},
+			},
+		},
+	}
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+	require.Len(t, reply.Presets["ZK"].Credentials, 1)
+	assert.Empty(t, reply.Presets["ZK"].Credentials[0].Meta.SourceFormat,
+		"source_format belongs to circuit_zk only")
 }
 
 // The claims fall-back exists for formats whose claims ARE the query.

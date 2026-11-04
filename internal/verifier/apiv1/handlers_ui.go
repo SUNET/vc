@@ -101,6 +101,10 @@ type UIPresetMeta struct {
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
+	// SourceFormat is meta.source_format, set for circuit_zk scopes from
+	// VerificationPresetScope.SourceFormat. It has to reach the browser, which
+	// posts this meta back as the query's meta.
+	SourceFormat string `json:"source_format,omitempty"`
 }
 
 // UIPresetClaim is a claim path within a preset credential.
@@ -414,6 +418,9 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
 					uiCred.Req = scopeCfg.Req
+					if scopeCfg.Format == openid4vp.FormatZkpReq {
+						uiCred.Meta.SourceFormat = scopeCfg.SourceFormat
+					}
 				}
 
 				// scopeCfg may be nil (scope with no overrides)

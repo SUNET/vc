@@ -137,6 +137,9 @@ const metadataResponseSchema = v.object({
                 // the DCQL query the wallet received, which is
                 // indistinguishable from "no ZK system offered" wallet-side.
                 zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
+                // circuit_zk's stored attestation. Left undeclared, v.object
+                // strips it and wallets refuse the query as invalid_meta.
+                source_format: v.optional(v.string()),
             }),
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),

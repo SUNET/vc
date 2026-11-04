@@ -908,6 +908,15 @@ type VerificationPresetScope struct {
 	// as a string if the exact digits are what you mean.
 	Req []openid4vp.ReqItem `yaml:"req,omitempty" validate:"omitempty,dive"`
 
+	// SourceFormat is meta.source_format of a circuit_zk query: the stored
+	// attestation the proof is made over, "mso_mdoc" or "bbs_cd".
+	//
+	// The rulebook requires it, and wallets refuse a query without it as
+	// invalid_meta. The value is not judged, so a request that omits or
+	// misnames it stays sendable for wallet testing. Setting it on a scope
+	// whose Format is not "circuit_zk" is refused at config load.
+	SourceFormat string `yaml:"source_format,omitempty" doc_example:"\"mso_mdoc\""`
+
 	// Validate names a profile to check this credential's request against
 	// AT STARTUP. Empty means no checking, which is the default.
 	//
