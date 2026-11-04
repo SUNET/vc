@@ -864,10 +864,36 @@ func TestDecodeMultibaseKey(t *testing.T) {
 		}
 	})
 
-	t.Run("base58-btc not implemented", func(t *testing.T) {
-		_, err := decodeMultibaseKey("z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")
-		if err == nil {
-			t.Error("expected error for base58-btc")
+	// Keys below are the ones in the W3C DID Core / Data Integrity examples and an Accredify
+	// DID document (Multikey, P-256), so the decoder is checked against values it did not make.
+	t.Run("Ed25519", func(t *testing.T) {
+		k, err := decodeMultibaseKey("z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := k.(ed25519.PublicKey); !ok {
+			t.Fatalf("got %T, want ed25519.PublicKey", k)
+		}
+	})
+
+	t.Run("P-256 compressed", func(t *testing.T) {
+		k, err := decodeMultibaseKey("zDnaeuGVUZ13VTEkfg6jB79b2gMLSiXBrAF7kGSP3Dnffm4it")
+		if err != nil {
+			t.Fatal(err)
+		}
+		pk, ok := k.(*ecdsa.PublicKey)
+		if !ok || pk.Curve != elliptic.P256() {
+			t.Fatalf("got %T, want a P-256 *ecdsa.PublicKey", k)
+		}
+		if !pk.Curve.IsOnCurve(pk.X, pk.Y) {
+			t.Fatal("decoded point is not on the curve")
+		}
+	})
+
+	t.Run("unknown multicodec", func(t *testing.T) {
+		// secp256k1 (0xe7): a real Multikey, but not a curve this package returns.
+		if _, err := decodeMultibaseKey("zQ3shokFTS3brHcDQrn82RUDfCZESWL1ZdCEJwekUDPQiYBme"); err == nil {
+			t.Error("expected error for an unsupported multicodec")
 		}
 	})
 
@@ -902,4 +928,37 @@ func TestExtractKeyFromJWK(t *testing.T) {
 			t.Error("expected error for invalid OKP JWK")
 		}
 	})
+}
+
+// A did:web issuer whose DID document carries its keys as publicKeyMultibase (Accredify's:
+// an Ed25519VerificationKey2020 and a P-256 Multikey). The credential names the second one.
+func TestExtractKeyFromMetadata_PublicKeyMultibase(t *testing.T) {
+	did := "did:web:issuer.example:organizations:a03de350"
+	meta := map[string]any{
+		"id": did,
+		"verificationMethod": []any{
+			map[string]any{"id": did + "#key-ed", "type": "Ed25519VerificationKey2020", "controller": did, "publicKeyMultibase": "z6MkqFENPafCx8qmm3KEE99cct7Qrr6eNbJR8inKLSE6vZiC"},
+			map[string]any{"id": did + "#key-p256", "type": "Multikey", "controller": did, "publicKeyMultibase": "zDnaeuGVUZ13VTEkfg6jB79b2gMLSiXBrAF7kGSP3Dnffm4it"},
+		},
+	}
+
+	k, err := extractKeyFromMetadata(meta, did+"#key-p256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pk, ok := k.(*ecdsa.PublicKey); !ok || pk.Curve != elliptic.P256() {
+		t.Fatalf("got %T, want a P-256 *ecdsa.PublicKey", k)
+	}
+
+	k, err = extractKeyFromMetadata(meta, did+"#key-ed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := k.(ed25519.PublicKey); !ok {
+		t.Fatalf("got %T, want ed25519.PublicKey", k)
+	}
+
+	if _, err := extractKeyFromMetadata(meta, did+"#absent"); err == nil {
+		t.Fatal("a verification method that is not in the document must not resolve")
+	}
 }
