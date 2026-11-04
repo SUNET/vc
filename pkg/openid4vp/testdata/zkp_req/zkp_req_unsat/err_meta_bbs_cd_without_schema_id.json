@@ -1,0 +1,24 @@
+{
+  "description": "bbs_cd needs schema_id_value.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "bbs_cd",
+      "doctype_value": "d"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "meta_type_value_invalid"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "description": "ver 2 and a huge integer are integers: the planner only judges the type; ver != 1 is unsatisfiable, not malformed.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "h",
+        "params": {
+          "ver": 2
+        }
+      },
+      {
+        "fn_id": "age_check",
+        "return": "a"
+      }
+    ]
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "pseudonym",
+          "handle": "h",
+          "params": {
+            "ver": 2
+          }
+        },
+        {
+          "function_id": "age_check",
+          "handle": "a",
+          "params": {}
+        }
+      ],
+      "system_filter": {},
+      "source_format": "mso_mdoc",
+      "meta_doctype": "eu.europa.ec.eudi.nym_auth.1",
+      "meta_schema_id": null
+    }
+  }
+}
