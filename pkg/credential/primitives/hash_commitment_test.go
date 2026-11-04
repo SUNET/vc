@@ -28,19 +28,19 @@ func TestKeyedOpening(t *testing.T) {
 	generators := []struct {
 		name     string
 		maxBytes int
-		opening  func(secretPath string, n, inputs int) KeyedOpening
+		opening  func(secretPath string, n, inputs int) ValueOpener
 	}{
-		{"hkdf", 64, func(secretPath string, n, inputs int) KeyedOpening {
+		{"hkdf", 64, func(secretPath string, n, inputs int) ValueOpener {
 			return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]string, inputs), Bytes: n}
 		}},
-		{"hmac", 32, func(secretPath string, n, inputs int) KeyedOpening {
+		{"hmac", 32, func(secretPath string, n, inputs int) ValueOpener {
 			return &HMACOpeningArgs{SecretPath: secretPath, Inputs: make([]string, inputs), Bytes: n}
 		}},
 	}
 	hkdf, hmac := generators[0], generators[1]
 
 	for _, tc := range []struct {
-		opening KeyedOpening
+		opening ValueOpener
 		values  []string
 		want    string
 	}{
@@ -60,7 +60,7 @@ func TestKeyedOpening(t *testing.T) {
 
 	for _, g := range generators {
 		for rule, tc := range map[string]struct {
-			opening KeyedOpening
+			opening ValueOpener
 			values  []string
 			want    string
 		}{

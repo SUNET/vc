@@ -38,9 +38,9 @@ type HKDFOpeningArgs = KeyedOpeningArgs[hkdfSHA256]
 // half its length (RFC 2104 section 5).
 type HMACOpeningArgs = KeyedOpeningArgs[hmacSHA256]
 
-// KeyedOpening is an hkdf or hmac opening: a function of the secret and the
+// ValueOpener is an hkdf or hmac opening: a function of the secret and the
 // values of its input claims.
-type KeyedOpening interface {
+type ValueOpener interface {
 	// OpenValues derives the opening from the values of the input claims,
 	// in their configured order.
 	OpenValues(values []string) ([]byte, error)

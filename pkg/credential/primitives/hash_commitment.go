@@ -133,12 +133,12 @@ func (o OpeningArgs) Inputs() (generator string, claims []string, err error) {
 }
 
 // Keyed returns the generator of an opening that sets hkdf or hmac alone.
-func (o OpeningArgs) Keyed() (KeyedOpening, bool) {
+func (o OpeningArgs) Keyed() (ValueOpener, bool) {
 	generator, err := o.generator()
 	if err != nil {
 		return nil, false
 	}
-	keyed, ok := generator.(KeyedOpening)
+	keyed, ok := generator.(ValueOpener)
 	return keyed, ok
 }
 
