@@ -160,6 +160,15 @@ func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (
 		return nil, fmt.Errorf("RDF dataset is nil")
 	}
 
+	// The document the holder signs has each embedded credential in its own graph (the
+	// verifiableCredential term is an @graph container). json-gold leaves it in the default
+	// graph, so every signer and verifier of a presentation has to put it there first, or the
+	// canonical form - and with it the signature - differs from every other implementation's.
+	// A no-op for a document without verifiableCredential links, and when already done.
+	if err := rc.NormalizeVerifiableCredentialGraph(); err != nil {
+		return nil, fmt.Errorf("placing embedded credentials in their graphs: %w", err)
+	}
+
 	// Map subject -> types
 	subjectTypes := make(map[string][]string)
 	for _, quads := range rc.dataset.Graphs {
@@ -595,10 +604,19 @@ func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 	// Initialize with VC roots
 	maps.Copy(nodesToMove, vcMoves)
 
+	// The presentation itself (the node holding verifiableCredential links) stays in the
+	// default graph.
+	presentationNodes := make(map[string]bool)
+	for _, quad := range defaultGraph {
+		if quad.Predicate != nil && quad.Predicate.GetValue() == vcPredicate && quad.Subject != nil {
+			presentationNodes[quad.Subject.GetValue()] = true
+		}
+	}
+
 	// Iteratively find all reachable nodes to move
 	// This is a simplification: we assume VCs are trees rooted at the VC node
 	// and don't share nodes with the VP or other VCs (except IRIs).
-	// We only move blank nodes.
+	// Nodes are followed by blank node and by IRI alike.
 	changed := true
 	for changed {
 		changed = false
@@ -611,8 +629,15 @@ func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 			// If subject is marked for move
 			if targetGraph, ok := nodesToMove[sub]; ok {
 				// Check object
-				if quad.Object != nil && strings.HasPrefix(quad.Object.GetValue(), "_:") {
+				if quad.Object != nil && (ld.IsBlankNode(quad.Object) || ld.IsIRI(quad.Object)) {
 					obj := quad.Object.GetValue()
+					// The whole description of the credential belongs to its graph, the nodes
+					// it names by IRI (credentialSubject.id, issuer, status entry) as much as
+					// the blank ones; a presentation that is not the credential's own is never
+					// pulled in.
+					if presentationNodes[obj] {
+						continue
+					}
 					// If object is not already marked, mark it
 					if _, exists := nodesToMove[obj]; !exists {
 						nodesToMove[obj] = targetGraph
