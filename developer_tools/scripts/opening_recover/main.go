@@ -47,6 +47,7 @@ func main() {
 type invocation struct {
 	configPath  string
 	scope       string
+	source      string
 	path        []string
 	inputs      []string
 	expect      []byte
@@ -62,7 +63,7 @@ func run(ctx context.Context, args []string, out io.Writer) (int, error) {
 	if err != nil {
 		return exitError, err
 	}
-	entry, err := findEntry(cfg, inv.scope, inv.path)
+	entry, err := findEntry(cfg, inv.scope, inv.source, inv.path)
 	if err != nil {
 		return exitError, err
 	}
@@ -118,6 +119,7 @@ func parseInvocation(args []string) (*invocation, error) {
 	flags.StringVar(&inv.configPath, "config", "", "the issuer's config file (required)")
 	flags.StringVar(&inv.scope, "scope", "", "the credential scope (required)")
 	flags.StringVar(&pathJSON, "path", "", `the entry's claims path as JSON, such as ["eu.europa.ec.eudi.nym_auth.1","ssc"]; optional when the credential has one to_wallet entry`)
+	flags.StringVar(&inv.source, "source", "", `reproduce one source scope, named by the path a "sources:" line prints; needed when the sources take different inputs`)
 	flags.StringVar(&expect, "expect", "", "a commitment in hex: exit 0 on a match, 2 on a mismatch")
 	flags.BoolVar(&inv.showOpening, "show-opening", false, "also print the opening")
 	flags.Var(&inputs, "input", "an hkdf or hmac input value; repeat in the configured order (required)")
@@ -190,8 +192,9 @@ type underivedOpening struct {
 }
 
 // findEntry returns the to_wallet entry of scope at path, or its one
-// to_wallet entry when path is empty.
-func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
+// to_wallet entry when path is empty. A non-empty source limits it to that
+// source scope.
+func findEntry(cfg *model.Cfg, scope, source string, path []string) (*entry, error) {
 	meta := cfg.Common.CredentialMetadata[scope]
 	if meta == nil || meta.AuxiliaryData == nil || cfg.APIGW == nil {
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data", scope)
@@ -208,7 +211,7 @@ func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
 		return nil, fmt.Errorf("scope %q has no to_wallet entry %q", scope, path)
 	}
 	e := &entry{alg: toWallet[i].Alg}
-	if err := e.collectOpenings(cfg.APIGW.DataSources, scope, path); err != nil {
+	if err := e.collectOpenings(cfg.APIGW.DataSources, scope, source, path); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -216,11 +219,12 @@ func findEntry(cfg *model.Cfg, scope string, path []string) (*entry, error) {
 
 // collectOpenings sorts the opening each source scope of scope configures
 // for path, each one validated, into those it reproduces and those with
-// nothing to derive. An entry with no keyed opening is refused.
-func (e *entry) collectOpenings(sources model.DataSources, scope string, path []string) error {
+// nothing to derive. An entry with no keyed opening is refused. A
+// non-empty source skips every other source scope.
+func (e *entry) collectOpenings(sources model.DataSources, scope, source string, path []string) error {
 	for _, src := range sources.SourceScopes() {
 		hc := primitives.HashCommitmentFor(src.Derivations, path)
-		if src.Scope != scope || hc == nil {
+		if src.Scope != scope || hc == nil || (source != "" && src.Where() != source) {
 			continue
 		}
 		if err := hc.Opening.Validate(); err != nil {
@@ -233,6 +237,9 @@ func (e *entry) collectOpenings(sources model.DataSources, scope string, path []
 		}
 	}
 	if len(e.keyed) == 0 {
+		if source != "" && len(e.underived) == 0 {
+			return fmt.Errorf("-source %q is no source scope of %q that derives %q", source, scope, path)
+		}
 		return e.nothingToReproduce(scope, path)
 	}
 	return nil
@@ -292,6 +299,9 @@ func (e *entry) reproduce(ctx context.Context, inputs []string) ([]result, error
 	for _, o := range e.keyed {
 		opening, err := o.opening.OpenValues(inputs)
 		if err != nil {
+			if len(e.keyed) > 1 {
+				return nil, fmt.Errorf("%s: %w; select one source scope with -source", o.where, err)
+			}
 			return nil, fmt.Errorf("%s: %w", o.where, err)
 		}
 		i := slices.IndexFunc(results, func(r result) bool { return subtle.ConstantTimeCompare(r.opening, opening) == 1 })

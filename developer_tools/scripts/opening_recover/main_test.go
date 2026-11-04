@@ -17,6 +17,65 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Sources with different input counts cannot share one -input list, so
+// -source selects the one to reproduce.
+func TestSourceSelectsOneSourceScope(t *testing.T) {
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "secret.key")
+	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte("s"), 32))), 0o600))
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, `
+common:
+  credential_metadata:
+    nym_auth:
+      format: mso_mdoc
+      auxiliary_data:
+        to_wallet:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, ssc]}
+apigw:
+  data_sources:
+    presentation:
+      scopes:
+        nym_auth:
+          from:
+            pid:
+              derivations:
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf: {secret_path: %[1]q, inputs: [issuing_country, personal_administrative_number], bytes: 16}
+            passport:
+              derivations:
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf: {secret_path: %[1]q, inputs: [issuing_country, document_type, document_number], bytes: 16}
+`, secretPath), 0o600))
+	const where = "apigw.data_sources.presentation.scopes.nym_auth.from."
+	recoverOpening := func(args ...string) (int, string, error) {
+		var out strings.Builder
+		code, err := run(t.Context(), append([]string{"-config", configPath, "-scope", "nym_auth"}, args...), &out)
+		return code, out.String(), err
+	}
+
+	code, out, err := recoverOpening("-source", where+"pid", "-input", "SE", "-input", "pan-100")
+	require.NoError(t, err)
+	assert.Equal(t, exitOK, code)
+	assert.Contains(t, out, where+"pid")
+	assert.NotContains(t, out, where+"passport")
+
+	_, out, err = recoverOpening("-source", where+"passport", "-input", "SE", "-input", "P", "-input", "123")
+	require.NoError(t, err)
+	assert.Contains(t, out, where+"passport")
+
+	_, _, err = recoverOpening("-input", "SE", "-input", "pan-100")
+	require.Error(t, err, "one list does not fit both sources")
+	assert.Contains(t, err.Error(), "-source")
+
+	_, _, err = recoverOpening("-source", where+"absent", "-input", "SE", "-input", "pan-100")
+	require.Error(t, err, "an unknown source scope is refused")
+}
+
 // The tool reproduces the commitment issuance writes, from the config and
 // the identifiers, for every source scope that derives it.
 func TestReproducesTheIssuedCommitment(t *testing.T) {
