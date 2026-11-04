@@ -122,7 +122,7 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		}
 		return serverFault(fmt.Errorf("failed to apply derivations for preview: %w", err))
 	}
-	credential.MergeNestedClaims(previewData, derived)
+	credential.MergeDerived(previewData, derived, accepted.Derivations)
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {
 		return serverFault(fmt.Errorf("failed to resolve defaults for preview: %w", err))

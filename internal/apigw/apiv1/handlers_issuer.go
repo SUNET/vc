@@ -368,7 +368,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				if err != nil {
 					return nil, err
 				}
-				credential.MergeNestedClaims(docData, derived)
+				credential.MergeDerived(docData, derived, derivs)
 
 				// Reapplied last. The configuration says these claims come
 				// from the presentation, so they win - but a derivation

@@ -3,6 +3,7 @@ package credential
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
@@ -77,8 +78,8 @@ func ApplyDerivationsPinned(list []primitives.Derivation, claims map[string]any,
 			return nil, fmt.Errorf("derivations[%d]: %w", i, err)
 		}
 		recordProvenance(generated, working, derived, "", !d.ReformatsInput() || generated[d.InputClaim()])
-		MergeNestedClaims(out, derived)
-		MergeNestedClaims(working, derived)
+		mergeDerivation(out, derived, d)
+		mergeDerivation(working, derived, d)
 		restore()
 	}
 	return out, nil
@@ -103,6 +104,56 @@ func recordProvenance(generated map[string]bool, existing, derived map[string]an
 		}
 		recordProvenance(generated, prior, sub, path+".", isGenerated)
 	}
+}
+
+// MergeDerived merges the output of ApplyDerivations into dst. A copy
+// replaces the whole object at its output path, so a field dst already
+// holds there does not outlive the copied value.
+func MergeDerived(dst, derived map[string]any, list []primitives.Derivation) {
+	for i := range list {
+		clearReplaced(dst, derived, &list[i])
+	}
+	MergeNestedClaims(dst, derived)
+}
+
+// mergeDerivation merges the output of one derivation into dst.
+func mergeDerivation(dst, derived map[string]any, d primitives.Derivation) {
+	clearReplaced(dst, derived, &d)
+	MergeNestedClaims(dst, derived)
+}
+
+// clearReplaced removes from dst the claim d is a copy to, when derived
+// carries a value for it.
+func clearReplaced(dst, derived map[string]any, d *primitives.Derivation) {
+	if d.Copy == nil {
+		return
+	}
+	parts := strings.Split(d.Copy.Output, ".")
+	if _, written := walkPath(derived, parts); !written {
+		return
+	}
+	parent, ok := walkPath(dst, parts[:len(parts)-1])
+	if !ok {
+		return
+	}
+	if m, isMap := parent.(map[string]any); isMap {
+		delete(m, parts[len(parts)-1])
+	}
+}
+
+// walkPath returns the value at parts in nested maps.
+func walkPath(root map[string]any, parts []string) (any, bool) {
+	var cur any = root
+	for _, part := range parts {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if cur, ok = m[part]; !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }
 
 // MergeNestedClaims deep-merges src into dst. When both dst[k] and src[k]
