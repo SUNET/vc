@@ -97,7 +97,7 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 		if err != nil {
 			return nil, err
 		}
-		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment); err != nil {
+		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment, false); err != nil {
 			return nil, err
 		}
 		delivered = append(delivered, openid4vci.AuxiliaryDataEntry{
@@ -113,7 +113,7 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 // writeCommitments writes each commitment the wallet sent at its path.
 func writeCommitments(doc *commitmentDocument, commitments []walletCommitment) error {
 	for _, commitment := range commitments {
-		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value); err != nil {
+		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value, true); err != nil {
 			return err
 		}
 	}
@@ -173,8 +173,11 @@ func newCommitmentDocument(format string, documentData []byte) (*commitmentDocum
 	return &commitmentDocument{commitmentCarrier: carrier, claims: claims}, nil
 }
 
-// setCommitment writes a commitment at path, in the entry's encoding.
-func (d *commitmentDocument) setCommitment(path []string, encoding string, commitment []byte) error {
+// setCommitment writes a commitment at path, in the entry's encoding. A
+// value already there is a server fault, unless the wallet sent the
+// commitment: then an equal value stands, and a different one is a
+// conflict the wallet can see.
+func (d *commitmentDocument) setCommitment(path []string, encoding string, commitment []byte, fromWallet bool) error {
 	text, err := d.claimText(encoding, commitment)
 	if err != nil {
 		return fmt.Errorf("path %q: %w", path, err)
@@ -184,7 +187,13 @@ func (d *commitmentDocument) setCommitment(path []string, encoding string, commi
 		return err
 	}
 	if existing, present := parent[key]; present && existing != nil {
-		return fmt.Errorf("the document data already carries a value at %q", path)
+		if !fromWallet {
+			return fmt.Errorf("the document data already carries a value at %q", path)
+		}
+		if existing == text {
+			return nil
+		}
+		return &openid4vci.Error{Err: openid4vci.ErrAuxiliaryDataConflict, ErrorDescription: fmt.Sprintf("auxiliary_data: the issuer holds a different commitment for %q", path)}
 	}
 	parent[key] = text
 	return nil
