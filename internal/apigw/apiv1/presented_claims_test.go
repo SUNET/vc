@@ -1131,7 +1131,7 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		},
 		{
 			file: "handlers_issuer.go", fn: "VCICredential",
-			calls: []string{"provedClaims", "restoreProvedClaims", "ApplyDerivationsPinned"},
+			calls: []string{"provedClaims", "restoreProvedClaims", "ApplyDerivationsReplacing", "openingSourceClaims"},
 		},
 	} {
 		t.Run(tc.fn, func(t *testing.T) {

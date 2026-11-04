@@ -678,12 +678,12 @@ vendor-circuit-zk-vectors: ## Refresh the vendored circuit_zk conformance vector
 
 # Reads the issuer's own config, so it links the same way the issuer does -
 # pkg/model reaches pkg/bbs, which is cgo.
-build-seed-recover: bbs-native-lib-ensure ## Build the seed_recover developer tool
-	$(info Building seed_recover)
+build-opening-recover: bbs-native-lib-ensure ## Build the opening_recover developer tool
+	$(info Building opening_recover)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags "$(WORKER_BUILD_TAGS)" \
-		$(BUILD_FLAGS) -o ./bin/seed_recover \
-		$(LDFLAGS) ./developer_tools/scripts/seed_recover/
+		$(BUILD_FLAGS) -o ./bin/opening_recover \
+		$(LDFLAGS) ./developer_tools/scripts/opening_recover/
 
 build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 	$(info Building check_issuer_jwks)

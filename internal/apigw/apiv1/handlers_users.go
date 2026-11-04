@@ -209,6 +209,8 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 // nested documents with plain Go type assertions.
 // The MongoDB driver v2 decodes nested BSON documents inside any-typed fields
 // as bson.D rather than map[string]any.
+// It returns new maps and slices and never writes into v, which a cache can
+// share between requests.
 func normalizeBSONValue(v any) any {
 	switch val := v.(type) {
 	case bson.D:
@@ -218,15 +220,17 @@ func normalizeBSONValue(v any) any {
 		}
 		return m
 	case map[string]any:
+		m := make(map[string]any, len(val))
 		for k, elem := range val {
-			val[k] = normalizeBSONValue(elem)
+			m[k] = normalizeBSONValue(elem)
 		}
-		return val
+		return m
 	case []any:
+		s := make([]any, len(val))
 		for i, elem := range val {
-			val[i] = normalizeBSONValue(elem)
+			s[i] = normalizeBSONValue(elem)
 		}
-		return val
+		return s
 	case bson.A:
 		m := make([]any, len(val))
 		for i, elem := range val {

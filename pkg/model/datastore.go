@@ -38,6 +38,12 @@ type CompleteDocument struct {
 	// The user lookup reads DocumentData and never returns the document
 	// itself. So it survives the cache without appearing in a response.
 	PresentedClaims []string `json:"presented_claims,omitempty" bson:"presented_claims,omitempty"`
+
+	// OpeningClaims holds the claims an assertion scope's hash_commitment
+	// openings read, as the identity provider asserted them. The callback
+	// derives and filters DocumentData, which drops or rewrites them. Tagged
+	// for JSON like PresentedClaims, which is what the cache serialises.
+	OpeningClaims map[string]any `json:"opening_claims,omitempty" bson:"opening_claims,omitempty"`
 }
 
 // DocumentList is a generic type for document list

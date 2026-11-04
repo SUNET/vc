@@ -295,6 +295,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	document := &model.CompleteDocument{}
+	var openingSource map[string]any
 
 	// For child sessions created in the pre-auth multi-client flow, use the
 	// source session ID (the original pre-auth code) for document lookup.
@@ -337,6 +338,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 			return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 		}
 
+		// Before the derivations below replace the document: an opening
+		// reads the source's claims, not the credential's.
+		openingSource = openingSourceClaims(authContext, document)
+
 		// Apply the scope's configured derivations to the cached document.
 		// Presentation is handled above (its derivations run against
 		// VerifiedClaims, not against the assembled doc). Assertion sources
@@ -364,11 +369,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// output feeds the next, so a dependent derivation must
 				// read the verified value rather than one a previous step
 				// computed over it.
-				derived, err := credential.ApplyDerivationsPinned(derivs, docData, time.Now(), proved)
+				derived, replaced, err := credential.ApplyDerivationsReplacing(derivs, docData, time.Now(), proved)
 				if err != nil {
 					return nil, err
 				}
-				credential.MergeNestedClaims(docData, derived)
+				credential.MergeDerived(docData, derived, replaced)
 
 				// Reapplied last. The configuration says these claims come
 				// from the presentation, so they win - but a derivation
@@ -517,23 +522,24 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Seed-backed claims, before anything is signed and before the issuer
-	// service is called at all.
-	//
-	// HERE rather than in each of the four signing paths inside the
-	// issuer, which is where this began. One call site means one place
-	// that decides what a commitment is worth, and the SIGNING FORMAT is
-	// in hand - which the issuer-side version had to be told separately,
-	// and got wrong when a caller named a scope configured for another
-	// format. The issuer now receives ssc as an ordinary claim and never
-	// sees a derivation secret.
-	//
-	// A no-op for a scope with no commitments configured, which is every
-	// scope in a deployment that does not use the feature.
-	documentData, err = c.injectCommitments(ctx, scope, format, documentData)
+	// Credential Auxiliary Data, before anything is signed: the
+	// commitments go into the document, and the openings into the
+	// response.
+	fromWallet, err := walletAuxiliaryData(req)
 	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", scope)
 		return nil, err
+	}
+	derivations, sourceClaims := c.sourceDerivations(scope, authContext, openingSource)
+	documentData, toWallet, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
+	if err != nil {
+		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)
+		return nil, err
+	}
+	if len(toWallet) > 0 && req.CredentialResponseEncryption == nil {
+		return nil, &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidEncryptionParameters,
+			ErrorDescription: "this credential sends an opening: request credential_response_encryption",
+		}
 	}
 
 	var credentials []openid4vci.Credential
@@ -581,7 +587,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 
-	return c.newCredentialResponse(credentials, scope, configurationID), nil
+	response := c.newCredentialResponse(credentials, scope, configurationID)
+	if len(toWallet) > 0 {
+		response.AddAuxiliaryData(toWallet...)
+	}
+	return response, nil
 }
 
 // newCredentialResponse assembles the Credential Response.

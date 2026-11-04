@@ -127,10 +127,11 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 	c, authCtx := newMdocPresentationTestClient(t, "sess-mdoc")
 
 	pScope := model.PresentationScope{
-		FromScope: "pid_mdoc",
-		RequiredClaims: map[string][]string{
-			"eu.europa.ec.eudi.pid.1.birth_date": nil,
-		},
+		From: map[string]model.PresentedCredential{"pid_mdoc": {
+			RequiredClaims: map[string][]string{
+				"eu.europa.ec.eudi.pid.1.birth_date": nil,
+			},
+		}},
 	}
 	// An mdoc element value, as fxamacker/cbor decodes it.
 	presented := map[string]any{
@@ -138,7 +139,7 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 		"eu.europa.ec.eudi.pid.1.birth_date": cbor.Tag{Number: 1004, Content: "1990-01-15"},
 	}
 
-	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented))
+	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, "pid_mdoc", presented))
 
 	stored := authCtx.VerifiedClaims["eu.europa.ec.eudi.pid.1.birth_date"]
 	assert.IsTypef(t, "", stored,
@@ -165,17 +166,18 @@ func TestTheUnrepresentableClaimRefusalCarriesNoClaimValue(t *testing.T) {
 	// names it. 9007199254740993 is 2^53+1.
 	const secret = "9007199254740993"
 	pScope := model.PresentationScope{
-		FromScope: "pid_mdoc",
-		RequiredClaims: map[string][]string{
-			"eu.europa.ec.eudi.pid.1.personal_administrative_number": nil,
-		},
+		From: map[string]model.PresentedCredential{"pid_mdoc": {
+			RequiredClaims: map[string][]string{
+				"eu.europa.ec.eudi.pid.1.personal_administrative_number": nil,
+			},
+		}},
 	}
 	presented := map[string]any{
 		"docType": "eu.europa.ec.eudi.pid.1",
 		"eu.europa.ec.eudi.pid.1.personal_administrative_number": int64(9007199254740993),
 	}
 
-	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented)
+	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, "pid_mdoc", presented)
 	require.Error(t, err, "a value the document cannot carry must be refused")
 	assert.NotContainsf(t, err.Error(), secret,
 		"the refusal returned the holder's claim to the caller: %v", err)

@@ -15,9 +15,9 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
+	"github.com/SUNET/vc/pkg/base64url"
 	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/grpchelpers"
-	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
@@ -404,13 +404,13 @@ func bbsKeyMaterial(which, path, inline string) ([]byte, error) {
 	case path != "" && inline != "":
 		return nil, fmt.Errorf("BBS %s key: set %s_key_path or %s_key, not both", which, which, which)
 	case path != "":
-		decoded, err := readBase64URLFile(path)
+		decoded, err := base64url.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load BBS %s key: %w", which, err)
 		}
 		return decoded, nil
 	case inline != "":
-		decoded, err := decodeBase64URL(inline)
+		decoded, err := base64url.Decode(inline)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load BBS %s key: %w", which, err)
 		}
@@ -419,13 +419,6 @@ func bbsKeyMaterial(which, path, inline string) ([]byte, error) {
 		return nil, fmt.Errorf("BBS %s key: set either %s_key_path or %s_key", which, which, which)
 	}
 }
-
-// decodeBase64URL and readBase64URLFile moved to pkg/helpers when the
-// apigw started loading seed derivation secrets written the same way;
-// these two names remain as the issuer's local spelling of them.
-func decodeBase64URL(value string) ([]byte, error) { return helpers.DecodeBase64URL(value) }
-
-func readBase64URLFile(path string) ([]byte, error) { return helpers.ReadBase64URLFile(path) }
 
 // bbsIssuer is the signer MakeJWP blind-signs with — the native one unless
 // a test has replaced it.
