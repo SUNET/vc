@@ -121,6 +121,16 @@ func TestAuxiliaryData(t *testing.T) {
 		assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err, rule)
 	}
 
+	// The issuer already holds a commitment at a to_issuer path: the same one
+	// stands, a different one is auxiliary_data_conflict.
+	stored := base64.StdEncoding.EncodeToString(walletPSC[:])
+	source := map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-200"}
+	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"`+stored+`"}`), fromWallet)
+	require.NoError(t, err, "the wallet sends the commitment the issuer holds")
+	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"AAAA"}`), fromWallet)
+	require.ErrorAs(t, err, &vciErr, "the wallet sends another commitment")
+	assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err)
+
 	proof := func(payload string) openid4vci.ProofJWTToken {
 		return openid4vci.ProofJWTToken("e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".c2ln")
 	}
@@ -228,6 +238,22 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	_, err = hc.NewOpening(claims)
 	require.NoError(t, err, "subject.pan resolves in the normalised claims")
 	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
+}
+
+// A memory store hands every request the same claims, so normalising them
+// must not write into them.
+func TestStoredClaimsLeavesTheCachedClaimsUnchanged(t *testing.T) {
+	nested := map[string]any{"pan": "pan-1"}
+	items := []any{map[string]any{"a": "b"}}
+	cached := map[string]any{"subject": nested, "list": items}
+
+	normalised := storedClaims(cached)
+
+	assert.Equal(t, map[string]any{"subject": map[string]any{"pan": "pan-1"}, "list": []any{map[string]any{"a": "b"}}}, normalised)
+	normalised["subject"].(map[string]any)["pan"] = "changed"
+	normalised["list"].([]any)[0] = "changed"
+	assert.Equal(t, "pan-1", nested["pan"], "the cached object is not shared")
+	assert.IsType(t, map[string]any{}, items[0], "the cached array is not shared")
 }
 
 // A claim opening is the bytes the claim holds, and the credential carries
