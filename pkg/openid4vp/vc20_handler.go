@@ -255,12 +255,10 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	// after unwrapping there is nothing left tying the credential to this
 	// session.
 	isPresentation := false
-	if types, ok := credMap["type"].([]any); ok {
-		for _, t := range types {
-			if t == "VerifiablePresentation" {
-				isPresentation = true
-				break
-			}
+	for _, t := range compactTypeNames(credMap["type"]) {
+		if t == "VerifiablePresentation" {
+			isPresentation = true
+			break
 		}
 	}
 
@@ -981,13 +979,7 @@ func (h *VC20Handler) buildResult(
 	}
 
 	// Extract types
-	if types, ok := credMap["type"].([]any); ok {
-		for _, t := range types {
-			if ts, ok := t.(string); ok {
-				result.Types = append(result.Types, ts)
-			}
-		}
-	}
+	result.Types = append(result.Types, compactTypeNames(credMap["type"])...)
 
 	// Extract credential subject
 	if cs, ok := credMap["credentialSubject"].(map[string]any); ok {
@@ -1316,6 +1308,27 @@ func (h *VC20Handler) checkPresentationBinding(proof map[string]any) error {
 	}
 	if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
 		return errors.New("presentation proof domain does not name this verifier")
+	}
+	return nil
+}
+
+// compactTypeNames reads the "type" member of a compacted JSON-LD document. It
+// is a single string or an array of strings: a document with one type may
+// spell it either way (VC Data Model 2.0, section 4.4), and the Accredify
+// wallet sends "type": "VerifiablePresentation". Anything else yields no
+// names, so a malformed member is never read as a presentation.
+func compactTypeNames(v any) []string {
+	switch t := v.(type) {
+	case string:
+		return []string{t}
+	case []any:
+		names := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				names = append(names, s)
+			}
+		}
+		return names
 	}
 	return nil
 }
