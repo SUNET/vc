@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // With nym_auth as the example: the issuer derives ssc's opening from the
@@ -198,6 +200,34 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	assert.Equal(t, want, disclosed, "the holder can withhold each commitment")
 	assert.NotContains(t, payload["commitments"], "ssc")
 	assert.NotContains(t, payload["commitments"], "psc")
+}
+
+// Nested verified claims reload from a Mongo-backed store as bson.D and
+// bson.A, and a dotted opening input must still resolve in them.
+func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
+	stored, err := bson.Marshal(&cache.AuthorizationContext{
+		DataSource:     string(model.DataSourcePresentation),
+		PresentedScope: "pid",
+		VerifiedClaims: map[string]any{"subject": map[string]any{"pan": "pan-1", "list": []any{map[string]any{"a": "b"}}}},
+	})
+	require.NoError(t, err)
+	var authContext cache.AuthorizationContext
+	require.NoError(t, bson.Unmarshal(stored, &authContext))
+	require.IsType(t, bson.D{}, authContext.VerifiedClaims["subject"], "the premise: the store returns bson.D")
+
+	c := &Client{cfg: &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
+		Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{"pid": {}}}},
+	}}}}}
+
+	_, claims := c.sourceDerivations("nym_auth", &authContext, nil)
+	secret := []byte(strings.Repeat("s", 32))
+	secretPath := filepath.Join(t.TempDir(), "seed.key")
+	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
+	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"subject.pan"}, Bytes: 16}
+	hc := primitives.HashCommitmentArgs{Path: []string{"commitments", "ssc"}, Opening: primitives.OpeningArgs{HKDF: &opening}}
+	_, err = hc.NewOpening(claims)
+	require.NoError(t, err, "subject.pan resolves in the normalised claims")
+	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
 }
 
 // A claim opening is the bytes the claim holds, and the credential carries

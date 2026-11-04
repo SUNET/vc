@@ -28,9 +28,16 @@ import (
 func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, document map[string]any) ([]primitives.Derivation, map[string]any) {
 	if authContext.DataSource == string(model.DataSourcePresentation) {
 		accepted := c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[authContext.PresentedScope]
-		return accepted.Derivations, authContext.VerifiedClaims
+		return accepted.Derivations, storedClaims(authContext.VerifiedClaims)
 	}
 	return c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)), document
+}
+
+// storedClaims is claims as plain maps and slices: a Mongo-backed store
+// returns nested objects as bson.D, which dotted claim paths cannot walk.
+func storedClaims(claims map[string]any) map[string]any {
+	normalised, _ := normalizeBSONValue(claims).(map[string]any)
+	return normalised
 }
 
 // applyAuxiliaryData writes the commitments of scope's auxiliary_data into
