@@ -93,6 +93,7 @@ func ApplyDerivationsReplacing(list []primitives.Derivation, claims map[string]a
 		mergeReplacing(working, derived, copied)
 		if copied != nil {
 			replaced = append(replaced, d.Copy.Output)
+			copyProvenance(generated, d.Copy.Input, d.Copy.Output)
 		}
 		restore()
 	}
@@ -118,6 +119,29 @@ func recordProvenance(generated map[string]bool, existing, derived map[string]an
 		}
 		recordProvenance(generated, prior, sub, path+".", isGenerated)
 	}
+}
+
+// copyProvenance gives each path under a copy's output the provenance of
+// the same path under its input, so a copied object keeps which of its
+// fields are generated. The copy replaced the whole output subtree, so the
+// provenance recorded there before is dropped.
+func copyProvenance(generated map[string]bool, input, output string) {
+	from, to := input+".", output+"."
+	carried := map[string]bool{}
+	for path, isGenerated := range generated {
+		if rest, under := strings.CutPrefix(path, from); under {
+			carried[rest] = isGenerated
+		}
+	}
+	for path := range generated {
+		if strings.HasPrefix(path, to) {
+			delete(generated, path)
+		}
+	}
+	for rest, isGenerated := range carried {
+		generated[to+rest] = isGenerated
+	}
+	generated[output] = generated[input]
 }
 
 // MergeDerived merges the output of ApplyDerivationsReplacing into dst.

@@ -295,6 +295,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	document := &model.CompleteDocument{}
+	var openingSource map[string]any
 
 	// For child sessions created in the pre-auth multi-client flow, use the
 	// source session ID (the original pre-auth code) for document lookup.
@@ -336,6 +337,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		default:
 			return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 		}
+
+		// Before the derivations below replace the document: an opening
+		// reads the source's claims, not the credential's.
+		openingSource = openingSourceClaims(authContext, document)
 
 		// Apply the scope's configured derivations to the cached document.
 		// Presentation is handled above (its derivations run against
@@ -524,7 +529,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	if err != nil {
 		return nil, err
 	}
-	derivations, sourceClaims := c.sourceDerivations(scope, authContext, document.DocumentData)
+	derivations, sourceClaims := c.sourceDerivations(scope, authContext, openingSource)
 	documentData, toWallet, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
 	if err != nil {
 		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)

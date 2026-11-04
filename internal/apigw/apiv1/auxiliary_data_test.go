@@ -240,6 +240,43 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
 }
 
+// An opening reads the claims its source supplied. For an assertion that is
+// what the callback captured, which the document filter may have dropped; for
+// the other sources it is the document before its derivations run.
+func TestOpeningSourceClaims(t *testing.T) {
+	document := &model.CompleteDocument{
+		DocumentData:  map[string]any{"given_name": "Alex"},
+		OpeningClaims: map[string]any{"personal_administrative_number": "pan-1"},
+	}
+	assertion := &cache.AuthorizationContext{DataSource: string(model.DataSourceAssertion)}
+	datastore := &cache.AuthorizationContext{DataSource: string(model.DataSourceDatastore)}
+
+	assert.Equal(t, document.OpeningClaims, openingSourceClaims(assertion, document), "the captured claims, not the filtered document")
+	assert.Equal(t, document.DocumentData, openingSourceClaims(datastore, document), "a datastore document is the source")
+	assert.Equal(t, document.DocumentData, openingSourceClaims(assertion, &model.CompleteDocument{DocumentData: document.DocumentData}),
+		"a document cached without captured claims gives its data")
+}
+
+// An opening that reads a claim the OIDC document filter drops still works,
+// because the callback captured the claim before the filter.
+func TestOIDCDocumentCarriesTheOpeningClaims(t *testing.T) {
+	c, _, _, _ := claimsTestClient(t)
+	cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), nil)
+	require.NoError(t, err)
+	cc.openingClaims = map[string]any{"sub": "opening-input"}
+
+	doc, err := c.buildOIDCDocument(cc, "https://issuer.example", true)
+	require.NoError(t, err)
+	assert.NotContains(t, doc.DocumentData, "sub", "the document filter drops the claim")
+	assert.Equal(t, map[string]any{"sub": "opening-input"}, doc.OpeningClaims)
+
+	encoded, err := json.Marshal(map[string]*model.CompleteDocument{"d": doc})
+	require.NoError(t, err)
+	var back map[string]*model.CompleteDocument
+	require.NoError(t, json.Unmarshal(encoded, &back))
+	assert.Equal(t, doc.OpeningClaims, back["d"].OpeningClaims, "the claims survive the JSON cache")
+}
+
 // A memory store hands every request the same claims, so normalising them
 // must not write into them.
 func TestStoredClaimsLeavesTheCachedClaimsUnchanged(t *testing.T) {

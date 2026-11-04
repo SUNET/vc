@@ -70,6 +70,34 @@ func HashCommitmentFor(list []Derivation, path []string) *HashCommitmentArgs {
 	return nil
 }
 
+// OpeningInputs returns the claims of source that the hash_commitment
+// derivations of list read as opening inputs, each a deep copy held under
+// its path as one literal key, so a later write into source or a filter on
+// it leaves them as they were. An input source lacks is left out.
+func OpeningInputs(list []Derivation, source map[string]any) map[string]any {
+	var out map[string]any
+	for _, d := range list {
+		if d.HashCommitment == nil {
+			continue
+		}
+		_, inputs, err := d.HashCommitment.Opening.Inputs()
+		if err != nil {
+			continue
+		}
+		for _, path := range inputs {
+			value, present := lookupClaim(source, path)
+			if !present {
+				continue
+			}
+			if out == nil {
+				out = map[string]any{}
+			}
+			out[path] = cloneClaimValue(value)
+		}
+	}
+	return out
+}
+
 // NewOpening produces the opening from the claims of the source data.
 func (a *HashCommitmentArgs) NewOpening(claims map[string]any) ([]byte, error) {
 	generator, err := a.Opening.generator()

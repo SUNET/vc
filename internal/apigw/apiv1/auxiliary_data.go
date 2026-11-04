@@ -24,13 +24,25 @@ import (
 
 // sourceDerivations returns the derivations of the data source this
 // issuance uses, and the claims they read: the verified presented claims
-// for a presentation source, the document data otherwise.
-func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, document map[string]any) ([]primitives.Derivation, map[string]any) {
+// for a presentation source, source otherwise.
+func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, source map[string]any) ([]primitives.Derivation, map[string]any) {
 	if authContext.DataSource == string(model.DataSourcePresentation) {
 		accepted := c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[authContext.PresentedScope]
 		return accepted.Derivations, storedClaims(authContext.VerifiedClaims)
 	}
-	return c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)), document
+	return c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)), source
+}
+
+// openingSourceClaims returns the claims an opening reads for a source other
+// than a presentation, as the source supplied them: a datastore or external
+// API document before its derivations run, and for an assertion the claims
+// the callback captured before it derived and filtered them. A document
+// cached without them gives its document data.
+func openingSourceClaims(authContext *cache.AuthorizationContext, document *model.CompleteDocument) map[string]any {
+	if authContext.DataSource == string(model.DataSourceAssertion) && len(document.OpeningClaims) > 0 {
+		return document.OpeningClaims
+	}
+	return document.DocumentData
 }
 
 // storedClaims is claims as plain maps and slices: a Mongo-backed store

@@ -14,6 +14,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// OpeningInputs keeps the claims the openings read, as copies, under their
+// paths, and nothing else.
+func TestOpeningInputs(t *testing.T) {
+	path := []string{"ns", "ssc"}
+	list := []Derivation{
+		{Lowercase: &LowercaseArgs{Input: "email"}},
+		{HashCommitment: &HashCommitmentArgs{Path: path, Opening: OpeningArgs{
+			HKDF: &HKDFOpeningArgs{SecretPath: "/unused", Inputs: []string{"country", "subject.pan", "absent"}, Bytes: 16},
+		}}},
+	}
+	source := map[string]any{"country": "SE", "subject": map[string]any{"pan": "pan-1"}, "email": "A@B.se"}
+
+	got := OpeningInputs(list, source)
+	assert.Equal(t, map[string]any{"country": "SE", "subject.pan": "pan-1"}, got)
+
+	source["subject"].(map[string]any)["pan"] = "changed"
+	assert.Equal(t, "pan-1", got["subject.pan"], "a later write into the source does not reach the copy")
+
+	assert.Nil(t, OpeningInputs([]Derivation{{Lowercase: &LowercaseArgs{Input: "email"}}}, source), "no opening, no claims")
+}
+
 // Known answers from a separate RFC 5869 HKDF-SHA256 and RFC 2104
 // HMAC-SHA256 in Python, over the construction in
 // docs/issuer/AUXILIARY_DATA.md, and one fixture per refusal of each keyed
