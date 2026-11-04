@@ -56,9 +56,23 @@ func TestVPResponse_PresentationAsJSONObject(t *testing.T) {
 	})
 
 	t.Run("the member order the wallet sent is kept", func(t *testing.T) {
+		// A W3C presentation with its members out of alphabetical order:
+		// "type" before "@context". Re-encoding through a Go map would
+		// sort them and put "@context" first, so the assertion below is
+		// an order check and not merely a round-trip check.
+		//
+		// W3C-shaped on purpose, although nothing on THIS branch requires
+		// it. The circuit_zk work in https://github.com/SUNET/vc/pull/829
+		// routes an array of objects that is not a W3C document into
+		// VPTokenRaw only, because that shape is a zkp_req presentation
+		// and must never reach VPToken. Probing member order with
+		// {"b":1,"a":2} asserted the opposite of that in passing, so the
+		// two could not both hold once integrated - and the shape of the
+		// object was never what this subtest was about.
+		const outOfOrder = `{"type": "VerifiablePresentation", "@context": "https://www.w3.org/ns/credentials/v2"}`
 		var r VPResponse
-		require.NoError(t, json.Unmarshal([]byte(`{"state":"s","vp_token":{"q":[{"b": 1, "a": 2}]}}`), &r))
-		assert.Equal(t, []string{`{"b":1,"a":2}`}, r.VPToken["q"])
+		require.NoError(t, json.Unmarshal([]byte(`{"state":"s","vp_token":{"q":[`+outOfOrder+`]}}`), &r))
+		assert.Equal(t, []string{`{"type":"VerifiablePresentation","@context":"https://www.w3.org/ns/credentials/v2"}`}, r.VPToken["q"])
 	})
 
 	for name, body := range map[string]string{
