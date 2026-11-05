@@ -39,7 +39,7 @@ func (u *configUpgrade) presentedCredential(n ast.Node, presented, document *laz
 			if err != nil {
 				return listEntry{}, err
 			}
-			entry := listEntry{keyField: "path", key: path, valueField: "values"}
+			entry := listEntry{keyField: "path", key: path, valueField: "values", omitEmpty: true}
 			shape, err := presented.read()
 			if err != nil || !shape.bareAlias(key) || slices.ContainsFunc(secrets, path.Equal) {
 				return entry, err

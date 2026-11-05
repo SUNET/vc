@@ -414,13 +414,18 @@ func (d *Document) upgradeAuxiliaryData() error {
 // scalar other than an integer that YAML reads as no string, such as true
 // or 1.5, is the key of its text, so it becomes a quoted string. With
 // nullString, the string "null" is every element of an array, so it
-// becomes YAML null.
+// becomes YAML null. A path that is no list stays as written: main read
+// none, and the strict decoder refuses it.
 func (d *Document) stringPath(path ast.Node, nullString bool) error {
-	components, err := items(path)
+	path, err := unwrap(path)
 	if err != nil {
 		return err
 	}
-	for _, component := range components {
+	sequence, isList := path.(*ast.SequenceNode)
+	if !isList {
+		return nil
+	}
+	for _, component := range sequence.Values {
 		component, err := unwrap(component)
 		if err != nil {
 			return err
