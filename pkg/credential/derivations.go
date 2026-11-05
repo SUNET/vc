@@ -314,17 +314,12 @@ func cloneValue(v any) any {
 	}
 }
 
-// CloneNestedClaims returns a copy of src with nested map[string]any values
-// cloned recursively so later in-place merges on the working map do not
-// mutate the caller's original claims map.
+// CloneNestedClaims returns a deep copy of src, objects and arrays
+// included, so a write into the copy leaves the caller's claims unchanged.
 func CloneNestedClaims(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for k, v := range src {
-		if m, ok := v.(map[string]any); ok {
-			out[k] = CloneNestedClaims(m)
-			continue
-		}
-		out[k] = v
+		out[k] = cloneValue(v)
 	}
 	return out
 }

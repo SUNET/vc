@@ -92,3 +92,16 @@ func TestASkippedCopyClearsNothing(t *testing.T) {
 	require.NoError(t, MergeDerived(doc, out, replaced))
 	assert.Equal(t, map[string]any{"name": "alice", "country": "SE"}, doc["identity"])
 }
+
+// A copy into an element of an array of the claims writes into the
+// derivations' own copy: the caller's claims are unchanged whatever the
+// derivations return.
+func TestApplyDerivations_CopyLeavesTheCallersArrayUnchanged(t *testing.T) {
+	claims := map[string]any{"birthdate": "1996-01-30", "items": []any{map[string]any{"name": "first"}}}
+	_, err := ApplyDerivations([]primitives.Derivation{{Copy: &primitives.CopyArgs{
+		Input:  claimpath.Keys("birthdate"),
+		Output: claimpath.New(claimpath.Key("items"), claimpath.Index(0), claimpath.Key("name")),
+	}}}, claims, time.Now(), nestedShapes)
+	assert.Equal(t, map[string]any{"birthdate": "1996-01-30", "items": []any{map[string]any{"name": "first"}}}, claims,
+		"the derivations returned %v", err)
+}
