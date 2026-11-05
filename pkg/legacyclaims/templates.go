@@ -165,10 +165,14 @@ func (d *Document) claimMappings(template ast.Node, queries []query, convert boo
 	}
 	old := renderNameMappings(mappings)
 	conversion := convertNameMappings(mappings, queries)
+	line, err := d.lineAt(entry.Key.GetToken().Position)
+	if err != nil {
+		return err
+	}
 	d.rewrites = append(d.rewrites, Rewrite{
 		File: d.file,
 		Path: entry.GetPath(),
-		Line: entry.Key.GetToken().Position.Line,
+		Line: line,
 		Old:  old,
 		New:  conversion.text,
 		Note: conversion.note,
@@ -447,13 +451,9 @@ func (d *Document) replaceEntry(entry *ast.MappingValueNode, text string) error 
 }
 
 // IsTemplateFile reports whether a file holds presentation request
-// templates: a "templates" list, or one template with a "dcql" query.
+// templates: a "templates" list, or one template with a "dcql" query. A
+// merge key of the root sets the keys it merges.
 func IsTemplateFile(d *Document) bool {
-	for _, key := range []string{"templates", "dcql"} {
-		entry, err := child(d.root, key)
-		if err == nil && entry != nil {
-			return true
-		}
-	}
-	return false
+	keys, err := d.rootKeys()
+	return err == nil && (slices.Contains(keys, "templates") || slices.Contains(keys, "dcql"))
 }

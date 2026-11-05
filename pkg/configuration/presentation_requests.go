@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -240,7 +241,77 @@ func upgradeTemplates(filePath string, src []byte) ([]byte, []legacyclaims.Rewri
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
+	if doc.Flattens() {
+		if doc, err = resolveTemplates(filePath, src); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := legacyclaims.UpgradeTemplates(doc, false); err != nil {
+		return nil, nil, err
+	}
+	text, err := doc.Bytes()
+	if err != nil {
+		return nil, nil, err
+	}
+	return text, doc.Rewrites(), nil
+}
+
+// resolveTemplates reads the text gopkg.in/yaml.v2 decodes from a
+// presentation request file: a list of templates when it holds a
+// non-empty "templates" list, and one template otherwise.
+func resolveTemplates(filePath string, src []byte) (*legacyclaims.Document, error) {
+	root := reflect.TypeFor[PresentationRequestTemplate]()
+	if hasTemplateList(src) {
+		root = reflect.TypeFor[PresentationRequestConfig]()
+	}
+	return legacyclaims.Resolve(filePath, src, root)
+}
+
+// UpgradeTemplateFile rewrites the claim spellings of earlier releases in
+// the text of a presentation request file, keeping every comment, and
+// writes each claim_mappings map in the keyed form where that form maps
+// the same claims. The rewrite of a file with a YAML alias, merge key or
+// repeated key must load as the rewrite of the text gopkg.in/yaml.v2 reads
+// from the file loads; otherwise UpgradeTemplateFile refuses the file with
+// legacyclaims.ErrInPlace.
+func UpgradeTemplateFile(filePath string, src []byte) ([]byte, []legacyclaims.Rewrite, error) {
+	doc, err := legacyclaims.Parse(filePath, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !doc.Flattens() {
+		return convertTemplates(doc)
+	}
+	flat, err := resolveTemplates(filePath, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	flatText, _, err := convertTemplates(flat)
+	if err != nil {
+		return nil, nil, err
+	}
+	want, err := readTemplateFile(filePath, flatText)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A rewrite in place that fails, or whose text loads otherwise, met a
+	// spelling an alias, a merge key or a repeated key reads.
+	text, rewrites, err := convertTemplates(doc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", filePath, legacyclaims.ErrInPlace)
+	}
+	got, err := readTemplateFile(filePath, text)
+	if err != nil || len(got.deprecations) != len(want.deprecations) || !reflect.DeepEqual(want.templates, got.templates) {
+		return nil, nil, fmt.Errorf("%s: %w", filePath, legacyclaims.ErrInPlace)
+	}
+	return text, rewrites, nil
+}
+
+// convertTemplates rewrites the claim spellings of doc in place, and
+// writes each claim_mappings map in the keyed form where that form maps
+// the same claims.
+func convertTemplates(doc *legacyclaims.Document) ([]byte, []legacyclaims.Rewrite, error) {
+	if err := legacyclaims.UpgradeTemplates(doc, true); err != nil {
 		return nil, nil, err
 	}
 	text, err := doc.Bytes()
@@ -265,7 +336,12 @@ func loadTemplateFile(filePath string) (templateFile, error) {
 	if err != nil {
 		return templateFile{}, fmt.Errorf("failed to read file: %w", err)
 	}
+	return readTemplateFile(filePath, fileBytes)
+}
 
+// readTemplateFile reads the templates of the text of a presentation
+// request file.
+func readTemplateFile(filePath string, fileBytes []byte) (templateFile, error) {
 	// Reject configs that still carry the removed presentation-request
 	// transformation keys. gopkg.in/yaml.v2 silently ignores unknown
 	// fields, so without this check an old template with

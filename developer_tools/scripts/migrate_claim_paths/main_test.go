@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -104,6 +105,58 @@ func TestMigrateKeepsTheMeaningAndTheComments(t *testing.T) {
 				want.Templates[i].ClaimMappings, got.Templates[i].ClaimMappings = openid4vp.ClaimMappings{}, openid4vp.ClaimMappings{}
 			}
 			assert.Equal(t, want.Templates, got.Templates)
+		})
+	}
+}
+
+// The converter rewrites a file with a YAML alias in place when the
+// rewrite reads as the file does. It leaves the file as written, and names
+// it, when an alias reads a spelling the rewrite would give another
+// meaning: a claim read again as a URL, or an anchor the keyed
+// claim_mappings drops.
+func TestMigrateRewritesAFileWithAliasesWhenItKeepsItsMeaning(t *testing.T) {
+	const mapping = "apigw:\n  auth_providers:\n    oidc:\n      attribute_mapping:\n        birthdate:\n          claim: %s\n"
+	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - id: age\n          format: dc+sd-jwt\n%s          claims:\n            - path: [age_over_18]\n    claim_mappings:\n%s"
+	const meta = "x-meta: &meta\n  vct_values: [urn:credential:age:1]\n"
+	tests := []struct {
+		name, file string
+		// want is the file once converted, and empty when the converter
+		// leaves it as written.
+		want string
+	}{
+		{
+			name: "a configuration with an alias outside the claims",
+			file: "x-url: &url https://issuer.example\n" + fmt.Sprintf(mapping, "birthdate") + "  public_url: *url\n",
+			want: "x-url: &url https://issuer.example\n" + fmt.Sprintf(mapping, "[birthdate]") + "  public_url: *url\n",
+		},
+		{
+			name: "a configuration whose alias reads a claim as a URL",
+			file: fmt.Sprintf(mapping, "&name birthdate") + "  public_url: *name\n",
+		},
+		{
+			name: "a template with an alias outside the claims",
+			file: meta + fmt.Sprintf(template, "          meta: *meta\n", "      age_over_18: age_over_18\n"),
+			want: meta + fmt.Sprintf(template, "          meta: *meta\n", "      age:\n        - {path: [age_over_18], claim: age_over_18}\n"),
+		},
+		{
+			name: "a template whose alias reads a claim the keyed form drops",
+			file: fmt.Sprintf(template, "", "      age_over_18: &claim age_over_18\n    description: *claim\n"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "file.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tt.file), 0o600))
+			var report bytes.Buffer
+			require.NoError(t, run(t.Context(), []string{path}, &report))
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			want := tt.want
+			if want == "" {
+				want = tt.file
+				assert.Contains(t, report.String(), path, "the report names the file left as written")
+			}
+			assert.Equal(t, want, string(got))
 		})
 	}
 }
