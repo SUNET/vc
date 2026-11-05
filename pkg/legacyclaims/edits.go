@@ -59,6 +59,9 @@ type listEntry struct {
 	valueField string
 	// value replaces a scalar value when set.
 	value *claimpath.Pointer
+	// omitEmpty leaves out the value field when the value is an empty
+	// list, which reads as no value.
+	omitEmpty bool
 	// note ends the rewrite record with what else the entry changes.
 	note string
 }
@@ -124,6 +127,13 @@ func (d *Document) convertEntry(mapping *ast.MappingNode, mv *ast.MappingValueNo
 	}
 	oldKey := string(d.src[keyStart:colon])
 	head := item.keyField + ": " + keyText
+	empty, err := isEmptyList(mv.Value)
+	if err != nil {
+		return err
+	}
+	if item.omitEmpty && empty {
+		return d.convertBareEntry(mapping, mv, item, keyStart, strings.TrimSpace(oldKey), head)
+	}
 	if mapping.IsFlowStyle {
 		d.replace(keyStart, colon+1, "{"+head+", "+item.valueField+":")
 	} else {
@@ -146,6 +156,32 @@ func (d *Document) convertEntry(mapping *ast.MappingNode, mv *ast.MappingValueNo
 	}
 	d.record(mv, strings.TrimSpace(oldKey)+": "+valueText.old, "{"+head+", "+item.valueField+": "+valueText.new+"}"+item.note)
 	return nil
+}
+
+// convertBareEntry rewrites a map entry whose value is an empty list as a
+// list item without the value field.
+func (d *Document) convertBareEntry(mapping *ast.MappingNode, mv *ast.MappingValueNode, item listEntry, keyStart int, oldKey, head string) error {
+	end, err := d.valueEnd(mv)
+	if err != nil {
+		return err
+	}
+	if mapping.IsFlowStyle {
+		d.replace(keyStart, end, "{"+head+"}")
+	} else {
+		d.replace(keyStart, end, "- "+head)
+	}
+	d.record(mv, oldKey+": []", "{"+head+"}"+item.note)
+	return nil
+}
+
+// isEmptyList reports whether a node is a sequence without elements.
+func isEmptyList(n ast.Node) (bool, error) {
+	n, err := unwrap(n)
+	if err != nil {
+		return false, err
+	}
+	sequence, ok := n.(*ast.SequenceNode)
+	return ok && len(sequence.Values) == 0, nil
 }
 
 // valueTexts are the old and the new text of an entry's value, for a
