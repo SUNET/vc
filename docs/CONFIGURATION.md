@@ -830,7 +830,8 @@ reads it.
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].hash_commitment.unique`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].hash_commitment.unique`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].hash_commitment.unique`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].hash_commitment.unique`
 
 The issuer accepts one commitment per value of key, until an operator
-resets it.
+resets it. With a random opening each issuance draws a new commitment, so
+the credential issues once per value of key until a reset.
 
 | Field | Type    | Description                                                                               | Example                                     | Default | Required |
 | ----- | ------- | ----------------------------------------------------------------------------------------- | ------------------------------------------- | ------- | -------- |
