@@ -158,14 +158,18 @@ window.adminApp = function () {
             setTimeout(() => toast.remove(), 5000);
         },
 
-        /** Fetch wrapper that adds CSRF token header to mutating requests. */
-        apiFetch(url, opts = {}) {
+        /** Fetch wrapper that adds CSRF token header to mutating requests and shows the login screen on 401. */
+        async apiFetch(url, opts = {}) {
             opts.credentials = 'same-origin';
             const method = (opts.method || 'GET').toUpperCase();
             if (method !== 'GET' && method !== 'HEAD' && this.csrfToken) {
                 opts.headers = { ...opts.headers, 'X-CSRF-Token': this.csrfToken };
             }
-            return fetch(url, opts);
+            const resp = await fetch(url, opts);
+            if (resp.status === 401) {
+                this.authenticated = false;
+            }
+            return resp;
         },
 
         async init() {

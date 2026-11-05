@@ -40,16 +40,8 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, err
 	}
 
-	// Seed-backed claims, before anything is signed. A no-op for a scope
-	// with no commitments configured, which is every scope in a deployment
-	// that does not use the feature.
-	// The VCTM decides which claims become disclosures, so a commitment
-	// path it does not declare would be signed in the clear - see
-	// CredentialMetadata.checkDisclosable. Parsed here rather than trusted
-	// from configuration, because this is the document actually being
-	// signed.
-	// The same wording the builder's own parse uses, because this now runs
-	// first and an invalid VCTM must be reported the way it always was.
+	// Parsed before a status list entry is allocated, so an invalid VCTM
+	// takes none. The same wording the builder's own parse uses.
 	vctm := &sdjwtvc.VCTM{}
 	if err := json.Unmarshal(req.VCTM, vctm); err != nil {
 		c.log.Error(err, "failed to parse inline VCTM", "scope", req.Scope)

@@ -9,6 +9,65 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+// source_format only reaches the query through the circuit_zk format, so on
+// any other it is refused rather than silently dropped. The value itself is
+// not judged: an unknown source format must stay sendable for wallet testing.
+func TestVerificationPresetScopeSourceFormat(t *testing.T) {
+	v, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		scope   model.VerificationPresetScope
+		wantTag string
+	}{
+		{
+			name:    "without a format override is rejected",
+			scope:   model.VerificationPresetScope{SourceFormat: openid4vp.SourceFormatMsoMdoc},
+			wantTag: "source_format_requires_circuit_zk_format",
+		},
+		{
+			name:    "on another format is rejected",
+			scope:   model.VerificationPresetScope{Format: openid4vp.FormatMsoMdoc, SourceFormat: openid4vp.SourceFormatMsoMdoc},
+			wantTag: "source_format_requires_circuit_zk_format",
+		},
+		{
+			name:  "on circuit_zk is accepted",
+			scope: model.VerificationPresetScope{Format: openid4vp.FormatZkpReq, SourceFormat: openid4vp.SourceFormatMsoMdoc},
+		},
+		{
+			name:  "an unknown value on circuit_zk is accepted",
+			scope: model.VerificationPresetScope{Format: openid4vp.FormatZkpReq, SourceFormat: "reserved_future_format"},
+		},
+		{
+			name:  "circuit_zk without it is accepted",
+			scope: model.VerificationPresetScope{Format: openid4vp.FormatZkpReq},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := v.Struct(tc.scope)
+			if tc.wantTag == "" {
+				if err != nil {
+					t.Fatalf("expected acceptance, got: %v", err)
+				}
+				return
+			}
+			var verrs validator.ValidationErrors
+			if !errors.As(err, &verrs) {
+				t.Fatalf("expected validation errors, got %T: %v", err, err)
+			}
+			for _, ve := range verrs {
+				if ve.Tag() == tc.wantTag {
+					return
+				}
+			}
+			t.Fatalf("expected a %q failure, got: %v", tc.wantTag, err)
+		})
+	}
+}
+
 // TestVerificationPresetScopeZKSystemType pins the "mso_mdoc_zk needs a
 // zk_system_type" rule that VerificationPresetScope.ZKSystemType's doc
 // comment has always claimed.

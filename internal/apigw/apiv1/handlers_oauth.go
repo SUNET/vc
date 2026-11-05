@@ -736,7 +736,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate access token: %w", err)
 	}
-	c.log.Debug("Generated access token", "access_token", accessToken)
+	// The token is a bearer credential: log its length only.
+	c.log.Debug("Generated access token", "token_bytes", len(accessToken))
 
 	// Bind the public key to the generated access token
 

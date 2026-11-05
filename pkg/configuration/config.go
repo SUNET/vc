@@ -12,10 +12,14 @@ import (
 
 	"github.com/SUNET/vc/pkg/issuance"
 
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/nymauth"
+	"github.com/SUNET/vc/pkg/nymauth/circuits"
 	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -227,9 +231,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		}
 
 		// Needs the schemas, so it runs after the loop above.
-		if err := checkCommitmentTargets(cfg); err != nil {
+		if err := checkAuxiliaryData(cfg, serviceName); err != nil {
 			return nil, err
 		}
+		deriveAuxiliaryDataRequired(cfg)
 
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
@@ -282,11 +287,19 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkPreAuthOfferExposure(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	if err := checkPresentationScopeFromScope(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
 	if err := checkRandomDerivations(cfg); err != nil {
+		return nil, err
+	}
+
+	if err := checkNymAuthVerifier(cfg); err != nil {
 		return nil, err
 	}
 
@@ -299,6 +312,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	if err := checkPolicyClaimsAreNotCallerTemplated(cfg); err != nil {
+		return nil, err
+	}
+
+	if err := checkPresetValidationProfiles(cfg); err != nil {
 		return nil, err
 	}
 
@@ -329,33 +346,164 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	return nil
 }
 
-// checkCommitmentTargets settles every seed-backed claim against the
-// schemas this service has loaded, and refuses a configuration that would
-// not do what it says.
-//
-// The issuer cannot do this at ITS startup - it has no schemas, it
-// receives them inline per request - so without this the misconfiguration
-// surfaces when someone is waiting for a credential. And it surfaces
-// quietly: an mdoc signer emits the elements its schema declares and
-// ignores anything else in the document.
-//
-// The resolution itself lives in pkg/model and is the same call the issuer
-// makes at issuance. Two implementations of it had already drifted once.
-func checkCommitmentTargets(cfg *model.Cfg) error {
-	if cfg.Common == nil {
+// checkAuxiliaryData refuses auxiliary_data this issuer cannot honour.
+func checkAuxiliaryData(cfg *model.Cfg, serviceName string) error {
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if err := checkAuxiliaryDataEntries(scope, cfg.Common.CredentialMetadata[scope]); err != nil {
+			return err
+		}
+	}
+	if serviceName != "apigw" || cfg.APIGW == nil {
 		return nil
 	}
+	if err := checkToWalletEncryption(cfg); err != nil {
+		return err
+	}
+	return checkSourceOpenings(cfg)
+}
 
-	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
-		meta := cfg.Common.CredentialMetadata[scope]
-		if meta == nil || len(meta.Commitments) == 0 {
-			continue
+// checkSourceOpenings checks the hash_commitment derivations of each data
+// source scope against its credential's to_wallet entries.
+func checkSourceOpenings(cfg *model.Cfg) error {
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		meta := cfg.Common.CredentialMetadata[src.Scope]
+		if err := checkHashCommitmentDerivations(src, toWalletPaths(meta)); err != nil {
+			return err
 		}
-		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{MDoc: meta.MDDL, VCTM: meta.VCTM}); err != nil {
-			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
+		if err := checkOpeningClaims(src, meta); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// checkToWalletEncryption requires a credential encryption key for a
+// credential with to_wallet entries. Their openings travel only in an
+// encrypted Credential Response, and the Credential Endpoint refuses
+// credential_response_encryption without a key.
+func checkToWalletEncryption(cfg *model.Cfg) error {
+	if len(cfg.APIGW.IssuerMetadata.CredentialEncryption.Keys) > 0 {
+		return nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if len(toWalletPaths(cfg.Common.CredentialMetadata[scope])) > 0 {
+			return fmt.Errorf("common.credential_metadata.%s.auxiliary_data.to_wallet: an opening travels only in an encrypted Credential Response, which needs a key under apigw.issuer_metadata.credential_encryption.keys", scope)
+		}
+	}
+	return nil
+}
+
+// checkAuxiliaryDataEntries checks every entry of a credential's
+// auxiliary_data, and that no path has two.
+func checkAuxiliaryDataEntries(scope string, meta *model.CredentialMetadata) error {
+	if meta == nil || meta.AuxiliaryData == nil {
+		return nil
+	}
+	where := fmt.Sprintf("common.credential_metadata.%s.auxiliary_data", scope)
+	seen := map[string]bool{}
+	if err := checkAuxiliaryDataList(meta, where+".to_wallet", meta.AuxiliaryData.ToWallet, seen); err != nil {
+		return err
+	}
+	return checkAuxiliaryDataList(meta, where+".to_issuer", meta.AuxiliaryData.ToIssuer, seen)
+}
+
+func checkAuxiliaryDataList(meta *model.CredentialMetadata, where string, entries []openid4vci.AuxiliaryDataEntry, seen map[string]bool) error {
+	for i, entry := range entries {
+		if err := checkHashCommitmentEntry(meta, entry); err != nil {
+			return fmt.Errorf("%s[%d]: %w", where, i, err)
+		}
+		key := claimsPathKey(entry.Path)
+		if seen[key] {
+			return fmt.Errorf("%s[%d]: a second entry for path %q", where, i, entry.Path)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+// checkHashCommitmentEntry accepts a sha-256 hash_commitment entry whose
+// path names a claim the credential's format can carry a commitment in.
+func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.AuxiliaryDataEntry) error {
+	switch {
+	case entry.Type != openid4vci.AuxiliaryDataTypeHashCommitment:
+		return fmt.Errorf("type %q; this issuer implements %q", entry.Type, openid4vci.AuxiliaryDataTypeHashCommitment)
+	case entry.Alg != openid4vci.HashCommitmentAlgSHA256:
+		return fmt.Errorf("alg %q; this issuer implements %q", entry.Alg, openid4vci.HashCommitmentAlgSHA256)
+	case len(entry.Path) == 0:
+		return errors.New("the path is empty; it names the claim that holds the commitment")
+	case entry.Opening != "" || entry.Commitment != "":
+		return errors.New("metadata carries no opening or commitment")
+	case entry.Required:
+		return errors.New("required comes from the type metadata's mandatory flag")
+	}
+	return checkCommitmentClaim(meta, entry)
+}
+
+// deriveAuxiliaryDataRequired sets each to_issuer entry's required from the
+// mandatory flag the type metadata gives its claim.
+func deriveAuxiliaryDataRequired(cfg *model.Cfg) {
+	for _, meta := range cfg.Common.CredentialMetadata {
+		if meta == nil || meta.AuxiliaryData == nil {
+			continue
+		}
+		for i, entry := range meta.AuxiliaryData.ToIssuer {
+			meta.AuxiliaryData.ToIssuer[i].Required = claimMandatory(meta, entry.Path)
+		}
+	}
+}
+
+// toWalletPaths returns the to_wallet paths of a credential, by
+// claimsPathKey.
+func toWalletPaths(meta *model.CredentialMetadata) map[string][]string {
+	paths := map[string][]string{}
+	if meta == nil || meta.AuxiliaryData == nil {
+		return paths
+	}
+	for _, entry := range meta.AuxiliaryData.ToWallet {
+		paths[claimsPathKey(entry.Path)] = entry.Path
+	}
+	return paths
+}
+
+// checkHashCommitmentDerivations requires a source scope to fulfil each
+// to_wallet path with exactly one hash_commitment derivation.
+func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][]string) error {
+	fulfilled := map[string]bool{}
+	for i, d := range src.Derivations {
+		if d.HashCommitment == nil {
+			continue
+		}
+		if err := checkHashCommitmentDerivation(d.HashCommitment, toWallet, fulfilled); err != nil {
+			return fmt.Errorf("%s.derivations[%d].hash_commitment: %w", src.Where(), i, err)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(toWallet)) {
+		if !fulfilled[key] {
+			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %q of common.credential_metadata.%s.auxiliary_data",
+				src.Where(), toWallet[key], src.Scope)
+		}
+	}
+	return nil
+}
+
+func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string][]string, fulfilled map[string]bool) error {
+	key := claimsPathKey(hc.Path)
+	if _, ok := toWallet[key]; !ok {
+		return fmt.Errorf("path %q is no to_wallet entry of the credential's auxiliary_data", hc.Path)
+	}
+	if fulfilled[key] {
+		return fmt.Errorf("path %q is fulfilled twice", hc.Path)
+	}
+	fulfilled[key] = true
+	if err := hc.Opening.Validate(); err != nil {
+		return fmt.Errorf("opening: %w", err)
+	}
+	return nil
+}
+
+// claimsPathKey is a map key for a claims path pointer.
+func claimsPathKey(path []string) string {
+	return strings.Join(path, "\x00")
 }
 
 // checkRandomDerivations refuses the random primitive on a presentation
@@ -380,19 +528,19 @@ func checkRandomDerivations(cfg *model.Cfg) error {
 	if cfg == nil || cfg.APIGW == nil {
 		return nil
 	}
-
-	scopes := cfg.APIGW.DataSources.Presentation.Scopes
-	for _, scope := range slices.Sorted(maps.Keys(scopes)) {
-		for i, derivation := range scopes[scope].Derivations {
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		if src.Source != model.DataSourcePresentation {
+			continue
+		}
+		for i, derivation := range src.Derivations {
 			if derivation.Random != nil {
-				return fmt.Errorf("apigw.data_sources.presentation.scopes.%s.derivations[%d]: "+
+				return fmt.Errorf("%s.derivations[%d]: "+
 					"the random primitive is not supported on a presentation source, because derivations run "+
 					"once for the consent preview and again for issuance, so the generated value would differ "+
-					"between what the holder approves and what they receive", scope, i)
+					"between what the holder approves and what they receive", src.Where(), i)
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -419,6 +567,59 @@ func checkLegacyCredentialResponseEncryption(cfg *model.Cfg) error {
 			"configure a key instead")
 	}
 
+	return nil
+}
+
+// checkNymAuthVerifier refuses a nym_auth verifier configuration that
+// cannot be honoured.
+//
+// At config load, because every failure it catches would otherwise
+// surface as a REFUSED PROOF: an allowlist with two builds for one
+// configuration, an artifact that is not the one allowed, a
+// verifier_id in neither of the two forms rulebook v0.4 defines.
+// Each of those produces a pseudonym nobody reports or a circuit that
+// will not load, and an operator looking at a failed presentation has
+// no reason to suspect the configuration.
+func checkNymAuthVerifier(cfg *model.Cfg) error {
+	if cfg == nil || cfg.Verifier == nil {
+		return nil
+	}
+	// The pre-v0.4 format and member names, refused BEFORE the enable
+	// check: a configuration carrying them was written against the
+	// old wire shape, and starting with it silently ignored is the
+	// failure this refuses. They land in Extra rather than erroring
+	// on their own, so nothing else would notice.
+	//
+	// Named individually, with the replacement, because an operator
+	// reading "unknown member" would reasonably go looking for a typo
+	// rather than for a rename.
+	if err := refuseLegacyZkpReqKeys(cfg.Verifier.PreferredVPFormats); err != nil {
+		return err
+	}
+	if !cfg.Verifier.NymAuth.Enable {
+		return nil
+	}
+
+	if err := nymauth.CheckVerifierID(cfg.Verifier.NymAuth.VerifierID); err != nil {
+		return fmt.Errorf("verifier.nym_auth.verifier_id: %w", err)
+	}
+	if len(cfg.Verifier.NymAuth.Circuits.Allow) == 0 {
+		// Enabled with nothing allowed verifies nothing. Refused
+		// rather than started, because "on" and "cannot check a
+		// single proof" is a state nobody means to configure.
+		return fmt.Errorf("verifier.nym_auth is enabled but verifier.nym_auth.circuits.allow is empty, so no proof could be verified")
+	}
+	allowlist, err := circuits.NewAllowlist(cfg.Verifier.NymAuth.Circuits)
+	if err != nil {
+		return err
+	}
+	// And the ARTIFACTS, not only the entries describing them. An
+	// entry can be perfectly well-formed and name a file that is not
+	// there, or one whose digest moved when it was rebuilt - and both
+	// of those would otherwise surface as a refused proof.
+	if err := allowlist.Preload(context.Background()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -966,9 +1167,9 @@ func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) erro
 }
 
 // checkPresentationScopeFromScope rejects an apigw config whose
-// presentation-source scopes reference a from_scope that has no matching
-// common.credential_metadata entry. Without this guard, a typo (e.g.
-// from_scope: eudid instead of eduid) reaches buildIssuanceAuthDCQL /
+// presentation-source scopes accept a presented credential scope that has no
+// matching common.credential_metadata entry. Without this guard, a typo (e.g.
+// from: {eudid: ...} instead of eduid) reaches buildIssuanceAuthDCQL /
 // enforceScopeCredentialType and either fails to build a DCQL constraint or
 // dereferences a nil CredentialMetadata mid-flow — turning a config error
 // into a runtime failure only visible on a wallet round-trip.
@@ -979,22 +1180,17 @@ func checkPresentationScopeFromScope(cfg *model.Cfg, serviceName string) error {
 	if cfg.Common == nil {
 		return nil
 	}
-	scopes := cfg.APIGW.DataSources.Presentation.Scopes
-	if len(scopes) == 0 {
-		return nil
-	}
 	var missing []string
-	for _, scope := range slices.Sorted(maps.Keys(scopes)) {
-		fromScope := scopes[scope].FromScope
-		if fromScope == "" {
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		if src.Source != model.DataSourcePresentation {
 			continue
 		}
-		if _, ok := cfg.Common.CredentialMetadata[fromScope]; !ok {
-			missing = append(missing, fmt.Sprintf("apigw.data_sources.presentation.scopes.%s.from_scope=%q", scope, fromScope))
+		if _, ok := cfg.Common.CredentialMetadata[src.Presented]; !ok {
+			missing = append(missing, src.Where())
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("presentation from_scope references unknown credential_metadata entries: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("presentation from references unknown credential_metadata entries: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }
@@ -1030,6 +1226,74 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	}
 
 	return secrets, nil
+}
+
+// checkPreAuthOfferExposure refuses a configuration where
+// allow_preauth_offer would be a login bypass.
+//
+// The flag lets POST /api/v1/datastore/preauth_offer mint an offer for a
+// scope that is otherwise login-gated. On a deployment where that
+// endpoint has no authenticated principal in front of it, that is an open
+// endpoint for minting a credential whose whole point is that it requires
+// a login - available to anyone who can reach the port.
+//
+// Refused here rather than guarded in the handler, for the same reason
+// interactive_authorization is: with neither JWKS nor OIDC configured the
+// API-auth middleware is a pass-through, and the admin session it would
+// otherwise look for is granted anonymously when OIDC is absent. There is
+// no authenticated principal to require, so the only honest check is on
+// the configuration that left none.
+//
+// A scope whose auth_provider IS preauth is not covered: nothing is
+// bypassed by minting an offer for a credential that has no other way to
+// be issued, and that is the behaviour this endpoint already had.
+func checkPreAuthOfferExposure(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+
+	flagged := []string{}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Datastore.Scopes)) {
+		entry := cfg.APIGW.DataSources.Datastore.Scopes[scope]
+		if entry.AllowPreAuthOffer && entry.AuthProvider != model.AuthProviderPreAuth {
+			flagged = append(flagged, scope)
+		}
+	}
+	if len(flagged) == 0 {
+		return nil
+	}
+	named := strings.Join(flagged, ", ")
+
+	if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+		return fmt.Errorf(
+			"apigw.data_sources.datastore.scopes sets allow_preauth_offer on login-gated %s "+
+				"but apigw.api_server.api_auth configures neither jwks nor oidc: the flag lets "+
+				"/api/v1/datastore/preauth_offer mint an offer for a credential this scope "+
+				"otherwise gates behind a login, and without API authentication anyone who can "+
+				"reach the port may call it", named)
+	}
+
+	// Having a Bearer mode configured is not enough on its own, because
+	// the admin session is an alternative to it rather than a second check
+	// on top of it.
+	//
+	// With the admin UI on and no OIDC, /ui/login grants a session with
+	// admin_subject "anonymous" to anybody who asks, and SessionOrAPIAuth
+	// accepts a session INSTEAD of falling through to the Bearer
+	// middleware. So a deployment with jwks enabled and the admin UI on
+	// still exposes minting to an anonymous caller, and the JWKS
+	// configuration says nothing about it.
+	if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+		return fmt.Errorf(
+			"apigw.data_sources.datastore.scopes sets allow_preauth_offer on login-gated %s "+
+				"with apigw.admin_ui_enable true and apigw.api_server.api_auth.oidc disabled: "+
+				"the admin UI grants an anonymous session when OIDC is absent, and that session "+
+				"is accepted in place of a bearer token - so /api/v1/datastore/preauth_offer "+
+				"would be reachable without authenticating anybody. Configure oidc, or turn the "+
+				"admin UI off", named)
+	}
+
+	return nil
 }
 
 // checkInteractiveAuthorization refuses a configuration that advertises
@@ -1111,6 +1375,41 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 		}
 	}
 
+	return nil
+}
+
+// legacyZkpReqKeys maps every pre-v0.4 name onto the one that
+// replaced it. There are no aliases: rulebook v0.4 renamed these on
+// the wire, and a verifier that quietly accepted the old spelling
+// would send one shape while its operator believed it sent another.
+var legacyZkpReqKeys = map[string]string{
+	"circuit_id_values":           "system_id_values",
+	"circuit_proof_system_values": "proof_system_values",
+}
+
+// refuseLegacyZkpReqKeys stops a deployment whose configuration still
+// speaks the pre-v0.4 names.
+//
+// Startup rather than first presentation: the old keys would be
+// carried as unknown members, the offered lists would be empty, and
+// EVERY presentation would then be refused as naming a system the
+// request never offered - which reads as a wallet problem.
+func refuseLegacyZkpReqKeys(formats *openid4vp.VPFormatsSupported) error {
+	if formats == nil {
+		return nil
+	}
+	if _, legacy := formats.Extra["circuit_zk"]; legacy {
+		return fmt.Errorf("verifier.preferred_vp_formats.circuit_zk is the pre-v0.4 name; rename it to zkp_req")
+	}
+	if formats.ZkpReq == nil {
+		return nil
+	}
+	for old, replacement := range legacyZkpReqKeys {
+		if _, legacy := formats.ZkpReq.Extra[old]; legacy {
+			return fmt.Errorf("verifier.preferred_vp_formats.zkp_req.%s is the pre-v0.4 name; rename it to %s",
+				old, replacement)
+		}
+	}
 	return nil
 }
 
