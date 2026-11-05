@@ -87,8 +87,9 @@ type UniqueCommitmentStore interface {
 	// Accept stores each commitment for its key when the key holds none. It
 	// returns nil when every key holds its commitment, which stays until a
 	// reset. It returns a *UniqueCommitmentConflict when a key holds another
-	// commitment. On every error it removes the commitments this call
-	// stored, and leaves those that other calls stored.
+	// commitment. On an error it removes the commitments this call stored,
+	// and leaves those that other calls stored; when that removal fails, the
+	// error returned is the removal's.
 	Accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error
 	// Find returns the record key holds, or ErrNoDocuments.
 	Find(ctx context.Context, key UniqueCommitmentKey) (UniqueCommitmentRecord, error)
