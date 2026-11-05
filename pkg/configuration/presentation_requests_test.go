@@ -369,6 +369,34 @@ claim_mappings:
 	}
 }
 
+// The verifier README points presentation_requests_dir at the shipped
+// directory; overlapping oidc_scopes used to make LoadPresentationRequests
+// refuse it (#861).
+func TestLoadPresentationRequests_ShippedDirectory(t *testing.T) {
+	dir := filepath.Join("..", "..", "presentation_requests")
+	cfg, err := LoadPresentationRequests(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("shipped presentation_requests must load: %v", err)
+	}
+	if len(cfg.Templates) == 0 {
+		t.Fatal("expected shipped templates")
+	}
+	var profileOwners []string
+	for _, tmpl := range cfg.Templates {
+		for _, scope := range tmpl.OIDCScopes {
+			if scope == "profile" {
+				profileOwners = append(profileOwners, tmpl.ID)
+			}
+		}
+	}
+	if len(profileOwners) != 1 {
+		t.Fatalf("profile must belong to exactly one template, got %v", profileOwners)
+	}
+	if profileOwners[0] != "eudi_pid_basic" {
+		t.Fatalf("expected profile on eudi_pid_basic, got %v", profileOwners)
+	}
+}
+
 func TestLoadPresentationRequests_DuplicateIDs(t *testing.T) {
 	dir := t.TempDir()
 	tmpl := `id: "dup"
