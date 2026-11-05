@@ -6,8 +6,11 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"math/big"
+
+	mb "github.com/multiformats/go-multibase"
 )
 
 // ecdsaToJWK converts an ECDSA public key to JWK format.
@@ -195,17 +198,56 @@ func extractKeyFromJWK(jwk map[string]any) (crypto.PublicKey, error) {
 	}
 }
 
-// decodeMultibaseKey decodes a multibase-encoded public key (Ed25519).
+// Multicodec prefixes (unsigned varint) of the public key types a Multikey can carry.
+const (
+	multicodecEd25519 = 0xed
+	multicodecP256    = 0x1200
+	multicodecP384    = 0x1201
+	multicodecP521    = 0x1202
+)
+
+// decodeMultibaseKey decodes a multibase-encoded Multikey: multibase(multicodec || key).
+// Ed25519 and the NIST curves (compressed point) are understood, which is what a DID document's
+// publicKeyMultibase carries for the cryptosuites in use.
 func decodeMultibaseKey(multibase string) (crypto.PublicKey, error) {
 	if len(multibase) < 2 {
 		return nil, fmt.Errorf("multibase string too short")
 	}
 
-	// Handle 'z' prefix (base58-btc)
-	if multibase[0] == 'z' {
-		// For now, return error - full multibase/multicodec support would require additional dependencies
-		return nil, fmt.Errorf("base58-btc multibase decoding not implemented in trust package")
+	enc, decoded, err := mb.Decode(multibase)
+	if err != nil {
+		return nil, fmt.Errorf("decoding multibase: %w", err)
+	}
+	if enc != mb.Base58BTC {
+		return nil, fmt.Errorf("unsupported multibase encoding: %c", multibase[0])
 	}
 
-	return nil, fmt.Errorf("unsupported multibase encoding: %c", multibase[0])
+	codec, n := binary.Uvarint(decoded)
+	if n <= 0 {
+		return nil, fmt.Errorf("multikey has no multicodec prefix")
+	}
+	key := decoded[n:]
+
+	var curve elliptic.Curve
+	switch codec {
+	case multicodecEd25519:
+		if len(key) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid Ed25519 public key size: got %d, expected %d", len(key), ed25519.PublicKeySize)
+		}
+		return ed25519.PublicKey(key), nil
+	case multicodecP256:
+		curve = elliptic.P256()
+	case multicodecP384:
+		curve = elliptic.P384()
+	case multicodecP521:
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported multicodec 0x%x", codec)
+	}
+
+	x, y := elliptic.UnmarshalCompressed(curve, key)
+	if x == nil {
+		return nil, fmt.Errorf("invalid compressed %s point", curve.Params().Name)
+	}
+	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 }
