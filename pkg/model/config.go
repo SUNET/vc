@@ -3633,13 +3633,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					if len(meta.Display) > 0 {
 						display := make([]openid4vci.ClaimDisplayProperties, len(meta.Display))
 						for j, d := range meta.Display {
-							label := d.Label
-							if label == "" {
-								label = d.Name
-							}
 							display[j] = openid4vci.ClaimDisplayProperties{
 								Name:   d.Name,
-								Label:  label,
+								Label:  d.LabelOrName(),
 								Locale: d.Locale,
 							}
 						}

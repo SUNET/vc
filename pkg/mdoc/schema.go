@@ -121,16 +121,12 @@ type ClaimMetadata struct {
 	SVGID string `json:"svg_id,omitempty"`
 }
 
-// Label is the claim's display label: the Label of its first display
-// entry, else that entry's Name, else empty.
+// Label is the LabelOrName of the claim's first display entry, or empty.
 func (c ClaimMetadata) Label() string {
 	if len(c.Display) == 0 {
 		return ""
 	}
-	if c.Display[0].Label != "" {
-		return c.Display[0].Label
-	}
-	return c.Display[0].Name
+	return c.Display[0].LabelOrName()
 }
 
 // ClaimDisplay is a localized display label for a claim.
@@ -139,10 +135,18 @@ type ClaimDisplay struct {
 	Name   string `json:"name"`
 	// Label is a display label distinct from Name, for schemas that declare
 	// both. Attributes/Presentation below still key off Name (their
-	// existing, established behavior); ClaimMetadata.Label and Generate's
-	// mso_mdoc credential_metadata.claims mapping (pkg/model/config.go) take
-	// Label, and fall back to Name when it is empty.
+	// existing, established behavior); a label shown to a person is
+	// LabelOrName.
 	Label string `json:"label,omitempty"`
+}
+
+// LabelOrName is the label shown for the claim in this locale: Label, or
+// Name when Label is empty.
+func (d ClaimDisplay) LabelOrName() string {
+	if d.Label != "" {
+		return d.Label
+	}
+	return d.Name
 }
 
 // defaultLocale is used to bucket claims that declare no display info, so
