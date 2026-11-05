@@ -280,9 +280,10 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	}
 
 	holder := ""
+	holderVM := ""
 	if isPresentation {
 		if h.requireHolderBinding {
-			holder, err = h.verifyPresentationProof(ctx, credBytes, credMap)
+			holder, holderVM, err = h.verifyPresentationProof(ctx, credBytes, credMap)
 			if err != nil {
 				return nil, fmt.Errorf("presentation is not bound to this session: %w", err)
 			}
@@ -294,7 +295,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		// The signature shows who signed this exchange. Binding means the
 		// signer is who the credential was issued to.
 		if h.requireHolderBinding {
-			if err := checkSubjectBinding(credMap, holder); err != nil {
+			if err := checkSubjectBinding(credMap, holder, holderVM); err != nil {
 				return nil, fmt.Errorf("presentation is not bound to the credential's subject: %w", err)
 			}
 		}
@@ -781,45 +782,45 @@ func expandedTypes(credMap map[string]any) ([]string, error) {
 // Mirrors VPBuilder.BuildVC20Presentation, which signs the VP as an
 // RDFCredential with proofPurpose "authentication" and the challenge and
 // domain in the proof.
-func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byte, vpMap map[string]any) (string, error) {
+func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byte, vpMap map[string]any) (signer, verificationMethod string, err error) {
 	proof, err := h.extractProof(vpMap)
 	if err != nil {
-		return "", fmt.Errorf("presentation carries no usable proof: %w", err)
+		return "", "", fmt.Errorf("presentation carries no usable proof: %w", err)
 	}
 
 	// The proof has to be an authentication proof. An assertionMethod proof
 	// over a presentation would verify cryptographically while proving
 	// something else entirely.
 	if purpose, _ := proof["proofPurpose"].(string); purpose != "authentication" {
-		return "", fmt.Errorf("presentation proof purpose is %q, want \"authentication\"", purpose)
+		return "", "", fmt.Errorf("presentation proof purpose is %q, want \"authentication\"", purpose)
 	}
 
 	// Binding to THIS request. The signature covers these values, so a
 	// mismatch means the presentation was made for someone else - which is
 	// exactly what replay looks like.
 	if err := h.checkPresentationBinding(proof); err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	vm, _ := proof["verificationMethod"].(string)
 	if vm == "" {
-		return "", errors.New("presentation proof has no verificationMethod")
+		return "", "", errors.New("presentation proof has no verificationMethod")
 	}
 	resolver := h.holderKeyResolver
 	if resolver == nil {
 		resolver = h.keyResolver
 	}
 	if resolver == nil {
-		return "", errors.New("no key resolver configured for presentation verification")
+		return "", "", errors.New("no key resolver configured for presentation verification")
 	}
 	holderKey, err := resolver.ResolveKey(ctx, vm)
 	if err != nil {
-		return "", fmt.Errorf("resolving holder key %q: %w", vm, err)
+		return "", "", fmt.Errorf("resolving holder key %q: %w", vm, err)
 	}
 
 	vpCred, err := credential.NewRDFCredentialFromJSON(vpBytes, nil)
 	if err != nil {
-		return "", fmt.Errorf("parsing presentation as RDF: %w", err)
+		return "", "", fmt.Errorf("parsing presentation as RDF: %w", err)
 	}
 
 	// WHICH proof is verified has to be said out loud here. A presentation
@@ -837,7 +838,7 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 	// selection happened to land right.
 	vpProofValue, _ := proof["proofValue"].(string)
 	if vpProofValue == "" {
-		return "", errors.New("presentation proof has no proofValue")
+		return "", "", errors.New("presentation proof has no proofValue")
 	}
 
 	cryptosuite, _ := proof["cryptosuite"].(string)
@@ -845,31 +846,31 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 	case CryptosuiteEdDSA2022:
 		edKey, ok := holderKey.(ed25519.PublicKey)
 		if !ok {
-			return "", fmt.Errorf("holder key for %s is %T, want ed25519.PublicKey", cryptosuite, holderKey)
+			return "", "", fmt.Errorf("holder key for %s is %T, want ed25519.PublicKey", cryptosuite, holderKey)
 		}
 		if err := eddsaSuite.NewSuite().VerifyProof(vpCred, edKey, vpProofValue); err != nil {
-			return "", fmt.Errorf("presentation signature verification failed: %w", err)
+			return "", "", fmt.Errorf("presentation signature verification failed: %w", err)
 		}
 	case CryptosuiteECDSA2019:
 		ecKey, ok := holderKey.(*ecdsa.PublicKey)
 		if !ok {
-			return "", fmt.Errorf("holder key for %s is %T, want *ecdsa.PublicKey", cryptosuite, holderKey)
+			return "", "", fmt.Errorf("holder key for %s is %T, want *ecdsa.PublicKey", cryptosuite, holderKey)
 		}
 		if err := ecdsaSuite.NewSuite().VerifyProof(vpCred, ecKey, vpProofValue); err != nil {
-			return "", fmt.Errorf("presentation signature verification failed: %w", err)
+			return "", "", fmt.Errorf("presentation signature verification failed: %w", err)
 		}
 	default:
-		return "", fmt.Errorf("unsupported cryptosuite %q for a presentation proof", cryptosuite)
+		return "", "", fmt.Errorf("unsupported cryptosuite %q for a presentation proof", cryptosuite)
 	}
 
 	// What is returned is the identifier the signature was verified under, not
 	// the presentation's own "holder" member, which the presenter writes. A
 	// presenter who signs with one key and names another as holder is refused.
-	signer := didOf(vm)
+	signer = didOf(vm)
 	if claimed, _ := vpMap["holder"].(string); claimed != "" && didOf(claimed) != signer {
-		return "", fmt.Errorf("presentation names holder %q but is signed by %q", claimed, signer)
+		return "", "", fmt.Errorf("presentation names holder %q but is signed by %q", claimed, signer)
 	}
-	return signer, nil
+	return signer, vm, nil
 }
 
 // didOf is a verification method or DID URL without its fragment.
@@ -878,12 +879,24 @@ func didOf(id string) string {
 	return did
 }
 
-// checkSubjectBinding requires the signer of a presentation to be a subject of
-// the credential it carries: credentialSubject.id (or one of several) names the
-// signer's DID. A credential that names no subject has nothing to bind to, and
-// is refused: otherwise anyone holding a copy could present it under a key of
-// their own.
-func checkSubjectBinding(credMap map[string]any, signer string) error {
+// checkSubjectBinding requires the signer of a presentation to be a subject of the
+// credential it carries: credentialSubject.id (or one of several) names either the
+// signer's DID or the exact verification method that signed.
+//
+// A subject id that carries a fragment is compared whole. did:web:example.com#alice and
+// did:web:example.com#bob are different resources of one DID document, and a DID
+// document's verification methods may name different controllers, so dropping the
+// fragment would let whoever holds one of its keys present a credential the issuer made
+// out to the other. A subject named by its DID alone is bound by control of that DID,
+// which signing with one of its verification methods shows; did:key and did:jwk carry
+// the key in the identifier, and there the verification method is the subject id itself.
+//
+// A credential that names no subject has nothing to bind to, and is refused: otherwise
+// anyone holding a copy could present it under a key of their own. A deployment that
+// means to accept such a credential turns holder binding off for that query
+// (require_cryptographic_holder_binding), which is the question this answers, rather
+// than having this answer it for every query at once.
+func checkSubjectBinding(credMap map[string]any, signer, verificationMethod string) error {
 	var subjects []any
 	switch cs := credMap["credentialSubject"].(type) {
 	case map[string]any:
@@ -899,7 +912,7 @@ func checkSubjectBinding(credMap map[string]any, signer string) error {
 			continue
 		}
 		named = true
-		if didOf(id) == signer {
+		if id == signer || (verificationMethod != "" && id == verificationMethod) {
 			return nil
 		}
 	}
