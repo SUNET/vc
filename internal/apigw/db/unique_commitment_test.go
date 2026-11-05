@@ -63,6 +63,8 @@ func testUniqueCommitmentStoreContract(t *testing.T, store UniqueCommitmentStore
 	stored, err = store.Accept(ctx, key, first, now)
 	require.NoError(t, err)
 	assert.Equal(t, second, stored, "a refused reset leaves the commitment on record")
+	assert.NoError(t, store.Reset(ctx, key, UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "Case-1", At: now}),
+		"evidence references that differ in case are distinct")
 }
 
 func TestUniqueCommitmentColl_Mongo(t *testing.T) {

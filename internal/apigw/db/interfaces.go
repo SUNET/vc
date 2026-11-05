@@ -89,8 +89,9 @@ type UniqueCommitmentStore interface {
 	// Find returns the record key holds, or ErrNoDocuments.
 	Find(ctx context.Context, key UniqueCommitmentKey) (UniqueCommitmentRecord, error)
 	// Reset records the operator approval and removes the commitment key
-	// holds. ErrNoDocuments when key holds none; ErrResetEvidenceUsed when
-	// the approval's evidence reference already reset another commitment.
+	// holds. ErrNoDocuments when key holds none, or when a concurrent reset
+	// removed it first; ErrResetEvidenceUsed when the approval's evidence
+	// reference already reset another commitment.
 	Reset(ctx context.Context, key UniqueCommitmentKey, approval UniqueCommitmentReset) error
 }
 
