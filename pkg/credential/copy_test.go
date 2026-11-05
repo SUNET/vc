@@ -93,15 +93,43 @@ func TestASkippedCopyClearsNothing(t *testing.T) {
 	assert.Equal(t, map[string]any{"name": "alice", "country": "SE"}, doc["identity"])
 }
 
-// A copy into an element of an array of the claims writes into the
-// derivations' own copy: the caller's claims are unchanged whatever the
-// derivations return.
-func TestApplyDerivations_CopyLeavesTheCallersArrayUnchanged(t *testing.T) {
-	claims := map[string]any{"birthdate": "1996-01-30", "items": []any{map[string]any{"name": "first"}}}
-	_, err := ApplyDerivations([]primitives.Derivation{{Copy: &primitives.CopyArgs{
-		Input:  claimpath.Keys("birthdate"),
-		Output: claimpath.New(claimpath.Key("items"), claimpath.Index(0), claimpath.Key("name")),
-	}}}, claims, time.Now(), nestedShapes)
-	assert.Equal(t, map[string]any{"birthdate": "1996-01-30", "items": []any{map[string]any{"name": "first"}}}, claims,
-		"the derivations returned %v", err)
+// A derivation that writes into an element of an array of the claims, as
+// a copy's output or in place, writes into the derivations' own copy: the
+// caller's claims are unchanged. Merged into the document, the write lands
+// in that element, and the other elements and fields stay.
+func TestApplyDerivations_WriteIntoAnArrayElement(t *testing.T) {
+	first := func(key string) claimpath.Pointer {
+		return claimpath.New(claimpath.Key("items"), claimpath.Index(0), claimpath.Key(key))
+	}
+	for name, tc := range map[string]struct {
+		derivation primitives.Derivation
+		want       map[string]any
+	}{
+		"a copy": {
+			derivation: primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Keys("birthdate"), Output: first("name")}},
+			want:       map[string]any{"name": "1996-01-30", "kind": "A"},
+		},
+		"in place": {
+			derivation: primitives.Derivation{Lowercase: &primitives.LowercaseArgs{Input: first("kind")}},
+			want:       map[string]any{"name": "first", "kind": "a"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			given := func() map[string]any {
+				return map[string]any{"birthdate": "1996-01-30", "items": []any{
+					map[string]any{"name": "first", "kind": "A"},
+					map[string]any{"name": "second"},
+				}}
+			}
+			claims := given()
+			out, replaced, err := ApplyDerivationsReplacing([]primitives.Derivation{tc.derivation}, claims, time.Now(), nil, nestedShapes)
+			require.NoError(t, err)
+			assert.Equal(t, given(), claims, "the caller's claims are unchanged")
+
+			doc := CloneNestedClaims(claims)
+			require.NoError(t, MergeDerived(doc, out, replaced))
+			assert.Equal(t, []any{tc.want, map[string]any{"name": "second"}}, doc["items"])
+			assert.Equal(t, "1996-01-30", doc["birthdate"])
+		})
+	}
 }

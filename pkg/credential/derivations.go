@@ -152,11 +152,13 @@ func applyDerivation(working *primitives.Working, workingClaims, out map[string]
 		return claimpath.Pointer{}, err
 	}
 	generated.carry(inputLocation, output)
-	return output, nil
+	return derivedLocation(output)
 }
 
 // writeOutput writes one output of a derivation into the working claims
-// and into out, and records its provenance.
+// and into out, and records its provenance. A write into an element of an
+// array derives the whole array, as the working claims hold it after the
+// write, so merging out into the document writes the element in place.
 func writeOutput(working *primitives.Working, workingClaims, out map[string]any, w primitives.Write, isGenerated bool, generated provenance, issued claimpath.Shape) error {
 	location, err := issued.Locate(w.Path)
 	if err != nil {
@@ -166,7 +168,29 @@ func writeOutput(working *primitives.Working, workingClaims, out map[string]any,
 	if err := working.Write(w.Path, cloneValue(w.Value)); err != nil {
 		return err
 	}
-	return issued.Set(out, w.Path, w.Value)
+	derived, err := derivedLocation(location)
+	if err != nil {
+		return err
+	}
+	value, present, err := claimpath.Nested().Get(workingClaims, derived)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("the write at %s left no claim at %s", location, derived)
+	}
+	return claimpath.Nested().Set(out, derived, cloneValue(value))
+}
+
+// derivedLocation returns the location the derived claims hold a write at
+// location under: location itself when it holds only keys, and otherwise
+// the outermost array on its path.
+func derivedLocation(location claimpath.Pointer) (claimpath.Pointer, error) {
+	keys, ok := location.KeyPrefix()
+	if !ok {
+		return claimpath.Pointer{}, fmt.Errorf("%s writes no member of the document", location)
+	}
+	return keys, nil
 }
 
 // inputOf returns the claim a derivation reads, and its location in the
