@@ -621,28 +621,37 @@ func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 }
 
 // verifiableCredentialTerms are the spellings of the verifiableCredential key a document
-// may carry: the compact term, and the IRI an expanded document uses.
-var verifiableCredentialTerms = []string{
-	"verifiableCredential",
-	"https://www.w3.org/2018/credentials#verifiableCredential",
+// may carry, and whether the graph container is still in force under each.
+//
+// Under the compact term it is: the VC v2 context declares "@container": "@graph", so
+// every value is a graph, a bare {"id": ...} among them. Under the expanded IRI it is
+// not: expansion has already consumed the container, so a value there is a node object
+// in its own right, and {"@id": "_:b0"} is a reference to a graph defined elsewhere in
+// the same document - which is exactly what CredentialWithoutProofForTypes produces
+// through FromRDF. Wrapping that reference would build a second, empty graph and point
+// the presentation's link at it.
+var verifiableCredentialTerms = map[string]bool{
+	"verifiableCredential": true,
+	"https://www.w3.org/2018/credentials#verifiableCredential": false,
 }
 
 // wrapEmbeddedCredentialsInGraphs rewrites every embedded credential in the document into
 // an explicit {"@graph": <credential>}, and reports whether it changed anything. A value
-// that is not an object - an IRI naming a credential held elsewhere - is left alone, and
-// so is one that already carries "@graph".
+// that is not an object - an IRI naming a credential held elsewhere - is left alone, as
+// is one that already carries "@graph", and so is a bare node reference under the
+// expanded IRI.
 func wrapEmbeddedCredentialsInGraphs(node any) bool {
 	changed := false
 	switch n := node.(type) {
 	case map[string]any:
-		for _, term := range verifiableCredentialTerms {
+		for term, graphContainer := range verifiableCredentialTerms {
 			value, ok := n[term]
 			if !ok {
 				continue
 			}
 			switch v := value.(type) {
 			case map[string]any:
-				if wrapped, did := graphWrap(v); did {
+				if wrapped, did := graphWrap(v, graphContainer); did {
 					n[term] = wrapped
 					changed = true
 				}
@@ -652,7 +661,7 @@ func wrapEmbeddedCredentialsInGraphs(node any) bool {
 					if !ok {
 						continue
 					}
-					if wrapped, did := graphWrap(itemMap); did {
+					if wrapped, did := graphWrap(itemMap, graphContainer); did {
 						v[i] = wrapped
 						changed = true
 					}
@@ -678,9 +687,27 @@ func wrapEmbeddedCredentialsInGraphs(node any) bool {
 }
 
 // graphWrap puts one embedded credential in its own graph, reporting whether it had to.
-func graphWrap(cred map[string]any) (any, bool) {
+// Without the graph container it leaves a bare node reference alone: that names a graph
+// the document defines elsewhere, and is not a credential to be put in one.
+func graphWrap(cred map[string]any, graphContainer bool) (any, bool) {
 	if _, already := cred["@graph"]; already {
 		return cred, false
 	}
+	if !graphContainer && isNodeReference(cred) {
+		return cred, false
+	}
 	return map[string]any{"@graph": cred}, true
+}
+
+// isNodeReference reports whether a node object says nothing but which node it is.
+func isNodeReference(node map[string]any) bool {
+	if _, hasID := node["@id"]; !hasID {
+		return false
+	}
+	for key := range node {
+		if key != "@id" && key != "@index" {
+			return false
+		}
+	}
+	return true
 }

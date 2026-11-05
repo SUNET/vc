@@ -25,7 +25,6 @@ func TestDidOf(t *testing.T) {
 
 func TestCheckSubjectBinding(t *testing.T) {
 	const signer = "did:key:z6MkAlice"
-	const vm = signer + "#z6MkAlice"
 	for name, tc := range map[string]struct {
 		cred    string
 		wantErr string
@@ -35,7 +34,10 @@ func TestCheckSubjectBinding(t *testing.T) {
 		"the signer is one of several subjects": {`{"credentialSubject":[{"id":"did:key:z6MkBob"},{"id":"did:key:z6MkAlice"}]}`, ""},
 		"another subject":                       {`{"credentialSubject":{"id":"did:key:z6MkBob"}}`, "not a subject of the credential"},
 		// Holding a key of a DID document is not being every resource described in it:
-		// the fragment is what tells #alice from #bob, and it is not dropped.
+		// the fragment is what tells #alice from #bob, and it is not dropped. The local
+		// resolver reads a did:key out of the identifier whatever fragment follows, so
+		// this is a fragment a presenter can sign under at will - which is why what
+		// counts is derived from the DID rather than from the proof.
 		"another resource of the signer's DID": {`{"credentialSubject":{"id":"did:key:z6MkAlice#alice"}}`, "not a subject of the credential"},
 		"no subject id":                        {`{"credentialSubject":{"a":1}}`, "names no subject"},
 		"no credentialSubject":                 {`{}`, "names no subject"},
@@ -45,7 +47,7 @@ func TestCheckSubjectBinding(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var m map[string]any
 			require.NoError(t, json.Unmarshal([]byte(tc.cred), &m))
-			err := checkSubjectBinding(m, signer, vm)
+			err := checkSubjectBinding(m, signer)
 			if tc.wantErr == "" {
 				require.NoError(t, err)
 				return
@@ -88,15 +90,14 @@ func TestPresentationProofReturnsTheSigner(t *testing.T) {
 
 	t.Run("signed by the holder it names", func(t *testing.T) {
 		vp, m := build(signer)
-		got, gotVM, err := h.verifyPresentationProof(t.Context(), vp, m)
+		got, err := h.verifyPresentationProof(t.Context(), vp, m)
 		require.NoError(t, err)
 		assert.Equal(t, signer, got)
-		assert.Equal(t, signer+"#key-1", gotVM, "the verification method comes back whole, fragment and all")
 	})
 
 	t.Run("names another holder than the signer", func(t *testing.T) {
 		vp, m := build("did:key:z6MkBob")
-		_, _, err := h.verifyPresentationProof(t.Context(), vp, m)
+		_, err := h.verifyPresentationProof(t.Context(), vp, m)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "names holder")
 	})
@@ -148,23 +149,40 @@ func (f *bindingFixture) credential(t *testing.T, context, credType string, subj
 	return created.CredentialJSON
 }
 
-// present wraps credentials in a presentation signed by the fixture's holder key.
-func (f *bindingFixture) present(t *testing.T, credJSON []byte) []byte {
+// present wraps credentials in a presentation signed by the fixture's holder key, under
+// a verification method of the presenter's choosing - which is what it is, in a proof.
+func (f *bindingFixture) present(t *testing.T, credJSON []byte, verificationMethod string) []byte {
 	t.Helper()
 	vp, err := NewVPBuilder().BuildVC20Presentation([][]byte{credJSON}, f.holderKey, &VPBuildOptions{
-		HolderDID: f.signer, VerificationMethod: f.signer + "#key-1",
+		HolderDID: f.signer, VerificationMethod: verificationMethod,
 		Nonce: "nonce", Domain: "verifier", Cryptosuite: CryptosuiteECDSA2019, Created: time.Now().UTC(),
 	})
 	require.NoError(t, err)
 	return vp
 }
 
-// resolvers resolve the issuer's key and the holder's, and nothing else.
+// resolvers resolve the issuer's key, and the holder's under any fragment of the
+// holder's DID - which is what the local resolver does for did:key and did:jwk: it reads
+// the key out of the identifier and never looks at the fragment.
 func (f *bindingFixture) resolvers() []VC20HandlerOption {
 	return []VC20HandlerOption{
 		WithVC20KeyResolver(mapResolver{"did:example:issuer#key-1": &f.issuerKey.PublicKey}),
-		WithVC20HolderKeyResolver(mapResolver{f.signer + "#key-1": &f.holderKey.PublicKey}),
+		WithVC20HolderKeyResolver(anyFragmentResolver{did: f.signer, key: &f.holderKey.PublicKey}),
 	}
+}
+
+// anyFragmentResolver mirrors pkg/keyresolver's local resolver: a did:key or did:jwk
+// carries its key in the identifier, so whatever fragment follows is ignored.
+type anyFragmentResolver struct {
+	did string
+	key crypto.PublicKey
+}
+
+func (r anyFragmentResolver) ResolveKey(_ context.Context, vm string) (crypto.PublicKey, error) {
+	if didOf(vm) == r.did {
+		return r.key, nil
+	}
+	return nil, errors.New("resolution denied")
 }
 
 // TestPresentationMustBeSignedBySubject: end to end through VerifyAndExtract. A
@@ -175,7 +193,7 @@ func TestPresentationMustBeSignedBySubject(t *testing.T) {
 	const ctx, credType = "https://example.org/degree", "UniversityDegreeCredential"
 	f := newBindingFixture(t, ctx, credType)
 	present := func(subject string) []byte {
-		return f.present(t, f.credential(t, ctx, credType, map[string]any{"id": subject, "fullName": "Alice Example"}))
+		return f.present(t, f.credential(t, ctx, credType, map[string]any{"id": subject, "fullName": "Alice Example"}), f.signer+"#"+"z6MkAlice")
 	}
 	h := mustHandler(t, append(f.resolvers(), WithVC20PresentationBinding("nonce", "verifier"))...)
 
@@ -206,7 +224,7 @@ func TestPresentationOfACredentialWithNoSubjectID(t *testing.T) {
 
 	t.Run("refused where binding is required", func(t *testing.T) {
 		h := mustHandler(t, append(f.resolvers(), WithVC20PresentationBinding("nonce", "verifier"))...)
-		_, err := h.VerifyAndExtract(t.Context(), string(f.present(t, cred)))
+		_, err := h.VerifyAndExtract(t.Context(), string(f.present(t, cred, f.signer+"#z6MkAlice")))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "names no subject")
 	})
@@ -217,4 +235,43 @@ func TestPresentationOfACredentialWithNoSubjectID(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, res.HolderBound)
 	})
+}
+
+// TestPresentationCannotInventTheSubjectItIsBoundTo: the verification method in a proof
+// is the presenter's to write, and the local resolver reads a did:key out of the
+// identifier whatever fragment follows it. So a holder can sign with their own key under
+// did:key:<theirs>#bob. That must not make them the subject "did:key:<theirs>#bob" the
+// issuer named - what signing as a DID shows control of is derived from the DID, not
+// from the proof.
+func TestPresentationCannotInventTheSubjectItIsBoundTo(t *testing.T) {
+	const ctx, credType = "https://example.org/invented", "InventedCredential"
+	f := newBindingFixture(t, ctx, credType)
+	h := mustHandler(t, append(f.resolvers(), WithVC20PresentationBinding("nonce", "verifier"))...)
+
+	for name, tc := range map[string]struct {
+		subject, verificationMethod string
+		wantErr                     string
+	}{
+		"a fragment the presenter chose": {
+			subject: f.signer + "#bob", verificationMethod: f.signer + "#bob",
+			wantErr: "not a subject of the credential",
+		},
+		"the did:key verification method": {
+			subject: f.signer + "#z6MkAlice", verificationMethod: f.signer + "#z6MkAlice",
+		},
+		"the DID itself, signed under some other fragment": {
+			subject: f.signer, verificationMethod: f.signer + "#whatever",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cred := f.credential(t, ctx, credType, map[string]any{"id": tc.subject, "fullName": "Alice Example"})
+			_, err := h.VerifyAndExtract(t.Context(), string(f.present(t, cred, tc.verificationMethod)))
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
 }

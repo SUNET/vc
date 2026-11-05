@@ -104,7 +104,7 @@ func TestVerifyPresentationProof_SelectsTheHolderProof(t *testing.T) {
 		expectedDomain:       domain,
 	}
 
-	got, _, err := h.verifyPresentationProof(t.Context(), vpBytes, vpMap)
+	got, err := h.verifyPresentationProof(t.Context(), vpBytes, vpMap)
 	require.NoError(t, err, "the holder's own proof must be the one verified")
 	require.Equal(t, holder, got)
 }
