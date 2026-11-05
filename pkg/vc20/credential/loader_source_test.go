@@ -123,3 +123,44 @@ func TestContextWithoutASourceIsUntouched(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, url, doc.DocumentURL)
 }
+
+// LoadDocument answers from the cache before it consults a source, so
+// installing sources has to drop what is cached for those URLs. The W3C
+// base contexts are preloaded at construction with NO expiry, so without
+// this an operator's configured copy of one was ignored for the life of the
+// process, with nothing to say the setting had not taken.
+func TestSetContextSourcesEvictsCachedCopies(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	dir := t.TempDir()
+
+	const url = "https://ctx.example.org/cached-first.jsonld"
+	seedWithTTL(t, loader, url, `{"@context":{"Term":"https://example.org/stale"}}`)
+
+	path := filepath.Join(dir, "fresh.jsonld")
+	require.NoError(t, os.WriteFile(path, []byte(`{"@context":{"Term":"https://example.org/fresh"}}`), 0o600))
+	loader.SetContextSources(map[string]ContextSource{url: {File: path}})
+
+	doc, err := loader.LoadDocument(url)
+	require.NoError(t, err)
+	assert.Equal(t, url, doc.DocumentURL)
+	assert.Equal(t, "https://example.org/fresh", termIRI(t, loader, url, "Term"),
+		"the configured copy must win over what was already cached")
+}
+
+// Including a preloaded context, which is pinned with no expiry and would
+// otherwise never be reconsidered.
+func TestSetContextSourcesOverridesAPreloadedContext(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	dir := t.TempDir()
+
+	// ContextV2 is preloaded by NewCachingDocumentLoader.
+	require.NotNil(t, loader.cache.Get(ContextV2), "precondition: the base context is preloaded")
+
+	path := filepath.Join(dir, "v2.jsonld")
+	require.NoError(t, os.WriteFile(path, []byte(`{"@context":{"Marker":"https://example.org/operator-copy"}}`), 0o600))
+	loader.SetContextSources(map[string]ContextSource{ContextV2: {File: path}})
+
+	_, err := loader.LoadDocument(ContextV2)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.org/operator-copy", termIRI(t, loader, ContextV2, "Marker"))
+}

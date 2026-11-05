@@ -55,7 +55,9 @@ func TestJSONLDContextDefaults(t *testing.T) {
 	var jc JSONLDContexts
 	require.NoError(t, defaults.Set(&jc))
 
-	assert.Equal(t, 12*time.Hour, jc.RefreshInterval)
+	require.NotNil(t, jc.RefreshInterval)
+	assert.Equal(t, 12*time.Hour, *jc.RefreshInterval)
+	assert.Equal(t, 12*time.Hour, jc.RefreshEvery())
 	assert.Equal(t, time.Second, jc.Retry.InitialInterval)
 	assert.Equal(t, 5*time.Minute, jc.Retry.MaxInterval)
 	assert.InDelta(t, 2.0, jc.Retry.Multiplier, 0.0001)

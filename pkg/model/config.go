@@ -349,7 +349,7 @@ type JSONLDContexts struct {
 	// host going away does not take a running service with it. Only
 	// pinned contexts refresh - under "lazy" nothing is pinned and this
 	// does nothing.
-	RefreshInterval time.Duration `yaml:"refresh_interval" default:"12h" doc_example:"12h"`
+	RefreshInterval *time.Duration `yaml:"refresh_interval" default:"12h" doc_example:"12h"`
 
 	// Sources maps a context URL to an operator-provided copy of it, so a
 	// deployment can serve a vetted document instead of dereferencing the
@@ -406,6 +406,31 @@ type JSONLDContextSource struct {
 	// internal mirror belongs in File, not here.
 	URL string `yaml:"url,omitempty" validate:"omitempty,url" doc_example:"https://contexts.example.org/individual-id.jsonld"`
 }
+
+// RefreshEvery returns how often a pinned context is re-fetched, with zero
+// meaning never. Unset is the default interval; a configured zero is an
+// operator turning refreshing off and is returned as such.
+//
+// This exists because RefreshInterval is a POINTER, for the same reason
+// RevocationConfig.FailOpen is one (SUNET/vc#753): creasty/defaults fills
+// any field still at its zero value, and the zero value of a Duration is
+// exactly what an operator writes to turn refreshing OFF. A plain
+// time.Duration with default:"12h" therefore could not be set to zero at
+// all - `refresh_interval: 0s` was silently replaced by 12h, so the one
+// behaviour the field documents was unreachable. Read it through here and
+// the distinction between "unset" and "set to zero" survives.
+func (j *JSONLDContexts) RefreshEvery() time.Duration {
+	if j == nil || j.RefreshInterval == nil {
+		return defaultJSONLDRefreshInterval
+	}
+	return *j.RefreshInterval
+}
+
+// defaultJSONLDRefreshInterval is the interval used when nothing is
+// configured. It agrees with the `default` tag above, which is what a
+// loaded config gets; this covers a Cfg built in code, which never passes
+// through defaults.Set.
+const defaultJSONLDRefreshInterval = 12 * time.Hour
 
 // PolicyFor returns the startup policy in force for a service: the
 // per-service override, else the global setting, else the built-in default.

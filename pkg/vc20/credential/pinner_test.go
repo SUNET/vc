@@ -87,6 +87,11 @@ func TestPinnerBestEffortStartsNotReadyThenRecovers(t *testing.T) {
 	clock := newTestClock()
 	p := newTestPinner(t, loader, clock, PinnerOptions{Policy: PolicyBestEffort})
 
+	// Configured to come from a file that is not there yet, so "the
+	// context is unavailable" is a real load failure and not a cache miss.
+	path := filepath.Join(t.TempDir(), "diploma.jsonld")
+	loader.SetContextSources(map[string]ContextSource{unreachable: {File: path}})
+
 	require.NoError(t, p.Pin(context.Background(), []PinGroup{scopeGroup(unreachable)}),
 		"best_effort must not fail the boot")
 
@@ -96,7 +101,7 @@ func TestPinnerBestEffortStartsNotReadyThenRecovers(t *testing.T) {
 	assert.Equal(t, []string{unreachable}, p.Pending())
 
 	// The context becomes available, and the background pass picks it up.
-	seedWithTTL(t, loader, unreachable, `{"@context":{"Diploma":"https://example.org/Diploma"}}`)
+	require.NoError(t, os.WriteFile(path, []byte(`{"@context":{"Diploma":"https://example.org/Diploma"}}`), 0o600))
 	clock.advance(time.Hour)
 	p.tick(context.Background())
 
@@ -148,11 +153,13 @@ func TestPinnerRetriesDuringBoot(t *testing.T) {
 func TestPinnerBootSucceedsOnALaterAttempt(t *testing.T) {
 	loader := NewCachingDocumentLoader()
 	clock := newTestClock()
-	const url = "https://ctx.example.org/late.jsonld"
+	const url = "https://ctx.invalid/late.jsonld"
+	path := filepath.Join(t.TempDir(), "late.jsonld")
+	loader.SetContextSources(map[string]ContextSource{url: {File: path}})
 
 	// The context arrives while the first backoff is being waited out.
 	clock.onWake = func() {
-		seedWithTTL(t, loader, url, `{"@context":{"Late":"https://example.org/Late"}}`)
+		require.NoError(t, os.WriteFile(path, []byte(`{"@context":{"Late":"https://example.org/Late"}}`), 0o600))
 		clock.onWake = nil
 	}
 
@@ -172,8 +179,14 @@ func TestPinnerBootSucceedsOnALaterAttempt(t *testing.T) {
 func TestPinnerVerifyWaitsForTheWholeGroup(t *testing.T) {
 	loader := NewCachingDocumentLoader()
 	clock := newTestClock()
-	const present = "https://ctx.example.org/present.jsonld"
-	seedWithTTL(t, loader, present, `{"@context":{"A":"https://example.org/A"}}`)
+	dir := t.TempDir()
+	const present = "https://ctx.invalid/present.jsonld"
+	presentPath := writeContext(t, dir, "present.jsonld", `{"@context":{"A":"https://example.org/A"}}`)
+	latePath := filepath.Join(dir, "late.jsonld")
+	loader.SetContextSources(map[string]ContextSource{
+		present:     {File: presentPath},
+		unreachable: {File: latePath},
+	})
 
 	verified := 0
 	group := scopeGroup(present, unreachable)
@@ -183,7 +196,7 @@ func TestPinnerVerifyWaitsForTheWholeGroup(t *testing.T) {
 	require.NoError(t, p.Pin(context.Background(), []PinGroup{group}))
 	require.Equal(t, 0, verified, "one context of two is not enough to expand against")
 
-	seedWithTTL(t, loader, unreachable, `{"@context":{"B":"https://example.org/B"}}`)
+	require.NoError(t, os.WriteFile(latePath, []byte(`{"@context":{"B":"https://example.org/B"}}`), 0o600))
 	clock.advance(time.Hour)
 	p.tick(context.Background())
 
@@ -325,4 +338,164 @@ func TestPinnerStartsNoLoopWithNothingToDo(t *testing.T) {
 	require.NoError(t, p.Pin(context.Background(), []PinGroup{scopeGroup(url)}))
 
 	assert.False(t, p.hasWork())
+}
+
+// A refresh that replaces SOME of a group's documents and then fails on
+// another leaves the cache holding fresh documents beside stale ones - a
+// combination nothing has expanded the configured types against. Keeping
+// the previous verdict would report a service healthy on the strength of a
+// check run against a set of documents that is no longer in use.
+func TestPinnerPartialRefreshRechecksTheTypes(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	clock := newTestClock()
+	dir := t.TempDir()
+	const first = "https://ctx.invalid/partial-first.jsonld"
+	const second = "https://ctx.invalid/partial-second.jsonld"
+	firstPath := writeContext(t, dir, "first.jsonld", `{"@context":{"A":"https://example.org/A"}}`)
+	secondPath := writeContext(t, dir, "second.jsonld", `{"@context":{"B":"https://example.org/B"}}`)
+	loader.SetContextSources(map[string]ContextSource{
+		first:  {File: firstPath},
+		second: {File: secondPath},
+	})
+
+	verified := 0
+	group := scopeGroup(first, second)
+	group.Verify = func() error { verified++; return nil }
+
+	p := newTestPinner(t, loader, clock, PinnerOptions{Policy: PolicyRequired, RefreshInterval: time.Hour})
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{group}))
+	require.Equal(t, 1, verified)
+
+	// The first document changes and the second becomes unreadable, so the
+	// refresh half succeeds.
+	require.NoError(t, os.WriteFile(firstPath, []byte(`{"@context":{"A":"https://example.org/A2"}}`), 0o600))
+	require.NoError(t, os.Remove(secondPath))
+	clock.advance(2 * time.Hour)
+	p.tick(context.Background())
+
+	assert.Equal(t, "https://example.org/A2", termIRI(t, loader, first, "A"),
+		"precondition: the refresh did replace one of the two")
+	assert.Equal(t, 2, verified,
+		"a mixed set of documents has to be checked, not inherit the old verdict")
+}
+
+// A refresh that replaces nothing does not re-run the check: there is no
+// new combination to check, and expanding is not free.
+func TestPinnerFullyFailedRefreshDoesNotRecheck(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	clock := newTestClock()
+	dir := t.TempDir()
+	const url = "https://ctx.invalid/no-recheck.jsonld"
+	path := writeContext(t, dir, "ctx.jsonld", `{"@context":{"A":"https://example.org/A"}}`)
+	loader.SetContextSources(map[string]ContextSource{url: {File: path}})
+
+	verified := 0
+	group := scopeGroup(url)
+	group.Verify = func() error { verified++; return nil }
+
+	p := newTestPinner(t, loader, clock, PinnerOptions{Policy: PolicyRequired, RefreshInterval: time.Hour})
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{group}))
+	require.Equal(t, 1, verified)
+
+	require.NoError(t, os.Remove(path))
+	clock.advance(2 * time.Hour)
+	p.tick(context.Background())
+
+	assert.Equal(t, 1, verified, "nothing was replaced, so the previous verdict still describes what is cached")
+}
+
+// A group whose contexts are pinned but whose deferred check has not run
+// yet is NOT ready. attempt clears pending and releases the lock before
+// running Verify, and a probe landing in that window must not report a
+// service healthy a moment before the check it depends on fails.
+func TestPinnerIsNotReadyUntilTheDeferredCheckHasPassed(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	dir := t.TempDir()
+	const url = "https://ctx.invalid/not-checked-yet.jsonld"
+	path := writeContext(t, dir, "ctx.jsonld", `{"@context":{"A":"https://example.org/A"}}`)
+	loader.SetContextSources(map[string]ContextSource{url: {File: path}})
+
+	probedDuringVerify := make(chan error, 1)
+	group := scopeGroup(url)
+
+	p := newTestPinner(t, loader, newTestClock(), PinnerOptions{Policy: PolicyBestEffort})
+	// Probe from INSIDE the check, which is exactly the window: pending is
+	// already empty and verifyErr is still nil.
+	group.Verify = func() error {
+		probedDuringVerify <- p.HealthProbe(context.Background())
+		return nil
+	}
+
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{group}))
+
+	err := <-probedDuringVerify
+	require.Error(t, err, "readiness must fail closed while the check is still outstanding")
+	assert.Contains(t, err.Error(), "not checked against their contexts yet")
+
+	assert.NoError(t, p.HealthProbe(context.Background()), "and pass once it has passed")
+}
+
+// A root whose reference fails is left cached with no expiry, because
+// pinContext caches each document before walking its references. A retry
+// that read the cache would reuse that stale root forever and never see the
+// corrected document it is retrying for.
+func TestPinnerRetryRereadsTheSourceRatherThanTheCache(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	clock := newTestClock()
+	dir := t.TempDir()
+	const root = "https://ctx.invalid/stale-root.jsonld"
+	const leaf = "https://ctx.invalid/stale-leaf.jsonld"
+	rootPath := writeContext(t, dir, "root.jsonld", `{"@context":["`+leaf+`",{"Root":"https://example.org/Root"}]}`)
+	leafPath := filepath.Join(dir, "leaf.jsonld")
+	loader.SetContextSources(map[string]ContextSource{
+		root: {File: rootPath},
+		leaf: {File: leafPath},
+	})
+
+	p := newTestPinner(t, loader, clock, PinnerOptions{Policy: PolicyBestEffort})
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{scopeGroup(root)}))
+	require.Error(t, p.HealthProbe(context.Background()), "precondition: the missing leaf leaves the group pending")
+
+	// The operator corrects the ROOT so it no longer references the leaf.
+	// A retry serving the root from cache would never notice.
+	require.NoError(t, os.WriteFile(rootPath, []byte(`{"@context":{"Root":"https://example.org/Root"}}`), 0o600))
+	clock.advance(time.Hour)
+	p.tick(context.Background())
+
+	assert.NoError(t, p.HealthProbe(context.Background()),
+		"the retry has to re-read the root, not reuse the copy pinned beside a failed reference")
+	assert.Empty(t, p.Pending())
+}
+
+// The same staleness applies to the BOOT retries, which is where it
+// matters most: the first attempt caches the root beside its failed
+// reference, and an operator fixing the document while the boot is still
+// retrying must be seen. A retry reading the cache would fail the boot
+// against a document that has already been corrected.
+func TestPinnerBootRetryRereadsTheSource(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	clock := newTestClock()
+	dir := t.TempDir()
+	const root = "https://ctx.invalid/boot-stale-root.jsonld"
+	const leaf = "https://ctx.invalid/boot-stale-leaf.jsonld"
+	rootPath := writeContext(t, dir, "root.jsonld", `{"@context":["`+leaf+`",{"Root":"https://example.org/Root"}]}`)
+	loader.SetContextSources(map[string]ContextSource{
+		root: {File: rootPath},
+		leaf: {File: filepath.Join(dir, "never-written.jsonld")},
+	})
+
+	// The root is corrected during the first backoff, by which time the
+	// first attempt has already cached the original with no expiry.
+	clock.onWake = func() {
+		require.NoError(t, os.WriteFile(rootPath, []byte(`{"@context":{"Root":"https://example.org/Root"}}`), 0o600))
+		clock.onWake = nil
+	}
+
+	p := newTestPinner(t, loader, clock, PinnerOptions{
+		Policy: PolicyRequired,
+		Retry:  RetryPolicy{InitialInterval: time.Second, MaxInterval: time.Minute, Multiplier: 2, BootAttempts: 2},
+	})
+
+	assert.NoError(t, p.Pin(context.Background(), []PinGroup{scopeGroup(root)}),
+		"the second attempt has to re-read the root, not the copy the first attempt cached")
 }

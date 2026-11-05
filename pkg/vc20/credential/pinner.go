@@ -188,19 +188,26 @@ func (p *Pinner) Pin(ctx context.Context, groups []PinGroup) error {
 		return nil
 	}
 
+	// Published BEFORE anything is attempted, so a readiness probe during
+	// the startup pass answers from the real state. Registering them
+	// afterwards left HealthProbe with no groups to look at for the whole
+	// of the boot, which is to say it reported healthy during precisely
+	// the period the service had not yet loaded anything.
 	states := make([]*pinGroupState, 0, len(groups))
 	for _, group := range groups {
-		state := &pinGroupState{group: group, pending: slices.Clone(group.URLs)}
-		states = append(states, state)
+		states = append(states, &pinGroupState{group: group, pending: slices.Clone(group.URLs)})
+	}
 
+	p.mu.Lock()
+	p.groups = states
+	p.mu.Unlock()
+
+	for _, state := range states {
 		err := p.attemptWithBootRetries(ctx, state)
 		if err == nil {
 			continue
 		}
 		if p.opts.Policy == PolicyRequired {
-			p.mu.Lock()
-			p.groups = states
-			p.mu.Unlock()
 			return err
 		}
 		p.log.Warn("starting without a JSON-LD context, and will keep trying",
@@ -208,7 +215,6 @@ func (p *Pinner) Pin(ctx context.Context, groups []PinGroup) error {
 	}
 
 	p.mu.Lock()
-	p.groups = states
 	p.nextRefresh = p.refreshDeadline()
 	p.mu.Unlock()
 	return nil
@@ -238,7 +244,14 @@ func (p *Pinner) attemptWithBootRetries(ctx context.Context, state *pinGroupStat
 	attempts := p.opts.Retry.bootAttempts()
 	var err error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		if err = p.attempt(state, false); err == nil {
+		// The first attempt may answer from the cache, so a preloaded or
+		// already-pinned document costs nothing. Every RETRY bypasses it:
+		// pinContext caches a root before it walks that root's
+		// references, so a root whose reference failed is left cached
+		// with no expiry - and a retry that read the cache would reuse
+		// that stale root forever, never seeing the corrected document
+		// it is retrying FOR.
+		if err = p.attempt(state, attempt > 1); err == nil {
 			return nil
 		}
 		if attempt == attempts {
@@ -459,7 +472,9 @@ func (p *Pinner) tick(ctx context.Context) {
 		// attempt runs the group's deferred check itself once nothing is
 		// pending, so the two failures it can return are told apart by
 		// what is left pending rather than by verifying a second time.
-		err := p.attempt(state, false)
+		// Bypasses the cache, for the reason attemptWithBootRetries
+		// gives: a background retry exists to re-reach the source.
+		err := p.attempt(state, true)
 
 		p.mu.Lock()
 		stillPending := len(state.pending) > 0
@@ -502,21 +517,34 @@ func (p *Pinner) refreshAll(_ context.Context) {
 		}
 
 		var problems []error
+		replaced := false
 		for _, url := range state.group.URLs {
 			if err := p.pin(url, true); err != nil {
 				problems = append(problems, p.describe(state.group, url, err))
+				continue
 			}
+			replaced = true
 		}
+
 		if len(problems) > 0 {
 			// Not recorded as pending: the previously pinned copy is
 			// still in the cache and still serving, so the service is
 			// not degraded and should not report itself unready.
 			p.log.Warn("refreshing a JSON-LD context failed, keeping the copy already pinned",
 				"config", state.group.Name, "error", errors.Join(problems...).Error())
-			continue
+		} else {
+			p.log.Info("refreshed JSON-LD contexts", "config", state.group.Name)
 		}
-		p.log.Info("refreshed JSON-LD contexts", "config", state.group.Name)
-		p.reportVerify(state)
+
+		// Re-checked whenever ANY document was replaced, including a
+		// refresh that then failed on a later URL of the group. That
+		// leaves the cache holding some fresh documents beside some old
+		// ones - a combination nothing has ever expanded the configured
+		// types against. Skipping the check there would keep reporting
+		// the verdict earned by a set that is no longer the set in use.
+		if replaced {
+			p.reportVerify(state)
+		}
 	}
 }
 
@@ -559,6 +587,16 @@ func (p *Pinner) HealthProbe(_ context.Context) error {
 		}
 		if state.verifyErr != nil {
 			failed = append(failed, state.verifyErr)
+			continue
+		}
+		// A group with a deferred check is ready only once that check
+		// has PASSED, not merely once its contexts are pinned. attempt
+		// clears pending and releases the lock before running Verify, so
+		// a probe landing in that window saw no pending URLs and a
+		// verifyErr still nil - and reported a service healthy a moment
+		// before the check it depends on failed. Fails closed.
+		if state.group.Verify != nil && !state.verified {
+			waiting = append(waiting, fmt.Sprintf("the configured types of %s are not checked against their contexts yet", state.group.Name))
 		}
 	}
 

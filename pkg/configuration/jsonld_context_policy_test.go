@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/creasty/defaults"
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -180,6 +183,10 @@ func TestJSONLDContextSourcesAreValidated(t *testing.T) {
 		{"neither file nor url", model.JSONLDContextSource{}, "set either file or url"},
 		{"both file and url", model.JSONLDContextSource{File: path, URL: "https://m.example.org/x"}, "set one"},
 		{"a file that is not there", model.JSONLDContextSource{File: filepath.Join(t.TempDir(), "absent")}, "cannot be read"},
+		// os.Stat would pass both of these, and the failure would then
+		// land on the first credential that needed the context.
+		{"a directory", model.JSONLDContextSource{File: t.TempDir()}, "is a directory"},
+		{"a file this process cannot open", model.JSONLDContextSource{File: unreadableFile(t)}, "cannot be read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := checkJSONLDContextSources(cfgWithSource(tc.source))
@@ -204,5 +211,51 @@ func TestJSONLDContextSourcesAreValidated(t *testing.T) {
 		err := w3cStartupChecks(context.Background(), cfgWithSource(model.JSONLDContextSource{}), "apigw", logger.NewSimple("test"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "set either file or url")
+	})
+}
+
+// unreadableFile returns a path to a real, regular file that this process
+// cannot open, which os.Stat reports as perfectly fine.
+func unreadableFile(t *testing.T) string {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root opens anything, so the mode cannot be exercised")
+	}
+	path := filepath.Join(t.TempDir(), "locked.jsonld")
+	require.NoError(t, os.WriteFile(path, []byte(`{"@context":{}}`), 0o000))
+	return path
+}
+
+// An operator turning refreshing off has to be able to turn it off.
+// creasty/defaults fills any field still at its zero value, so a plain
+// time.Duration with default:"12h" silently became 12h - the one behaviour
+// the field documents was unreachable. This is the same defect as
+// RevocationConfig.FailOpen (SUNET/vc#753) in a second field.
+func TestRefreshIntervalCanBeTurnedOff(t *testing.T) {
+	t.Run("unset takes the default", func(t *testing.T) {
+		var jc model.JSONLDContexts
+		require.NoError(t, defaults.Set(&jc))
+		assert.Equal(t, 12*time.Hour, jc.RefreshEvery())
+	})
+
+	t.Run("an explicit zero survives defaulting", func(t *testing.T) {
+		zero := time.Duration(0)
+		jc := model.JSONLDContexts{RefreshInterval: &zero}
+		require.NoError(t, defaults.Set(&jc))
+		assert.Zero(t, jc.RefreshEvery(), "refresh_interval: 0s must disable refreshing, as documented")
+	})
+
+	t.Run("a configured interval is kept", func(t *testing.T) {
+		hour := time.Hour
+		jc := model.JSONLDContexts{RefreshInterval: &hour}
+		require.NoError(t, defaults.Set(&jc))
+		assert.Equal(t, time.Hour, jc.RefreshEvery())
+	})
+
+	t.Run("and it reaches the pinner", func(t *testing.T) {
+		zero := time.Duration(0)
+		cfg := cfgNaming("https://ctx.invalid/refresh-off.jsonld")
+		cfg.Common.JSONLDContexts.RefreshInterval = &zero
+		assert.Zero(t, pinnerOptions(cfg, "verifier", logger.NewSimple("test")).RefreshInterval)
 	})
 }

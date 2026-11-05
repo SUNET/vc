@@ -73,8 +73,18 @@ type ContextSource struct {
 // pins.
 func (l *CachingDocumentLoader) SetContextSources(sources map[string]ContextSource) {
 	l.sourcesMu.Lock()
-	defer l.sourcesMu.Unlock()
 	l.sources = maps.Clone(sources)
+	l.sourcesMu.Unlock()
+
+	// Anything already cached for these URLs has to go, because
+	// LoadDocument answers from the cache BEFORE it consults a source. The
+	// W3C base contexts are preloaded at construction with no expiry, so
+	// an operator who configured a copy of one would have been served the
+	// embedded document instead - for the life of the process, with
+	// nothing to say the setting had been ignored.
+	for url := range sources {
+		l.cache.Delete(url)
+	}
 }
 
 // contextSource returns the configured source for a URL, if there is one.

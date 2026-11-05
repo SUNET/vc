@@ -808,13 +808,42 @@ func checkJSONLDContextSources(cfg *model.Cfg) error {
 			// Read at startup anyway under required and best_effort, but
 			// not under lazy - where an unreadable path would otherwise
 			// surface at the first presentation that needed it.
-			if _, err := os.Stat(source.File); err != nil {
+			//
+			// OPENED, not stat'd. os.Stat answers only that the path
+			// resolves: a directory passes it, and so does a file whose
+			// mode or owner stops this process reading it. Either one
+			// then failed at the first credential that needed the
+			// context, which is the moment this check exists to move
+			// away from.
+			if err := checkReadableFile(source.File); err != nil {
 				problems = append(problems, fmt.Sprintf("common.jsonld_contexts.sources.%s: file %q cannot be read: %v", url, source.File, err))
 			}
 		}
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// checkReadableFile reports whether a path names a regular file this
+// process can actually open and read.
+func checkReadableFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New("is a directory, not a JSON-LD document")
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("is not a regular file (mode %s)", info.Mode())
 	}
 	return nil
 }
@@ -1006,7 +1035,7 @@ func pinnerOptions(cfg *model.Cfg, serviceName string, log *logger.Log) credenti
 			Multiplier:      jc.Retry.Multiplier,
 			BootAttempts:    jc.Retry.BootAttempts,
 		},
-		RefreshInterval: jc.RefreshInterval,
+		RefreshInterval: jc.RefreshEvery(),
 		Log:             log,
 	}
 }
