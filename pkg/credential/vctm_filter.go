@@ -1,7 +1,11 @@
 package credential
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -16,12 +20,20 @@ import (
 //
 // A VCTM claim path that starts with null or an index is skipped: the
 // document is an object. A null in the middle of a path descends into
-// every array element, an index into that element only. An array keeps
-// the elements a path selects, in order.
+// every array element, an index into that element only.
+//
+// An array the VCTM selects only with null keeps the elements with
+// something left, in order. An array the VCTM indexes keeps each element
+// at its index, so a pointer with an index selects the same claim in the
+// filtered document: a declared element with nothing left stays as its
+// empty form ({}, [] or null) while a later element is kept, and the
+// elements after the last kept one are dropped.
 //
 // Sibling keys inside a nested object are dropped when the VCTM only
 // declares specific children — e.g. a VCTM path [address, locality] lets
 // address.locality through but drops address.street.
+//
+// It refuses a VCTM CheckFilterable refuses.
 func FilterAgainstVCTM(doc map[string]any, vctm *sdjwtvc.VCTM) (map[string]any, error) {
 	if vctm == nil {
 		return map[string]any{}, nil
@@ -35,6 +47,18 @@ func FilterAgainstVCTM(doc map[string]any, vctm *sdjwtvc.VCTM) (map[string]any, 
 		return map[string]any{}, nil
 	}
 	return filtered, nil
+}
+
+// CheckFilterable refuses a VCTM FilterAgainstVCTM cannot filter: a claim
+// without a path, and an array whose declared indices are not 0 to k
+// while the VCTM selects none of its elements with null. Keeping an
+// element at its index keeps every element before it.
+func CheckFilterable(vctm *sdjwtvc.VCTM) error {
+	if vctm == nil {
+		return nil
+	}
+	_, err := buildAllowTree(vctm)
+	return err
 }
 
 // allowNode describes the subset of a nested value that is permitted. A nil
@@ -60,7 +84,72 @@ func buildAllowTree(vctm *sdjwtvc.VCTM) (*allowNode, error) {
 		}
 		insertAllowPath(root, components)
 	}
+	if err := root.checkIndices(nil); err != nil {
+		return nil, err
+	}
 	return root, nil
+}
+
+// checkIndices refuses an array below node, at path, whose declared
+// indices are not 0 to k while null declares none of its elements.
+func (n *allowNode) checkIndices(path []claimpath.Component) error {
+	var indices []uint
+	for _, component := range slices.SortedFunc(maps.Keys(n.children), compareComponents) {
+		if index, ok := component.IndexValue(); ok {
+			indices = append(indices, index)
+		}
+		if err := n.children[component].checkIndices(append(slices.Clip(path), component)); err != nil {
+			return err
+		}
+	}
+	if len(indices) == 0 || n.children[claimpath.All()] != nil {
+		return nil
+	}
+	for want, index := range indices {
+		if index != uint(want) {
+			array, err := claimpath.FromComponents(path)
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("VCTM declares elements %v of the array %s: the issuer filters an array the VCTM indexes from 0 without a gap, or selects with null", indices, array)
+		}
+	}
+	return nil
+}
+
+// compareComponents orders keys before null before indices, keys by name
+// and indices by value.
+func compareComponents(a, b claimpath.Component) int {
+	rank := func(c claimpath.Component) int {
+		if _, ok := c.KeyName(); ok {
+			return 0
+		}
+		if c.IsAll() {
+			return 1
+		}
+		return 2
+	}
+	if ra, rb := rank(a), rank(b); ra != rb {
+		return ra - rb
+	}
+	if ka, ok := a.KeyName(); ok {
+		kb, _ := b.KeyName()
+		return strings.Compare(ka, kb)
+	}
+	ia, _ := a.IndexValue()
+	ib, _ := b.IndexValue()
+	return cmp.Compare(ia, ib)
+}
+
+// indexed reports whether the VCTM declares an element of the array at
+// node by its index.
+func (n *allowNode) indexed() bool {
+	for component := range n.children {
+		if _, ok := component.IndexValue(); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func insertAllowPath(node *allowNode, path []claimpath.Component) {
@@ -145,22 +234,57 @@ func filterValue(v any, node *allowNode) (any, bool) {
 
 func filterArray(tv []any, node *allowNode) (any, bool) {
 	all := node.children[claimpath.All()]
-	out := make([]any, 0, len(tv))
-	declared := false
-	for i, e := range tv {
-		element := mergeAllowNodes(all, node.children[claimpath.Index(uint(i))])
-		if element == nil {
-			continue
+	if node.indexed() {
+		return filterIndexedArray(tv, node, all)
+	}
+	if all == nil {
+		if node.leaf {
+			return tv, true
 		}
-		declared = true
-		if filtered, keep := filterValue(e, element); keep {
+		return nil, false
+	}
+	out := make([]any, 0, len(tv))
+	for _, e := range tv {
+		if filtered, keep := filterValue(e, all); keep {
 			out = append(out, filtered)
 		}
 	}
-	if !declared && node.leaf {
-		return tv, true
-	}
 	return out, len(out) > 0
+}
+
+// filterIndexedArray keeps each element of an array the VCTM indexes at
+// its index. The declared indices are 0 to k, or null declares every
+// element.
+func filterIndexedArray(tv []any, node, all *allowNode) (any, bool) {
+	out := make([]any, 0, len(tv))
+	kept := 0
+	for i, e := range tv {
+		element := mergeAllowNodes(all, node.children[claimpath.Index(uint(i))])
+		if element == nil {
+			break
+		}
+		filtered, keep := filterValue(e, element)
+		if !keep {
+			filtered = emptyForm(e)
+		}
+		out = append(out, filtered)
+		if keep {
+			kept = len(out)
+		}
+	}
+	return out[:kept], kept > 0
+}
+
+// emptyForm is the value of an element with nothing left: an empty object
+// or array, or null.
+func emptyForm(v any) any {
+	switch v.(type) {
+	case map[string]any:
+		return map[string]any{}
+	case []any, []string:
+		return []any{}
+	}
+	return nil
 }
 
 // mergeAllowNodes returns the node that permits what either a or b

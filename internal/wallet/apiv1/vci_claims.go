@@ -129,27 +129,47 @@ func (sd *sdJWT) resolveKey(n map[string]any, path []claimpath.Component, need [
 }
 
 // resolveElements continues a path whose next component is null or an
-// index, in an array.
+// index, in an array. An index counts the elements of the processed array
+// (SD-JWT §7.1), which drops each placeholder without a held disclosure.
+// An index match needs the disclosures of every earlier element, so the
+// selected element keeps its index in the presentation.
 func (sd *sdJWT) resolveElements(n []any, path []claimpath.Component, need []string) []claimMatch {
 	if _, isKey := path[0].KeyName(); isKey {
 		return nil
 	}
 	index, oneElement := path[0].IndexValue()
 	var matches []claimMatch
-	for i, element := range n {
-		if oneElement && uint(i) != index {
+	var earlier []string
+	var position uint
+	for _, element := range n {
+		value, own, ok := sd.processedElement(element)
+		if !ok {
 			continue
 		}
-		child, elementNeed := element, need
-		if disc, ok := sd.arrayElement(element); ok {
-			child, elementNeed = disc.value, append(slices.Clone(need), disc.raw)
-		} else if isArrayPlaceholder(element) {
-			// An undisclosed element or a decoy: there is no value to match.
+		if !oneElement {
+			matches = append(matches, sd.resolve(value, path[1:], slices.Concat(need, own))...)
 			continue
 		}
-		matches = append(matches, sd.resolve(child, path[1:], elementNeed)...)
+		if position == index {
+			return sd.resolve(value, path[1:], slices.Concat(need, earlier, own))
+		}
+		earlier = append(earlier, own...)
+		position++
 	}
 	return matches
+}
+
+// processedElement is an array element's value after processing, and the
+// disclosure that reveals it. ok is false for a placeholder without a held
+// disclosure, such as a decoy: processing removes it.
+func (sd *sdJWT) processedElement(element any) (value any, need []string, ok bool) {
+	if disc, held := sd.arrayElement(element); held {
+		return disc.value, []string{disc.raw}, true
+	}
+	if isArrayPlaceholder(element) {
+		return nil, nil, false
+	}
+	return element, nil, true
 }
 
 // nested is every disclosure reachable inside a selected value, since

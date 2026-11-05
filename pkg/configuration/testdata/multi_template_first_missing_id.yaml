@@ -14,7 +14,8 @@ templates:
           claims:
             - path: ["name"]
     claim_mappings:
-      - {path: [name], claim: name}
+      cred:
+        - {path: [name], claim: "name"}
     enabled: true
 
   - id: "valid_second"
@@ -33,5 +34,6 @@ templates:
           claims:
             - path: ["value"]
     claim_mappings:
-      - {path: [value], claim: value}
+      cred2:
+        - {path: [value], claim: "value"}
     enabled: true

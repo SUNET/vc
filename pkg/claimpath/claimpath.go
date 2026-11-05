@@ -17,14 +17,8 @@ import (
 
 // Pointer is a claims path pointer: a non-empty sequence of keys, null
 // (every element of an array) and array indices.
-//
-// Configuration may also write a pointer as a dotted string, such as
-// "address.locality". The string's meaning depends on the credential the
-// claim belongs to, so it stays pending until the configuration loader
-// resolves it with Resolve. Every accessor refuses a pending pointer.
 type Pointer struct {
 	components []Component
-	dotted     string
 }
 
 // Component is one element of a Pointer.
@@ -92,45 +86,12 @@ func FromKeys(keys []string) (Pointer, error) {
 	return Keys(keys[0], keys[1:]...), nil
 }
 
-// Dotted returns a pending pointer for a dotted claim name, for a caller
-// that reads the legacy form outside YAML.
-func Dotted(dotted string) (Pointer, error) {
-	if dotted == "" {
-		return Pointer{}, errors.New("claimpath: a dotted claim name is non-empty")
-	}
-	return Pointer{dotted: dotted}, nil
-}
-
-// Pending returns the dotted string of a pointer the loader has not
-// resolved yet.
-func (p Pointer) Pending() (string, bool) { return p.dotted, p.dotted != "" }
-
 // IsZero reports whether the pointer is unset.
-func (p Pointer) IsZero() bool { return len(p.components) == 0 && p.dotted == "" }
+func (p Pointer) IsZero() bool { return len(p.components) == 0 }
 
-// Resolve replaces a pending dotted string with the pointer interpret
-// returns for it. A pointer written as an array is left unchanged.
-func (p *Pointer) Resolve(interpret func(dotted string) (Pointer, error)) error {
-	if p.dotted == "" {
-		return nil
-	}
-	resolved, err := interpret(p.dotted)
-	if err != nil {
-		return fmt.Errorf("claim %q: %w", p.dotted, err)
-	}
-	if _, err := resolved.Components(); err != nil {
-		return fmt.Errorf("claim %q: %w", p.dotted, err)
-	}
-	*p = resolved
-	return nil
-}
-
-// Components returns the pointer's components. A pending or unset pointer,
-// and one with an empty key, is an error.
+// Components returns the pointer's components. An unset pointer, and one
+// with an empty key, is an error.
 func (p Pointer) Components() ([]Component, error) {
-	if p.dotted != "" {
-		return nil, fmt.Errorf("claimpath: claim %q is unresolved", p.dotted)
-	}
 	if len(p.components) == 0 {
 		return nil, errors.New("claimpath: the claims path pointer is unset")
 	}
@@ -146,7 +107,7 @@ var errEmptyKey = errors.New("a key is a non-empty string")
 
 // KeyNames returns the keys of a pointer made only of keys.
 func (p Pointer) KeyNames() ([]string, bool) {
-	if p.dotted != "" || len(p.components) == 0 {
+	if len(p.components) == 0 {
 		return nil, false
 	}
 	keys := make([]string, len(p.components))
@@ -172,15 +133,15 @@ func (p Pointer) MDoc() (namespace, element string, err error) {
 // Name returns the key a claim is named by: the last component, which is
 // a key.
 func (p Pointer) Name() (string, bool) {
-	if p.dotted != "" || len(p.components) == 0 {
+	if len(p.components) == 0 {
 		return "", false
 	}
 	return p.components[len(p.components)-1].KeyName()
 }
 
-// FirstKey returns the key a resolved pointer starts with.
+// FirstKey returns the key a pointer starts with.
 func (p Pointer) FirstKey() (string, bool) {
-	if p.dotted != "" || len(p.components) == 0 {
+	if len(p.components) == 0 {
 		return "", false
 	}
 	return p.components[0].KeyName()
@@ -192,9 +153,9 @@ func (p Pointer) Parent() (Pointer, bool) {
 	return p.Prefix(len(p.components) - 1)
 }
 
-// Last returns the last component of a resolved pointer.
+// Last returns the last component of a pointer.
 func (p Pointer) Last() (Component, bool) {
-	if p.dotted != "" || len(p.components) == 0 {
+	if len(p.components) == 0 {
 		return Component{}, false
 	}
 	return p.components[len(p.components)-1], true
@@ -203,7 +164,7 @@ func (p Pointer) Last() (Component, bool) {
 // Prefix returns the first n components of the pointer, for n from 1 to
 // its length.
 func (p Pointer) Prefix(n int) (Pointer, bool) {
-	if p.dotted != "" || n < 1 || n > len(p.components) {
+	if n < 1 || n > len(p.components) {
 		return Pointer{}, false
 	}
 	return Pointer{components: p.components[:n:n]}, true
@@ -212,7 +173,7 @@ func (p Pointer) Prefix(n int) (Pointer, bool) {
 // Ancestors returns the pointers of the claims that hold p's claim: each
 // strict prefix of p, shortest first.
 func (p Pointer) Ancestors() []Pointer {
-	if p.dotted != "" || len(p.components) < 2 {
+	if len(p.components) < 2 {
 		return nil
 	}
 	out := make([]Pointer, 0, len(p.components)-1)
@@ -225,9 +186,6 @@ func (p Pointer) Ancestors() []Pointer {
 // KeyPrefix returns the leading keys of the pointer, up to its first null
 // or index.
 func (p Pointer) KeyPrefix() (Pointer, bool) {
-	if p.dotted != "" {
-		return Pointer{}, false
-	}
 	n := slices.IndexFunc(p.components, func(c Component) bool { return c.kind != keyKind })
 	if n < 0 {
 		n = len(p.components)
@@ -238,32 +196,27 @@ func (p Pointer) KeyPrefix() (Pointer, bool) {
 	return Pointer{components: p.components[:n:n]}, true
 }
 
-// Len returns the number of components of a resolved pointer.
+// Len returns the number of components of a pointer.
 func (p Pointer) Len() int {
-	if p.dotted != "" {
-		return 0
-	}
 	return len(p.components)
 }
 
-// Equal reports whether two resolved pointers are the same. A pending
-// pointer equals no pointer.
+// Equal reports whether two set pointers are the same.
 func (p Pointer) Equal(q Pointer) bool {
-	return p.dotted == "" && q.dotted == "" && len(p.components) > 0 && slices.Equal(p.components, q.components)
+	return len(p.components) > 0 && slices.Equal(p.components, q.components)
 }
 
-// HasPrefix reports whether prefix is the start of p, or p itself. A
-// pending pointer has no prefix and is none.
+// HasPrefix reports whether prefix is the start of p, or p itself.
 func (p Pointer) HasPrefix(prefix Pointer) bool {
-	return p.dotted == "" && prefix.dotted == "" && len(prefix.components) > 0 &&
+	return len(prefix.components) > 0 &&
 		len(prefix.components) <= len(p.components) &&
 		slices.Equal(p.components[:len(prefix.components)], prefix.components)
 }
 
-// SelectsOne reports whether a resolved pointer selects at most one claim:
-// it has no null component.
+// SelectsOne reports whether a pointer selects at most one claim: it is
+// set and has no null component.
 func (p Pointer) SelectsOne() bool {
-	return p.dotted == "" && len(p.components) > 0 && !slices.ContainsFunc(p.components, Component.IsAll)
+	return len(p.components) > 0 && !slices.ContainsFunc(p.components, Component.IsAll)
 }
 
 // Rebase returns p with its prefix from replaced by to, and whether p
@@ -277,15 +230,11 @@ func (p Pointer) Rebase(from, to Pointer) (Pointer, bool) {
 
 // Append returns p extended with components.
 func (p Pointer) Append(components ...Component) Pointer {
-	return Pointer{components: append(slices.Clone(p.components), components...), dotted: p.dotted}
+	return Pointer{components: append(slices.Clone(p.components), components...)}
 }
 
-// String renders the pointer as an array, such as ["address","locality"],
-// or a pending pointer as its quoted dotted string.
+// String renders the pointer as an array, such as ["address","locality"].
 func (p Pointer) String() string {
-	if p.dotted != "" {
-		return strconv.Quote(p.dotted)
-	}
 	var b strings.Builder
 	b.WriteByte('[')
 	for i, c := range p.components {
@@ -322,15 +271,19 @@ func (p Pointer) values() []any {
 }
 
 // fromValues reads a pointer from decoded JSON, YAML or BSON values.
+// ErrMalformed is the error of a value that decodes as no claims path
+// pointer. A *StringError is one.
+var ErrMalformed = errors.New("claimpath: the value is no claims path pointer")
+
 func fromValues(values []any) (Pointer, error) {
 	if len(values) == 0 {
-		return Pointer{}, errors.New("claimpath: a claims path pointer is a non-empty array")
+		return Pointer{}, fmt.Errorf("%w: a claims path pointer is a non-empty array", ErrMalformed)
 	}
 	components := make([]Component, len(values))
 	for i, value := range values {
 		c, err := component(value)
 		if err != nil {
-			return Pointer{}, fmt.Errorf("claimpath: element %d: %w", i, err)
+			return Pointer{}, fmt.Errorf("%w: element %d: %w", ErrMalformed, i, err)
 		}
 		components[i] = c
 	}
@@ -393,11 +346,15 @@ func (p *Pointer) UnmarshalJSON(data []byte) error {
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		return nil
 	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		return &StringError{Text: text}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var values []any
 	if err := decoder.Decode(&values); err != nil {
-		return fmt.Errorf("claimpath: a claims path pointer is a JSON array: %w", err)
+		return fmt.Errorf("%w: a claims path pointer is a JSON array: %w", ErrMalformed, err)
 	}
 	pointer, err := fromValues(values)
 	if err != nil {
@@ -407,20 +364,15 @@ func (p *Pointer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalYAML writes the pointer as a sequence, or a pending pointer as
-// its dotted string.
+// MarshalYAML writes the pointer as a sequence.
 func (p Pointer) MarshalYAML() (any, error) {
-	if p.dotted != "" {
-		return p.dotted, nil
-	}
 	if _, err := p.Components(); err != nil {
 		return nil, err
 	}
 	return p.values(), nil
 }
 
-// UnmarshalYAML reads a sequence, or a dotted string that stays pending
-// until the loader resolves it. YAML null leaves the pointer unset.
+// UnmarshalYAML reads a sequence. YAML null leaves the pointer unset.
 func (p *Pointer) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw any
 	if err := unmarshal(&raw); err != nil {
@@ -430,12 +382,7 @@ func (p *Pointer) UnmarshalYAML(unmarshal func(any) error) error {
 	case nil:
 		return nil
 	case string:
-		pointer, err := Dotted(v)
-		if err != nil {
-			return err
-		}
-		*p = pointer
-		return nil
+		return &StringError{Text: v}
 	case []any:
 		pointer, err := fromValues(v)
 		if err != nil {
@@ -444,14 +391,33 @@ func (p *Pointer) UnmarshalYAML(unmarshal func(any) error) error {
 		*p = pointer
 		return nil
 	default:
-		return fmt.Errorf("claimpath: a claim is an array or a dotted string, not %v", raw)
+		return fmt.Errorf("%w: a claims path pointer is an array; %v is a %T", ErrMalformed, raw, raw)
 	}
 }
 
+// StringError is a claims path pointer written as a string.
+type StringError struct {
+	// Text is the string.
+	Text string
+}
+
+// Unwrap returns ErrMalformed.
+func (e *StringError) Unwrap() error { return ErrMalformed }
+
+// Error suggests the array of the string split at each dot.
+func (e *StringError) Error() string {
+	parts := strings.Split(e.Text, ".")
+	quoted := make([]string, len(parts))
+	for i, part := range parts {
+		quoted[i] = strconv.Quote(part)
+	}
+	return fmt.Sprintf("claims path pointer %q is a string; write it as an array, such as [%s] (OpenID4VP 1.0 §7)", e.Text, strings.Join(quoted, ", "))
+}
+
 // ValidationValue is the value go-playground/validator checks for a
-// Pointer: its components, or nil for a pointer that is unset, pending or
-// has an empty key. A validator that registers it with
-// RegisterCustomTypeFunc reads "required" as a valid resolved pointer.
+// Pointer: its components, or nil for a pointer that is unset or has an
+// empty key. A validator that registers it with RegisterCustomTypeFunc
+// reads "required" as a valid pointer.
 func ValidationValue(field reflect.Value) any {
 	p, ok := field.Interface().(Pointer)
 	if !ok {

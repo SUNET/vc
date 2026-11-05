@@ -16,16 +16,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/claimpath"
+	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
-
-	"gopkg.in/yaml.v2"
 )
 
 // Exit codes. A mismatch is its own code, so a loop over candidate
@@ -37,7 +35,7 @@ const (
 )
 
 func main() {
-	code, err := run(context.Background(), os.Args[1:], os.Stdout)
+	code, err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "opening_recover:", err)
 	}
@@ -55,12 +53,14 @@ type invocation struct {
 	showOpening bool
 }
 
-func run(ctx context.Context, args []string, out io.Writer) (int, error) {
+// run reproduces the opening the arguments name. It writes the result to
+// out, and a line per deprecated claim spelling of the config to warn.
+func run(ctx context.Context, args []string, out, warn io.Writer) (int, error) {
 	inv, err := parseInvocation(args)
 	if err != nil {
 		return exitError, err
 	}
-	cfg, err := loadConfig(inv.configPath)
+	cfg, err := loadConfig(ctx, inv.configPath, warn)
 	if err != nil {
 		return exitError, err
 	}
@@ -158,15 +158,17 @@ func flagGiven(flags *flag.FlagSet, name string) bool {
 	return given
 }
 
-// loadConfig parses the config file as the issuer does.
-func loadConfig(path string) (*model.Cfg, error) {
-	raw, err := os.ReadFile(filepath.Clean(path))
+// loadConfig parses the config file as the issuer does, and writes a line
+// to warn for each claim spelling of an earlier release it upgraded.
+func loadConfig(ctx context.Context, path string, warn io.Writer) (*model.Cfg, error) {
+	cfg, rewrites, err := configuration.LoadFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	cfg := &model.Cfg{}
-	if err := yaml.Unmarshal(raw, cfg); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	for _, rewrite := range rewrites {
+		if _, err := fmt.Fprintln(warn, rewrite); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }

@@ -35,12 +35,18 @@ func (p *Pointer) UnmarshalBSONValue(typ byte, data []byte) error {
 	case bson.TypeNull:
 		return nil
 	case bson.TypeArray:
+	case bson.TypeString:
+		var text string
+		if err := bson.UnmarshalValue(bson.TypeString, data, &text); err != nil {
+			return fmt.Errorf("claimpath: %w", err)
+		}
+		return &StringError{Text: text}
 	default:
-		return fmt.Errorf("claimpath: a claims path pointer is a BSON array, not a %s", bson.Type(typ))
+		return fmt.Errorf("%w: a claims path pointer is a BSON array; the value is a BSON %s", ErrMalformed, bson.Type(typ))
 	}
 	var values []any
 	if err := bson.UnmarshalValue(bson.Type(typ), data, &values); err != nil {
-		return fmt.Errorf("claimpath: %w", err)
+		return fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	pointer, err := fromValues(values)
 	if err != nil {

@@ -3,6 +3,7 @@ package claimpath
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -19,12 +20,11 @@ import (
 //     data element identifier, in a namespace the MDDL declares.
 type Shape struct {
 	kind shapeKind
-	// defaultNamespace is the namespace of a dotted name without a dot,
-	// for MDocQualified.
-	defaultNamespace string
 	// namespaces maps an element identifier to the namespaces that
-	// declare it, for MDocElements.
+	// declare it, sorted, for MDocElements.
 	namespaces map[string][]string
+	// declared holds the namespaces the MDDL declares, for MDocElements.
+	declared map[string]bool
 }
 
 type shapeKind uint8
@@ -38,17 +38,18 @@ const (
 // Nested returns the shape of a JSON-based credential.
 func Nested() Shape { return Shape{kind: nestedShape} }
 
-// MDocQualified returns the shape of a presented mdoc. A dotted name
-// without a dot is an element of defaultNamespace.
-func MDocQualified(defaultNamespace string) Shape {
-	return Shape{kind: mdocQualifiedShape, defaultNamespace: defaultNamespace}
+// MDocQualified returns the shape of a presented mdoc.
+func MDocQualified() Shape {
+	return Shape{kind: mdocQualifiedShape}
 }
 
 // MDocElements returns the shape of mdoc document data whose MDDL
 // declares the elements of declared, by namespace.
 func MDocElements[M ~map[string]V, V any](declared map[string]M) Shape {
 	namespaces := map[string][]string{}
+	set := make(map[string]bool, len(declared))
 	for namespace, elements := range declared {
+		set[namespace] = true
 		for element := range elements {
 			namespaces[element] = append(namespaces[element], namespace)
 		}
@@ -56,17 +57,24 @@ func MDocElements[M ~map[string]V, V any](declared map[string]M) Shape {
 	for _, list := range namespaces {
 		slices.Sort(list)
 	}
-	return Shape{kind: mdocElementsShape, namespaces: namespaces}
+	return Shape{kind: mdocElementsShape, namespaces: namespaces, declared: set}
+}
+
+// Equal reports whether two shapes hold claims the same way.
+func (s Shape) Equal(t Shape) bool {
+	return s.kind == t.kind &&
+		maps.EqualFunc(s.namespaces, t.namespaces, slices.Equal[[]string]) &&
+		maps.Equal(s.declared, t.declared)
 }
 
 // Locate returns where the claim p names sits in a claims map of the
 // shape, as a pointer through its objects and arrays.
 //
-// An MDocElements pointer is [namespace, element] for an element the MDDL
-// declares in that namespace. A single-key pointer [key] addresses a
-// document key the MDDL does not declare: an intermediate claim a
-// derivation reads or writes. It exists so configuration written as
-// dotted names keeps working.
+// An MDocElements pointer starts with [namespace, element] for an element
+// the MDDL declares in that namespace, and continues into the element's
+// value. A pointer that starts with a key the MDDL declares neither as a
+// namespace nor as an element addresses a document key outside the MDDL:
+// an intermediate claim a derivation reads or writes.
 func (s Shape) Locate(p Pointer) (Pointer, error) {
 	if _, err := p.Components(); err != nil {
 		return Pointer{}, err
@@ -87,20 +95,24 @@ func (s Shape) Locate(p Pointer) (Pointer, error) {
 }
 
 func (s Shape) locateElement(p Pointer) (Pointer, error) {
-	keys, ok := p.KeyNames()
-	switch {
-	case ok && len(keys) == 2:
-		if !slices.Contains(s.namespaces[keys[1]], keys[0]) {
-			return Pointer{}, fmt.Errorf("claimpath: the MDDL declares no element %q in namespace %q", keys[1], keys[0])
-		}
-		return Keys(keys[1]), nil
-	case ok && len(keys) == 1:
-		if declaring := s.namespaces[keys[0]]; len(declaring) > 0 {
-			return Pointer{}, fmt.Errorf("claimpath: the MDDL declares %q in %s; name it [namespace, element]", keys[0], strings.Join(declaring, " and "))
-		}
-		return p, nil
+	first, ok := p.FirstKey()
+	if !ok {
+		return Pointer{}, fmt.Errorf("claimpath: %s starts with no key of mdoc document data", p)
 	}
-	return Pointer{}, fmt.Errorf("claimpath: %s is no [namespace, element] pointer into mdoc document data", p)
+	if s.declared[first] {
+		var element string
+		if p.Len() > 1 {
+			element, ok = p.components[1].KeyName()
+		}
+		if !ok || !slices.Contains(s.namespaces[element], first) {
+			return Pointer{}, fmt.Errorf("claimpath: %s names no element the MDDL declares in namespace %q", p, first)
+		}
+		return Pointer{components: p.components[1:]}, nil
+	}
+	if declaring := s.namespaces[first]; len(declaring) > 0 {
+		return Pointer{}, fmt.Errorf("claimpath: the MDDL declares %q in %s; name it [namespace, element]", first, strings.Join(declaring, " and "))
+	}
+	return p, nil
 }
 
 // LocateOne is Locate for a pointer that names one claim: it refuses a
@@ -116,53 +128,27 @@ func (s Shape) LocateOne(p Pointer) (Pointer, error) {
 	return location, nil
 }
 
-// ResolveOne reads a pending pointer as a dotted name of the shape, and
-// checks that a set pointer names one claim the shape locates.
-func (s Shape) ResolveOne(p *Pointer) error {
-	if err := p.Resolve(s.Dotted); err != nil {
-		return err
-	}
-	if p.IsZero() {
-		return nil
-	}
-	_, err := s.LocateOne(*p)
-	return err
-}
-
-// Dotted reads a dotted claim name as a pointer into the shape.
-//
-//   - Nested splits it on dots, one key per segment.
-//   - MDocQualified splits it at the last dot into [namespace, element],
-//     and reads a name without an inner dot as an element of the default
-//     namespace.
-//   - MDocElements reads it as an element identifier: [namespace, element]
-//     for an element the MDDL declares in one namespace, [name] for a
-//     name it does not declare.
-func (s Shape) Dotted(name string) (Pointer, error) {
+// Key returns the pointer of the top-level document key name: [namespace,
+// name] for an element an MDocElements MDDL declares, in the first
+// declaring namespace in sorted order, and [name] otherwise. Every
+// declaring namespace locates the same key.
+func (s Shape) Key(name string) (Pointer, error) {
 	if name == "" {
-		return Pointer{}, errors.New("claimpath: a dotted claim name is non-empty")
+		return Pointer{}, errEmptyKey
 	}
 	switch s.kind {
 	case nestedShape:
-		keys := strings.Split(name, ".")
-		if slices.Contains(keys, "") {
-			return Pointer{}, fmt.Errorf("claimpath: %q has an empty segment", name)
-		}
-		return FromKeys(keys)
-	case mdocQualifiedShape:
-		if i := strings.LastIndex(name, "."); i > 0 && i < len(name)-1 {
-			return Keys(name[:i], name[i+1:]), nil
-		}
-		return Keys(s.defaultNamespace, name), nil
+		return Keys(name), nil
 	case mdocElementsShape:
-		switch declaring := s.namespaces[name]; len(declaring) {
-		case 0:
-			return Keys(name), nil
-		case 1:
+		if declaring := s.namespaces[name]; len(declaring) > 0 {
 			return Keys(declaring[0], name), nil
-		default:
-			return Pointer{}, fmt.Errorf("claimpath: the MDDL declares %q in %s; name it [namespace, element]", name, strings.Join(declaring, " and "))
 		}
+		if s.declared[name] {
+			return Pointer{}, fmt.Errorf("claimpath: %q is a namespace of the MDDL, so no pointer names the document key", name)
+		}
+		return Keys(name), nil
+	case mdocQualifiedShape:
+		return Pointer{}, fmt.Errorf("claimpath: a presented mdoc holds no document key %q", name)
 	}
 	return Pointer{}, errors.New("claimpath: the shape is unset")
 }

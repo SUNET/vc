@@ -74,10 +74,10 @@ func TestPrepareIssuance_MatchesAnMdocClaimUnderEitherSpelling(t *testing.T) {
 			}
 			client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
 
-			reply, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+			reply, err := client.PrepareLegacyIssuance(t.Context(), &LegacyPrepareIssuanceRequest{
 				Scope: challengeScope,
-				IdentityMatch: &openid4vci.IdentityMatch{
-					Claims: openid4vci.ClaimMatches{{Path: dottedPath(ruleClaim), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}},
+				IdentityMatch: &openid4vci.LegacyIdentityMatch{
+					Claims: map[string]openid4vci.ClaimTest{ruleClaim: {Equals: "Andersson"}},
 				},
 			})
 			require.NoError(t, err, "the request asks for this claim, however the rule spells it")
@@ -95,7 +95,7 @@ func TestPrepareIssuance_StillRefusesAClaimTheRequestDoesNotAsk(t *testing.T) {
 	reply, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope: challengeScope,
 		IdentityMatch: &openid4vci.IdentityMatch{
-			Claims: openid4vci.ClaimMatches{{Path: dottedPath("nationality"), ClaimTest: openid4vci.ClaimTest{Equals: "SE"}}},
+			Claims: []openid4vci.ClaimMatch{{Path: claimpath.Keys("nationality"), ClaimTest: openid4vci.ClaimTest{Equals: "SE"}}},
 		},
 	})
 	require.Error(t, err)

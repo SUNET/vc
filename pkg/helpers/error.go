@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/kaptinlin/jsonschema"
 	"github.com/moogar0880/problems"
@@ -148,6 +150,9 @@ func NewErrorFromError(v any) *Error {
 	}
 	if validatorErr, ok := errors.AsType[validator.ValidationErrors](err); ok {
 		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
+	}
+	if errors.Is(err, claimpath.ErrMalformed) {
+		return &Error{Title: "invalid_claims_path", Err: err.Error(), HTTPStatus: http.StatusBadRequest}
 	}
 
 	if errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, ErrNoDocumentFound) {

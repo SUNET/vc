@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/SUNET/vc/pkg/claimpath"
@@ -241,11 +242,8 @@ func lookupClaim(claims map[string]any, path string) (any, bool, error) {
 	if value, ok := claims[path]; ok {
 		return value, true, nil
 	}
-	pointer, err := claimpath.Nested().Dotted(path)
-	if err != nil {
-		return nil, false, err
-	}
-	value, ok, err := claimpath.Nested().Get(claims, pointer)
+	keys := strings.Split(path, ".")
+	value, ok, err := claimpath.Nested().Get(claims, claimpath.Keys(keys[0], keys[1:]...))
 	if errors.Is(err, claimpath.ErrMismatch) {
 		// The token holds another structure where the template reads the
 		// claim, so it does not assert the claim.

@@ -25,13 +25,14 @@ templates:
             - path: ["institution_country"]
             - path: ["expiry_date"]
     claim_mappings:
-      - {path: [card_number], claim: ehic_card_number}
-      - {path: [personal_identification_number], claim: pin}
-      - {path: [forename], claim: given_name}
-      - {path: [family_name], claim: family_name}
-      - {path: [date_of_birth], claim: birthdate}
-      - {path: [institution_id], claim: competent_institution_id}
-      - {path: [institution_name], claim: competent_institution}
-      - {path: [institution_country], claim: issuing_country}
-      - {path: [expiry_date], claim: card_expiry}
+      eudi_ehic:
+        - {path: [card_number], claim: "ehic_card_number"}
+        - {path: [personal_identification_number], claim: "pin"}
+        - {path: [forename], claim: "given_name"}
+        - {path: [family_name], claim: "family_name"}
+        - {path: [date_of_birth], claim: "birthdate"}
+        - {path: [institution_id], claim: "competent_institution_id"}
+        - {path: [institution_name], claim: "competent_institution"}
+        - {path: [institution_country], claim: "issuing_country"}
+        - {path: [expiry_date], claim: "card_expiry"}
     enabled: true

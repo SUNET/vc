@@ -785,15 +785,15 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 	return template
 }
 
-// GetClaimMappings is a helper to extract claim mappings from a template.
-// The mappings are empty when the template doesn't implement this method.
-func GetClaimMappings(template PresentationRequestTemplate) ClaimMappings {
+// GetClaimMappings returns the claim mappings of a template, bound to its
+// dcql. The mappings are empty when the template has none.
+func GetClaimMappings(template PresentationRequestTemplate) (BoundClaimMappings, error) {
 	if t, ok := template.(interface {
-		GetClaimMappings() ClaimMappings
+		GetClaimMappings() (BoundClaimMappings, error)
 	}); ok {
 		return t.GetClaimMappings()
 	}
-	return ClaimMappings{}
+	return BoundClaimMappings{}, nil
 }
 
 // ListTemplates returns all templates

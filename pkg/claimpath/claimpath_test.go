@@ -5,6 +5,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"gopkg.in/yaml.v2"
 )
 
 // arthurDent is the credential of the examples in OpenID4VP 1.0 section
@@ -88,13 +90,15 @@ func TestShapes(t *testing.T) {
 	}{
 		{"nested object", Nested(), map[string]any{"identity": map[string]any{"birthdate": "1990"}}, Keys("identity", "birthdate"), "1990", false},
 		{"nested refuses a flat dotted key", Nested(), map[string]any{"identity.birthdate": "1990"}, Keys("identity", "birthdate"), nil, false},
-		{"presented mdoc element", MDocQualified("org.iso.18013.5.1"), map[string]any{"eu.europa.ec.eudi.pid.1.birth_date": "1990"}, Keys("eu.europa.ec.eudi.pid.1", "birth_date"), "1990", false},
-		{"presented mdoc refuses one key", MDocQualified("org.iso.18013.5.1"), map[string]any{"birth_date": "1990"}, Keys("birth_date"), nil, true},
+		{"presented mdoc element", MDocQualified(), map[string]any{"eu.europa.ec.eudi.pid.1.birth_date": "1990"}, Keys("eu.europa.ec.eudi.pid.1", "birth_date"), "1990", false},
+		{"presented mdoc refuses one key", MDocQualified(), map[string]any{"birth_date": "1990"}, Keys("birth_date"), nil, true},
 		{"mdoc document element", elements, map[string]any{"birth_date": "1990"}, Keys("org.iso.18013.5.1", "birth_date"), "1990", false},
 		{"mdoc document refuses an undeclared namespace", elements, map[string]any{"birth_date": "1990"}, Keys("eu.europa.ec.eudi.pid.1", "birth_date"), nil, true},
 		{"mdoc document refuses a declared element as one key", elements, map[string]any{"birth_date": "1990"}, Keys("birth_date"), nil, true},
+		{"mdoc document element value", elements, map[string]any{"birth_date": map[string]any{"year": "1990"}}, Keys("org.iso.18013.5.1", "birth_date", "year"), "1990", false},
+		{"mdoc document refuses a namespace alone", elements, map[string]any{"birth_date": "1990"}, Keys("org.iso.18013.5.1"), nil, true},
 		{"mdoc document key the MDDL does not declare", elements, map[string]any{"raw": "1990"}, Keys("raw"), "1990", false},
-		{"mdoc document refuses three keys", elements, map[string]any{}, Keys("a", "b", "c"), nil, true},
+		{"mdoc document value under a key the MDDL does not declare", elements, map[string]any{"raw": map[string]any{"year": "1990"}}, Keys("raw", "year"), "1990", false},
 		{"one claim refuses null", Nested(), map[string]any{"a": []any{"x"}}, New(Key("a"), All()), nil, true},
 	}
 	for _, tt := range tests {
@@ -110,30 +114,19 @@ func TestShapes(t *testing.T) {
 	}
 }
 
-// TestCheckResolved finds a pending pointer through maps, slices,
-// pointers and a field a custom unmarshaler sets, and names where it is.
-func TestCheckResolved(t *testing.T) {
-	type leaf struct {
-		Path Pointer `yaml:"-"`
+// TestStringPointerRefused refuses a claims path pointer written as a
+// string, in JSON and in YAML.
+func TestStringPointerRefused(t *testing.T) {
+	var target struct {
+		Path Pointer `json:"path" yaml:"path"`
 	}
-	type entry struct {
-		Leaves []*leaf `yaml:"leaves"`
-	}
-	type root struct {
-		Entries map[string]entry `yaml:"entries"`
-	}
-	pending, err := Dotted("given_name")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := root{Entries: map[string]entry{"pid": {Leaves: []*leaf{{Path: Keys("a")}, {Path: pending}}}}}
-
-	var found *PendingError
-	if !errors.As(CheckResolved(cfg), &found) || found.At != "entries.pid.leaves[1].path" {
-		t.Fatalf("CheckResolved() = %v, want the pending pointer at entries.pid.leaves[1].path", found)
-	}
-	cfg.Entries["pid"].Leaves[1].Path = Keys("b")
-	if err := CheckResolved(cfg); err != nil {
-		t.Fatalf("CheckResolved() = %v on resolved pointers", err)
+	for name, decode := range map[string]func() error{
+		"json": func() error { return json.Unmarshal([]byte(`{"path": "address.locality"}`), &target) },
+		"yaml": func() error { return yaml.Unmarshal([]byte("path: address.locality\n"), &target) },
+	} {
+		var refused *StringError
+		if err := decode(); !errors.As(err, &refused) || refused.Text != "address.locality" {
+			t.Errorf("%s: decode error = %v, want the string refused", name, err)
+		}
 	}
 }

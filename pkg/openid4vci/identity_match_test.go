@@ -36,75 +36,72 @@ func TestIdentityMatchRefusalNamesTheRightAlternative(t *testing.T) {
 }
 
 // Dotted claim paths must not become BSON field names; MongoDB < 5.0
-// refuses "." in them.
+// refuses "." in them. A stored rule holds dotted names, which a replica
+// of the earlier release reads, or pointers.
 func TestIdentityMatchBSONKeepsDottedPathsOutOfFieldNames(t *testing.T) {
-	m := &IdentityMatch{Claims: ClaimMatches{
-		{Path: dotted(t, "org.iso.18013.5.1.family_name"), ClaimTest: ClaimTest{Equals: "Andersson"}},
-		{Path: claimpath.Keys("org.iso.18013.5.1", "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}},
+	rule := &IdentityMatch{Claims: []ClaimMatch{
+		{Path: claimpath.Keys("org.iso.18013.5.1", "family_name"), ClaimTest: ClaimTest{Equals: "Andersson"}},
+		{Path: claimpath.Keys("given_name"), ClaimTest: ClaimTest{Equals: "Anna"}},
 	}}
+	named := rule.Store(func(p claimpath.Pointer) (string, bool) {
+		keys, _ := p.KeyNames()
+		name := keys[0]
+		for _, key := range keys[1:] {
+			name += "." + key
+		}
+		return name, true
+	})
+	for form, stored := range map[string]*StoredIdentityMatch{"names": named, "pointers": rule.Store(nil)} {
+		data, err := bson.Marshal(struct {
+			M *StoredIdentityMatch `bson:"identity_match"`
+		}{stored})
+		require.NoError(t, err, form)
 
-	data, err := bson.Marshal(struct {
-		M *IdentityMatch `bson:"identity_match"`
-	}{m})
-	require.NoError(t, err)
-
-	var walk func(raw bson.Raw)
-	walk = func(raw bson.Raw) {
-		elems, err := raw.Elements()
-		require.NoError(t, err)
-		for _, e := range elems {
-			assert.NotContains(t, e.Key(), ".", "field name %q", e.Key())
-			if doc, ok := e.Value().DocumentOK(); ok {
-				walk(doc)
-			}
-			if arr, ok := e.Value().ArrayOK(); ok {
-				walk(bson.Raw(arr))
+		var walk func(raw bson.Raw)
+		walk = func(raw bson.Raw) {
+			elems, err := raw.Elements()
+			require.NoError(t, err)
+			for _, e := range elems {
+				assert.NotContains(t, e.Key(), ".", "%s: field name %q", form, e.Key())
+				if doc, ok := e.Value().DocumentOK(); ok {
+					walk(doc)
+				}
+				if arr, ok := e.Value().ArrayOK(); ok {
+					walk(bson.Raw(arr))
+				}
 			}
 		}
-	}
-	walk(data)
+		walk(data)
 
-	var got struct {
-		M *IdentityMatch `bson:"identity_match"`
+		var got struct {
+			M *StoredIdentityMatch `bson:"identity_match"`
+		}
+		require.NoError(t, bson.Unmarshal(data, &got), form)
+		assert.Equal(t, stored, got.M, form)
 	}
-	require.NoError(t, bson.Unmarshal(data, &got))
-	assert.Equal(t, m, got.M)
 }
 
-// A context stored before the entry-list shape still loads.
+// A context stored before the entry-list shape still loads, and its names
+// read in the shape of the presented credential.
 func TestIdentityMatchBSONReadsTheMapShape(t *testing.T) {
 	data, err := bson.Marshal(bson.M{"claims": bson.M{"given_name": bson.M{"equals": "Anna"}}})
 	require.NoError(t, err)
 
-	var got IdentityMatch
+	var got StoredIdentityMatch
 	require.NoError(t, bson.Unmarshal(data, &got))
-	assert.Equal(t, ClaimMatches{{Path: dotted(t, "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}}}, got.Claims)
+	rule, err := got.Rule(func(name string) (claimpath.Pointer, error) { return claimpath.Keys("read", name), nil })
+	require.NoError(t, err)
+	assert.Equal(t, []ClaimMatch{{Path: claimpath.Keys("read", "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}}}, rule.Claims)
 }
 
-// A caller may send the claims as a list of pointers or dotted names, or
-// in the earlier object form, which reads as dotted names.
-func TestIdentityMatchJSONForms(t *testing.T) {
-	want := ClaimMatches{
-		{Path: dotted(t, "family_name"), ClaimTest: ClaimTest{Equals: "Andersson"}},
-		{Path: dotted(t, "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}},
-	}
-	for name, body := range map[string]string{
-		"object form":       `{"claims": {"given_name": {"equals": "Anna"}, "family_name": {"equals": "Andersson"}}}`,
-		"list, dotted name": `{"claims": [{"path": "family_name", "equals": "Andersson"}, {"path": "given_name", "equals": "Anna"}]}`,
-	} {
-		var got IdentityMatch
-		require.NoError(t, json.Unmarshal([]byte(body), &got), name)
-		assert.Equal(t, want, got.Claims, name)
-	}
-
+// A request lists claims as pointers. The dotted string inside the list
+// form was never released, so it is refused.
+func TestIdentityMatchJSON(t *testing.T) {
 	var got IdentityMatch
 	require.NoError(t, json.Unmarshal([]byte(`{"claims": [{"path": ["address", null, 0], "equals": "x"}]}`), &got))
-	assert.Equal(t, claimpath.New(claimpath.Key("address"), claimpath.All(), claimpath.Index(0)), got.Claims[0].Path)
-}
+	assert.Equal(t, []ClaimMatch{{Path: claimpath.New(claimpath.Key("address"), claimpath.All(), claimpath.Index(0)), ClaimTest: ClaimTest{Equals: "x"}}}, got.Claims)
 
-func dotted(t *testing.T, name string) claimpath.Pointer {
-	t.Helper()
-	p, err := claimpath.Dotted(name)
-	require.NoError(t, err)
-	return p
+	err := json.Unmarshal([]byte(`{"claims": [{"path": "family_name", "equals": "Andersson"}]}`), &got)
+	var stringErr *claimpath.StringError
+	assert.ErrorAs(t, err, &stringErr)
 }
