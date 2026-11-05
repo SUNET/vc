@@ -65,6 +65,20 @@
 
 ### Fixed
 
+- **MongoDB database names are configurable**: apigw, verifier and registry
+  always used the fixed databases `vc`, `verifier` and `vc_registry`. A
+  database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only
+  selects the authSource and never chose where data went, so deployments
+  sharing one MongoDB server silently shared credentials, identity mappings,
+  OIDC clients and status lists. New settings
+  `common.mongo.apigw_database_name`, `common.mongo.verifier_database_name`
+  and `common.mongo.registry_database_name` default to the old names, so
+  existing deployments are unaffected. Deployments sharing a MongoDB server
+  must give each one distinct names, and a distinct
+  `common.ha.cache_database_name`. Changing a name does not move data: copy
+  the existing collections to the new database first (for example with
+  `mongodump` and `mongorestore --nsFrom/--nsTo`).
+
 - **W3C presentation verification picked a proof by accident.** A verifiable
   presentation holds two Data Integrity proofs - the holder's, over the
   presentation, and the embedded credential's, from the issuer - and both

@@ -128,6 +128,21 @@ registry:
 	assert.Nil(t, secrets.Common)
 }
 
+// The database name defaults are the names that were hard-coded before they
+// became configurable. Changing one moves an existing deployment's data out
+// from under it, so they are pinned here.
+func TestMongoDatabaseNameDefaults(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{},
+	}
+	require.NoError(t, defaults.Set(cfg))
+
+	assert.Equal(t, "vc", cfg.Common.Mongo.APIGWDatabaseName)
+	assert.Equal(t, "verifier", cfg.Common.Mongo.VerifierDatabaseName)
+	assert.Equal(t, "vc_registry", cfg.Common.Mongo.RegistryDatabaseName)
+	assert.Equal(t, "vc_cache", cfg.Common.HA.CacheDatabaseName)
+}
+
 func TestDigitalCredentialsDefaults(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{},
