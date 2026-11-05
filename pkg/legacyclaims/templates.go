@@ -26,6 +26,11 @@ func UpgradeTemplates(d *Document, convert bool) error {
 	if d.root == nil {
 		return nil
 	}
+	return d.fail(d.upgradeTemplates(convert))
+}
+
+// upgradeTemplates is UpgradeTemplates for a document with a root.
+func (d *Document) upgradeTemplates(convert bool) error {
 	templates, err := templateNodes(d.root)
 	if err != nil {
 		return err
@@ -118,18 +123,24 @@ func (d *Document) templateDCQL(template ast.Node) ([]query, error) {
 }
 
 // scalarValue returns the text of the scalar under key of mapping n, or
-// "" when it is absent.
+// "" when it is absent or null.
 func scalarValue(n ast.Node, key string) (string, error) {
 	value, err := descend(n, key)
 	if err != nil || value == nil {
 		return "", err
 	}
 	value, err = unwrap(value)
-	if err != nil {
+	if err != nil || isNull(value) {
 		return "", err
 	}
-	name, _ := dottedName(value)
-	return name, nil
+	if literal, ok := value.(*ast.LiteralNode); ok {
+		return literal.Value.Value, nil
+	}
+	text, ok := dottedName(value)
+	if !ok {
+		return "", fmt.Errorf("%s is no scalar", value.GetPath())
+	}
+	return text, nil
 }
 
 // nameMapping is one entry of the earlier release's claim_mappings map.
@@ -214,9 +225,15 @@ func (d *Document) claimOf(value ast.Node) (claim, text string, ok bool, err err
 	case *ast.LiteralNode:
 		return v.Value.Value, strconv.Quote(v.Value.Value), true, nil
 	}
-	claim, _ = dottedName(value)
+	claim, ok = dottedName(value)
+	if !ok {
+		return "", "", false, fmt.Errorf("%s is no OIDC claim name", value.GetPath())
+	}
 	text, err = d.text(value)
-	return claim, strings.TrimSpace(text), err == nil, err
+	if err != nil {
+		return "", "", false, err
+	}
+	return claim, strings.TrimSpace(text), true, nil
 }
 
 // renderNameMappings renders the earlier release's map as a flow mapping.
@@ -256,7 +273,10 @@ func convertNameMappings(mappings []nameMapping, queries []query) conversion {
 	if slices.ContainsFunc(mappings, func(m nameMapping) bool { return m.name == passThrough && m.claim == passThrough }) {
 		return conversion{text: `"*"`, passThrough: true}
 	}
-	suggested := suggestKeyed(mappings, queries)
+	suggested, unreadable := suggestKeyed(mappings, queries)
+	if unreadable != "" {
+		return conversion{text: suggested, note: unreadable}
+	}
 	if i := slices.IndexFunc(mappings, func(m nameMapping) bool { return m.name == passThrough }); i >= 0 {
 		return conversion{text: suggested, note: fmt.Sprintf("the earlier form skips the entry %q: %q; delete it", passThrough, mappings[i].claim)}
 	}
@@ -309,26 +329,40 @@ func mappedClaim(format, name string) (claimpath.Pointer, string) {
 
 // suggestKeyed renders the keyed form that maps each entry in each query,
 // with each name read the way a dotted claim name of a presented
-// credential of the query's format reads.
-func suggestKeyed(mappings []nameMapping, queries []query) string {
+// credential of the query's format reads. The form leaves out each entry
+// whose name has no claims path pointer, and the note names the first.
+func suggestKeyed(mappings []nameMapping, queries []query) (text, note string) {
 	parts := make([]string, 0, len(queries))
 	for _, q := range queries {
 		reading := Presented(q.format)
 		entries := make([]string, 0, len(mappings))
 		for _, m := range mappings {
-			path, err := reading.Dotted(m.name)
+			entry, err := keyedEntry(reading, m)
 			if err != nil {
+				if note == "" {
+					note = fmt.Sprintf("%q names no claims path pointer: %v", m.name, err)
+				}
 				continue
 			}
-			text, err := pointerText(path)
-			if err != nil {
-				continue
-			}
-			entries = append(entries, "{path: "+text+", claim: "+m.claimText+"}")
+			entries = append(entries, entry)
 		}
 		parts = append(parts, scalarText(q.id)+": ["+strings.Join(entries, ", ")+"]")
 	}
-	return "{" + strings.Join(parts, ", ") + "}"
+	return "{" + strings.Join(parts, ", ") + "}", note
+}
+
+// keyedEntry renders the keyed entry that maps the name of m, read as
+// reading reads it.
+func keyedEntry(reading Shape, m nameMapping) (string, error) {
+	path, err := reading.Dotted(m.name)
+	if err != nil {
+		return "", err
+	}
+	pointer, err := pointerText(path)
+	if err != nil {
+		return "", err
+	}
+	return "{path: " + pointer + ", claim: " + m.claimText + "}", nil
 }
 
 // rewriteMappings writes a convertible claim_mappings map in the keyed

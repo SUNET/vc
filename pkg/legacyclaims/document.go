@@ -75,6 +75,14 @@ func Parse(file string, src []byte) (*Document, error) {
 	return d, nil
 }
 
+// fail names the file in an error of an upgrade.
+func (d *Document) fail(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", d.file, err)
+}
+
 // lineStarts returns the byte offset of the start of each line of src.
 func lineStarts(src []byte) []int {
 	starts := []int{0}
@@ -175,7 +183,7 @@ func (d *Document) tokenSpan(tk *token.Token) (int, int, error) {
 	}
 	text := strings.TrimSpace(tk.Origin)
 	if text == "" || !bytes.HasPrefix(d.src[start:], []byte(text)) {
-		return 0, 0, fmt.Errorf("%s: line %d: the text of %q is not where its token says", d.file, tk.Position.Line, tk.Value)
+		return 0, 0, fmt.Errorf("line %d: the text of %q is not where its token says", tk.Position.Line, tk.Value)
 	}
 	return start, start + len(text), nil
 }
@@ -196,14 +204,14 @@ func (d *Document) span(n ast.Node) (int, int, error) {
 	default:
 		return d.tokenSpan(n.GetToken())
 	}
-	return 0, 0, fmt.Errorf("%s: line %d: %s is no scalar or flow collection", d.file, n.GetToken().Position.Line, n.GetPath())
+	return 0, 0, fmt.Errorf("line %d: %s is no scalar or flow collection", n.GetToken().Position.Line, n.GetPath())
 }
 
 // flowSpan returns the byte range from a flow collection's opening
 // indicator through its closing one.
 func (d *Document) flowSpan(start, end *token.Token) (int, int, error) {
 	if start == nil || end == nil {
-		return 0, 0, fmt.Errorf("%s: a flow collection has no bounds", d.file)
+		return 0, 0, errors.New("a flow collection has no bounds")
 	}
 	from, err := d.offset(start.Position)
 	if err != nil {

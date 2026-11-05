@@ -1,7 +1,6 @@
 package legacyclaims
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/claimpath"
@@ -70,13 +69,12 @@ func UpgradeShared(d *Document) error {
 	if d.root == nil {
 		return nil
 	}
-	if err := d.upgradeAuthProviders(); err != nil {
-		return err
+	for _, upgrade := range []func() error{d.upgradeAuthProviders, d.upgradePresets, d.upgradeAuxiliaryData} {
+		if err := upgrade(); err != nil {
+			return d.fail(err)
+		}
 	}
-	if err := d.upgradePresets(); err != nil {
-		return err
-	}
-	return d.upgradeAuxiliaryData()
+	return nil
 }
 
 // UpgradeDataSources rewrites the claim spellings of apigw.data_sources,
@@ -85,6 +83,11 @@ func UpgradeDataSources(d *Document, shapes Shapes) error {
 	if d.root == nil {
 		return nil
 	}
+	return d.fail(d.upgradeDataSources(shapes))
+}
+
+// upgradeDataSources is UpgradeDataSources for a document with a root.
+func (d *Document) upgradeDataSources(shapes Shapes) error {
 	dataSources, err := descend(d.root, "apigw", "data_sources")
 	if err != nil || isNull(dataSources) {
 		return err
@@ -136,7 +139,7 @@ func (u *configUpgrade) eachScope(dataSources ast.Node, source string, upgrade f
 			return err
 		}
 		if err := upgrade(scope, entry.Value); err != nil {
-			return fmt.Errorf("%s: %w", u.file, err)
+			return err
 		}
 	}
 	return nil
@@ -297,6 +300,11 @@ func ClearDataSources(d *Document) error {
 	if d.root == nil {
 		return nil
 	}
+	return d.fail(d.clearDataSources())
+}
+
+// clearDataSources is ClearDataSources for a document with a root.
+func (d *Document) clearDataSources() error {
 	apigw, err := descend(d.root, "apigw")
 	if err != nil {
 		return err

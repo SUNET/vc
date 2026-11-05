@@ -1,6 +1,7 @@
 package legacyclaims
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,23 +16,23 @@ type reader func(name string) (claimpath.Pointer, error)
 
 // pointer reads the claims path pointer a node holds. A scalar is main's
 // dotted name: read rewrites it as a sequence and records the rewrite. It
-// returns the zero pointer for a null node, and reports whether it
-// rewrote the node.
-func (d *Document) pointer(n ast.Node, read reader) (claimpath.Pointer, bool, error) {
+// returns the zero pointer for a null node, and the dotted name it
+// rewrote, which is empty when the node holds no scalar.
+func (d *Document) pointer(n ast.Node, read reader) (claimpath.Pointer, string, error) {
 	n, err := unwrap(n)
 	if err != nil || isNull(n) {
-		return claimpath.Pointer{}, false, err
+		return claimpath.Pointer{}, "", err
 	}
 	name, scalar := dottedName(n)
 	if !scalar {
 		p, err := pointerOf(n)
-		return p, false, err
+		return p, "", err
 	}
 	p, err := read(name)
 	if err != nil {
-		return claimpath.Pointer{}, false, fmt.Errorf("%s: %w", n.GetPath(), err)
+		return claimpath.Pointer{}, "", fmt.Errorf("%s: %w", n.GetPath(), err)
 	}
-	return p, true, d.replaceScalar(n, p)
+	return p, name, d.replaceScalar(n, p)
 }
 
 // replaceScalar replaces a scalar with the sequence of a pointer.
@@ -288,7 +289,7 @@ func (d *Document) appendItems(n ast.Node, texts []string) error {
 // collection.
 func (d *Document) appendFlow(end *token.Token, nonEmpty bool, texts []string) error {
 	if end == nil {
-		return fmt.Errorf("%s: a flow collection has no end", d.file)
+		return errors.New("a flow collection has no end")
 	}
 	at, err := d.offset(end.Position)
 	if err != nil {
