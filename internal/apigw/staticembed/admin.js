@@ -1,38 +1,8 @@
 // @ts-nocheck
 import Alpine from '/static/alpinejs.esm.min.js';
+import { flattenObject, unflattenEntries } from './admin-helpers.js';
 
 window.adminApp = function () {
-    /** Flatten a nested object into dot-notation key-value pairs */
-    function flattenObject(obj, prefix) {
-        const entries = [];
-        for (const [k, v] of Object.entries(obj)) {
-            const key = prefix ? prefix + '.' + k : k;
-            if (v && typeof v === 'object' && !Array.isArray(v)) {
-                entries.push(...flattenObject(v, key));
-            } else {
-                entries.push({ key, value: v == null ? '' : String(v) });
-            }
-        }
-        return entries;
-    }
-
-    /** Rebuild a nested object from dot-notation key-value pairs */
-    function unflattenEntries(entries) {
-        const result = {};
-        for (const { key, value } of entries) {
-            const parts = key.split('.');
-            let cur = result;
-            for (let i = 0; i < parts.length - 1; i++) {
-                if (!(parts[i] in cur) || typeof cur[parts[i]] !== 'object') {
-                    cur[parts[i]] = {};
-                }
-                cur = cur[parts[i]];
-            }
-            cur[parts[parts.length - 1]] = value;
-        }
-        return result;
-    }
-
     /** Build a tree-view display list from flat dot-notation entries */
     function buildTreeView(entries) {
         const rows = [];
