@@ -58,6 +58,33 @@ func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path []string, encoding str
 	if claim.ValueType != want {
 		return fmt.Errorf("path %q is a %s element; a commitment in %s needs a %s element", path, claim.ValueType, held, want)
 	}
+	return checkMDocElementNameIsUnique(mddl, path)
+}
+
+// checkMDocElementNameIsUnique refuses a commitment element whose name another
+// namespace of the same MDDL also declares.
+//
+// The document the issuer signs from is keyed by element name alone: Issuer.addElements
+// walks every namespace and reads doc[elementID], so one value is written into every
+// namespace declaring that name. A commitment configured for one namespace would be
+// issued into the other as well - the holder's opening ends up where nothing asked for
+// it - and two entries naming the same element in different namespaces have one place
+// to write between them. Refused at startup rather than mis-issued, until document data
+// can name a namespace.
+func checkMDocElementNameIsUnique(mddl *mdoc.MDDLSchema, path []string) error {
+	if mddl == nil {
+		return nil
+	}
+	namespace, element := path[0], path[1]
+	for otherNamespace, elements := range mddl.Claims {
+		if otherNamespace == namespace {
+			continue
+		}
+		if _, shared := elements[element]; shared {
+			return fmt.Errorf("namespaces %q and %q both declare element %q, and an issued document names its values by element alone, so a commitment there would be written into both",
+				namespace, otherNamespace, element)
+		}
+	}
 	return nil
 }
 

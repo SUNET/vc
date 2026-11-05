@@ -3697,6 +3697,22 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		return nil, fmt.Errorf("failed to construct nonce endpoint URL: %w", err)
 	}
 
+	// The Notification Endpoint is registered on the same root as /nonce and
+	// /credential, unconditionally, so it is advertised the same way: derived from
+	// the public URL. Omitting it tells a wallet this issuer has no Notification
+	// Endpoint (OpenID4VCI 11), which is how a credential response carrying a
+	// notification_id - as a delivered auxiliary-data opening does, so the wallet can
+	// report a failed commitment check - ended up naming an identifier with nowhere
+	// to send it. A configured notification_endpoint still wins, for a deployment
+	// whose endpoint is reached by some other path.
+	notificationEndpoint := cfg.NotificationEndpoint
+	if notificationEndpoint == "" {
+		notificationEndpoint, err = url.JoinPath(publicURL, "/notification")
+		if err != nil {
+			return nil, fmt.Errorf("failed to construct notification endpoint URL: %w", err)
+		}
+	}
+
 	// Both encryption objects come from keys that have actually been loaded,
 	// so the metadata cannot advertise something the Credential Endpoint will
 	// refuse. nil when no key is configured, which omits both objects.
@@ -3711,7 +3727,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		NonceEndpoint:                        nonceEndpoint,
 		AuthorizationServers:                 cfg.AuthorizationServers,
 		DeferredCredentialEndpoint:           cfg.DeferredCredentialEndpoint,
-		NotificationEndpoint:                 cfg.NotificationEndpoint,
+		NotificationEndpoint:                 notificationEndpoint,
 		CryptographicBindingMethodsSupported: cfg.CryptographicBindingMethodsSupported,
 		CredentialSigningAlgValuesSupported:  cfg.CredentialSigningAlgValuesSupported,
 		ProofSigningAlgValuesSupported:       cfg.ProofSigningAlgValuesSupported,

@@ -100,11 +100,17 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		mutate func(*model.Cfg)
 		want   string
 	}{
-		"an unknown type":               {func(c *model.Cfg) { entry(c).Type = "x" }, `type "x"`},
-		"an unknown alg":                {func(c *model.Cfg) { entry(c).Alg = "sha-512" }, `alg "sha-512"`},
-		"an opening in config":          {func(c *model.Cfg) { entry(c).Opening = "AA" }, "carries no opening"},
-		"a non-bstr element":            {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "birth_date"} }, "full-date element"},
-		"an undeclared path":            {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "nope"} }, "declares no element"},
+		"an unknown type":      {func(c *model.Cfg) { entry(c).Type = "x" }, `type "x"`},
+		"an unknown alg":       {func(c *model.Cfg) { entry(c).Alg = "sha-512" }, `alg "sha-512"`},
+		"an opening in config": {func(c *model.Cfg) { entry(c).Opening = "AA" }, "carries no opening"},
+		"a non-bstr element":   {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "birth_date"} }, "full-date element"},
+		"an undeclared path":   {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "nope"} }, "declares no element"},
+		// An issued document names its values by element alone (Issuer.addElements reads
+		// doc[elementID] for every namespace), so a commitment at an element two
+		// namespaces declare is written into both.
+		"an element name another namespace declares": {func(c *model.Cfg) {
+			c.Common.CredentialMetadata["nym_auth"].MDDL.Claims["eu.europa.ec.eudi.other.1"] = mdoc.NamespaceClaims{"ssc": {ValueType: "bstr"}}
+		}, "both declare element"},
 		"an encoding on a bstr element": {func(c *model.Cfg) { entry(c).Encoding = "hex" }, "a commitment in hex text needs a tstr element"},
 		"required set in config": {func(c *model.Cfg) {
 			c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: []string{ssc[0], "psc"}, Required: true}}
