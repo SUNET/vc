@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"time"
 
@@ -39,22 +40,18 @@ func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSession
 		return nil, ErrSessionNotFound
 	}
 
-	// Get session
-	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
-	if err != nil {
-		return nil, ErrSessionNotFound
-	}
-	if authCtx == nil {
-		return nil, ErrSessionNotFound
-	}
-
-	// Update preference
-	authCtx.ShowCredentialDetails = req.ShowCredentialDetails
-	if req.WalletFollowsRedirect != nil {
-		authCtx.WalletFollowsRedirect = *req.WalletFollowsRedirect
-	}
-
-	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+	// Only the two preference fields are written, and nothing is read first.
+	//
+	// Reading the whole context and writing it back put the session back the way
+	// it was found: the browser can send this while the user is deciding, and a
+	// decline or a completed presentation recorded in between - through
+	// ClaimOutcome, so that the first outcome wins - was replaced by the pending
+	// session this request had read. The session then accepted a further
+	// presentation.
+	if err := c.cacheService.AuthContext.SetDisplayPreferences(ctx, req.SessionID, req.ShowCredentialDetails, req.WalletFollowsRedirect); err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, ErrSessionNotFound
+		}
 		c.log.Error(err, "Failed to update session preference")
 		return nil, ErrServerError
 	}

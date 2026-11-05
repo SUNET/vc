@@ -244,6 +244,32 @@ func (s *MongoStore) Update(ctx context.Context, doc *AuthorizationContext) erro
 	return nil
 }
 
+// SetDisplayPreferences sets only the preference fields. See
+// AuthContextStore.SetDisplayPreferences.
+//
+// A $set of two fields rather than a ReplaceOne of the whole document: the
+// caller's copy was read before the user had decided anything, and replacing
+// with it would put the session back the way it was found, outcome and all.
+func (s *MongoStore) SetDisplayPreferences(ctx context.Context, sessionID string, showCredentialDetails bool, walletFollowsRedirect *bool) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	set := bson.M{"show_credential_details": showCredentialDetails}
+	if walletFollowsRedirect != nil {
+		set["wallet_follows_redirect"] = *walletFollowsRedirect
+	}
+
+	result, err := s.coll.UpdateOne(ctx, bson.M{"session_id": sessionID}, bson.M{"$set": set})
+	if err != nil {
+		return fmt.Errorf("failed to set display preferences: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+	return nil
+}
+
 // Delete removes an authorization context by session ID.
 func (s *MongoStore) Delete(ctx context.Context, id string) error {
 	if id == "" {

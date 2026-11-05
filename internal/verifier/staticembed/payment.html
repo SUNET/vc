@@ -114,8 +114,16 @@ import { armWalletLink } from "/static/payment-handoff.js";
         }
     });
 
+    function declined(c) {
+        $("pending").hidden = true;
+        $("done").hidden = false;
+        $("verdict").textContent = "The wallet declined this request. Nothing was shared.";
+        $("result").textContent = c.error_description || c.error || "";
+    }
+
     async function poll(sessionID) {
-        // /ui/completion answers {"status":"pending"} until the wallet's response has been accepted.
+        // /ui/completion answers {"status":"pending"} until the wallet's response has been accepted,
+        // "declined" once the user has refused, and "complete" with a response_code once it is in.
         // A refused response leaves it pending: the reason is in the verifier log (invalid_transaction_data).
         var completed = false;
         for (var i = 0; i < 150; i++) {
@@ -126,6 +134,10 @@ import { armWalletLink } from "/static/payment-handoff.js";
                 if (res.ok) {
                     var c = await res.json();
                     if (c.status === "complete") { completed = true; return await show(c.response_code); }
+                    // A decline is an answer, and the last one this session will give.
+                    // Polling on would spend the whole five minutes and then report a
+                    // timeout to a user who already said no.
+                    if (c.status === "declined") { return declined(c); }
                 }
             } catch (e) { /* retry */ }
             await sleep(2000);

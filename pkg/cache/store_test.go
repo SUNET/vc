@@ -1104,3 +1104,96 @@ func TestClaimOutcomeAdmitsExactlyOneWinner(t *testing.T) {
 	assert.Equal(t, before.Error, after.Error)
 	assert.Equal(t, before.VerifierResponseCode, after.VerifierResponseCode)
 }
+
+// A display preference must never undo an outcome.
+//
+// The verifier's preference endpoint used to read the whole context and write it
+// back. The browser can send that while the user is deciding, so a decline - or a
+// presentation completing - landed between the read and the write, and the write
+// put the session back the way it had been read: pending, and open to a further
+// presentation. ClaimOutcome exists so the first outcome wins; writing only the
+// preference fields is what keeps a preference from being the second.
+//
+// This one states the contract and passes either way - a read that happens after
+// the claim reads the outcome. TestSetDisplayPreferencesRacingAnOutcome below is
+// the guard: it is what fails when the read-modify-write comes back.
+func TestSetDisplayPreferencesKeepsTheOutcome(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	const sessionID = "preference-session"
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "preference-state",
+		Status:    SessionStatusAwaitingPresentation,
+	}))
+
+	declined := &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "preference-state",
+		Status:    SessionStatusError,
+		Error:     "access_denied",
+	}
+	won, err := store.ClaimOutcome(ctx, declined)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	followsRedirect := true
+	require.NoError(t, store.SetDisplayPreferences(ctx, sessionID, true, &followsRedirect))
+
+	stored, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.True(t, HasOutcome(stored), "the decline must survive a preference written after it")
+	assert.Equal(t, SessionStatusError, stored.Status)
+	assert.Equal(t, "access_denied", stored.Error)
+	assert.True(t, stored.ShowCredentialDetails, "and the preference must land")
+	assert.True(t, stored.WalletFollowsRedirect)
+}
+
+// The same thing without the ordering handed to it: preference writes racing a
+// claim, the outcome recorded somewhere in the middle of them.
+func TestSetDisplayPreferencesRacingAnOutcome(t *testing.T) {
+	ctx := context.Background()
+
+	for round := range 16 {
+		store := NewMemoryStore(5 * time.Minute)
+		sessionID := fmt.Sprintf("racing-preference-%d", round)
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: sessionID,
+			State:     sessionID,
+			Status:    SessionStatusAwaitingPresentation,
+		}))
+
+		var start sync.WaitGroup
+		var done sync.WaitGroup
+		start.Add(1)
+		done.Add(2)
+
+		go func() {
+			defer done.Done()
+			start.Wait()
+			for range 64 {
+				assert.NoError(t, store.SetDisplayPreferences(ctx, sessionID, true, nil))
+			}
+		}()
+		go func() {
+			defer done.Done()
+			start.Wait()
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: sessionID,
+				State:     sessionID,
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			})
+			assert.NoError(t, err)
+			assert.True(t, won, "nothing else claims this session")
+		}()
+
+		start.Done()
+		done.Wait()
+
+		stored, err := store.GetByID(ctx, sessionID)
+		require.NoError(t, err)
+		require.True(t, HasOutcome(stored), "round %d: the outcome must survive the preferences written around it", round)
+	}
+}
