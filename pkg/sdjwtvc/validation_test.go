@@ -395,12 +395,8 @@ func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
 			},
 		},
 		{
-			// The processing of a claims path returns an error for an
-			// empty selection (OpenID4VP 1.0 section 7.1), so a mandatory
-			// element claim needs an element.
 			name:     "empty array",
 			outcomes: []any{},
-			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},
 		},
 		{
 			name:     "mandatory leaf is null",
@@ -429,24 +425,69 @@ func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			docData, err := json.Marshal(map[string]any{"learningOutcomes": tt.outcomes})
-			require.NoError(t, err)
-
-			err = ValidateDocument(docData, vctm)
-			if len(tt.missing) == 0 {
-				assert.NoError(t, err)
-				return
-			}
-
-			var verrs *ValidationErrors
-			require.ErrorAs(t, err, &verrs)
-			var fields []string
-			for _, e := range verrs.Errors {
-				fields = append(fields, e.Field)
-			}
-			assert.ElementsMatch(t, tt.missing, fields)
+			assertMissingOutcomeClaims(t, vctm, tt.outcomes, tt.missing)
 		})
 	}
+}
+
+// A mandatory claim at an index is present when the element at that index
+// holds it, whatever the other elements hold.
+func TestValidateDocument_MandatoryClaimAtIndex(t *testing.T) {
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: claimpath.New(claimpath.Key("learningOutcomes"), claimpath.Index(1), claimpath.Key("title")), SD: "never", Mandatory: true},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		outcomes []any
+		missing  []string
+	}{
+		{
+			name:     "element at the index holds the claim",
+			outcomes: []any{map[string]any{}, map[string]any{"title": "a"}},
+		},
+		{
+			name:     "element at the index lacks the claim",
+			outcomes: []any{map[string]any{"title": "a"}, map[string]any{}},
+			missing:  []string{"$.learningOutcomes[1].title"},
+		},
+		{
+			name:     "index beyond the array",
+			outcomes: []any{map[string]any{"title": "a"}},
+			missing:  []string{"$.learningOutcomes[1].title"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMissingOutcomeClaims(t, vctm, tt.outcomes, tt.missing)
+		})
+	}
+}
+
+// assertMissingOutcomeClaims validates a document whose learningOutcomes
+// are outcomes, and checks that the claims missing are exactly missing.
+func assertMissingOutcomeClaims(t *testing.T, vctm *VCTM, outcomes []any, missing []string) {
+	t.Helper()
+	docData, err := json.Marshal(map[string]any{"learningOutcomes": outcomes})
+	require.NoError(t, err)
+
+	err = ValidateDocument(docData, vctm)
+	if len(missing) == 0 {
+		assert.NoError(t, err)
+		return
+	}
+
+	var verrs *ValidationErrors
+	require.ErrorAs(t, err, &verrs)
+	var fields []string
+	for _, e := range verrs.Errors {
+		fields = append(fields, e.Field)
+	}
+	assert.ElementsMatch(t, missing, fields)
 }
 
 func TestValidateClaimPaths_StrictMode_Success(t *testing.T) {

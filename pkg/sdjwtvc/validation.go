@@ -97,8 +97,24 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 	}
 
 	errors := &ValidationErrors{}
+
 	for _, claim := range vctm.Claims {
-		validateClaim(errors, claims, claim, skipIssuerSupplied)
+		if !claim.Mandatory || (skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path)) {
+			continue
+		}
+		if _, exists := claimValue(claims, claim.Path); !exists {
+			errors.AddError(claim.JSONPath(), "mandatory claim is missing")
+		}
+	}
+
+	for _, claim := range vctm.Claims {
+		value, exists := claimValue(claims, claim.Path)
+		if !exists {
+			continue
+		}
+		if err := validateClaimValue(claim, value); err != nil {
+			errors.AddError(claim.JSONPath(), err.Error())
+		}
 	}
 
 	if errors.HasErrors() {
@@ -108,54 +124,57 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 	return nil
 }
 
-// validateClaim checks that a mandatory claim is present and that every
-// value the claim's path selects has a JSON type. A mandatory claim whose
-// path selects every element of an array is present in each element.
-func validateClaim(errors *ValidationErrors, claims map[string]any, claim Claim, skipIssuerSupplied bool) {
-	values, err := claim.Path.Select(claims)
-	if err != nil || (claim.Mandatory && !inEveryElement(claims, claim.Path)) {
-		if claim.Mandatory && !(skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path)) {
-			errors.AddError(claim.JSONPath(), "mandatory claim is missing")
-		}
-		return
-	}
-	for _, value := range values {
-		if err := validateClaimValue(claim, value); err != nil {
-			errors.AddError(claim.JSONPath(), err.Error())
-		}
-	}
-}
-
-// inEveryElement reports whether path reaches a value in every element each
-// of its nulls selects: a key or an index that one element lacks is absent.
-func inEveryElement(claims map[string]any, path claimpath.Pointer) bool {
+// claimValue returns the value path reaches in claims. A path that cannot
+// be processed reaches none.
+func claimValue(claims map[string]any, path claimpath.Pointer) (any, bool) {
 	components, err := path.Components()
-	return err == nil && reachesEveryElement(claims, components)
+	if err != nil {
+		return nil, false
+	}
+	return lookupClaim(claims, components)
 }
 
-func reachesEveryElement(current any, components []claimpath.Component) bool {
-	if len(components) == 0 {
-		return true
-	}
-	c, rest := components[0], components[1:]
-	if key, ok := c.KeyName(); ok {
-		object, isObject := current.(map[string]any)
-		value, present := object[key]
-		return isObject && present && reachesEveryElement(value, rest)
-	}
-	array, ok := current.([]any)
-	if !ok {
-		return false
-	}
-	if index, ok := c.IndexValue(); ok {
-		return index < uint(len(array)) && reachesEveryElement(array[index], rest)
-	}
-	for _, element := range array {
-		if !reachesEveryElement(element, rest) {
-			return false
+// lookupClaim walks components from current. A null selects every element
+// of an array: the rest of the path must reach a value other than null in
+// each element, and the value is the list of those values. The value of a
+// path that ends in null is the array.
+func lookupClaim(current any, components []claimpath.Component) (any, bool) {
+	for i, c := range components {
+		if key, ok := c.KeyName(); ok {
+			object, isObject := current.(map[string]any)
+			value, present := object[key]
+			if !isObject || !present {
+				return nil, false
+			}
+			current = value
+			continue
 		}
+		array, ok := current.([]any)
+		if !ok {
+			return nil, false
+		}
+		if index, ok := c.IndexValue(); ok {
+			if index >= uint(len(array)) {
+				return nil, false
+			}
+			current = array[index]
+			continue
+		}
+		if i == len(components)-1 {
+			return array, true
+		}
+		values := make([]any, 0, len(array))
+		for _, element := range array {
+			// A null leaf would hide inside the list from validateClaimValue's nil check.
+			value, ok := lookupClaim(element, components[i+1:])
+			if !ok || value == nil {
+				return nil, false
+			}
+			values = append(values, value)
+		}
+		return values, true
 	}
-	return true
+	return current, true
 }
 
 // validateClaimValue validates a claim value based on basic type checking
