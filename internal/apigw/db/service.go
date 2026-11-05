@@ -68,7 +68,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 
 	datastoreColl := &DatastoreColl{
 		Service: service,
-		Coll:    service.MongoClient.Database("vc").Collection("datastore"),
+		Coll:    service.MongoClient.Database(cfg.Common.Mongo.APIGWDatabaseName).Collection("datastore"),
 		log:     log.New("VCDatastoreColl"),
 	}
 	if err := datastoreColl.createIndex(ctx); err != nil {
@@ -79,7 +79,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 
 	identityMappingsColl := &IdentityMappingsColl{
 		Service: service,
-		Coll:    service.MongoClient.Database("vc").Collection("identity_mappings"),
+		Coll:    service.MongoClient.Database(cfg.Common.Mongo.APIGWDatabaseName).Collection("identity_mappings"),
 		log:     log.New("VCIdentityMappingsColl"),
 	}
 	if err := identityMappingsColl.createIndex(ctx); err != nil {

@@ -12,8 +12,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-var databaseName = "vc_registry"
-
 // Service is the database service
 type Service struct {
 	MongoClient *mongo.Client

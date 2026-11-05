@@ -18,7 +18,7 @@ type mongoUniqueCommitments struct {
 // NewUniqueCommitmentColl opens the Mongo unique commitment collections and
 // their unique indexes.
 func NewUniqueCommitmentColl(ctx context.Context, service *Service) (*UniqueCommitments, error) {
-	database := service.MongoClient.Database("vc")
+	database := service.MongoClient.Database(service.cfg.Common.Mongo.APIGWDatabaseName)
 	backend := &mongoUniqueCommitments{
 		records: database.Collection("unique_commitments"),
 		resets:  database.Collection("unique_commitment_resets"),
