@@ -26,8 +26,20 @@ import (
 // pinned here. The fetch still goes through LoadDocument, so scheme and
 // address policy apply to it.
 func (l *CachingDocumentLoader) PinRemoteContext(url string) error {
-	_, err := l.pinContext(url, make(map[string]bool), 0, false)
+	_, err := l.PinRemoteContextTracked(url)
 	return err
+}
+
+// PinRemoteContextTracked is PinRemoteContext, reporting whether it wrote
+// to the cache.
+//
+// An ordinary pin writes just as a refresh does - it is only the cache
+// LOOKUP that differs - so a caller that has to know when the documents
+// under it changed needs the flag from both. Discarding it here meant a
+// context pinned for the first time never prompted a recheck of the groups
+// that share it.
+func (l *CachingDocumentLoader) PinRemoteContextTracked(url string) (bool, error) {
+	return l.pinContext(url, make(map[string]bool), 0, false)
 }
 
 // RefreshRemoteContext pins a context again, ignoring what is already

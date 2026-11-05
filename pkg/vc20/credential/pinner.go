@@ -217,6 +217,19 @@ func (p *Pinner) Pin(ctx context.Context, groups []PinGroup) error {
 	p.mu.Lock()
 	p.nextRefresh = p.refreshDeadline()
 	p.mu.Unlock()
+
+	// Under "required" the aggregate decides, not each group in turn. A
+	// later group's pin can replace a context an EARLIER group was
+	// already verified against, and recheckOtherGroups records that
+	// failure where only readiness can see it - so a boot that checked
+	// nothing but its own loop would start a service whose first scope no
+	// longer checks out. Everything the probe reports is a reason this
+	// policy exists.
+	if p.opts.Policy == PolicyRequired {
+		if err := p.HealthProbe(ctx); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -348,7 +361,7 @@ func (p *Pinner) pin(url string, refresh bool) (bool, error) {
 	if refresh {
 		return p.loader.RefreshRemoteContext(url)
 	}
-	return false, p.loader.PinRemoteContext(url)
+	return p.loader.PinRemoteContextTracked(url)
 }
 
 // describe renders a pin failure in the operator's own vocabulary: the

@@ -580,3 +580,88 @@ func TestPinnerFailedRefreshThatStillReplacedDocumentsRechecks(t *testing.T) {
 	assert.Equal(t, 2, verified,
 		"the root was replaced before the reference failed, so the group has to be re-checked")
 }
+
+// Under "required" the aggregate decides. A later group's pin can replace
+// a context an EARLIER group was already verified against, and the recheck
+// records that where only readiness sees it - so a boot that consulted
+// nothing but its own loop would start a service whose first scope no
+// longer checks out.
+func TestPinnerRequiredRefusesWhenALaterGroupBreaksAnEarlierOne(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	dir := t.TempDir()
+	const shared = "https://ctx.invalid/required-shared.jsonld"
+	const later = "https://ctx.invalid/required-later.jsonld"
+	sharedPath := writeContext(t, dir, "shared.jsonld", `{"@context":{"S":"https://example.org/S"}}`)
+	// The later group's root replaces the shared document as it is pinned.
+	laterPath := writeContext(t, dir, "later.jsonld", `{"@context":["`+shared+`",{"L":"https://example.org/L"}]}`)
+	loader.SetContextSources(map[string]ContextSource{
+		shared: {File: sharedPath},
+		later:  {File: laterPath},
+	})
+
+	firstChecks := 0
+	first := scopeGroup(shared)
+	first.Name = "common.credential_metadata.first"
+	first.Verify = func() error {
+		firstChecks++
+		if firstChecks == 1 {
+			return nil
+		}
+		return errors.New("credential_contexts defines none of DiplomaCredential")
+	}
+
+	second := scopeGroup(later)
+	second.Name = "common.credential_metadata.second"
+	second.Verify = func() error { return nil }
+
+	p := newTestPinner(t, loader, newTestClock(), PinnerOptions{Policy: PolicyRequired})
+
+	err := p.Pin(context.Background(), []PinGroup{first, second})
+
+	require.Error(t, err, "required must not start a service whose first scope stopped checking out")
+	assert.Contains(t, err.Error(), "defines none of")
+	assert.Equal(t, 2, firstChecks, "the first group has to be re-checked after the second pinned")
+}
+
+// An ordinary pin writes just as a refresh does - only the cache LOOKUP
+// differs - so the write flag has to come back from both. The background
+// retry always refreshes, so the non-refresh flag matters on the STARTUP
+// pass: a group pinned later in that pass can settle a context an earlier
+// group needed, and without the flag the earlier group keeps the verdict
+// it reached while that context was missing. Under best_effort with
+// refreshing off, nothing would ever revisit it.
+func TestPinnerFirstTimePinRechecksSharingGroups(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	dir := t.TempDir()
+	const earlyURL = "https://ctx.invalid/early.jsonld"
+	const lateURL = "https://ctx.invalid/late-in-pass.jsonld"
+	loader.SetContextSources(map[string]ContextSource{
+		earlyURL: {File: writeContext(t, dir, "early.jsonld", `{"@context":{"E":"https://example.org/E"}}`)},
+		lateURL:  {File: writeContext(t, dir, "late.jsonld", `{"@context":{"L":"https://example.org/L"}}`)},
+	})
+
+	// The early group expands against something the LATER group pins, so
+	// its first check fails and its second succeeds.
+	checks := 0
+	early := scopeGroup(earlyURL)
+	early.Name = "common.credential_metadata.early"
+	early.Verify = func() error {
+		checks++
+		if checks == 1 {
+			return errors.New("credential_contexts defines none of DiplomaCredential")
+		}
+		return nil
+	}
+
+	late := scopeGroup(lateURL)
+	late.Name = "common.jsonld_contexts.sources"
+	late.Verify = func() error { return nil }
+
+	// Refreshing OFF, so the startup pass is the only thing that runs.
+	p := newTestPinner(t, loader, newTestClock(), PinnerOptions{Policy: PolicyBestEffort})
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{early, late}))
+
+	assert.Equal(t, 2, checks, "pinning the later group has to recheck the earlier one")
+	assert.NoError(t, p.HealthProbe(context.Background()),
+		"the earlier group must not keep the verdict it reached before the later group pinned")
+}
