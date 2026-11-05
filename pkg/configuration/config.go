@@ -359,7 +359,71 @@ func checkAuxiliaryData(cfg *model.Cfg, serviceName string) error {
 	if err := checkToWalletEncryption(cfg); err != nil {
 		return err
 	}
-	return checkSourceOpenings(cfg)
+	if err := checkSourceOpenings(cfg); err != nil {
+		return err
+	}
+	return checkUniqueEntriesAgree(cfg)
+}
+
+// checkUniqueEntriesAgree requires the source scopes of a credential scope
+// to set the same unique hash_commitment entries, with the same key. The
+// record then binds a subject whichever source identified them.
+func checkUniqueEntriesAgree(cfg *model.Cfg) error {
+	first := map[string]model.SourceScope{}
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		other, seen := first[src.Scope]
+		if !seen {
+			first[src.Scope] = src
+			continue
+		}
+		if err := compareUniqueEntries(other, src); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// compareUniqueEntries refuses a hash_commitment entry that a and b set
+// different unique on.
+func compareUniqueEntries(a, b model.SourceScope) error {
+	inA, inB := uniqueDerivations(a), uniqueDerivations(b)
+	paths := map[string][]string{}
+	for key, hc := range inA {
+		paths[key] = hc.Path
+	}
+	for key, hc := range inB {
+		paths[key] = hc.Path
+	}
+	for _, key := range slices.Sorted(maps.Keys(paths)) {
+		hcA, hcB := inA[key], inB[key]
+		if hcA != nil && hcB != nil && slices.EqualFunc(hcA.Unique.Key, hcB.Unique.Key, slices.Equal[[]string]) {
+			continue
+		}
+		return fmt.Errorf("%s sets %s on hash_commitment %q, and %s sets %s; every source scope of credential scope %q sets the same",
+			a.Where(), uniqueSetting(hcA), paths[key], b.Where(), uniqueSetting(hcB), a.Scope)
+	}
+	return nil
+}
+
+// uniqueDerivations returns the hash_commitment derivations of src that set
+// unique, by claimsPathKey.
+func uniqueDerivations(src model.SourceScope) map[string]*primitives.HashCommitmentArgs {
+	unique := map[string]*primitives.HashCommitmentArgs{}
+	for _, d := range src.Derivations {
+		if d.HashCommitment != nil && d.HashCommitment.Unique != nil {
+			unique[claimsPathKey(d.HashCommitment.Path)] = d.HashCommitment
+		}
+	}
+	return unique
+}
+
+// uniqueSetting is the unique setting of a derivation from
+// uniqueDerivations, as the config writes it.
+func uniqueSetting(hc *primitives.HashCommitmentArgs) string {
+	if hc == nil {
+		return "no unique"
+	}
+	return fmt.Sprintf("unique.key %q", hc.Unique.Key)
 }
 
 // checkSourceOpenings checks the hash_commitment derivations of each data
@@ -1440,4 +1504,3 @@ func refuseLegacyZkpReqKeys(formats *openid4vp.VPFormatsSupported) error {
 	}
 	return nil
 }
-

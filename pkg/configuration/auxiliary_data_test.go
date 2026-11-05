@@ -206,6 +206,11 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"a key part that is the entry itself": {func(c *model.Cfg) {
 			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{psc}}})
 		}, "is the entry itself, which every commitment matches"},
+		"a source scope without the unique entry of another": {func(c *model.Cfg) {
+			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{ssc}}})
+			from := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From
+			from["pid_mdoc"] = model.PresentedCredential{RequiredClaims: from["pid"].RequiredClaims, Derivations: []primitives.Derivation{from["pid"].Derivations[0]}}
+		}, `apigw.data_sources.presentation.scopes.nym_auth.from.pid sets unique.key [["eu.europa.ec.eudi.nym_auth.1" "ssc"]] on hash_commitment ["eu.europa.ec.eudi.nym_auth.1" "psc"], and apigw.data_sources.presentation.scopes.nym_auth.from.pid_mdoc sets no unique`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base()
