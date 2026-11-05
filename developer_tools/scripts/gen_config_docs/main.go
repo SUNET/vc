@@ -813,8 +813,7 @@ func structDescriptionExtra(def *StructDef) string {
 // docSummary splits a doc comment into its first sentence and the lines
 // after it. The sentence ends where go/doc's Synopsis ends it: at a period
 // followed by white space and not preceded by exactly one capital letter, or
-// at the end of the first paragraph. A letter between two periods, as in
-// "e.g.", ends no sentence either. The sentence can wrap over several lines.
+// at the end of the first paragraph. The sentence can wrap over several lines.
 func docSummary(doc string) (string, []string) {
 	lines := strings.Split(doc, "\n")
 	end := slices.IndexFunc(lines, func(line string) bool {
@@ -838,8 +837,7 @@ func firstSentenceEnd(s string) int {
 	var ppp, pp, p rune
 	for i, q := range s {
 		initial := unicode.IsUpper(pp) && !unicode.IsUpper(ppp)
-		abbreviation := unicode.IsLetter(pp) && ppp == '.'
-		if unicode.IsSpace(q) && p == '.' && !initial && !abbreviation {
+		if unicode.IsSpace(q) && p == '.' && !initial {
 			return i
 		}
 		ppp, pp, p = pp, p, q
