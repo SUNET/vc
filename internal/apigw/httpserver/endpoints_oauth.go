@@ -764,21 +764,96 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
+	legacy, err := legacyIdentityMatchBody(c)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "unreadable request body")
+		return nil, err
+	}
+	var reply *apiv1.PrepareIssuanceReply
+	if legacy {
+		reply, err = s.prepareLegacyIssuance(ctx, c)
+	} else {
+		reply, err = s.prepareIssuance(ctx, c)
+	}
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}
+
+// identityMatchDeprecation is the RFC 9745 Deprecation header of a
+// /issuance/prepare request in the earlier release's form: deprecated
+// since 2026-11-05, as a Structured Field Date.
+const identityMatchDeprecation = "@1793836800"
+
+// prepareIssuance binds and prepares a request in the current form.
+func (s *Service) prepareIssuance(ctx context.Context, c *gin.Context) (*apiv1.PrepareIssuanceReply, error) {
 	request := &apiv1.PrepareIssuanceRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
 		return nil, err
 	}
-
 	reply, err := s.apiv1.PrepareIssuance(ctx, request)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "prepare issuance error")
 		return nil, err
 	}
-
 	return reply, nil
+}
+
+// prepareLegacyIssuance binds and prepares a request whose
+// identity_match.claims is the earlier release's object from dotted claim
+// names to tests. Every answer carries the Deprecation header.
+func (s *Service) prepareLegacyIssuance(ctx context.Context, c *gin.Context) (*apiv1.PrepareIssuanceReply, error) {
+	c.Header("Deprecation", identityMatchDeprecation)
+	request := &apiv1.LegacyPrepareIssuanceRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+	s.log.Warn("deprecated identity_match form: identity_match.claims is an object from dotted claim names; "+
+		"write it as a list of {path, equals} entries, each path a claims path pointer (OpenID4VP 1.0 section 7)",
+		"scope", request.Scope, "claims", request.IdentityMatch.ClaimPaths())
+	reply, err := s.apiv1.PrepareLegacyIssuance(ctx, request)
+	if err != nil {
+		s.log.Error(err, "prepare issuance error")
+		return nil, err
+	}
+	return reply, nil
+}
+
+// legacyIdentityMatchBody reports whether the body's identity_match.claims
+// is a JSON object, the earlier release's form. Members are matched the
+// way the binding matches them, and the body is left in place for it.
+func legacyIdentityMatchBody(c *gin.Context) (bool, error) {
+	body, err := io.ReadAll(c.Request.Body)
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+	if err != nil {
+		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
+	}
+	var request struct {
+		IdentityMatch json.RawMessage `json:"identity_match"`
+	}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "the request body is not a JSON object", 400, err)
+	}
+	if !isJSONObject(request.IdentityMatch) {
+		return false, nil
+	}
+	var match struct {
+		Claims json.RawMessage `json:"claims"`
+	}
+	if err := json.Unmarshal(request.IdentityMatch, &match); err != nil {
+		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "identity_match is not a JSON object", 400, err)
+	}
+	return isJSONObject(match.Claims), nil
+}
+
+// isJSONObject reports whether raw is a JSON object.
+func isJSONObject(raw json.RawMessage) bool {
+	return bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{"))
 }
 
 // isAnonymousAdminSession reports whether the request is authenticated by

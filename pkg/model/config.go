@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/claimpath"
+	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -2566,6 +2567,10 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
+
+	// Deprecations holds one record per claim spelling of an earlier
+	// release that loading upgraded. The service logs each as a warning.
+	Deprecations []legacyclaims.Rewrite `yaml:"-" json:"-"`
 }
 
 // LookupCredentialSources returns full data source information for a credential type

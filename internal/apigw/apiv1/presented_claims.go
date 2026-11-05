@@ -25,7 +25,9 @@ import (
 // Read in the presented credential's shape, so a namespace-qualified mdoc
 // claim resolves, and value-normalising, so an mdoc full-date - which
 // arrives as a CBOR tag 1004, not a string - can be matched at all. Each
-// claim is stored under its identity attribute (IdentityAttributes.For).
+// claim must be a string, and is stored under its identity attribute
+// (IdentityAttributes.For); a claim matched as no attribute is only
+// required.
 func extractAuthScopeIdentity(shape claimpath.Shape, presented map[string]any, entry model.AuthScopeEntry) (map[string]string, error) {
 	out := make(map[string]string, len(entry.AuthClaims))
 	var missing []string
@@ -34,15 +36,13 @@ func extractAuthScopeIdentity(shape claimpath.Shape, presented map[string]any, e
 		if err != nil {
 			return nil, err
 		}
-		attribute, named := entry.IdentityAttributes.For(claim)
-		if !named {
-			return nil, fmt.Errorf("auth claim %s names no identity attribute", claim)
-		}
 		if !ok {
 			missing = append(missing, claim.String())
 			continue
 		}
-		out[attribute] = s
+		if attribute, named := entry.IdentityAttributes.For(claim); named {
+			out[attribute] = s
+		}
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("required identity claims missing or not string: %v", missing)

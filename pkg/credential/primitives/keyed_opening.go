@@ -97,13 +97,7 @@ func (a *KeyedOpeningArgs[F]) name() string {
 	return f.name()
 }
 
-func (a *KeyedOpeningArgs[F]) inputs() []*claimpath.Pointer {
-	inputs := make([]*claimpath.Pointer, len(a.Inputs))
-	for i := range a.Inputs {
-		inputs[i] = &a.Inputs[i]
-	}
-	return inputs
-}
+func (a *KeyedOpeningArgs[F]) inputs() []claimpath.Pointer { return a.Inputs }
 
 func (a *KeyedOpeningArgs[F]) validate() error {
 	_, err := a.key()

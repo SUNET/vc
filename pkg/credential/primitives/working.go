@@ -46,7 +46,7 @@ func (w *Working) Issued(p claimpath.Pointer) (any, bool, error) {
 
 // Named implements Claims.
 func (w *Working) Named(name string) (claimpath.Pointer, error) {
-	return w.shapes.Issued.Dotted(name)
+	return w.shapes.Issued.Key(name)
 }
 
 // InputShape returns the shape an input pointer reads: the issued shape
@@ -75,27 +75,25 @@ func writtenBefore(written []claimpath.Pointer, p claimpath.Pointer) bool {
 	return slices.ContainsFunc(written, func(q claimpath.Pointer) bool { return p.HasPrefix(q) })
 }
 
-// ResolveDerivations reads the dotted claims of a derivation list, and
-// checks that every claim the list reads or writes is one claim its shape
-// locates.
+// CheckDerivations checks that every claim a derivation list reads or
+// writes is one claim its shape locates.
 //
-//   - An output, and an unset output of a primitive that writes in place,
-//     is a claim of the issued credential's document.
-//   - An input is a claim of the source data. An input whose dotted name is
-//     an earlier derivation's output, or one beneath it, is a claim of the
-//     issued document: the derivations chain.
-//   - An hkdf input is a claim of the source data.
-func ResolveDerivations(list []Derivation, shapes Shapes) error {
+//   - An output, and the input of a primitive that writes in place, is a
+//     claim of the issued credential's document.
+//   - An input is a claim of the source data, or of the issued document
+//     when an earlier derivation of the list writes it or a claim above it.
+//   - An opening input is a claim of the source data.
+func CheckDerivations(list []Derivation, shapes Shapes) error {
 	var written []claimpath.Pointer
 	for i := range list {
 		a, name, err := list[i].selected()
 		if err != nil {
 			return fmt.Errorf("derivations[%d]: %w", i, err)
 		}
-		if err := resolveArgs(a, shapes, written); err != nil {
+		if err := checkArgs(a, shapes, written); err != nil {
 			return fmt.Errorf("derivations[%d].%s.%w", i, name, err)
 		}
-		outputs, err := list[i].Outputs(shapes.Issued.Dotted)
+		outputs, err := list[i].Outputs(shapes.Issued.Key)
 		if err != nil {
 			return fmt.Errorf("derivations[%d].%s: %w", i, name, err)
 		}
@@ -104,51 +102,26 @@ func ResolveDerivations(list []Derivation, shapes Shapes) error {
 	return nil
 }
 
-// resolveArgs resolves the claims of one primitive's arguments.
-func resolveArgs(a Applier, shapes Shapes, written []claimpath.Pointer) error {
+// checkArgs checks the claims of one primitive's arguments.
+func checkArgs(a Applier, shapes Shapes, written []claimpath.Pointer) error {
 	if hc, ok := a.(*HashCommitmentArgs); ok {
-		return hc.resolve(shapes.Source)
+		return hc.checkInputs(shapes.Source)
 	}
-	input, hasInput := pointerField(a, "Input")
-	if output, ok := pointerField(a, "Output"); ok {
-		if err := resolveOutput(output, input, shapes.Issued); err != nil {
+	if output, ok := outputOf(a); ok {
+		if _, err := shapes.Issued.LocateOne(output); err != nil {
 			return fmt.Errorf("output: %w", err)
 		}
 	}
-	if !hasInput {
+	input, ok := pointerField(a, "Input")
+	if !ok {
 		return nil
-	}
-	if err := resolveInput(input, shapes, written); err != nil {
-		return fmt.Errorf("input: %w", err)
-	}
-	return nil
-}
-
-// resolveOutput resolves an output in the issued claims. An unset output
-// is the input, written in place: a dotted input names it by the same
-// dotted name.
-func resolveOutput(output, input *claimpath.Pointer, issued claimpath.Shape) error {
-	if input != nil && output.IsZero() {
-		*output = *input
-	}
-	return issued.ResolveOne(output)
-}
-
-// resolveInput resolves an input in the source claims, or in the issued
-// claims when its dotted name is an earlier output or beneath one.
-func resolveInput(input *claimpath.Pointer, shapes Shapes, written []claimpath.Pointer) error {
-	chained := func(dotted string) (claimpath.Pointer, error) {
-		if issued, err := shapes.Issued.Dotted(dotted); err == nil && writtenBefore(written, issued) {
-			return issued, nil
-		}
-		return shapes.Source.Dotted(dotted)
-	}
-	if err := input.Resolve(chained); err != nil {
-		return err
 	}
 	space := shapes.Source
 	if writtenBefore(written, *input) {
 		space = shapes.Issued
 	}
-	return space.ResolveOne(input)
+	if _, err := space.LocateOne(*input); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	return nil
 }

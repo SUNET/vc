@@ -96,8 +96,9 @@ func TestNymAuthBirthDateIsCopiedAndNormalisedFromEveryAuthScope(t *testing.T) {
 		"mdl": {"mso_mdoc", mdocPresented(t, "org.iso.18013.5.1.mDL", map[string]map[string]any{
 			"org.iso.18013.5.1": {"given_name": "Alice", "family_name": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
 		}), model.AuthScopeEntry{
-			AuthClaims:     []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "given_name"), claimpath.Keys("org.iso.18013.5.1", "family_name")},
-			DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}},
+			AuthClaims:         []claimpath.Pointer{claimpath.Keys("org.iso.18013.5.1", "given_name"), claimpath.Keys("org.iso.18013.5.1", "family_name")},
+			IdentityAttributes: model.IdentityAttributes{{Path: claimpath.Keys("org.iso.18013.5.1", "given_name"), Attribute: "given_name"}, {Path: claimpath.Keys("org.iso.18013.5.1", "family_name"), Attribute: "family_name"}},
+			DocumentClaims:     model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", "birth_date"), To: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}},
 		}},
 		"photoid": {"mso_mdoc", mdocPresented(t, "eu.europa.ec.eudi.photoid.1", map[string]map[string]any{
 			"org.iso.23220.1": {"given_name_unicode": "Alice", "family_name_unicode": "Wonderland", "birth_date": mdoc.FullDate("1990-01-15")},
@@ -1084,7 +1085,7 @@ func copiedMdocClaim(t *testing.T, element string, v any) (map[string]any, error
 	target := nymAuthTarget(t)
 	document, err := target.DocumentShape()
 	require.NoError(t, err)
-	to, err := document.Dotted(element)
+	to, err := document.Key(element)
 	require.NoError(t, err)
 	entry := model.AuthScopeEntry{
 		DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("org.iso.18013.5.1", element), To: to}},

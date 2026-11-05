@@ -89,9 +89,9 @@ func TestPrepareIssuance_RefusesAMatchTheRequestWillNeverAskFor(t *testing.T) {
 	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope: challengeScope,
 		IdentityMatch: &openid4vci.IdentityMatch{
-			Claims: openid4vci.ClaimMatches{
+			Claims: []openid4vci.ClaimMatch{
 				// Configured auth_claims are given_name and family_name.
-				{Path: dottedPath("personal_administrative_number"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}},
+				{Path: claimpath.Keys("personal_administrative_number"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}},
 			},
 		},
 	})
@@ -476,9 +476,10 @@ func TestPrepareIssuance_RefusesAScopeWithNoCredentialMetadata(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown_credential_configuration")
 }
 
-// For an mdoc auth scope, a rule's "family_name" and the qualified
-// "org.iso.18013.5.1.family_name" both name the auth claim
-// ["org.iso.18013.5.1", "family_name"].
+// For an mdoc auth scope, a request of the earlier release that names
+// "org.iso.18013.5.1.family_name" names the auth claim
+// ["org.iso.18013.5.1", "family_name"], and another namespace names
+// another claim.
 func TestPrepareIssuance_NormalisesMDocClaimPaths(t *testing.T) {
 	client := newChallengeClient(t)
 	client.cfg.Common.CredentialMetadata[challengeAuthScope] = &model.CredentialMetadata{
@@ -491,15 +492,13 @@ func TestPrepareIssuance_NormalisesMDocClaimPaths(t *testing.T) {
 	}
 	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = scopes
 
-	_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
-		Scope:         challengeScope,
-		IdentityMatch: &openid4vci.IdentityMatch{Claims: openid4vci.ClaimMatches{{Path: dottedPath("org.iso.18013.5.1.family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}}},
-	})
-	require.NoError(t, err)
-
-	_, err = client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
-		Scope:         challengeScope,
-		IdentityMatch: &openid4vci.IdentityMatch{Claims: openid4vci.ClaimMatches{{Path: dottedPath("org.example.ns.family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}}},
-	})
-	require.Error(t, err, "another namespace is a different path")
+	prepare := func(name string) error {
+		_, err := client.PrepareLegacyIssuance(t.Context(), &LegacyPrepareIssuanceRequest{
+			Scope:         challengeScope,
+			IdentityMatch: &openid4vci.LegacyIdentityMatch{Claims: map[string]openid4vci.ClaimTest{name: {Equals: "Andersson"}}},
+		})
+		return err
+	}
+	require.NoError(t, prepare("org.iso.18013.5.1.family_name"))
+	require.Error(t, prepare("org.example.ns.family_name"), "another namespace is a different path")
 }

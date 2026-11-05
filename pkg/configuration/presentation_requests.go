@@ -4,14 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/SUNET/vc/pkg/claimpath"
+	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"gopkg.in/yaml.v2"
@@ -43,13 +42,12 @@ type PresentationRequestTemplate struct {
 	// This defines what credentials and claims to request from the wallet
 	DCQLQuery *openid4vp.DCQL `yaml:"dcql" json:"dcql" validate:"required"`
 
-	// ClaimMappings maps claims of the presented credentials to OIDC
-	// claims: a list of {path, claim} entries, such as
-	// {path: [place_of_birth, country], claim: birth_country}, or "*" to
-	// map every claim under its own name. The legacy mapping
-	// {claim: OIDC claim} is read too, with "*": "*" for every claim; a
-	// dotted claim is read as a claim of the credentials the dcql
-	// requests.
+	// ClaimMappings maps the claims of the presented credentials to OIDC
+	// claims: "*" maps every claim under its own name, and a map from DCQL
+	// credential query id to a list of {path, claim} entries maps each
+	// presentation through the entries of its query. The deprecated map
+	// from dotted claim names to OIDC claims maps the claims of all
+	// presentations merged.
 	ClaimMappings openid4vp.ClaimMappings `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
 
 	// Enabled indicates whether this template is active. Absent means
@@ -82,51 +80,15 @@ func (t *PresentationRequestTemplate) GetDCQLQuery() *openid4vp.DCQL {
 	return t.DCQLQuery
 }
 
-// GetClaimMappings returns the claim mappings (for claims extraction)
-func (t *PresentationRequestTemplate) GetClaimMappings() openid4vp.ClaimMappings {
-	return t.ClaimMappings
+// GetClaimMappings returns the claim mappings bound to the template's dcql.
+func (t *PresentationRequestTemplate) GetClaimMappings() (openid4vp.BoundClaimMappings, error) {
+	return t.ClaimMappings.Bind(t.DCQLQuery)
 }
 
-// resolveClaimPaths reads the dotted claims of the claim mappings in the
-// shape the dcql's credentials present their claims in, and refuses a
-// claims path pointer of the template still pending.
-func (t *PresentationRequestTemplate) resolveClaimPaths() error {
-	if len(t.ClaimMappings.Mappings) > 0 {
-		shape, err := t.presentedShape()
-		if err != nil {
-			return fmt.Errorf("claim_mappings: %w", err)
-		}
-		if err := t.ClaimMappings.Resolve(shape); err != nil {
-			return err
-		}
-	}
-	return claimpath.CheckResolved(t)
-}
-
-// presentedShape returns the shape the template's credentials present their
-// claims in. Claim mappings read one shape, so the dcql requests either mdoc
-// credentials or JSON-based ones.
-func (t *PresentationRequestTemplate) presentedShape() (claimpath.Shape, error) {
-	if t.DCQLQuery == nil || len(t.DCQLQuery.Credentials) == 0 {
-		return claimpath.Shape{}, errors.New("the dcql requests no credential whose claims the mappings read")
-	}
-	mdoc := isMDocCredential(t.DCQLQuery.Credentials[0].Format)
-	for _, credential := range t.DCQLQuery.Credentials[1:] {
-		if isMDocCredential(credential.Format) != mdoc {
-			return claimpath.Shape{}, errors.New("the dcql requests mdoc and JSON-based credentials, which hold their claims in different shapes; map the claims of one kind per template")
-		}
-	}
-	return openid4vp.PresentedShape(t.DCQLQuery.Credentials[0].Format), nil
-}
-
-func isMDocCredential(format string) bool {
-	return openid4vp.IsMdocFormat(format) || openid4vp.IsMdocZkFormat(format)
-}
-
-// resolveTemplates resolves the claims path pointers of each template.
-func resolveTemplates(templates []*PresentationRequestTemplate) error {
+// bindTemplates binds the claim mappings of each template to its dcql.
+func bindTemplates(templates []*PresentationRequestTemplate) error {
 	for _, template := range templates {
-		if err := template.resolveClaimPaths(); err != nil {
+		if _, err := template.GetClaimMappings(); err != nil {
 			return fmt.Errorf("presentation request template %q: %w", template.ID, err)
 		}
 	}
@@ -140,6 +102,10 @@ type PresentationRequestConfig struct {
 
 	// DefaultTemplate is the ID of the template to use when no scope matches
 	DefaultTemplate string `yaml:"default_template,omitempty" json:"default_template,omitempty"`
+
+	// Deprecations holds one record per claim spelling of an earlier
+	// release that loading read. The verifier logs each as a warning.
+	Deprecations []legacyclaims.Rewrite `yaml:"-" json:"-"`
 }
 
 // GetEnabledTemplates returns only the enabled templates as a generic slice
@@ -184,11 +150,12 @@ func LoadPresentationRequests(ctx context.Context, dirPath string) (*Presentatio
 
 	// Load each file
 	for _, filePath := range files {
-		templates, err := loadTemplateFile(filePath)
+		file, err := loadTemplateFile(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", filePath, err)
 		}
-		config.Templates = append(config.Templates, templates...)
+		config.Templates = append(config.Templates, file.templates...)
+		config.Deprecations = append(config.Deprecations, file.deprecations...)
 	}
 
 	if err := config.check(); err != nil {
@@ -235,10 +202,16 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 		return nil, err
 	}
 
+	upgraded, deprecations, err := upgradeTemplates(filePath, fileBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	var config PresentationRequestConfig
-	if err := yaml.Unmarshal(fileBytes, &config); err != nil {
+	if err := yaml.Unmarshal(upgraded, &config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
+	config.Deprecations = deprecations
 
 	if err := config.check(); err != nil {
 		return nil, err
@@ -248,7 +221,7 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 }
 
 // check refuses duplicate template IDs and a scope in two templates, then
-// resolves the claims path pointers of each template.
+// binds the claim mappings of each template to its dcql.
 func (c *PresentationRequestConfig) check() error {
 	if err := c.validateUniqueIDs(); err != nil {
 		return err
@@ -256,16 +229,41 @@ func (c *PresentationRequestConfig) check() error {
 	if err := c.validateNoDuplicateScopes(); err != nil {
 		return err
 	}
-	return resolveTemplates(c.Templates)
+	return bindTemplates(c.Templates)
+}
+
+// upgradeTemplates rewrites the claim paths of earlier releases in the
+// text of a presentation request file, and records each claim_mappings
+// written as the map from dotted claim names.
+func upgradeTemplates(filePath string, src []byte) ([]byte, []legacyclaims.Rewrite, error) {
+	doc, err := legacyclaims.Parse(filePath, src)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+	if err := legacyclaims.UpgradeTemplates(doc, false); err != nil {
+		return nil, nil, err
+	}
+	text, err := doc.Bytes()
+	if err != nil {
+		return nil, nil, err
+	}
+	return text, doc.Rewrites(), nil
+}
+
+// templateFile is the templates of one file, and the claim spellings of
+// earlier releases they were written in.
+type templateFile struct {
+	templates    []*PresentationRequestTemplate
+	deprecations []legacyclaims.Rewrite
 }
 
 // loadTemplateFile loads templates from a YAML file.
 // Each file may contain a single template (top-level fields) or multiple
 // templates wrapped in a "templates:" list.
-func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
+func loadTemplateFile(filePath string) (templateFile, error) {
 	fileBytes, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return templateFile{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	// Reject configs that still carry the removed presentation-request
@@ -277,12 +275,18 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 	// derivations never run in the verifier here), so reject rather
 	// than mis-apply.
 	if err := rejectRemovedTemplateKeys(filePath, fileBytes); err != nil {
-		return nil, err
+		return templateFile{}, err
+	}
+
+	upgraded, deprecations, err := upgradeTemplates(filePath, fileBytes)
+	if err != nil {
+		return templateFile{}, err
 	}
 
 	// Try loading as a config with a "templates:" list first
 	var cfg PresentationRequestConfig
-	if err := yaml.Unmarshal(fileBytes, &cfg); err == nil && len(cfg.Templates) > 0 {
+	err = yaml.Unmarshal(upgraded, &cfg)
+	if err == nil && len(cfg.Templates) > 0 {
 		hasID := false
 		for _, t := range cfg.Templates {
 			if t.ID != "" {
@@ -290,21 +294,33 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 			}
 		}
 		if hasID {
-			return cfg.Templates, nil
+			return templateFile{templates: cfg.Templates, deprecations: deprecations}, nil
 		}
-		return nil, fmt.Errorf("invalid templates configuration in %s: templates list present but all entries missing id", filePath)
+		return templateFile{}, fmt.Errorf("invalid templates configuration in %s: templates list present but all entries missing id", filePath)
+	}
+	if err != nil && hasTemplateList(upgraded) {
+		return templateFile{}, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
 	// Fall back to a single template
 	var template PresentationRequestTemplate
-	if err := yaml.Unmarshal(fileBytes, &template); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	if err := yaml.Unmarshal(upgraded, &template); err != nil {
+		return templateFile{}, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
 	// No defaulting here any more: Enabled is a pointer, so nil already
 	// means "not specified", and IsEnabled reads it that way. Writing true
 	// over it was what made "enabled: false" unusable in a file.
-	return []*PresentationRequestTemplate{&template}, nil
+	return templateFile{templates: []*PresentationRequestTemplate{&template}, deprecations: deprecations}, nil
+}
+
+// hasTemplateList reports whether a file holds a non-empty "templates"
+// list.
+func hasTemplateList(text []byte) bool {
+	var list struct {
+		Templates []any `yaml:"templates"`
+	}
+	return yaml.Unmarshal(text, &list) == nil && len(list.Templates) > 0
 }
 
 // validateUniqueIDs checks that all template IDs are unique

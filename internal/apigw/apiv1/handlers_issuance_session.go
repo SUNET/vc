@@ -70,6 +70,17 @@ type PrepareIssuanceRequest struct {
 	TTLSeconds int `json:"ttl_seconds,omitempty" header:"-" validate:"omitempty,gt=0"`
 }
 
+// LegacyPrepareIssuanceRequest is a PrepareIssuanceRequest in the earlier
+// release's form, whose identity_match.claims is an object from dotted
+// claim names to tests. Its fields are `header:"-"` for the reason
+// PrepareIssuanceRequest gives.
+type LegacyPrepareIssuanceRequest struct {
+	Scope           string                          `json:"scope" header:"-" validate:"required"`
+	IdentityMatch   *openid4vci.LegacyIdentityMatch `json:"identity_match" header:"-" validate:"required"`
+	AuthenticSource string                          `json:"authentic_source,omitempty" header:"-" validate:"omitempty"`
+	TTLSeconds      int                             `json:"ttl_seconds,omitempty" header:"-" validate:"omitempty,gt=0"`
+}
+
 // PrepareIssuanceReply is the prepared issuance.
 type PrepareIssuanceReply struct {
 	// CredentialOffer is handed to the wallet, by QR or deep link.
@@ -120,43 +131,85 @@ const maxPreparedIssuanceTTLSeconds = model.MaxAuthSessionTTLSeconds
 // to present a credential, and is issued to only if that credential
 // satisfies the rule the caller supplied here.
 func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceRequest) (*PrepareIssuanceReply, error) {
-	ia := &c.cfg.APIGW.Delivery.InteractiveAuthorization
+	if err := c.acceptIdentityMatch(req.IdentityMatch.Validate); err != nil {
+		return nil, err
+	}
+	return c.prepareIssuance(ctx, preparation{
+		scope:           req.Scope,
+		authenticSource: req.AuthenticSource,
+		ttlSeconds:      req.TTLSeconds,
+		rule:            c.storedIdentityMatch(req.Scope, req.IdentityMatch),
+	})
+}
 
+// PrepareLegacyIssuance prepares an issuance from a request in the earlier
+// release's form. The session holds the rule's dotted names, and each name
+// reads in the shape of the credential presented against it, so a rule
+// keeps its meaning for every format the scope's auth scopes accept.
+func (c *Client) PrepareLegacyIssuance(ctx context.Context, req *LegacyPrepareIssuanceRequest) (*PrepareIssuanceReply, error) {
+	if err := c.acceptIdentityMatch(req.IdentityMatch.Validate); err != nil {
+		return nil, err
+	}
+	return c.prepareIssuance(ctx, preparation{
+		scope:           req.Scope,
+		authenticSource: req.AuthenticSource,
+		ttlSeconds:      req.TTLSeconds,
+		rule:            req.IdentityMatch.Store(),
+	})
+}
+
+// preparation is a /issuance/prepare request, with its identity match as
+// the session stores it.
+type preparation struct {
+	scope           string
+	authenticSource string
+	ttlSeconds      int
+	rule            *openid4vci.StoredIdentityMatch
+}
+
+// acceptIdentityMatch refuses a preparation while Interactive
+// Authorization is off, and a rule validate refuses.
+func (c *Client) acceptIdentityMatch(validate func() error) error {
 	// Nothing prepared here is redeemable while Interactive Authorization
 	// is off: the Challenge Endpoint is the only place an issuer_state can
 	// be spent, and it answers 404 when the mechanism is not enabled. A
 	// preparation that succeeds anyway hands the caller a valid-looking
 	// offer to print and distribute, and the failure surfaces to whoever
 	// scans it.
-	if !ia.Enabled() {
-		return nil, helpers.NewErrorDetailsWithStatus("interactive_authorization_disabled",
+	if !c.cfg.APIGW.Delivery.InteractiveAuthorization.Enabled() {
+		return helpers.NewErrorDetailsWithStatus("interactive_authorization_disabled",
 			"interactive authorization is not enabled on this server, so a prepared issuance could not be redeemed", 400)
 	}
-
-	if err := req.IdentityMatch.Validate(); err != nil {
-		return nil, helpers.NewErrorDetailsWithStatus("invalid_identity_match", err.Error(), 400)
+	if err := validate(); err != nil {
+		return helpers.NewErrorDetailsWithStatus("invalid_identity_match", err.Error(), 400)
 	}
+	return nil
+}
+
+// prepareIssuance prepares an issuance whose identity match is accepted.
+func (c *Client) prepareIssuance(ctx context.Context, req preparation) (*PrepareIssuanceReply, error) {
+	ia := &c.cfg.APIGW.Delivery.InteractiveAuthorization
 
 	// The scope has to be one a presentation can authenticate, or there is
 	// no point at which the rule could be evaluated. Asked through the
 	// same Selector the Challenge Endpoint and /authorize use, so a scope
 	// prepared here is one this deployment will actually answer with a
 	// presentation rather than a browser.
-	required, source, err := c.interactionTypeForScope(ia, req.Scope)
+	required, source, err := c.interactionTypeForScope(ia, req.scope)
 	if err != nil {
 		return nil, err
 	}
 	if required != ia.InteractionType(model.InteractionOpenID4VPPresentation) {
 		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentation_authenticated",
 			fmt.Sprintf("scope %q is authenticated by %q, and an identity match can only be evaluated against a presentation",
-				req.Scope, required), 400)
+				req.scope, required), 400)
 	}
 
-	// The offer names req.Scope as its credential_configuration_id, and
+	// The offer names req.scope as its credential_configuration_id, and
 	// issuance resolves it through matchScope only after the exchange is spent.
-	if c.cfg.GetCredentialMetadata(req.Scope) == nil {
+	if c.cfg.GetCredentialMetadata(req.scope) == nil {
 		return nil, helpers.NewErrorDetailsWithStatus("unknown_credential_configuration",
-			fmt.Sprintf("scope %q has no credential metadata, so the offer would name a credential this issuer does not advertise", req.Scope), 400)
+			fmt.Sprintf("scope %q has no credential metadata, so the offer would name a credential this issuer does not advertise", req.scope), 400)
 	}
 
 	// The source the caller named, if it named one, has to be the source
@@ -169,16 +222,21 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	// resolves to B, and have the issuance prepared against B having been
 	// authorized for nothing of the sort. Refusing the mismatch keeps the
 	// pair that was checked and the pair that is used the same pair.
-	if req.AuthenticSource != "" && req.AuthenticSource != source.AuthenticSource {
+	if req.authenticSource != "" && req.authenticSource != source.AuthenticSource {
 		c.log.Error(nil, "PREPARE: authentic_source does not match the source the scope resolves to",
-			"scope", req.Scope, "named", req.AuthenticSource, "resolved", source.AuthenticSource)
+			"scope", req.scope, "named", req.authenticSource, "resolved", source.AuthenticSource)
 		return nil, helpers.NewErrorDetailsWithStatus("authentic_source_mismatch",
 			fmt.Sprintf("scope %q is served by authentic source %q, not %q",
-				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
+				req.scope, source.AuthenticSource, req.authenticSource), 403)
 	}
 
-	// The request has to be buildable, which matching claim NAMES does
-	// not establish.
+	// A rule naming a claim the request will not ask for can never pass.
+	if err := c.validateIdentityMatchIsAskable(req.scope, req.rule); err != nil {
+		return nil, err
+	}
+
+	// And the request itself has to be buildable, which matching claim
+	// NAMES does not establish.
 	//
 	// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
 	// query and one whose credential metadata is missing, and it is not
@@ -188,17 +246,10 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	// moment it prepared the issuance. Built here and thrown away: it is
 	// rebuilt when the exchange opens, from configuration that may have
 	// changed, so storing this one would only make the two disagree.
-	if _, err := c.issuanceAuthDCQL(req.Scope); err != nil {
-		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.Scope)
+	if _, err := c.issuanceAuthDCQL(req.scope); err != nil {
+		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.scope)
 		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
-			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.Scope, err), 400)
-	}
-
-	// And a rule naming a claim the request will not ask for can never
-	// pass. Checked against a request that can be built, so every auth
-	// scope has the credential metadata its claims are read by.
-	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
-		return nil, err
+			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.scope, err), 400)
 	}
 
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
@@ -206,7 +257,7 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 	}
 
-	ttl := req.TTLSeconds
+	ttl := req.ttlSeconds
 	if ttl == 0 {
 		ttl = defaultPreparedIssuanceTTLSeconds
 	}
@@ -225,8 +276,8 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		SessionID:       uuid.NewString(),
 		Code:            uuid.NewString(),
 		IssuerState:     issuerState,
-		IdentityMatch:   req.IdentityMatch,
-		Scopes:          []string{req.Scope},
+		IdentityMatch:   req.rule,
+		Scopes:          []string{req.scope},
 		ClientID:        fmt.Sprintf("x509_san_dns:%s", host),
 		AuthProvider:    source.AuthProvider,
 		DataSource:      string(source.DataSource),
@@ -250,7 +301,7 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	}
 
 	offer, err := openid4vci.NewCredentialOffer(
-		c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Scope, openid4vci.GrantTypeAuthorizationCode)
+		c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.scope, openid4vci.GrantTypeAuthorizationCode)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +312,8 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	}
 
 	c.log.Info("prepared an issuer-initiated issuance",
-		"scope", req.Scope, "session_id", authCtx.SessionID,
-		"match_claims", req.IdentityMatch.ClaimPaths())
+		"scope", req.scope, "session_id", authCtx.SessionID,
+		"match_claims", req.rule.ClaimPaths())
 
 	return &PrepareIssuanceReply{
 		CredentialOffer: offer,
@@ -291,32 +342,25 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 // scope that does not carry the matched claim then fails the match, which
 // is the correct outcome and not this check's business. What this check
 // catches is the rule no presentation at all could satisfy.
-func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.IdentityMatch) error {
-	if len(match.Claims) == 0 {
-		return nil
-	}
-
+func (c *Client) validateIdentityMatchIsAskable(scope string, rule *openid4vci.StoredIdentityMatch) error {
 	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
 	if vpAuth == nil || len(vpAuth.AuthScopes) == 0 {
 		return helpers.NewErrorDetailsWithStatus("invalid_identity_match",
 			fmt.Sprintf("scope %q has no authentication scopes configured, so no claim could be matched on", scope), 400)
 	}
 
-	// Compared as the claims path pointers the REQUEST carries. A dotted
-	// rule path is read the way the authentication scope's credential
-	// reads it, so for an mdoc both "family_name" and
-	// "org.iso.18013.5.1.family_name" name the
-	// ["org.iso.18013.5.1", "family_name"] the request asks for, and the
-	// comparison is about the claim rather than how it was spelled.
+	// Compared as the claims path pointers the REQUEST carries. Each auth
+	// scope reads the rule the way matchPresentedIdentity reads it for a
+	// presentation of that scope.
 	offered := make(map[string][]string, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		claims := vpAuth.AuthScopes[authScope].AuthClaims
 		offered[authScope] = renderPaths(claims)
-		shape, err := c.cfg.PresentedShape(authScope)
+		match, err := rule.Rule(presentedClaimReader(c.cfg.GetFormatForScope(authScope)))
 		if err != nil {
-			return err
+			return helpers.NewErrorDetailsWithStatus("invalid_identity_match", err.Error(), 400)
 		}
-		if coversAll(shape, claims, match.Claims) {
+		if coversAll(claims, match.Claims) {
 			return nil
 		}
 	}
@@ -324,15 +368,13 @@ func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.
 	return helpers.NewErrorDetailsWithStatus("invalid_identity_match",
 		fmt.Sprintf("no authentication scope for %q discloses every claim this rule matches on (%s); "+
 			"the authentication scopes offer %v, and the presentation request asks for those and nothing else",
-			scope, strings.Join(match.ClaimPaths(), ", "), offered), 400)
+			scope, strings.Join(rule.ClaimPaths(), ", "), offered), 400)
 }
 
-// coversAll reports whether every claim of a rule is one of claims, with a
-// dotted rule path read in shape.
-func coversAll(shape claimpath.Shape, claims []claimpath.Pointer, matches openid4vci.ClaimMatches) bool {
+// coversAll reports whether every claim of a rule is one of claims.
+func coversAll(claims []claimpath.Pointer, matches []openid4vci.ClaimMatch) bool {
 	for _, match := range matches {
-		path := match.Path
-		if err := path.Resolve(shape.Dotted); err != nil || !slices.ContainsFunc(claims, path.Equal) {
+		if !slices.ContainsFunc(claims, match.Path.Equal) {
 			return false
 		}
 	}

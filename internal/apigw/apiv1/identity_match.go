@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/SUNET/vc/pkg/claimpath"
+	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -28,10 +29,10 @@ var errIdentityMismatch = errors.New("the presented credential does not identify
 // evaluated against unverified claims tests nothing but what the sender
 // chose to write.
 //
-// A claim is read in the presented credential's shape, the same one the
-// presentation scopes use, and a dotted claim path the way that format
-// reads it, so a caller writes the same path here that it would write
-// anywhere else and an mdoc's namespace-qualified claim keeps working.
+// A claim is located in the presented credential's shape, the same one
+// the presentation scopes use. A dotted claim name a session of the
+// earlier release holds reads the way that release read it for the
+// presented format.
 //
 // Neither the returned error NOR the log names the values. The error is
 // handed back to whoever is holding the wallet, and telling them which of
@@ -45,13 +46,17 @@ var errIdentityMismatch = errors.New("the presented credential does not identify
 // read access to either, which is what SECURITY_HARDENING_PLAN.md's first
 // phase exists to stop. The claim path is what makes a failure
 // diagnosable; the values only make it quotable.
-func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[string]any, match *openid4vci.IdentityMatch) error {
-	if match == nil {
+func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[string]any, stored *openid4vci.StoredIdentityMatch) error {
+	if stored == nil {
 		// Nothing to check. The decision that an issuance may be prepared
 		// without a rule belongs to whoever accepted it - see
 		// IdentityMatch.Validate, which refuses an EMPTY rule precisely so
 		// that "no rule" has to be deliberate.
 		return nil
+	}
+	match, err := stored.Rule(presentedClaimReader(sourceFormat))
+	if err != nil {
+		return err
 	}
 
 	shape := openid4vp.PresentedShape(sourceFormat)
@@ -78,11 +83,12 @@ func (c *Client) matchPresentedIdentity(sourceFormat string, presented map[strin
 }
 
 // presentedClaim returns the claim at a rule path in a presentation held
-// in shape, with a dotted path read in shape. A claim the presentation
-// holds in another structure is absent.
+// in shape. A claim the presentation holds in another structure is
+// absent, and so is a path the shape holds no claim at: a rule path of
+// one key in an mdoc, which a scope accepting SD-JWT VCs and mdocs meets.
 func presentedClaim(shape claimpath.Shape, presented map[string]any, path claimpath.Pointer) (any, bool, error) {
-	if err := path.Resolve(shape.Dotted); err != nil {
-		return nil, false, err
+	if _, err := shape.LocateOne(path); err != nil {
+		return nil, false, nil
 	}
 	value, present, err := shape.Get(presented, path)
 	if errors.Is(err, claimpath.ErrMismatch) {
@@ -103,4 +109,45 @@ func unwrapMDocFullDate(v any) any {
 		return string(d)
 	}
 	return v
+}
+
+// authScopeFormats returns the credential format of each auth scope of
+// scope.
+func (c *Client) authScopeFormats(scope string) map[string]string {
+	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
+	if vpAuth == nil {
+		return nil
+	}
+	formats := make(map[string]string, len(vpAuth.AuthScopes))
+	for authScope := range vpAuth.AuthScopes {
+		formats[authScope] = c.cfg.GetFormatForScope(authScope)
+	}
+	return formats
+}
+
+// storedIdentityMatch returns the rule as the session of an issuance of
+// scope stores it: in the earlier release's dotted names when every auth
+// scope of scope reads each name as its claim, so a replica running that
+// release reads the session.
+func (c *Client) storedIdentityMatch(scope string, match *openid4vci.IdentityMatch) *openid4vci.StoredIdentityMatch {
+	formats := c.authScopeFormats(scope)
+	return match.Store(func(p claimpath.Pointer) (string, bool) {
+		name := ""
+		for _, format := range formats {
+			n, ok := legacyclaims.PresentedName(format, p)
+			if !ok || (name != "" && n != name) {
+				return "", false
+			}
+			name = n
+		}
+		return name, name != ""
+	})
+}
+
+// presentedClaimReader reads the earlier release's dotted name of a claim
+// of a presented credential of format.
+func presentedClaimReader(format string) func(string) (claimpath.Pointer, error) {
+	return func(name string) (claimpath.Pointer, error) {
+		return legacyclaims.PresentedClaim(format, name)
+	}
 }

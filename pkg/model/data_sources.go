@@ -161,17 +161,18 @@ type DatastoreScope struct {
 // Each entry represents one acceptable credential type the wallet can present.
 type AuthScopeEntry struct {
 	// AuthClaims lists the identity claims to extract from this credential
-	// type, each a claims path pointer into the presented credential. A
-	// dotted string is read as a claim of the presented credential.
+	// type, each a claims path pointer into the presented credential. Every
+	// auth claim must be present.
 	AuthClaims []claimpath.Pointer `yaml:"auth_claims" validate:"required,min=1,dive,required" doc_example:"[[given_name], [family_name], [birth_date]]"`
 
 	// IdentityAttributes renames an auth claim to the identity-mapping
 	// attribute it is matched as (given_name, family_name, birth_date or
 	// authentic_source_person_id). Needed when the presented credential
-	// names the attribute differently - an SD-JWT PID's "birthdate", or a
-	// Photo ID's ["org.iso.23220.1", "given_name_unicode"]. An auth claim
-	// without an entry is matched under the key its path ends in. The
-	// mapping form {auth claim: attribute} is read too.
+	// names the attribute differently - an SD-JWT PID's "birthdate", an
+	// mdoc's ["org.iso.18013.5.1", "given_name"], or a Photo ID's
+	// ["org.iso.23220.1", "given_name_unicode"]. An auth claim of one key
+	// without an entry is matched under that key. A longer auth claim
+	// without an entry is matched as no attribute.
 	IdentityAttributes IdentityAttributes `yaml:"identity_attributes,omitempty" validate:"omitempty,dive"`
 
 	// DocumentClaims copies claims of the verified presented credential into
@@ -181,8 +182,7 @@ type AuthScopeEntry struct {
 	// full-date) is normalised to "YYYY-MM-DD" whatever the source shape
 	// (SD-JWT string, mdoc CBOR tag 1004/0, date-time). Every source claim is
 	// added to the DCQL request, and one that is missing from the
-	// presentation fails issuance. The mapping form {presented claim: issued
-	// claim} is read too.
+	// presentation fails issuance.
 	DocumentClaims DocumentClaims `yaml:"document_claims,omitempty" validate:"omitempty,dive"`
 }
 
@@ -196,24 +196,20 @@ type IdentityAttribute struct {
 	Attribute string `yaml:"attribute" validate:"required" doc_example:"birth_date"`
 }
 
-// IdentityAttributes is the list of identity attribute renames. YAML also
-// reads the mapping form {auth claim: attribute}.
+// IdentityAttributes is the list of identity attribute renames.
 type IdentityAttributes []IdentityAttribute
 
-// UnmarshalYAML reads the list, or the mapping form.
-func (a *IdentityAttributes) UnmarshalYAML(unmarshal func(any) error) error {
-	return claimpath.DecodeList(unmarshal, a, func(path claimpath.Pointer, attribute string) (IdentityAttribute, error) {
-		return IdentityAttribute{Path: path, Attribute: attribute}, nil
-	})
-}
-
 // For returns the attribute an auth claim is matched as: its rename, or
-// the key its path ends in.
+// the key of an auth claim of one key. A longer auth claim without a
+// rename is matched as no attribute.
 func (a IdentityAttributes) For(claim claimpath.Pointer) (string, bool) {
 	for _, rename := range a {
 		if rename.Path.Equal(claim) {
 			return rename.Attribute, true
 		}
+	}
+	if claim.Len() != 1 {
+		return "", false
 	}
 	return claim.Name()
 }
@@ -227,17 +223,8 @@ type DocumentClaim struct {
 	To claimpath.Pointer `yaml:"to" validate:"required" doc_example:"[eu.europa.ec.eudi.nym_auth.1, birth_date]"`
 }
 
-// DocumentClaims is the list of document claim copies. YAML also reads the
-// mapping form {presented claim: issued claim}.
+// DocumentClaims is the list of document claim copies.
 type DocumentClaims []DocumentClaim
-
-// UnmarshalYAML reads the list, or the mapping form.
-func (d *DocumentClaims) UnmarshalYAML(unmarshal func(any) error) error {
-	return claimpath.DecodeList(unmarshal, d, func(from claimpath.Pointer, to string) (DocumentClaim, error) {
-		pointer, err := claimpath.Dotted(to)
-		return DocumentClaim{From: from, To: pointer}, err
-	})
-}
 
 // AuthScopeNames returns the list of scope keys from AuthScopes.
 func (d *DatastoreScope) AuthScopeNames() []string {
@@ -311,8 +298,7 @@ type AssertionScope struct {
 	// Defaults holds claim values injected into the assertion document for
 	// credential-level fields the authentication assertion cannot supply
 	// (e.g. issuing_authority, issuing_country, date_of_expiry). Merged
-	// after attribute_mapping — real attributes always win. The mapping
-	// form {claim: value} is read too.
+	// after attribute_mapping — real attributes always win.
 	Defaults ClaimDefaults `yaml:"defaults,omitempty" validate:"omitempty,dive"`
 
 	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
@@ -405,8 +391,7 @@ type PresentationScope struct {
 
 	// Defaults holds claim values injected into the derived credential
 	// document for fields the presented credential does not carry
-	// (e.g. issuing_authority, issuing_country). The mapping form
-	// {claim: value} is read too.
+	// (e.g. issuing_authority, issuing_country).
 	Defaults ClaimDefaults `yaml:"defaults,omitempty" validate:"omitempty,dive"`
 
 	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
@@ -422,7 +407,7 @@ type PresentedCredential struct {
 	// must be present, each with an optional allow-list of exact-match
 	// values, in the shape of a DCQL claims query. Every claim must be
 	// present on the presented credential's verified claims; a missing one
-	// fails issuance. The mapping form {claim: values} is read too.
+	// fails issuance.
 	RequiredClaims RequiredClaims `yaml:"required_claims" validate:"required,min=1,dive"`
 
 	// Derivations are generic post-verification steps that compute additional
@@ -442,16 +427,8 @@ type RequiredClaim struct {
 	Values []string `yaml:"values,omitempty" doc_example:"[SE, NO]"`
 }
 
-// RequiredClaims is the list of required claims. YAML also reads the
-// mapping form {claim: values}.
+// RequiredClaims is the list of required claims.
 type RequiredClaims []RequiredClaim
-
-// UnmarshalYAML reads the list, or the mapping form.
-func (r *RequiredClaims) UnmarshalYAML(unmarshal func(any) error) error {
-	return claimpath.DecodeList(unmarshal, r, func(path claimpath.Pointer, values []string) (RequiredClaim, error) {
-		return RequiredClaim{Path: path, Values: values}, nil
-	})
-}
 
 // Paths returns the paths of the required claims.
 func (r RequiredClaims) Paths() []claimpath.Pointer {
@@ -481,16 +458,8 @@ type ClaimDefault struct {
 	Value any `yaml:"value" doc_example:"SE"`
 }
 
-// ClaimDefaults is the list of claim defaults. YAML also reads the
-// mapping form {claim: value}.
+// ClaimDefaults is the list of claim defaults.
 type ClaimDefaults []ClaimDefault
-
-// UnmarshalYAML reads the list, or the mapping form.
-func (d *ClaimDefaults) UnmarshalYAML(unmarshal func(any) error) error {
-	return claimpath.DecodeList(unmarshal, d, func(path claimpath.Pointer, value any) (ClaimDefault, error) {
-		return ClaimDefault{Path: path, Value: value}, nil
-	})
-}
 
 // Merge injects the defaults into doc, held in shape, for any claim not
 // already present. Existing values — including nested ones — always win.
@@ -545,7 +514,7 @@ func (d ClaimDefaults) resolve(now time.Time, expiryDuration string, document cl
 	}
 	out := slices.Clone(d)
 	for _, name := range slices.Sorted(maps.Keys(computed)) {
-		path, err := document.Dotted(name)
+		path, err := document.Key(name)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}

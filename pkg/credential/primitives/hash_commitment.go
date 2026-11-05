@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/base64url"
@@ -64,15 +65,21 @@ func (a *HashCommitmentArgs) outputs(func(string) (claimpath.Pointer, error)) ([
 	return nil, nil
 }
 
-// resolve reads the dotted opening inputs as claims of the source data.
-func (a *HashCommitmentArgs) resolve(source claimpath.Shape) error {
+// checkInputs checks that each opening input is one claim of the source
+// data.
+func (a *HashCommitmentArgs) checkInputs(source claimpath.Shape) error {
 	generator, err := a.Opening.generator()
 	if err != nil {
 		return fmt.Errorf("opening: %w", err)
 	}
-	inputs := generator.inputs()
-	for i := range inputs {
-		if err := source.ResolveOne(inputs[i]); err != nil {
+	if claim, ok := generator.(*ClaimOpeningArgs); ok {
+		if _, err := source.LocateOne(claim.Input); err != nil {
+			return fmt.Errorf("opening.claim.input: %w", err)
+		}
+		return nil
+	}
+	for i, input := range generator.inputs() {
+		if _, err := source.LocateOne(input); err != nil {
 			return fmt.Errorf("opening.%s.inputs[%d]: %w", generator.name(), i, err)
 		}
 	}
@@ -143,7 +150,7 @@ type openingGenerator interface {
 	// name is the generator's key under opening.
 	name() string
 	// inputs are the claims of the source data the generator reads.
-	inputs() []*claimpath.Pointer
+	inputs() []claimpath.Pointer
 	open(claims map[string]any, source claimpath.Shape) ([]byte, error)
 	// validate checks what the configuration fixes: the length, and a
 	// secret.
@@ -188,12 +195,7 @@ func (o OpeningArgs) Inputs() (generator string, claims []claimpath.Pointer, err
 	if err != nil {
 		return "", nil, err
 	}
-	inputs := g.inputs()
-	claims = make([]claimpath.Pointer, len(inputs))
-	for i, input := range inputs {
-		claims[i] = *input
-	}
-	return g.name(), claims, nil
+	return g.name(), slices.Clone(g.inputs()), nil
 }
 
 // Keyed returns the generator of an opening that sets hkdf or hmac alone.
@@ -235,8 +237,8 @@ func inputClaim(claims map[string]any, source claimpath.Shape, path claimpath.Po
 	return s, nil
 }
 
-func (a *RandomOpeningArgs) name() string                 { return "random" }
-func (a *RandomOpeningArgs) inputs() []*claimpath.Pointer { return nil }
+func (a *RandomOpeningArgs) name() string                { return "random" }
+func (a *RandomOpeningArgs) inputs() []claimpath.Pointer { return nil }
 
 func (a *RandomOpeningArgs) validate() error {
 	if err := openingLengths.check(a.Bytes); err != nil {
@@ -253,8 +255,8 @@ func (a *RandomOpeningArgs) open(map[string]any, claimpath.Shape) ([]byte, error
 	return opening, nil
 }
 
-func (a *ClaimOpeningArgs) name() string                 { return "claim" }
-func (a *ClaimOpeningArgs) inputs() []*claimpath.Pointer { return []*claimpath.Pointer{&a.Input} }
+func (a *ClaimOpeningArgs) name() string                { return "claim" }
+func (a *ClaimOpeningArgs) inputs() []claimpath.Pointer { return []claimpath.Pointer{a.Input} }
 
 // validate accepts every claim: its value is checked when it is read.
 func (a *ClaimOpeningArgs) validate() error {

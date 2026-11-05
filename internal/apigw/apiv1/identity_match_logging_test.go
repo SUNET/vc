@@ -30,14 +30,17 @@ func TestMatchPresentedIdentity_DoesNotLogTheValues(t *testing.T) {
 	c := &Client{log: log}
 
 	match := &openid4vci.IdentityMatch{
-		Claims: openid4vci.ClaimMatches{{Path: dottedPath("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}}, {Path: dottedPath("personal_identifier"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}}},
+		Claims: []openid4vci.ClaimMatch{
+			{Path: claimpath.Keys("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}},
+			{Path: claimpath.Keys("personal_identifier"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}},
+		},
 	}
 	presented := map[string]any{
 		"given_name":          "Bertil",
 		"personal_identifier": "199912319876",
 	}
 
-	err = c.matchPresentedIdentity("dc+sd-jwt", presented, match)
+	err = c.matchPresentedIdentity("dc+sd-jwt", presented, match.Store(nil))
 	require.Error(t, err, "the presented identity is a different person")
 
 	written, readErr := os.ReadFile(filepath.Join(dir, "identitymatchtest.log"))
@@ -58,13 +61,4 @@ func TestMatchPresentedIdentity_DoesNotLogTheValues(t *testing.T) {
 	for _, value := range []string{"Anna", "Bertil", "198001011234", "199912319876"} {
 		assert.NotContains(t, err.Error(), value)
 	}
-}
-
-// dottedPath is a claim path an API caller writes as a dotted name.
-func dottedPath(name string) claimpath.Pointer {
-	p, err := claimpath.Dotted(name)
-	if err != nil {
-		panic(err)
-	}
-	return p
 }

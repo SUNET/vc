@@ -139,7 +139,7 @@ func applyDerivation(working *primitives.Working, workingClaims, out map[string]
 			return claimpath.Pointer{}, err
 		}
 	}
-	outputs, err := d.Outputs(shapes.Issued.Dotted)
+	outputs, err := d.Outputs(shapes.Issued.Key)
 	if err != nil {
 		return claimpath.Pointer{}, err
 	}

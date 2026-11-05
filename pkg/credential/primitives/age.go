@@ -73,7 +73,7 @@ func (a *AgeOverThresholdsArgs) Apply(claims Claims, now time.Time) ([]Write, er
 func (a *AgeOverThresholdsArgs) outputs(named func(string) (claimpath.Pointer, error)) ([]claimpath.Pointer, error) {
 	out := make([]claimpath.Pointer, 0, 2*len(a.Thresholds))
 	for _, t := range a.Thresholds {
-		for _, name := range ageClaimNames(t) {
+		for _, name := range AgeClaimNames(t) {
 			path, err := named(name)
 			if err != nil {
 				return nil, err
@@ -84,8 +84,8 @@ func (a *AgeOverThresholdsArgs) outputs(named func(string) (claimpath.Pointer, e
 	return out, nil
 }
 
-// ageClaimNames are the claims AgeOverThresholds writes for threshold t.
-func ageClaimNames(t int) [2]string {
+// AgeClaimNames are the claims AgeOverThresholds writes for threshold t.
+func AgeClaimNames(t int) [2]string {
 	return [2]string{fmt.Sprintf("age_over_%d", t), fmt.Sprintf("over_%d_this_year", t)}
 }
 
@@ -129,7 +129,7 @@ func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[s
 	}
 	out := make(map[string]bool, 2*len(thresholds))
 	for _, t := range thresholds {
-		names := ageClaimNames(t)
+		names := AgeClaimNames(t)
 		out[names[0]] = age >= t
 		out[names[1]] = ageThisYear >= t
 	}

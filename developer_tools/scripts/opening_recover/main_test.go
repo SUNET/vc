@@ -24,7 +24,7 @@ func TestAConfigWithoutCommonIsRefused(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("apigw: {}\n"), 0o600))
 
-	code, err := run(t.Context(), []string{"-config", configPath, "-scope", "nym_auth", "-input", "x"}, io.Discard)
+	code, err := run(t.Context(), []string{"-config", configPath, "-scope", "nym_auth", "-input", "x"}, io.Discard, io.Discard)
 	require.Error(t, err)
 	assert.Equal(t, exitError, code)
 }
@@ -66,7 +66,7 @@ apigw:
 	const where = "apigw.data_sources.presentation.scopes.nym_auth.from."
 	recoverOpening := func(args ...string) (int, string, error) {
 		var out strings.Builder
-		code, err := run(t.Context(), append([]string{"-config", configPath, "-scope", "nym_auth"}, args...), &out)
+		code, err := run(t.Context(), append([]string{"-config", configPath, "-scope", "nym_auth"}, args...), &out, io.Discard)
 		return code, out.String(), err
 	}
 
@@ -137,14 +137,10 @@ apigw:
 `, secretPath), 0o600))
 
 	// What issuance writes for these source claims.
-	cfg, err := loadConfig(configPath)
+	cfg, err := loadConfig(t.Context(), configPath, io.Discard)
 	require.NoError(t, err)
 	issued := cfg.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"].Derivations
 	hc := primitives.HashCommitmentFor(issued, claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc"))
-	// The issuer reads the dotted inputs as claims of the SD-JWT PID.
-	for i := range hc.Opening.HKDF.Inputs {
-		require.NoError(t, claimpath.Nested().ResolveOne(&hc.Opening.HKDF.Inputs[i]))
-	}
 	opening, err := hc.NewOpening(map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-100"}, claimpath.Nested())
 	require.NoError(t, err)
 	commitment, err := openid4vci.HashCommitment(openid4vci.HashCommitmentAlgSHA256, opening)
@@ -153,7 +149,7 @@ apigw:
 
 	recoverOpening := func(args ...string) (int, string, error) {
 		var out strings.Builder
-		code, err := run(t.Context(), append([]string{"-config", configPath, "-scope", "nym_auth"}, args...), &out)
+		code, err := run(t.Context(), append([]string{"-config", configPath, "-scope", "nym_auth"}, args...), &out, io.Discard)
 		return code, out.String(), err
 	}
 

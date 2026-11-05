@@ -10,6 +10,7 @@ import (
 	"github.com/SUNET/vc/internal/wallet/credential"
 	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -231,4 +232,37 @@ func TestSelectClaims_UndisclosedArrayPlaceholderIsNotAValue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"given": true}, selected,
 		"the unsatisfiable option must not be chosen over a valid alternative")
+}
+
+// An index selects in the array the verifier processes: a decoy and an
+// element the wallet does not hold drop out, and each earlier held element
+// is disclosed, so the target keeps its index.
+func TestSelectClaims_IndexSelectsTheElementTheVerifierSees(t *testing.T) {
+	se, seDigest := disclosure(t, "salt-se", "SE")
+	_, unheldDigest := disclosure(t, "salt-dk", "DK")
+	no, noDigest := disclosure(t, "salt-no", "NO")
+	payload, err := json.Marshal(map[string]any{
+		"vct": "urn:test",
+		"nationalities": []any{
+			map[string]any{"...": "decoy-digest"},
+			map[string]any{"...": seDigest},
+			map[string]any{"...": unheldDigest},
+			"FI",
+			map[string]any{"...": noDigest},
+		},
+	})
+	require.NoError(t, err)
+	raw := "eyJhbGciOiJFUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(payload) + ".sig~" + se + "~" + no + "~"
+
+	path := claimpath.New(claimpath.Key("nationalities"), claimpath.Index(2))
+	presentation, ok := selectClaims(raw, openid4vp.CredentialQuery{
+		ID: "nat", Format: "dc+sd-jwt", Claims: []openid4vp.ClaimQuery{{Path: path}},
+	})
+	require.True(t, ok)
+
+	processed, err := sdjwtvc.Token(presentation).Parse()
+	require.NoError(t, err)
+	selected, err := path.Select(processed.Claims)
+	require.NoError(t, err)
+	assert.Equal(t, []any{"NO"}, selected)
 }

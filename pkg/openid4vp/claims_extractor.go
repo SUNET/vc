@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -26,7 +27,7 @@ type ClaimsExtractor struct {
 type presentationRequestTemplate interface {
 	GetID() string
 	GetOIDCScopes() []string
-	GetClaimMappings() ClaimMappings
+	GetClaimMappings() (BoundClaimMappings, error)
 }
 
 // NewClaimsExtractor creates a new claims extractor
@@ -45,6 +46,18 @@ func NewClaimsExtractor() *ClaimsExtractor {
 //
 // Returns a merged map of disclosed claims from all credentials.
 func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken string) (map[string]any, error) {
+	presentations, err := ce.ExtractPresentations(ctx, vpToken)
+	if err != nil {
+		return nil, err
+	}
+	return mergedClaims(presentations), nil
+}
+
+// ExtractPresentations extracts the disclosed claims of each presentation
+// of a VP token, in the formats ExtractClaimsFromVPToken detects. The
+// presentations of a DCQL response come in credential query id order, and
+// a token that is one presentation comes with an empty query id.
+func (ce *ClaimsExtractor) ExtractPresentations(ctx context.Context, vpToken string) ([]Presentation, error) {
 	if vpToken == "" {
 		return nil, fmt.Errorf("VP token is empty")
 	}
@@ -60,19 +73,27 @@ func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken
 	trimmed := strings.TrimSpace(vpToken)
 	if len(trimmed) > 0 && trimmed[0] == '{' {
 		if isW3CDocument(trimmed) {
-			return extractW3CClaims(trimmed)
+			claims, err := extractW3CClaims(trimmed)
+			if err != nil {
+				return nil, err
+			}
+			return []Presentation{{Shape: claimpath.Nested(), Claims: claims}}, nil
 		}
-		return ce.extractClaimsFromDCQLResponse(ctx, trimmed)
+		return ce.extractDCQLResponse(ctx, trimmed)
 	}
 
-	return ce.extractClaimsFromSingleToken(vpToken)
+	presentation, err := ce.extractSingleToken(vpToken)
+	if err != nil {
+		return nil, err
+	}
+	return []Presentation{presentation}, nil
 }
 
-// extractClaimsFromDCQLResponse parses a DCQL vp_token response where the value
-// is a JSON object mapping credential query IDs to arrays of VP token strings
-// (per OID4VP §6.3). Claims from all credentials are merged into a single map;
-// credential query IDs are processed in sorted order for deterministic output.
-func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vpToken string) (map[string]any, error) {
+// extractDCQLResponse parses a DCQL vp_token response where the value is a
+// JSON object mapping credential query IDs to arrays of VP token strings
+// (per OID4VP §6.3). Credential query IDs are processed in sorted order
+// for deterministic output.
+func (ce *ClaimsExtractor) extractDCQLResponse(ctx context.Context, vpToken string) ([]Presentation, error) {
 	var dcqlResponse map[string][]string
 	if err := json.Unmarshal([]byte(vpToken), &dcqlResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse DCQL vp_token as map[string][]string: %w", err)
@@ -82,52 +103,50 @@ func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vp
 		return nil, fmt.Errorf("DCQL vp_token contains no credentials")
 	}
 
-	merged := make(map[string]any)
-	credIDs := make([]string, 0, len(dcqlResponse))
-	for credID := range dcqlResponse {
-		credIDs = append(credIDs, credID)
-	}
-	slices.Sort(credIDs)
-	for _, credID := range credIDs {
+	var presentations []Presentation
+	for _, credID := range slices.Sorted(maps.Keys(dcqlResponse)) {
 		tokens := dcqlResponse[credID]
 		if len(tokens) == 0 {
 			return nil, fmt.Errorf("DCQL vp_token contains empty array for credential %q", credID)
 		}
 		for _, token := range tokens {
-			claims, err := ce.extractClaimsFromSingleToken(token)
+			presentation, err := ce.extractSingleToken(token)
 			if err != nil {
 				return nil, fmt.Errorf("failed to extract claims from credential %q: %w", credID, err)
 			}
-			maps.Copy(merged, claims)
+			presentation.QueryID = credID
+			presentations = append(presentations, presentation)
 		}
 	}
 
-	return merged, nil
+	return presentations, nil
 }
 
-// extractClaimsFromSingleToken extracts claims from a single VP token
-// (W3C JSON-LD, SD-JWT or mdoc).
-func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[string]any, error) {
+// extractSingleToken extracts the claims of a single VP token (W3C
+// JSON-LD, SD-JWT or mdoc).
+func (ce *ClaimsExtractor) extractSingleToken(vpToken string) (Presentation, error) {
 	// A W3C VC 2.0 credential or presentation travels as JSON-LD, so it is
 	// a JSON document rather than a dot-separated token - an object when
 	// compact, an array when expanded. Inside a DCQL response this is where
 	// each one arrives.
 	if document, ok := jsonDocumentToken(vpToken); ok {
-		return extractW3CClaims(document)
+		claims, err := extractW3CClaims(document)
+		return Presentation{Shape: claimpath.Nested(), Claims: claims}, err
 	}
 
 	// Check if this is an mdoc format token
 	if isMDocFormatToken(vpToken) {
-		return extractMDocClaimsFromToken(vpToken)
+		claims, err := extractMDocClaimsFromToken(vpToken)
+		return Presentation{Shape: claimpath.MDocQualified(), Claims: claims}, err
 	}
 
 	// Default to SD-JWT format
 	parsed, err := sdjwtvc.Token(vpToken).Parse()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse VP token: %w", err)
+		return Presentation{}, fmt.Errorf("failed to parse VP token: %w", err)
 	}
 
-	return parsed.Claims, nil
+	return Presentation{Shape: claimpath.Nested(), Claims: parsed.Claims}, nil
 }
 
 // isMDocFormatToken checks if the VP token appears to be in mdoc format.
@@ -283,16 +302,87 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 	return claims, nil
 }
 
-// MapClaimsToOIDC maps VP claims to OIDC claims using the template's claim
-// mappings.
-func (ce *ClaimsExtractor) MapClaimsToOIDC(vpClaims map[string]any, claimMappings ClaimMappings) (map[string]any, error) {
+// MapClaimsToOIDC maps VP claims to OIDC claims using the earlier release's
+// claim mappings.
+// claimMappings: Key = VP claim path, Value = OIDC claim name
+// Special mapping "*" : "*" means pass all claims through unchanged
+func (ce *ClaimsExtractor) MapClaimsToOIDC(vpClaims map[string]any, claimMappings map[string]string) (map[string]any, error) {
+	return mapClaimsByName(vpClaims, claimMappings)
+}
+
+// mapClaimsByName maps VP claims to OIDC claims by the earlier release's
+// map from dotted claim names to OIDC claim names.
+func mapClaimsByName(vpClaims map[string]any, claimMappings map[string]string) (map[string]any, error) {
 	if vpClaims == nil {
 		return nil, fmt.Errorf("VP claims are nil")
 	}
-	if claimMappings.IsZero() {
-		return nil, fmt.Errorf("claim mappings are empty")
+	if claimMappings == nil {
+		return nil, fmt.Errorf("claim mappings are nil")
 	}
-	return claimMappings.MapClaims(vpClaims)
+
+	oidcClaims := make(map[string]any)
+
+	// Check for wildcard mapping first
+	if wildcardTarget, hasWildcard := claimMappings["*"]; hasWildcard && wildcardTarget == "*" {
+		// Map all claims through unchanged
+		for key, value := range vpClaims {
+			// Skip internal SD-JWT claims
+			if !isInternalClaim(key) {
+				oidcClaims[key] = value
+			}
+		}
+		return oidcClaims, nil
+	}
+
+	// Map specific claims according to the mapping
+	for vpPath, oidcName := range claimMappings {
+		if vpPath == "*" {
+			continue // Already handled above
+		}
+
+		value, err := extractNestedClaim(vpClaims, vpPath)
+		if err != nil {
+			// Claim not found - this is acceptable, not all claims may be present
+			continue
+		}
+
+		oidcClaims[oidcName] = value
+	}
+
+	return oidcClaims, nil
+}
+
+// extractNestedClaim extracts a claim value from a nested path
+// Supports paths like "given_name" or "place_of_birth.country"
+func extractNestedClaim(claims map[string]any, path string) (any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("empty claim path")
+	}
+
+	// Split path by dots for nested access
+	parts := strings.Split(path, ".")
+
+	current := claims
+	for i, part := range parts {
+		value, ok := current[part]
+		if !ok {
+			return nil, fmt.Errorf("claim '%s' not found at path '%s'", part, path)
+		}
+
+		// If this is the last part, return the value
+		if i == len(parts)-1 {
+			return value, nil
+		}
+
+		// Otherwise, value must be a map to continue traversing
+		nextMap, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("claim '%s' is not an object, cannot traverse further in path '%s'", part, path)
+		}
+		current = nextMap
+	}
+
+	return nil, fmt.Errorf("unexpected error extracting claim at path '%s'", path)
 }
 
 // isInternalClaim checks if a claim is an internal SD-JWT structural claim that should
@@ -317,14 +407,14 @@ func isInternalClaim(key string) bool {
 func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	ctx context.Context,
 	vpToken string,
-	claimMappings ClaimMappings,
+	claimMappings BoundClaimMappings,
 ) (map[string]any, error) {
-	vpClaims, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
+	presentations, err := ce.ExtractPresentations(ctx, vpToken)
 	if err != nil {
 		return nil, fmt.Errorf("extraction failed: %w", err)
 	}
 
-	oidcClaims, err := ce.MapClaimsToOIDC(vpClaims, claimMappings)
+	oidcClaims, err := claimMappings.MapClaims(presentations)
 	if err != nil {
 		return nil, fmt.Errorf("mapping failed: %w", err)
 	}

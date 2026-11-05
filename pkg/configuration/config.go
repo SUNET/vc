@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/pkg/issuance"
 
 	"github.com/SUNET/vc/pkg/claimpath"
+	vctmfilter "github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -137,9 +138,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, errors.New("config is a folder")
 	}
 
-	if err := yaml.Unmarshal(configFile, cfg); err != nil {
+	deprecations, err := decodeShared(configPath, configFile, cfg)
+	if err != nil {
 		return nil, err
 	}
+	cfg.Deprecations = deprecations
 
 	// Apply defaults AFTER unmarshalling so that nested structs inside
 	// pointer fields (e.g. Issuer.APIServer.Addr) receive their default
@@ -231,6 +234,13 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
+		// Reads each claim of a data source in its credential's schema.
+		if serviceName == "apigw" {
+			if err := readDataSources(cfg, configPath, configFile); err != nil {
+				return nil, err
+			}
+		}
+
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
 		// document is consistent.
@@ -259,7 +269,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	// Needs the schemas, and reads only the sections this service keeps.
-	if err := resolveClaimPaths(cfg, serviceName); err != nil {
+	if err := checkClaimPaths(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
@@ -322,23 +332,60 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	return cfg, nil
 }
 
-// resolveClaimPaths reads the dotted claims of the configuration as claims
-// path pointers, and then refuses a pointer still pending, naming where it
-// is. It then checks the auxiliary_data, which reads the resolved claims.
-func resolveClaimPaths(cfg *model.Cfg, serviceName string) error {
-	if err := cfg.ResolveClaimPaths(); err != nil {
+// readDataSources decodes apigw.data_sources into cfg with its defaults,
+// and adds the claim spellings of earlier releases it upgraded to
+// cfg.Deprecations. The credential schemas must be loaded.
+func readDataSources(cfg *model.Cfg, file string, src []byte) error {
+	if cfg.APIGW == nil {
+		return nil
+	}
+	dataSources, rewrites, err := decodeDataSources(file, src, cfg)
+	if err != nil {
 		return err
 	}
-	if err := claimpath.CheckResolved(cfg); err != nil {
+	if err := defaults.Set(&dataSources); err != nil {
+		return err
+	}
+	cfg.APIGW.DataSources = dataSources
+	cfg.Deprecations = append(cfg.Deprecations, rewrites...)
+	return nil
+}
+
+// checkClaimPaths checks each claim of the configuration against the shape
+// of its credential, and then the auxiliary_data, which reads the claims.
+func checkClaimPaths(cfg *model.Cfg, serviceName string) error {
+	if err := cfg.CheckClaimPaths(); err != nil {
 		return err
 	}
 	if !servicesRequiringVCTM[serviceName] {
 		return nil
 	}
+	if err := checkFilterable(cfg); err != nil {
+		return err
+	}
 	if err := checkAuxiliaryData(cfg, serviceName); err != nil {
 		return err
 	}
 	deriveAuxiliaryDataRequired(cfg)
+	return nil
+}
+
+// checkFilterable refuses the VCTM of a presentation-sourced scope that
+// credential.FilterAgainstVCTM cannot filter. The filter issues only the
+// claims the VCTM declares from a presented credential.
+func checkFilterable(cfg *model.Cfg) error {
+	if cfg.APIGW == nil {
+		return nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Presentation.Scopes)) {
+		meta := cfg.GetCredentialMetadata(scope)
+		if meta == nil {
+			continue
+		}
+		if err := vctmfilter.CheckFilterable(meta.GetVCTM()); err != nil {
+			return fmt.Errorf("apigw.data_sources.presentation.scopes.%s: %w", scope, err)
+		}
+	}
 	return nil
 }
 

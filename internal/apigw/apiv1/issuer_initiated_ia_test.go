@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -20,7 +21,10 @@ import (
 // authenticated, named by the claims it authenticated them under.
 func portalMatch() *openid4vci.IdentityMatch {
 	return &openid4vci.IdentityMatch{
-		Claims: openid4vci.ClaimMatches{{Path: dottedPath("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}}, {Path: dottedPath("family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}},
+		Claims: []openid4vci.ClaimMatch{
+			{Path: claimpath.Keys("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}},
+			{Path: claimpath.Keys("family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}},
+		},
 	}
 }
 
@@ -79,8 +83,8 @@ func TestPrepareIssuance_RequiresAMatchRule(t *testing.T) {
 
 	for name, match := range map[string]*openid4vci.IdentityMatch{
 		"absent":                     nil,
-		"empty":                      {Claims: openid4vci.ClaimMatches{}},
-		"a claim with no comparison": {Claims: openid4vci.ClaimMatches{{Path: dottedPath("given_name"), ClaimTest: openid4vci.ClaimTest{}}}},
+		"empty":                      {Claims: []openid4vci.ClaimMatch{}},
+		"a claim with no comparison": {Claims: []openid4vci.ClaimMatch{{Path: claimpath.Keys("given_name")}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
@@ -119,7 +123,8 @@ func TestIssuerInitiated_ChallengeResumesThePreparedIssuance(t *testing.T) {
 	assert.Equal(t, "wallet-1", authCtx.WalletClientID, "the wallet supplies its own identity")
 	assert.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint)
 	require.NotNil(t, authCtx.IdentityMatch, "the caller's rule must survive onto the exchange")
-	assert.Equal(t, portalMatch(), authCtx.IdentityMatch)
+	assert.Equal(t, []string{"given_name", "family_name"}, authCtx.IdentityMatch.ClaimPaths(),
+		"an SD-JWT auth scope reads each claim as its dotted name, so the session holds the names a replica of the earlier release reads")
 }
 
 // The issuer_state is spent when it is used. It was the Issuer's handle
@@ -228,7 +233,7 @@ func TestIdentityMatch_DecidesOnTheVerifiedClaims(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := client.matchPresentedIdentity("dc+sd-jwt", tc.presented, portalMatch())
+			err := client.matchPresentedIdentity("dc+sd-jwt", tc.presented, portalMatch().Store(nil))
 			if !tc.wantErr {
 				require.NoError(t, err)
 				return
@@ -255,7 +260,7 @@ func TestIdentityMatch_DoesNotLeakTheExpectedValues(t *testing.T) {
 	// deterministic - paths are evaluated in sorted order, which is why a
 	// case where both differ would name family_name instead.
 	err := client.matchPresentedIdentity("dc+sd-jwt",
-		map[string]any{"given_name": "Bo", "family_name": "Andersson"}, portalMatch())
+		map[string]any{"given_name": "Bo", "family_name": "Andersson"}, portalMatch().Store(nil))
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "given_name", "the claim that failed is useful to a wallet author")
@@ -270,9 +275,8 @@ func TestIdentityMatch_DoesNotLeakTheExpectedValues(t *testing.T) {
 func TestIdentityMatch_ResolvesPathsByFormat(t *testing.T) {
 	client := newChallengeClient(t)
 
-	match := &openid4vci.IdentityMatch{
-		Claims: openid4vci.ClaimMatches{{Path: dottedPath("org.iso.18013.5.1.family_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Andersson"}}},
-	}
+	// A session of the earlier release holds the rule's dotted claim name.
+	match := storedNames(t, map[string]string{"org.iso.18013.5.1.family_name": "Andersson"})
 
 	mdocClaims := map[string]any{"org.iso.18013.5.1.family_name": "Andersson"}
 	require.NoError(t, client.matchPresentedIdentity("mso_mdoc", mdocClaims, match))
@@ -289,14 +293,14 @@ func TestIdentityMatch_ArrayClaims(t *testing.T) {
 	client := newChallengeClient(t)
 
 	match := &openid4vci.IdentityMatch{
-		Claims: openid4vci.ClaimMatches{{Path: dottedPath("roles"), ClaimTest: openid4vci.ClaimTest{Equals: "legal_representative"}}},
+		Claims: []openid4vci.ClaimMatch{{Path: claimpath.Keys("roles"), ClaimTest: openid4vci.ClaimTest{Equals: "legal_representative"}}},
 	}
 
 	require.NoError(t, client.matchPresentedIdentity("dc+sd-jwt",
-		map[string]any{"roles": []any{"employee", "legal_representative"}}, match))
+		map[string]any{"roles": []any{"employee", "legal_representative"}}, match.Store(nil)))
 
 	require.Error(t, client.matchPresentedIdentity("dc+sd-jwt",
-		map[string]any{"roles": []any{"employee"}}, match))
+		map[string]any{"roles": []any{"employee"}}, match.Store(nil)))
 }
 
 // No rule means no check. That is only safe because preparing an issuance
@@ -446,10 +450,10 @@ func TestIdentityMatch_UnwrapsMDocFullDate(t *testing.T) {
 	require.NoError(t, cbor.Unmarshal(encoded, &decoded))
 	require.IsType(t, cbor.Tag{}, decoded)
 
-	match := &openid4vci.IdentityMatch{Claims: openid4vci.ClaimMatches{{Path: dottedPath("birth_date"), ClaimTest: openid4vci.ClaimTest{Equals: "1980-01-01"}}}}
+	match := &openid4vci.IdentityMatch{Claims: []openid4vci.ClaimMatch{{Path: claimpath.Keys("org.iso.18013.5.1", "birth_date"), ClaimTest: openid4vci.ClaimTest{Equals: "1980-01-01"}}}}
 	presented := map[string]any{"org.iso.18013.5.1.birth_date": decoded}
-	require.NoError(t, client.matchPresentedIdentity("mso_mdoc", presented, match))
+	require.NoError(t, client.matchPresentedIdentity("mso_mdoc", presented, match.Store(nil)))
 
 	match.Claims[0].Equals = "1980-01-02"
-	require.ErrorIs(t, client.matchPresentedIdentity("mso_mdoc", presented, match), errIdentityMismatch)
+	require.ErrorIs(t, client.matchPresentedIdentity("mso_mdoc", presented, match.Store(nil)), errIdentityMismatch)
 }

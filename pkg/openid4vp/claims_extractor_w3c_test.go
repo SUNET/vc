@@ -252,7 +252,7 @@ func TestW3CDocumentsInSeesThroughBase64(t *testing.T) {
 // SD-JWT parser.
 func TestExtractClaimsFromBase64W3CToken(t *testing.T) {
 	extractor := &ClaimsExtractor{}
-	claims, err := extractor.extractClaimsFromSingleToken(base64.RawURLEncoding.EncodeToString([]byte(w3cCredential)))
+	presentation, err := extractor.extractSingleToken(base64.RawURLEncoding.EncodeToString([]byte(w3cCredential)))
 	require.NoError(t, err)
-	assert.Equal(t, "Master of Science", claims["degree"])
+	assert.Equal(t, "Master of Science", presentation.Claims["degree"])
 }

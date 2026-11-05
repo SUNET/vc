@@ -14,7 +14,8 @@ templates:
           claims:
             - path: ["name"]
     claim_mappings:
-      - {path: [name], claim: name}
+      cred_a:
+        - {path: [name], claim: "name"}
 
   - id: "tmpl_b"
     name: "Template B"
@@ -31,4 +32,5 @@ templates:
           claims:
             - path: ["value"]
     claim_mappings:
-      - {path: [value], claim: value}
+      cred_b:
+        - {path: [value], claim: "value"}

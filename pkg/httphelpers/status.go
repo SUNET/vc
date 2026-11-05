@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -73,6 +74,9 @@ func StatusCode(ctx context.Context, err error) int {
 	}
 	if errors.Is(err, helpers.ErrInternalServerError) {
 		return http.StatusInternalServerError
+	}
+	if errors.Is(err, claimpath.ErrMalformed) {
+		return http.StatusBadRequest
 	}
 
 	// Check for http.MaxBytesError (request body exceeded size limit)

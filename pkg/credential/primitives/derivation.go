@@ -16,14 +16,14 @@ import (
 // these fields, and the derivation_entry struct-level validator (registered
 // in pkg/helpers) enforces the exactly-one-field rule. A primitive reads the
 // claim at its claimpath.Pointer field Input and writes the claim at its
-// field Output, which defaults to Input; the loader resolves both by these
-// names.
+// field Output, which defaults to Input; CheckDerivations finds both by
+// these names.
 
 // Derivation is one post-verification claim computation configured on a scope; exactly one field must be set and that field's Apply method runs.
 //
 // Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: [email] }`). The subsections below catalog the primitives and their parameters.
 //
-// Every claim a primitive reads or writes is a claims path pointer (OpenID4VP 1.0 section 7). An output is a claim of the issued credential's document. An input is a claim of the source data - the presented credential for a presentation source, the document otherwise - and a claim of the issued document when an earlier derivation of the list writes it or a claim above it. A dotted string is read the same way: an mdoc output names the element its MDDL declares, or a document key it does not declare.
+// Every claim a primitive reads or writes is a claims path pointer (OpenID4VP 1.0 section 7). An output is a claim of the issued credential's document. An input is a claim of the source data - the presented credential for a presentation source, the document otherwise - and a claim of the issued document when an earlier derivation of the list writes it or a claim above it.
 type Derivation struct {
 	// AgeOverThresholds emits two boolean claims per configured threshold
 	// N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at

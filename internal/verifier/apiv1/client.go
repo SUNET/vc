@@ -19,6 +19,7 @@ import (
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
@@ -243,6 +244,8 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("loading templates from %s: %w", templatesDir, err)
 	}
+
+	legacyclaims.Warn(c.log, config.Deprecations)
 
 	// Create presentation builder
 	c.presentationBuilder = openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
@@ -830,7 +833,10 @@ func (c *Client) extractAndMapClaims(ctx context.Context, vpToken string, scopeS
 	c.log.Debug("Using template for claim extraction", "template_id", template.GetID(), "scopes", scopes)
 
 	// Get claim mappings from template
-	claimMappings := openid4vp.GetClaimMappings(template)
+	claimMappings, err := openid4vp.GetClaimMappings(template)
+	if err != nil {
+		return nil, fmt.Errorf("template %q: %w", template.GetID(), err)
+	}
 	if claimMappings.IsZero() {
 		c.log.Debug("Template has no claim mappings, using basic extraction")
 		return c.claimsExtractor.ExtractClaimsFromVPToken(ctx, vpToken)

@@ -20,7 +20,8 @@ templates:
             vct_values:
               - "urn:eudi:pid:1"
     claim_mappings:
-      - {path: [given_name], claim: given_name}
+      eudi_pid:
+        - {path: [given_name], claim: "given_name"}
     enabled: true
 
   - id: "eduid_basic"
@@ -36,5 +37,6 @@ templates:
             vct_values:
               - "urn:credential:eduid:1"
     claim_mappings:
-      - {path: [given_name], claim: first_name}
+      eduid:
+        - {path: [given_name], claim: "first_name"}
     enabled: true

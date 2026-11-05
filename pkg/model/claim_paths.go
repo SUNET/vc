@@ -10,35 +10,30 @@ import (
 	"github.com/SUNET/vc/pkg/credential/primitives"
 )
 
-// ResolveClaimPaths reads every dotted claim of the apigw configuration as
-// a claims path pointer, by the credential the claim belongs to, and checks
-// each claim against the shape that holds it.
+// CheckClaimPaths checks each claim of the apigw configuration against the
+// shape of the credential the claim belongs to.
 //
-//   - A claim of a presented credential: an mdoc claim splits at its last
-//     dot into [namespace, element], and a name without one is an element
-//     of org.iso.18013.5.1. A JSON-based claim splits on dots.
-//   - A claim of the issued credential's document: a JSON-based claim
-//     splits on dots. An mdoc claim is the element the MDDL declares in one
-//     namespace, or a document key the MDDL does not declare.
-//   - An auth provider's attribute mapping writes a JSON object, so its
-//     claims split on dots.
+//   - A claim of a presented credential is located in its presented shape.
+//   - A claim of the issued credential's document is located in the
+//     document shape.
+//   - An auth provider's attribute mapping writes a JSON object.
 //
 // A derivation reads its source data and writes the issued document; see
-// primitives.ResolveDerivations. The credential metadata schemas must be
+// primitives.CheckDerivations. The credential metadata schemas must be
 // loaded.
-func (c *Cfg) ResolveClaimPaths() error {
+func (c *Cfg) CheckClaimPaths() error {
 	if c.APIGW == nil {
 		return nil
 	}
-	if err := resolveAttributeMapping(c.APIGW.AuthProviders.SAML.AttributeMapping, claimpath.Nested()); err != nil {
+	if err := checkAttributeMapping(c.APIGW.AuthProviders.SAML.AttributeMapping, claimpath.Nested()); err != nil {
 		return fmt.Errorf("apigw.auth_providers.saml.attribute_mapping.%w", err)
 	}
-	if err := resolveAttributeMapping(c.APIGW.AuthProviders.OIDC.AttributeMapping, claimpath.Nested()); err != nil {
+	if err := checkAttributeMapping(c.APIGW.AuthProviders.OIDC.AttributeMapping, claimpath.Nested()); err != nil {
 		return fmt.Errorf("apigw.auth_providers.oidc.attribute_mapping.%w", err)
 	}
 	ds := &c.APIGW.DataSources
-	for _, resolve := range []func(*Cfg, *DataSources) error{resolveDatastore, resolveAssertion, resolveExternalAPI, resolvePresentation} {
-		if err := resolve(c, ds); err != nil {
+	for _, check := range []func(*Cfg, *DataSources) error{checkDatastore, checkAssertion, checkExternalAPI, checkPresentation} {
+		if err := check(c, ds); err != nil {
 			return err
 		}
 	}
@@ -46,21 +41,23 @@ func (c *Cfg) ResolveClaimPaths() error {
 }
 
 // DocumentShape returns how the document data of the scope's credential
-// holds its claims.
+// holds its claims. A scope without credential_metadata holds them as a
+// JSON object.
 func (c *Cfg) DocumentShape(scope string) (claimpath.Shape, error) {
 	meta := c.GetCredentialMetadata(scope)
 	if meta == nil {
-		return claimpath.Shape{}, fmt.Errorf("scope %q has no credential_metadata", scope)
+		return claimpath.Nested(), nil
 	}
 	return meta.DocumentShape()
 }
 
 // PresentedShape returns how the verified claims of a presented credential
-// of the scope are held.
+// of the scope are held. A scope without credential_metadata holds them as
+// a JSON object.
 func (c *Cfg) PresentedShape(scope string) (claimpath.Shape, error) {
 	meta := c.GetCredentialMetadata(scope)
 	if meta == nil {
-		return claimpath.Shape{}, fmt.Errorf("scope %q has no credential_metadata", scope)
+		return claimpath.Nested(), nil
 	}
 	return meta.PresentedShape(), nil
 }
@@ -83,72 +80,70 @@ func (c *Cfg) DerivationShapes(src SourceScope) (primitives.Shapes, error) {
 	return primitives.Shapes{Source: presented, Issued: issued}, nil
 }
 
-func resolveDatastore(c *Cfg, ds *DataSources) error {
+func checkDatastore(c *Cfg, ds *DataSources) error {
 	for _, scope := range slices.Sorted(maps.Keys(ds.Datastore.Scopes)) {
 		where := fmt.Sprintf("apigw.data_sources.datastore.scopes.%s", scope)
 		entries := ds.Datastore.Scopes[scope].AuthScopes
 		for _, authScope := range slices.Sorted(maps.Keys(entries)) {
-			entry := entries[authScope]
-			if err := c.resolveAuthScope(&entry, scope, authScope); err != nil {
+			if err := c.checkAuthScope(entries[authScope], scope, authScope); err != nil {
 				return fmt.Errorf("%s.auth_scopes.%s.%w", where, authScope, err)
 			}
-			entries[authScope] = entry
 		}
-		if err := c.resolveDerivations(SourceScope{Source: DataSourceDatastore, Scope: scope, Derivations: ds.Datastore.Scopes[scope].Derivations}); err != nil {
+		if err := c.checkDerivations(SourceScope{Source: DataSourceDatastore, Scope: scope, Derivations: ds.Datastore.Scopes[scope].Derivations}); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
 	}
 	return nil
 }
 
-func resolveAssertion(c *Cfg, ds *DataSources) error {
+func checkAssertion(c *Cfg, ds *DataSources) error {
 	for _, scope := range slices.Sorted(maps.Keys(ds.Assertion.Scopes)) {
 		where := fmt.Sprintf("apigw.data_sources.assertion.scopes.%s", scope)
 		s := ds.Assertion.Scopes[scope]
-		if err := c.resolveDefaults(s.Defaults, scope, s.ExpiryDuration); err != nil {
+		if err := c.checkDefaults(s.Defaults, scope, s.ExpiryDuration); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
-		if err := c.resolveDerivations(SourceScope{Source: DataSourceAssertion, Scope: scope, Derivations: s.Derivations}); err != nil {
+		if err := c.checkDerivations(SourceScope{Source: DataSourceAssertion, Scope: scope, Derivations: s.Derivations}); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
 	}
 	return nil
 }
 
-func resolveExternalAPI(c *Cfg, ds *DataSources) error {
+func checkExternalAPI(c *Cfg, ds *DataSources) error {
 	for _, scope := range slices.Sorted(maps.Keys(ds.ExternalAPI.Scopes)) {
 		where := fmt.Sprintf("apigw.data_sources.external_api.scopes.%s", scope)
 		s := ds.ExternalAPI.Scopes[scope]
-		if err := c.resolveScopeAttributeMapping(s.AttributeMapping, scope); err != nil {
+		if err := c.checkScopeAttributeMapping(s.AttributeMapping, scope); err != nil {
 			return fmt.Errorf("%s.attribute_mapping.%w", where, err)
 		}
-		if err := c.resolveDerivations(SourceScope{Source: DataSourceExternalAPI, Scope: scope, Derivations: s.Derivations}); err != nil {
+		if err := c.checkDerivations(SourceScope{Source: DataSourceExternalAPI, Scope: scope, Derivations: s.Derivations}); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
 	}
 	return nil
 }
 
-func resolvePresentation(c *Cfg, ds *DataSources) error {
+func checkPresentation(c *Cfg, ds *DataSources) error {
 	for _, scope := range slices.Sorted(maps.Keys(ds.Presentation.Scopes)) {
 		where := fmt.Sprintf("apigw.data_sources.presentation.scopes.%s", scope)
 		s := ds.Presentation.Scopes[scope]
 		for _, presented := range slices.Sorted(maps.Keys(s.From)) {
-			if err := c.resolvePresentedCredential(s.From[presented], scope, presented); err != nil {
+			if err := c.checkPresentedCredential(s.From[presented], scope, presented); err != nil {
 				return fmt.Errorf("%s.from.%s.%w", where, presented, err)
 			}
 		}
-		if err := c.resolveDefaults(s.Defaults, scope, s.ExpiryDuration); err != nil {
+		if err := c.checkDefaults(s.Defaults, scope, s.ExpiryDuration); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
 	}
 	return nil
 }
 
-// resolveAuthScope reads the claims of an auth scope: the auth claims,
+// checkAuthScope locates the claims of an auth scope: the auth claims,
 // identity attributes and copy sources in the presented credential, and
 // the copy targets in the issued document.
-func (c *Cfg) resolveAuthScope(entry *AuthScopeEntry, scope, authScope string) error {
+func (c *Cfg) checkAuthScope(entry AuthScopeEntry, scope, authScope string) error {
 	if len(entry.AuthClaims) == 0 && len(entry.IdentityAttributes) == 0 && len(entry.DocumentClaims) == 0 {
 		return nil
 	}
@@ -156,7 +151,7 @@ func (c *Cfg) resolveAuthScope(entry *AuthScopeEntry, scope, authScope string) e
 	if err != nil {
 		return err
 	}
-	if err := resolveIdentityClaims(entry, presented); err != nil {
+	if err := checkIdentityClaims(entry, presented); err != nil {
 		return err
 	}
 	if len(entry.DocumentClaims) == 0 {
@@ -166,46 +161,37 @@ func (c *Cfg) resolveAuthScope(entry *AuthScopeEntry, scope, authScope string) e
 	if err != nil {
 		return err
 	}
-	for i := range entry.DocumentClaims {
-		if err := resolveDocumentClaim(&entry.DocumentClaims[i], presented, document); err != nil {
+	for i, claim := range entry.DocumentClaims {
+		if err := checkDocumentClaim(claim, presented, document); err != nil {
 			return fmt.Errorf("document_claims[%d].%w", i, err)
 		}
 	}
 	return nil
 }
 
-// resolveIdentityClaims reads the auth claims and identity attribute
-// renames in the presented credential, and requires each auth claim to
-// name an identity attribute.
-func resolveIdentityClaims(entry *AuthScopeEntry, presented claimpath.Shape) error {
-	for i := range entry.AuthClaims {
-		if err := presented.ResolveOne(&entry.AuthClaims[i]); err != nil {
+// checkIdentityClaims locates the auth claims and identity attribute
+// renames in the presented credential.
+func checkIdentityClaims(entry AuthScopeEntry, presented claimpath.Shape) error {
+	for i, claim := range entry.AuthClaims {
+		if _, err := presented.LocateOne(claim); err != nil {
 			return fmt.Errorf("auth_claims[%d]: %w", i, err)
 		}
 	}
-	for i := range entry.IdentityAttributes {
-		if err := presented.ResolveOne(&entry.IdentityAttributes[i].Path); err != nil {
+	for i, rename := range entry.IdentityAttributes {
+		if _, err := presented.LocateOne(rename.Path); err != nil {
 			return fmt.Errorf("identity_attributes[%d].path: %w", i, err)
-		}
-	}
-	for i, claim := range entry.AuthClaims {
-		if _, ok := entry.IdentityAttributes.For(claim); !ok {
-			return fmt.Errorf("auth_claims[%d]: %s ends in no key, so it needs an identity_attributes entry", i, claim)
 		}
 	}
 	return nil
 }
 
-// resolveDocumentClaim reads a copy's source in the presented credential
+// checkDocumentClaim locates a copy's source in the presented credential
 // and its target, one top-level document key, in the issued document.
-func resolveDocumentClaim(claim *DocumentClaim, presented, document claimpath.Shape) error {
-	if err := presented.ResolveOne(&claim.From); err != nil {
+func checkDocumentClaim(claim DocumentClaim, presented, document claimpath.Shape) error {
+	if _, err := presented.LocateOne(claim.From); err != nil {
 		return fmt.Errorf("from: %w", err)
 	}
-	if err := document.ResolveOne(&claim.To); err != nil {
-		return fmt.Errorf("to: %w", err)
-	}
-	location, err := document.Locate(claim.To)
+	location, err := document.LocateOne(claim.To)
 	if err != nil {
 		return fmt.Errorf("to: %w", err)
 	}
@@ -215,18 +201,18 @@ func resolveDocumentClaim(claim *DocumentClaim, presented, document claimpath.Sh
 	return nil
 }
 
-// resolvePresentedCredential reads the required claims in the presented
+// checkPresentedCredential checks the required claims in the presented
 // credential, and the derivations from it into the issued document.
-func (c *Cfg) resolvePresentedCredential(accepted PresentedCredential, scope, presented string) error {
-	if err := c.resolveRequiredClaims(accepted.RequiredClaims, presented); err != nil {
+func (c *Cfg) checkPresentedCredential(accepted PresentedCredential, scope, presented string) error {
+	if err := c.checkRequiredClaims(accepted.RequiredClaims, presented); err != nil {
 		return err
 	}
-	return c.resolveDerivations(SourceScope{Source: DataSourcePresentation, Scope: scope, Presented: presented, Derivations: accepted.Derivations})
+	return c.checkDerivations(SourceScope{Source: DataSourcePresentation, Scope: scope, Presented: presented, Derivations: accepted.Derivations})
 }
 
-// resolveRequiredClaims reads the required claims in the presented
+// checkRequiredClaims locates the required claims in the presented
 // credential. A required claim may select every element of an array.
-func (c *Cfg) resolveRequiredClaims(claims RequiredClaims, presented string) error {
+func (c *Cfg) checkRequiredClaims(claims RequiredClaims, presented string) error {
 	if len(claims) == 0 {
 		return nil
 	}
@@ -234,21 +220,17 @@ func (c *Cfg) resolveRequiredClaims(claims RequiredClaims, presented string) err
 	if err != nil {
 		return err
 	}
-	for i := range claims {
-		claim := &claims[i].Path
-		if err := claim.Resolve(shape.Dotted); err != nil {
-			return fmt.Errorf("required_claims[%d].path: %w", i, err)
-		}
-		if _, err := shape.Locate(*claim); err != nil {
+	for i, claim := range claims {
+		if _, err := shape.Locate(claim.Path); err != nil {
 			return fmt.Errorf("required_claims[%d].path: %w", i, err)
 		}
 	}
 	return nil
 }
 
-// resolveDefaults reads the default claims in the issued document, and
+// checkDefaults locates the default claims in the issued document, and
 // checks them against the claims MergeDefaults computes.
-func (c *Cfg) resolveDefaults(defaults ClaimDefaults, scope, expiryDuration string) error {
+func (c *Cfg) checkDefaults(defaults ClaimDefaults, scope, expiryDuration string) error {
 	if len(defaults) == 0 {
 		return nil
 	}
@@ -256,8 +238,8 @@ func (c *Cfg) resolveDefaults(defaults ClaimDefaults, scope, expiryDuration stri
 	if err != nil {
 		return err
 	}
-	for i := range defaults {
-		if err := document.ResolveOne(&defaults[i].Path); err != nil {
+	for i, claim := range defaults {
+		if _, err := document.LocateOne(claim.Path); err != nil {
 			return fmt.Errorf("defaults[%d].path: %w", i, err)
 		}
 	}
@@ -271,7 +253,7 @@ func (c *Cfg) resolveDefaults(defaults ClaimDefaults, scope, expiryDuration stri
 	return nil
 }
 
-func (c *Cfg) resolveDerivations(src SourceScope) error {
+func (c *Cfg) checkDerivations(src SourceScope) error {
 	if len(src.Derivations) == 0 {
 		return nil
 	}
@@ -279,12 +261,12 @@ func (c *Cfg) resolveDerivations(src SourceScope) error {
 	if err != nil {
 		return err
 	}
-	return primitives.ResolveDerivations(src.Derivations, shapes)
+	return primitives.CheckDerivations(src.Derivations, shapes)
 }
 
-// resolveScopeAttributeMapping reads the claims of an external API
+// checkScopeAttributeMapping locates the claims of an external API
 // attribute mapping in the document of the scope's credential.
-func (c *Cfg) resolveScopeAttributeMapping(mapping AttributeMapping, scope string) error {
+func (c *Cfg) checkScopeAttributeMapping(mapping AttributeMapping, scope string) error {
 	if len(mapping) == 0 {
 		return nil
 	}
@@ -292,17 +274,15 @@ func (c *Cfg) resolveScopeAttributeMapping(mapping AttributeMapping, scope strin
 	if err != nil {
 		return err
 	}
-	return resolveAttributeMapping(mapping, document)
+	return checkAttributeMapping(mapping, document)
 }
 
-// resolveAttributeMapping reads the claim of each attribute in shape.
-func resolveAttributeMapping(mapping AttributeMapping, shape claimpath.Shape) error {
+// checkAttributeMapping locates the claim of each attribute in shape.
+func checkAttributeMapping(mapping AttributeMapping, shape claimpath.Shape) error {
 	for _, attribute := range slices.Sorted(maps.Keys(mapping)) {
-		config := mapping[attribute]
-		if err := shape.ResolveOne(&config.Claim); err != nil {
+		if _, err := shape.LocateOne(mapping[attribute].Claim); err != nil {
 			return fmt.Errorf("%s.claim: %w", attribute, err)
 		}
-		mapping[attribute] = config
 	}
 	return nil
 }
