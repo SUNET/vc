@@ -111,50 +111,78 @@ func (m mapResolver) ResolveKey(_ context.Context, vm string) (crypto.PublicKey,
 	return nil, errors.New("resolution denied")
 }
 
-// TestPresentationMustBeSignedBySubject: end to end through VerifyAndExtract. A
-// genuine credential, a trusted issuer, a fresh presentation with the right
-// challenge and domain: it verifies when the signer is the credential's
-// subject, and is refused when it is anyone else, who holds only a copy.
-func TestPresentationMustBeSignedBySubject(t *testing.T) {
+// bindingFixture is the end-to-end setup both tests below share: a genuine credential
+// from a trusted issuer, wrapped in a fresh presentation with the right challenge and
+// domain, signed by one holder key. What differs between them is the credential's
+// subject, which is the whole question.
+type bindingFixture struct {
+	holderKey, issuerKey *ecdsa.PrivateKey
+	issuer               *VC20Handler
+	signer               string
+}
+
+func newBindingFixture(t *testing.T, context, credType string) *bindingFixture {
+	t.Helper()
 	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	const signer = "did:key:z6MkAlice"
-
-	const degreeContext = "https://example.org/degree"
-	credential.GetGlobalLoader().AddContext(degreeContext,
-		`{"@context":{"UniversityDegreeCredential":"https://example.org/degree#UniversityDegreeCredential"}}`)
+	credential.GetGlobalLoader().AddContext(context,
+		`{"@context":{"`+credType+`":"`+context+`#`+credType+`","fullName":"https://schema.org/name"}}`)
 	issuer, err := NewVC20Handler(WithVC20SignerConfig(&VC20SignerConfig{
 		PrivateKey: issuerKey, IssuerID: "did:example:issuer",
 		VerificationMethod: "did:example:issuer#key-1", Cryptosuite: CryptosuiteECDSA2019,
 	}))
 	require.NoError(t, err)
-	credFor := func(subject string) []byte {
-		created, err := issuer.CreateCredential(t.Context(), &VC20CreateRequest{
-			Types: []string{"UniversityDegreeCredential"}, AdditionalContexts: []string{degreeContext},
-			Subject: map[string]any{"id": subject, "degree": "MSc"},
-		})
-		require.NoError(t, err)
-		return created.CredentialJSON
+	return &bindingFixture{holderKey: holderKey, issuerKey: issuerKey, issuer: issuer, signer: "did:key:z6MkAlice"}
+}
+
+// credential issues one credential with the given subject; context and type come from the
+// fixture's own, registered in newBindingFixture.
+func (f *bindingFixture) credential(t *testing.T, context, credType string, subject map[string]any) []byte {
+	t.Helper()
+	created, err := f.issuer.CreateCredential(t.Context(), &VC20CreateRequest{
+		Types: []string{credType}, AdditionalContexts: []string{context}, Subject: subject,
+	})
+	require.NoError(t, err)
+	return created.CredentialJSON
+}
+
+// present wraps credentials in a presentation signed by the fixture's holder key.
+func (f *bindingFixture) present(t *testing.T, credJSON []byte) []byte {
+	t.Helper()
+	vp, err := NewVPBuilder().BuildVC20Presentation([][]byte{credJSON}, f.holderKey, &VPBuildOptions{
+		HolderDID: f.signer, VerificationMethod: f.signer + "#key-1",
+		Nonce: "nonce", Domain: "verifier", Cryptosuite: CryptosuiteECDSA2019, Created: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	return vp
+}
+
+// resolvers resolve the issuer's key and the holder's, and nothing else.
+func (f *bindingFixture) resolvers() []VC20HandlerOption {
+	return []VC20HandlerOption{
+		WithVC20KeyResolver(mapResolver{"did:example:issuer#key-1": &f.issuerKey.PublicKey}),
+		WithVC20HolderKeyResolver(mapResolver{f.signer + "#key-1": &f.holderKey.PublicKey}),
 	}
+}
+
+// TestPresentationMustBeSignedBySubject: end to end through VerifyAndExtract. A
+// genuine credential, a trusted issuer, a fresh presentation with the right
+// challenge and domain: it verifies when the signer is the credential's
+// subject, and is refused when it is anyone else, who holds only a copy.
+func TestPresentationMustBeSignedBySubject(t *testing.T) {
+	const ctx, credType = "https://example.org/degree", "UniversityDegreeCredential"
+	f := newBindingFixture(t, ctx, credType)
 	present := func(subject string) []byte {
-		vp, err := NewVPBuilder().BuildVC20Presentation([][]byte{credFor(subject)}, holderKey, &VPBuildOptions{
-			HolderDID: signer, VerificationMethod: signer + "#key-1",
-			Nonce: "nonce", Domain: "verifier", Cryptosuite: CryptosuiteECDSA2019, Created: time.Now().UTC(),
-		})
-		require.NoError(t, err)
-		return vp
+		return f.present(t, f.credential(t, ctx, credType, map[string]any{"id": subject, "fullName": "Alice Example"}))
 	}
-	h := mustHandler(t,
-		WithVC20KeyResolver(mapResolver{"did:example:issuer#key-1": &issuerKey.PublicKey}),
-		WithVC20HolderKeyResolver(mapResolver{signer + "#key-1": &holderKey.PublicKey}),
-		WithVC20PresentationBinding("nonce", "verifier"))
+	h := mustHandler(t, append(f.resolvers(), WithVC20PresentationBinding("nonce", "verifier"))...)
 
 	t.Run("the signer is the subject", func(t *testing.T) {
-		res, err := h.VerifyAndExtract(t.Context(), string(present(signer)))
+		res, err := h.VerifyAndExtract(t.Context(), string(present(f.signer)))
 		require.NoError(t, err)
-		assert.Equal(t, signer, res.Holder)
+		assert.Equal(t, f.signer, res.Holder)
 		assert.True(t, res.HolderBound)
 	})
 
@@ -168,51 +196,24 @@ func TestPresentationMustBeSignedBySubject(t *testing.T) {
 // TestPresentationOfACredentialWithNoSubjectID: the shape an Accredify wallet sends -
 // a credential whose credentialSubject carries claims but no id (see the fixture in
 // vp_token_object_test.go). There is nothing in it to bind a presenter to, so a query
-// that requires cryptographic holder binding refuses it, and one that does not accept it.
-// The refusal is the policy, not an accident of this change: a credential naming no
+// that requires cryptographic holder binding refuses it, and one that does not accepts
+// it. The refusal is the policy, not an accident of this change: a credential naming no
 // subject is a bearer credential, and anyone holding a copy could present it.
 func TestPresentationOfACredentialWithNoSubjectID(t *testing.T) {
-	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	const signer = "did:key:z6MkAlice"
-
-	const idContext = "https://example.org/individual-id"
-	credential.GetGlobalLoader().AddContext(idContext,
-		`{"@context":{"IndividualIDCredential":"https://example.org/individual-id#IndividualIDCredential","fullName":"https://schema.org/name"}}`)
-	issuer, err := NewVC20Handler(WithVC20SignerConfig(&VC20SignerConfig{
-		PrivateKey: issuerKey, IssuerID: "did:example:issuer",
-		VerificationMethod: "did:example:issuer#key-1", Cryptosuite: CryptosuiteECDSA2019,
-	}))
-	require.NoError(t, err)
-	created, err := issuer.CreateCredential(t.Context(), &VC20CreateRequest{
-		Types: []string{"IndividualIDCredential"}, AdditionalContexts: []string{idContext},
-		Subject: map[string]any{"fullName": "Alice Example"},
-	})
-	require.NoError(t, err)
-
-	vp, err := NewVPBuilder().BuildVC20Presentation([][]byte{created.CredentialJSON}, holderKey, &VPBuildOptions{
-		HolderDID: signer, VerificationMethod: signer + "#key-1",
-		Nonce: "nonce", Domain: "verifier", Cryptosuite: CryptosuiteECDSA2019, Created: time.Now().UTC(),
-	})
-	require.NoError(t, err)
-
-	resolvers := []VC20HandlerOption{
-		WithVC20KeyResolver(mapResolver{"did:example:issuer#key-1": &issuerKey.PublicKey}),
-		WithVC20HolderKeyResolver(mapResolver{signer + "#key-1": &holderKey.PublicKey}),
-	}
+	const ctx, credType = "https://example.org/individual-id", "IndividualIDCredential"
+	f := newBindingFixture(t, ctx, credType)
+	cred := f.credential(t, ctx, credType, map[string]any{"fullName": "Alice Example"})
 
 	t.Run("refused where binding is required", func(t *testing.T) {
-		h := mustHandler(t, append(resolvers, WithVC20PresentationBinding("nonce", "verifier"))...)
-		_, err := h.VerifyAndExtract(t.Context(), string(vp))
+		h := mustHandler(t, append(f.resolvers(), WithVC20PresentationBinding("nonce", "verifier"))...)
+		_, err := h.VerifyAndExtract(t.Context(), string(f.present(t, cred)))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "names no subject")
 	})
 
 	t.Run("accepted where the query does not require binding", func(t *testing.T) {
-		h := mustHandler(t, resolvers...)
-		res, err := h.VerifyAndExtract(t.Context(), string(created.CredentialJSON))
+		h := mustHandler(t, f.resolvers()...)
+		res, err := h.VerifyAndExtract(t.Context(), string(cred))
 		require.NoError(t, err)
 		assert.False(t, res.HolderBound)
 	})
