@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -123,7 +125,7 @@ func TestCombinedBindingVerifier_AttributeBinding_Match(t *testing.T) {
 			Enabled:     true,
 			Enforcement: BindingEnforcementEnforce,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"sub"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 			},
 		},
 	}
@@ -147,7 +149,7 @@ func TestCombinedBindingVerifier_AttributeBinding_Mismatch(t *testing.T) {
 			Enabled:     true,
 			Enforcement: BindingEnforcementEnforce,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"sub"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 			},
 		},
 	}
@@ -171,7 +173,7 @@ func TestCombinedBindingVerifier_CompoundAttributeBinding(t *testing.T) {
 			Enabled:     true,
 			Enforcement: BindingEnforcementEnforce,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"given_name", "family_name", "birth_date"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name"), claimpath.Keys("birth_date")}},
 			},
 		},
 	}
@@ -201,7 +203,7 @@ func TestCombinedBindingVerifier_CompoundAttributeBinding_PartialMismatch(t *tes
 			Enabled:     true,
 			Enforcement: BindingEnforcementEnforce,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"given_name", "family_name", "birth_date"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("given_name"), claimpath.Keys("family_name"), claimpath.Keys("birth_date")}},
 			},
 		},
 	}
@@ -230,7 +232,7 @@ func TestCombinedBindingVerifier_NestedAttributePath(t *testing.T) {
 			Enabled:     true,
 			Enforcement: BindingEnforcementEnforce,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"address.country"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("address", "country")}},
 			},
 		},
 	}
@@ -257,7 +259,7 @@ func TestCombinedBindingVerifier_KeyAndAttributeBinding(t *testing.T) {
 			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"sub"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 			},
 		},
 	}
@@ -281,7 +283,7 @@ func TestCombinedBindingVerifier_InsufficientKeyMaterial(t *testing.T) {
 			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 			BindingAttributes: []BindingAttributeConfig{
-				{Paths: []string{"sub"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 			},
 		},
 	}
@@ -335,7 +337,7 @@ func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
 				Enforcement:       BindingEnforcementEnforce,
 				KeyBindingEnabled: true,
 				BindingAttributes: []BindingAttributeConfig{
-					{Paths: []string{"sub", "family_name"}},
+					{Paths: []claimpath.Pointer{claimpath.Keys("sub"), claimpath.Keys("family_name")}},
 				},
 			},
 		}
@@ -363,7 +365,7 @@ func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
 				Enforcement:       BindingEnforcementWarn,
 				KeyBindingEnabled: true,
 				BindingAttributes: []BindingAttributeConfig{
-					{Paths: []string{"sub"}},
+					{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 				},
 			},
 		}
@@ -392,7 +394,7 @@ func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
 				Enforcement:       BindingEnforcementEnforce,
 				KeyBindingEnabled: true,
 				BindingAttributes: []BindingAttributeConfig{
-					{Paths: []string{"sub"}},
+					{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 				},
 			},
 		}
@@ -536,7 +538,9 @@ func TestECPublicKeyToJWKThumbprint_CrossFormat(t *testing.T) {
 	assert.Equal(t, tpFromKey, tpFromJWK, "thumbprint from key and JWK map should match")
 }
 
-func TestResolveSimplePath(t *testing.T) {
+// A binding attribute reads the claim the earlier release's dotted name
+// read: a key per segment, and nothing beneath a value that is no object.
+func TestBindingClaimReadsTheEarlierReleaseClaim(t *testing.T) {
 	claims := map[string]any{
 		"sub":         "user123",
 		"given_name":  "Alice",
@@ -547,11 +551,21 @@ func TestResolveSimplePath(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, "user123", resolveSimplePath(claims, "sub"))
-	assert.Equal(t, "Alice", resolveSimplePath(claims, "given_name"))
-	assert.Equal(t, "SE", resolveSimplePath(claims, "address.country"))
-	assert.Nil(t, resolveSimplePath(claims, "nonexistent"))
-	assert.Nil(t, resolveSimplePath(claims, "address.nonexistent"))
+	for _, tc := range []struct {
+		path claimpath.Pointer
+		want any
+	}{
+		{claimpath.Keys("sub"), "user123"},
+		{claimpath.Keys("given_name"), "Alice"},
+		{claimpath.Keys("address", "country"), "SE"},
+		{claimpath.Keys("nonexistent"), nil},
+		{claimpath.Keys("address", "nonexistent"), nil},
+		{claimpath.Keys("sub", "nonexistent"), nil},
+	} {
+		got, err := bindingClaim(claims, tc.path)
+		require.NoError(t, err, tc.path.String())
+		assert.Equal(t, tc.want, got, tc.path.String())
+	}
 }
 
 func encodeBase64URL(data []byte) string {
