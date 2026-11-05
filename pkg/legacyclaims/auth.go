@@ -76,12 +76,11 @@ func (u *configUpgrade) authClaims(n ast.Node, presented *lazy) ([]renamed, erro
 		if err != nil {
 			return nil, err
 		}
-		name, _ := dottedName(item)
-		path, rewritten, err := u.pointer(item, presented.dotted)
-		if err != nil || !rewritten || !identityAttributes[name] {
-			if err != nil {
-				return nil, err
-			}
+		path, name, err := u.pointer(item, presented.dotted)
+		if err != nil {
+			return nil, err
+		}
+		if !identityAttributes[name] {
 			continue
 		}
 		shape, err := presented.read()

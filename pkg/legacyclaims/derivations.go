@@ -127,11 +127,6 @@ type inputClaim struct {
 
 // input reads a derivation's input.
 func (u *configUpgrade) input(n ast.Node, source, issued *lazy, written []claimpath.Pointer) (inputClaim, error) {
-	n, err := unwrap(n)
-	if err != nil {
-		return inputClaim{}, err
-	}
-	name, _ := dottedName(n)
 	read := func(name string) (claimpath.Pointer, error) {
 		if len(written) > 0 {
 			shape, err := issued.read()
@@ -144,8 +139,8 @@ func (u *configUpgrade) input(n ast.Node, source, issued *lazy, written []claimp
 		}
 		return source.dotted(name)
 	}
-	path, rewritten, err := u.pointer(n, read)
-	if err != nil || !rewritten {
+	path, name, err := u.pointer(n, read)
+	if err != nil || name == "" {
 		return inputClaim{path: path}, err
 	}
 	return inputClaim{path: path, dotted: name, record: len(u.rewrites) - 1}, nil
