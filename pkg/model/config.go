@@ -180,6 +180,35 @@ type OpenID4VPCompat struct {
 	// still has to reach a draft-era wallet, and expect conformance to fail
 	// for as long as it is on.
 	SendLegacyJARMEncryptionParams *bool `yaml:"send_legacy_jarm_encryption_params" default:"false"`
+
+	// CompactW3CTypeValues sends the type_values of an ldp_vc credential query
+	// to the wallet as compact terms ("IndividualIDCredential") instead of
+	// fully expanded IRIs ("https://schemas.example.org/vocab#IndividualIDCredential").
+	//
+	// Off by default, and deliberately: OpenID4VP 1.0 B.3.2 defines type_values
+	// as expanded IRIs, and a conformant wallet finds no credential for a
+	// compact name. Some deployed wallets match the credential's own compact
+	// `type` array instead, so they offer nothing for the conformant request.
+	// Turn this on only for a deployment that has to reach such a wallet.
+	//
+	// Only the request object sent to the wallet changes. Queries, templates,
+	// the session and the response check stay in expanded form, so a returned
+	// credential is still matched by its expanded types. The compact term sent
+	// is the part of the IRI after its last '#' or, without one, its last '/',
+	// which is the term a credential's context defines for it in the common
+	// case (the W3C base context, Accredify's vocab); a type whose context
+	// names it differently needs the wallet fixed instead.
+	CompactW3CTypeValues *bool `yaml:"compact_w3c_type_values" default:"false"`
+}
+
+// CompactW3CTypeValues reports whether request objects should carry compact
+// type_values for W3C credential queries. Nil-safe, like
+// SendLegacyJARMEncryptionParams.
+func (cfg *Cfg) CompactW3CTypeValues() bool {
+	if cfg == nil || cfg.Common == nil {
+		return false
+	}
+	return BoolVal(cfg.Common.OpenID4VPCompat.CompactW3CTypeValues, false)
 }
 
 // SendLegacyJARMEncryptionParams reports whether client_metadata should carry
