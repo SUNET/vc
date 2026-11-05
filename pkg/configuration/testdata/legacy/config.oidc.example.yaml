@@ -1,0 +1,144 @@
+# OIDC Configuration Example for VC Issuer
+# This file demonstrates how to configure OpenID Connect authentication for
+# credential issuance via the standard OID4VCI pipeline.
+#
+# OIDC authentication requires two parts:
+#   1. data_sources — which credentials use OIDC and how (assertion, datastore, or external_api)
+#   2. auth_providers.oidc — the OIDC RP configuration
+#
+# attribute_mappings is optional for OIDC. When omitted, passthrough mappings
+# are auto-generated from the VCTM claims. Only specify attribute_mappings when
+# OIDC claim names differ from credential claim names.
+
+common:
+  mongo:
+    uri: "mongodb://mongo:27017"
+  production: false
+
+  credential_metadata:
+    pid:
+      vctm_file_path: "/metadata/vctm_pid.json"
+      format: "dc+sd-jwt"
+
+issuer:
+  issuer_url: "http://apigw.vc.docker:8080"
+  api_server:
+    addr: :8080
+  grpc_server:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  jwt_attribute:
+    issuer: https://issuer.sunet.se
+    enable_not_before: true
+    valid_duration: 3600
+    verifiable_credential_type: "https://credential.sunet.se/identity_credential"
+
+apigw:
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  api_server:
+    addr: :8080
+  public_url: "https://issuer.example.org"
+  issuer_client:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
+
+  # ── Data sources ─────────────────────────────────────────────────
+  # Each credential type goes under one of three data source categories.
+  # All can use the same auth_provider (oidc in this example).
+  data_sources:
+    # Assertion: credential data comes directly from the OIDC userinfo/token claims.
+    # No database or API call needed — the claims ARE the credential data.
+    assertion:
+      scopes:
+        pid:
+          auth_provider: oidc
+
+    # Datastore: credential data is pre-loaded in MongoDB by an authentic source.
+    # OIDC is used only to identify the user; auth_claims specify which OIDC
+    # claims to use for the datastore lookup.
+    datastore:
+      scopes:
+        ehic:
+          auth_provider: oidc
+          authentic_source: "Skatteverket"
+          auth_claims: ["given_name", "family_name", "birthdate"]
+        # "preauth" restricts issuance to pre-authorized credential offers
+        # (e.g. via POST /api/v1/datastore/preauth_offer). Wallet-initiated
+        # PAR requests for this scope are rejected with invalid_scope.
+        microcredential:
+          auth_provider: preauth
+
+    # External API: credential data is fetched from a remote API at issuance time.
+    # OIDC identifies the user; the remote API provides the credential data.
+    external_api:
+      scopes:
+        diploma:
+          auth_provider: oidc
+          remote: ladok
+
+  # ── Auth providers ───────────────────────────────────────────────
+  auth_providers:
+    # preauth (data_sources scopes with auth_provider: preauth).
+    # Set enable_pin: true to require a PIN on pre-authorized credential offers.
+    #preauth:
+    #  enable_pin: true
+    oidc:
+      enable: true
+      issuer_url: "https://accounts.google.com"
+      redirect_uri: "https://issuer.example.org/oidcrp/callback"
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "${OIDC_CLIENT_ID}"
+          client_secret: "${OIDC_CLIENT_SECRET}"
+
+      # attribute_mapping is optional. When omitted, OIDC claims pass through
+      # as-is (standard claim names already match canonical names).
+      # Only needed when OIDC claim names differ from canonical claim names:
+      #
+      # attribute_mapping:
+      #   sub:                          # OIDC claim name
+      #     claim: "subject_id"         # canonical claim name (if different)
+      #     required: true
+      #
+      # For value transformations (e.g. lowercase), attach a derivations block
+      # to the target scope; see docs/CONFIGURATION.md § Derivation Primitives.
+
+  # ── Delivery ─────────────────────────────────────────────────────
+  delivery:
+    openid4vci:
+      token_endpoint: "https://issuer.example.org/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
+    credential_offers:
+      # Must be byte-identical to apigw.public_url.
+      issuer_url: "https://issuer.example.org"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
+
+# Common OIDC Providers Reference:
+# ------------------------------------------
+# Google:          https://accounts.google.com
+# Microsoft:       https://login.microsoftonline.com/{tenant}/v2.0
+# Keycloak:        https://keycloak.example.org/realms/{realm}
+# Auth0:           https://{domain}.auth0.com/
+# Okta:            https://{org}.okta.com
+#
+# Dynamic Client Registration (RFC 7591):
+#   registration:
+#     dynamic:
+#       enable: true
+#       initial_access_token: "your-registration-token"

@@ -1,0 +1,27 @@
+# Full PID with all claims - wildcard mapping example
+#
+# This requests all available claims from a PID credential
+# Uses wildcard mapping to pass through all claims unchanged
+
+id: "pid_full"
+name: "Full PID - All Claims"
+description: "Request all available PID claims"
+version: "1.0"
+
+oidc_scopes:
+  - "pid:full"
+
+dcql:
+  credentials:
+    - id: "full_pid"
+      format: "vc+sd-jwt"
+      meta:
+        vct_values:
+          - "urn:eu.europa.ec.eudi:pid:1"
+      # No claims array = request all claims
+
+# Wildcard mapping - pass through all claims unchanged
+claim_mappings:
+  "*": "*"
+
+enabled: true
