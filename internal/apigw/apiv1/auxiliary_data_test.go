@@ -176,37 +176,46 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	}}
 
 	source := derivationSource{derivations, map[string]any{"personal_administrative_number": "pan-200"}, claimpath.Nested()}
-	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", source, []byte(`{"given_name":"Alex"}`), fromWallet)
-	require.NoError(t, err)
-	require.Len(t, toWallet, 1)
-	assert.Equal(t, openid4vci.AuxiliaryDataEntry{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Opening: toWallet[0].Opening},
-		toWallet[0], "a response entry carries type, alg, path and opening")
-	opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
-	require.NoError(t, err)
-	issued := sha256.Sum256(opening)
-	want := map[string]any{
-		"ssc": base64.RawURLEncoding.EncodeToString(issued[:]),
-		"psc": hex.EncodeToString(walletPSC[:]),
-	}
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(out, &doc))
-	assert.Equal(t, want, doc["commitments"], "each commitment is at its claims path, in its entry's encoding")
+	// A commitment lands at its claims path whether the object above it is
+	// absent or null.
+	for name, documentData := range map[string]string{
+		"absent parent": `{"given_name":"Alex"}`,
+		"null parent":   `{"given_name":"Alex","commitments":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", source, []byte(documentData), fromWallet)
+			require.NoError(t, err)
+			require.Len(t, toWallet, 1)
+			assert.Equal(t, openid4vci.AuxiliaryDataEntry{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Opening: toWallet[0].Opening},
+				toWallet[0], "a response entry carries type, alg, path and opening")
+			opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
+			require.NoError(t, err)
+			issued := sha256.Sum256(opening)
+			want := map[string]any{
+				"ssc": base64.RawURLEncoding.EncodeToString(issued[:]),
+				"psc": hex.EncodeToString(walletPSC[:]),
+			}
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(out, &doc))
+			assert.Equal(t, want, doc["commitments"], "each commitment is at its claims path, in its entry's encoding")
 
-	payload, disclosures, err := sdjwtvc.New().MakeCredential(sha256.New(), doc, vctm, 0)
-	require.NoError(t, err)
-	disclosed := map[string]any{}
-	for _, d := range disclosures {
-		raw, err := base64.RawURLEncoding.DecodeString(d)
-		require.NoError(t, err)
-		var parts []any
-		require.NoError(t, json.Unmarshal(raw, &parts))
-		if len(parts) == 3 {
-			disclosed[parts[1].(string)] = parts[2]
-		}
+			payload, disclosures, err := sdjwtvc.New().MakeCredential(sha256.New(), doc, vctm, 0)
+			require.NoError(t, err)
+			disclosed := map[string]any{}
+			for _, d := range disclosures {
+				raw, err := base64.RawURLEncoding.DecodeString(d)
+				require.NoError(t, err)
+				var parts []any
+				require.NoError(t, json.Unmarshal(raw, &parts))
+				if len(parts) == 3 {
+					disclosed[parts[1].(string)] = parts[2]
+				}
+			}
+			assert.Equal(t, want, disclosed, "the holder can withhold each commitment")
+			assert.NotContains(t, payload["commitments"], "ssc")
+			assert.NotContains(t, payload["commitments"], "psc")
+		})
 	}
-	assert.Equal(t, want, disclosed, "the holder can withhold each commitment")
-	assert.NotContains(t, payload["commitments"], "ssc")
-	assert.NotContains(t, payload["commitments"], "psc")
 }
 
 // Nested verified claims reload from a Mongo-backed store as bson.D and

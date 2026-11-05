@@ -228,6 +228,9 @@ func (d *commitmentDocument) setCommitment(path claimpath.Pointer, encoding stri
 	if err != nil {
 		return fmt.Errorf("path %s: %w", path, err)
 	}
+	if err := d.objectsAbove(path); err != nil {
+		return fmt.Errorf("path %s: %w", path, err)
+	}
 	existing, present, err := d.shape.Get(d.claims, path)
 	if err != nil {
 		return fmt.Errorf("path %s: %w", path, err)
@@ -242,6 +245,28 @@ func (d *commitmentDocument) setCommitment(path claimpath.Pointer, encoding stri
 		return &openid4vci.Error{Err: openid4vci.ErrAuxiliaryDataConflict, ErrorDescription: fmt.Sprintf("auxiliary_data: the issuer holds a different commitment for %s", path)}
 	}
 	return d.shape.Set(d.claims, path, text)
+}
+
+// objectsAbove replaces each null that holds the claim at path with an
+// object, which the commitment is then written into.
+func (d *commitmentDocument) objectsAbove(path claimpath.Pointer) error {
+	location, err := d.shape.LocateOne(path)
+	if err != nil {
+		return err
+	}
+	document := claimpath.Nested()
+	for _, above := range location.Ancestors() {
+		value, present, err := document.Get(d.claims, above)
+		if err != nil {
+			return err
+		}
+		if present && value == nil {
+			if err := document.Set(d.claims, above, map[string]any{}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // decodeDocumentData reads the document, preserving numbers exactly.
