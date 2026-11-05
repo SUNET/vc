@@ -385,10 +385,59 @@ func contextLinkTarget(resp *http.Response) (string, error) {
 	}
 }
 
+// cloneRemoteDocument returns a deep copy of a loaded document.
+//
+// The cache hands the same object to every caller, and json-gold MUTATES
+// what it is given: handling "@import" it merges the importing context's
+// members into the imported document's own map - including the "@import"
+// key itself (see vendor/github.com/piprate/json-gold/ld/context.go, "merge
+// import context into the outer context"). The cached document is then a
+// context that declares a nested @import, which the very next expansion
+// refuses with "must not include @import entry".
+//
+// So a context using @import worked exactly once per process and failed
+// every time after. Nothing here expanded twice before this file's startup
+// policy began re-checking scopes, which is how it stayed hidden; the
+// defect is in handing a shared mutable map to a processor that writes to
+// it, so it is fixed here rather than at the callers that now notice.
+func cloneRemoteDocument(doc *ld.RemoteDocument) *ld.RemoteDocument {
+	if doc == nil {
+		return nil
+	}
+	return &ld.RemoteDocument{
+		DocumentURL: doc.DocumentURL,
+		Document:    cloneJSONValue(doc.Document),
+		ContextURL:  doc.ContextURL,
+	}
+}
+
+// cloneJSONValue deep-copies a decoded JSON value. json.Unmarshal into an
+// `any` produces only these shapes, so the default case is every scalar.
+func cloneJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = cloneJSONValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneJSONValue(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
 // LoadDocument implements ld.DocumentLoader
+//
+// Every successful path returns a COPY: see cloneRemoteDocument.
 func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, error) {
 	if item := l.cache.Get(url); item != nil {
-		return item.Value(), nil
+		return cloneRemoteDocument(item.Value()), nil
 	}
 
 	// An operator's own copy wins over dereferencing the URL. Checked here
@@ -400,7 +449,7 @@ func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, er
 			return nil, err
 		}
 		l.cache.Set(url, doc, ttlcache.DefaultTTL)
-		return doc, nil
+		return cloneRemoteDocument(doc), nil
 	}
 
 	// Fetched here rather than by json-gold's loader, which calls os.Open for
@@ -418,7 +467,7 @@ func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, er
 
 	l.cache.Set(url, doc, ttlcache.DefaultTTL)
 
-	return doc, nil
+	return cloneRemoteDocument(doc), nil
 }
 
 func (l *CachingDocumentLoader) preloadContexts() {

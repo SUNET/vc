@@ -164,3 +164,62 @@ func TestSetContextSourcesOverridesAPreloadedContext(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://example.org/operator-copy", termIRI(t, loader, ContextV2, "Marker"))
 }
+
+// json-gold mutates what the loader gives it. Handling "@import" it merges
+// the importing context's members into the IMPORTED document's own map,
+// including the "@import" key itself - so the cached document becomes a
+// context declaring a nested import, which the next expansion refuses with
+// "must not include @import entry".
+//
+// A context using @import therefore worked exactly once per process and
+// failed every time after. Nothing expanded twice before the startup
+// policy began re-checking scopes, which is how it stayed hidden.
+func TestExpandingTwiceDoesNotCorruptAnImportedContext(t *testing.T) {
+	loader := GetGlobalLoader()
+	const importer = "https://ctx.invalid/importer.jsonld"
+	const imported = "https://ctx.invalid/imported.jsonld"
+
+	loader.AddContext(imported, `{"@context":{"@version":1.1,"Extra":"https://example.org/Extra"}}`)
+	loader.AddContext(importer, `{"@context":{"@version":1.1,"@import":"`+imported+`","Diploma":"https://example.org/Diploma"}}`)
+
+	first, err := ExpandTypes([]string{importer}, []string{"Diploma"})
+	require.NoError(t, err, "the first expansion has always worked")
+	require.Contains(t, first, "https://example.org/Diploma")
+
+	second, err := ExpandTypes([]string{importer}, []string{"Diploma"})
+	require.NoError(t, err, "the second expansion must not see an @import the first one wrote into the cache")
+	assert.Equal(t, first, second)
+
+	// And the cached document is still what was loaded.
+	doc, err := loader.LoadDocument(imported)
+	require.NoError(t, err)
+	ctx, ok := doc.Document.(map[string]any)["@context"].(map[string]any)
+	require.True(t, ok)
+	assert.NotContains(t, ctx, "@import",
+		"the imported context must not have acquired its importer's @import key")
+	assert.NotContains(t, ctx, "Diploma",
+		"nor the importer's own terms")
+}
+
+// The copy has to be deep: a shallow one shares the nested maps that
+// json-gold actually writes into.
+func TestLoadDocumentReturnsAnIndependentCopy(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	const url = "https://ctx.invalid/independent.jsonld"
+	loader.AddContext(url, `{"@context":{"Term":"https://example.org/Term","nested":{"Inner":"https://example.org/Inner"}}}`)
+
+	first, err := loader.LoadDocument(url)
+	require.NoError(t, err)
+
+	// Mutate the handed-out document the way the processor does.
+	ctx := first.Document.(map[string]any)["@context"].(map[string]any)
+	ctx["@import"] = "https://ctx.invalid/injected.jsonld"
+	ctx["nested"].(map[string]any)["Inner"] = "https://example.org/Clobbered"
+
+	second, err := loader.LoadDocument(url)
+	require.NoError(t, err)
+	freshCtx := second.Document.(map[string]any)["@context"].(map[string]any)
+	assert.NotContains(t, freshCtx, "@import", "a caller's write must not reach the cache")
+	assert.Equal(t, "https://example.org/Inner", freshCtx["nested"].(map[string]any)["Inner"],
+		"a shallow copy would share this nested map")
+}
