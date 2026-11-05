@@ -123,19 +123,20 @@ func (f *framer) QueueControlFrame(frame wire.Frame) {
 	f.controlFrames = append(f.controlFrames, frame)
 }
 
-func (f *framer) Append(
+// AppendStreamFrames appends STREAM frames, retransmitting lost STREAM data before sending new STREAM data.
+// If a stream or the connection becomes blocked on flow control,
+// the respective STREAM_DATA_BLOCKED or DATA_BLOCKED frame is appended to frames.
+func (f *framer) AppendStreamFrames(
 	frames []ackhandler.Frame,
 	streamFrames []ackhandler.StreamFrame,
 	maxLen protocol.ByteCount,
-	now monotime.Time,
 	v protocol.Version,
 ) ([]ackhandler.Frame, []ackhandler.StreamFrame, protocol.ByteCount) {
+	// STREAM_DATA_BLOCKED and DATA_BLOCKED frames that don't fit are queued as control frames
 	f.controlFrameMutex.Lock()
-	frames, controlFrameLen := f.appendControlFrames(frames, maxLen, now, v)
-	maxLen -= controlFrameLen
 
 	var lastFrame ackhandler.StreamFrame
-	var streamFrameLen protocol.ByteCount
+	var controlFrameLen, streamFrameLen protocol.ByteCount
 	f.mutex.Lock()
 	// retransmit all lost STREAM data before sending new STREAM data
 retransmissions:
@@ -231,12 +232,15 @@ retransmissions:
 	return frames, streamFrames, controlFrameLen + streamFrameLen
 }
 
-func (f *framer) appendControlFrames(
+func (f *framer) AppendControlFrames(
 	frames []ackhandler.Frame,
 	maxLen protocol.ByteCount,
 	now monotime.Time,
 	v protocol.Version,
 ) ([]ackhandler.Frame, protocol.ByteCount) {
+	f.controlFrameMutex.Lock()
+	defer f.controlFrameMutex.Unlock()
+
 	var length protocol.ByteCount
 	// add a PATH_RESPONSE first, but only pack a single PATH_RESPONSE per packet
 	if len(f.pathResponses) > 0 {
@@ -274,6 +278,16 @@ func (f *framer) appendControlFrames(
 
 	for len(f.controlFrames) > 0 {
 		frame := f.controlFrames[len(f.controlFrames)-1]
+		if cf, ok := frame.(*wire.CryptoFrame); ok {
+			if split, needsSplit := cf.MaybeSplitOffFrame(maxLen-length, v); needsSplit {
+				if split != nil {
+					frames = append(frames, ackhandler.Frame{Frame: split})
+					length += split.Length(v)
+				}
+				// Leave the original frame queued with the remaining data.
+				break
+			}
+		}
 		frameLen := frame.Length(v)
 		if length+frameLen > maxLen {
 			break

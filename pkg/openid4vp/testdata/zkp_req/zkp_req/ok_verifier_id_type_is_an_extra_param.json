@@ -1,0 +1,74 @@
+{
+  "description": "verifier_id_type is no longer part of the rulebook request. If a verifier still sends it, it is an undeclared parameter: kept in params like any other, never interpreted, never an error.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "nym-123",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "verifier_id_type": "x509_san_dns"
+        }
+      },
+      {
+        "fn_id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "zkp_req": {
+        "proof_system_values": [
+          "longfellow-libzk-v1"
+        ],
+        "system_id_values": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      }
+    }
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "pseudonym",
+          "handle": "nym-123",
+          "params": {
+            "config": "known-offender-matching-ssc",
+            "verifier_id_type": "x509_san_dns"
+          }
+        },
+        {
+          "function_id": "age_check",
+          "handle": "age-range-123",
+          "params": {
+            "ge": "2008-10-10",
+            "le": "2013-10-09"
+          }
+        }
+      ],
+      "meta_doctype": "eu.europa.ec.eudi.nym_auth.1",
+      "system_filter": {
+        "proof_systems": [
+          "longfellow-libzk-v1"
+        ],
+        "system_ids": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      },
+      "source_format": "mso_mdoc",
+      "meta_schema_id": null
+    }
+  }
+}

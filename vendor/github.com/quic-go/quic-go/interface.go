@@ -64,6 +64,10 @@ var ErrWouldBlock = errors.New("operation would block")
 // ErrWriteLimitReached is returned by [SendStream.WriteWithLimit] when its limiter prevents accepting the entire slice.
 var ErrWriteLimitReached = errors.New("write limit reached")
 
+// ErrStreamClosed is returned when writing to a stream after [SendStream.Close] was called.
+// Closing a stream also cancels its context with this error as the cause.
+var ErrStreamClosed = errors.New("stream closed")
+
 // QUICVersionContextKey can be used to find out the QUIC version of a TLS handshake from the
 // context returned by [tls.ClientHelloInfo.Context].
 var QUICVersionContextKey = handshake.QUICVersionContextKey
@@ -159,6 +163,11 @@ type Config struct {
 	// If set to a negative value, it doesn't allow any unidirectional streams.
 	// Values larger than 2^60 will be clipped to that value.
 	MaxIncomingUniStreams int64
+	// RequireStreamCreditRelease requires the application to release the credit of streams opened by the peer.
+	// By default, the peer is allowed to open a new stream as soon as one of its streams completes.
+	// If set, a completed stream keeps counting towards MaxIncomingStreams and MaxIncomingUniStreams
+	// until the application calls ReleaseStreamCredit on it.
+	RequireStreamCreditRelease bool
 	// KeepAlivePeriod defines whether this peer will periodically send a packet to keep the connection alive.
 	// If set to 0, then no keep alive is sent. Otherwise, the keep alive is sent on that period (or at most
 	// every half of MaxIdleTimeout, whichever is smaller).
@@ -167,6 +176,9 @@ type Config struct {
 	// Under most circumstances, it is not necessary to manually set this value,
 	// since path MTU discovery quickly finds the path's MTU.
 	// If set too high, the path might not support packets of that size, leading to a timeout of the QUIC handshake.
+	// If set to 0, it defaults to 1280 bytes and falls back to 1200 bytes if the first write at that size
+	// returns a "message too long" error. An explicitly set value is kept as the lower limit;
+	// a "message too long" error at that size fails the handshake instead.
 	// Values below 1200 are invalid.
 	InitialPacketSize uint16
 	// DisablePathMTUDiscovery disables Path MTU Discovery (RFC 8899).
@@ -213,6 +225,8 @@ type ConnectionState struct {
 		// Local is true if support was enabled via Config.EnableStreamResetPartialDelivery.
 		Remote, Local bool
 	}
+	// RequireStreamCreditRelease is true if Config.RequireStreamCreditRelease was set.
+	RequireStreamCreditRelease bool
 	// Used0RTT says if 0-RTT resumption was used.
 	Used0RTT bool
 	// Version is the QUIC version of the QUIC connection.

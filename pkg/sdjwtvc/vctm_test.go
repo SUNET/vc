@@ -666,6 +666,19 @@ func TestWalkPath(t *testing.T) {
 		assert.Equal(t, "PhD", walkPath(deep, []*string{new("claims[0]"), new("title")}))
 		assert.Equal(t, "MSc", walkPath(deep, []*string{new("claims[1]"), new("title")}))
 	})
+
+	t.Run("interior wildcard projects remaining path per element", func(t *testing.T) {
+		deep := map[string]any{
+			"outcomes": []any{
+				map[string]any{"title": "Ethics", "description": "d1"},
+				map[string]any{"description": "d2"},
+				map[string]any{"title": "Bias", "description": "d3"},
+			},
+		}
+		assert.Equal(t, []any{"Ethics", "Bias"}, walkPath(deep, []*string{new("outcomes"), nil, new("title")}))
+		assert.Nil(t, walkPath(deep, []*string{new("outcomes"), nil, new("missing")}))
+		assert.Nil(t, walkPath(data, []*string{new("name"), nil, new("x")}))
+	})
 }
 
 func TestIsChildOfDisplayableParent(t *testing.T) {

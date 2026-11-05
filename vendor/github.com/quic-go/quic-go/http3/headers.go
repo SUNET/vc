@@ -25,7 +25,31 @@ type qpackError struct{ err error }
 func (e *qpackError) Error() string { return fmt.Sprintf("qpack: %v", e.err) }
 func (e *qpackError) Unwrap() error { return e.err }
 
+type headerFieldError struct {
+	error
+	InvalidName  bool
+	InvalidValue bool
+}
+
 var errHeaderTooLarge = errors.New("http3: headers too large")
+
+// readHeaderBlock preallocates up to 8 KiB, growing larger buffers as data arrives.
+// The caller must check length against the configured header size limit first.
+func readHeaderBlock(r io.Reader, length uint64) ([]byte, error) {
+	const maxInitialBufferSize = 8 << 10
+
+	b := make([]byte, min(length, maxInitialBufferSize))
+	if length <= maxInitialBufferSize {
+		_, err := io.ReadFull(r, b)
+		return b, err
+	}
+	buf := bytes.NewBuffer(b[:0])
+	n, err := io.CopyN(buf, r, int64(length))
+	if errors.Is(err, io.EOF) && n > 0 {
+		err = io.ErrUnexpectedEOF
+	}
+	return buf.Bytes(), err
+}
 
 type header struct {
 	// Pseudo header fields defined in RFC 9114
@@ -158,19 +182,34 @@ func parseHeaders(decodeFn qpack.DecodeFunc, isRequest bool, sizeLimit int, head
 
 func validateHeaderFieldNameAndValue(h qpack.HeaderField) error {
 	// field names need to be lowercase, see section 4.2 of RFC 9114
-	if strings.ToLower(h.Name) != h.Name {
-		return fmt.Errorf("header field is not lower-case: %s", h.Name)
+	lowercase := strings.ToLower(h.Name) == h.Name
+	invalidName := !httpguts.ValidHeaderFieldName(strings.TrimPrefix(h.Name, ":")) || !lowercase
+	invalidValue := !httpguts.ValidHeaderFieldValue(h.Value)
+	if !lowercase {
+		return &headerFieldError{
+			error:        fmt.Errorf("header field is not lower-case: %s", h.Name),
+			InvalidName:  invalidName,
+			InvalidValue: invalidValue,
+		}
 	}
-	if !httpguts.ValidHeaderFieldValue(h.Value) {
-		return fmt.Errorf("invalid header field value for %s: %q", h.Name, h.Value)
+	if invalidValue {
+		return &headerFieldError{
+			error:        fmt.Errorf("invalid header field value for %s: %q", h.Name, h.Value),
+			InvalidName:  invalidName,
+			InvalidValue: invalidValue,
+		}
+	}
+	if invalidName {
+		return &headerFieldError{
+			error:        fmt.Errorf("invalid header field name: %q", h.Name),
+			InvalidName:  invalidName,
+			InvalidValue: invalidValue,
+		}
 	}
 	return nil
 }
 
 func validateRegularHeaderField(h qpack.HeaderField) error {
-	if !httpguts.ValidHeaderFieldName(h.Name) {
-		return fmt.Errorf("invalid header field name: %q", h.Name)
-	}
 	if slices.Contains(invalidHeaderFields[:], h.Name) {
 		return fmt.Errorf("invalid header field name: %q", h.Name)
 	}
@@ -450,8 +489,8 @@ func decodeTrailers(r io.Reader, hf *headersFrame, maxHeaderBytes int, decoder *
 		return nil, fmt.Errorf("http3: HEADERS frame too large: %d bytes (max: %d)", hf.Length, maxHeaderBytes)
 	}
 
-	b := make([]byte, hf.Length)
-	if _, err := io.ReadFull(r, b); err != nil {
+	b, err := readHeaderBlock(r, hf.Length)
+	if err != nil {
 		return nil, err
 	}
 	decodeFn := decoder.Decode(b)
@@ -467,7 +506,7 @@ func decodeTrailers(r io.Reader, hf *headersFrame, maxHeaderBytes int, decoder *
 		return nil, err
 	}
 	if qlogger != nil {
-		qlogParsedHeadersFrame(qlogger, streamID, hf, fields)
+		qlogParsedHeadersFrame(qlogger, streamID, hf, fields, nil)
 	}
 	return trailers, nil
 }

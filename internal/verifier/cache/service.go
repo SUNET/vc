@@ -42,6 +42,9 @@ type Service struct {
 	Credential             Cache[[]sdjwtvc.CredentialCache]
 	EphemeralEncryptionKey Cache[jwk.Key]
 	RequestObject          Cache[*openid4vp.RequestObject]
+	// UsedJTI records the jti of every accepted EC TS12 SCA presentation so
+	// the same KB-JWT cannot be submitted twice.
+	UsedJTI Cache[bool]
 
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
@@ -81,6 +84,12 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: request_objects: %w", err)
 	}
 
+	// The nonce already ties a KB-JWT to one session, so a jti only has to be
+	// remembered as long as the session can still accept a response.
+	if s.UsedJTI, err = pkgcache.NewGenericCache[bool](cs, ctx, "verifier_used_jti", presentationScopedTTL(cfg, 15*time.Minute)); err != nil {
+		return nil, fmt.Errorf("cache: used_jti: %w", err)
+	}
+
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).
 	sharedSecrets, err := pkgcache.EnsureSharedSecrets(ctx, cs, "verifier")
 	if err != nil {
@@ -106,9 +115,44 @@ func jwkKeyDecoder(data []byte) (jwk.Key, error) {
 // post-processing.
 func requestObjectDecoder(data []byte) (*openid4vp.RequestObject, error) {
 	ro := &openid4vp.RequestObject{}
-	if err := json.Unmarshal(data, ro); err != nil {
+	err := json.Unmarshal(data, ro)
+	if err == nil {
+		return ro, nil
+	}
+
+	// The DCQL may be one the raw escape hatch built, which strict
+	// ingress refuses on purpose - see openid4vp.UnmarshalTrustedDCQL.
+	// These bytes are ours: this verifier encoded the request object
+	// into its own cache, and an HA request_uri lookup reads it back on
+	// another node. Refusing it here meant a request this verifier had
+	// already published could not be delivered to the wallet that was
+	// sent to fetch it.
+	//
+	// Only the query is retried, and only with the ORIGINAL error kept
+	// for every other outcome: a request object that fails to decode for
+	// any other reason must still report what actually went wrong.
+	var envelope map[string]json.RawMessage
+	if envelopeErr := json.Unmarshal(data, &envelope); envelopeErr != nil {
 		return nil, err
 	}
+	rawQuery, ok := envelope["dcql_query"]
+	if !ok {
+		return nil, err
+	}
+	trusted, trustedErr := openid4vp.UnmarshalTrustedDCQL(rawQuery)
+	if trustedErr != nil {
+		return nil, err
+	}
+	delete(envelope, "dcql_query")
+	rest, restErr := json.Marshal(envelope)
+	if restErr != nil {
+		return nil, err
+	}
+	ro = &openid4vp.RequestObject{}
+	if retryErr := json.Unmarshal(rest, ro); retryErr != nil {
+		return nil, err
+	}
+	ro.DCQLQuery = trusted
 	return ro, nil
 }
 

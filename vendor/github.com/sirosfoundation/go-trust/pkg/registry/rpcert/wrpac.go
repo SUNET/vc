@@ -4,9 +4,11 @@
 // in the EUDI Wallet ecosystem. It defines:
 //
 //   - Four certificate policy OIDs (NCP/QCP × natural/legal person)
-//   - Required extensions (keyUsage, subjectAltName, certificatePolicies, AIA)
+//   - Required extensions (subjectAltName, certificatePolicies, AIA)
 //   - Identity extraction from Subject DN and SANs
-//   - Security constraints (key usage restricted to nonRepudiation)
+//   - No keyUsage constraint: the access certificate authenticates the relying
+//     party (RFC 5280 4.2.1.3 digitalSignature), and TS 119 411-8 specifies no
+//     keyUsage bit, so none is enforced
 //
 // The profile is based on the APTITUDE wp2-trust-specifications access-certificate
 // topic (derived from ETSI TS 119 411-8, ETSI EN 319 412-x, and CIR 2025/848).
@@ -189,10 +191,26 @@ func (p *WRPACProfile) ExtractIdentity(credential interface{}) (map[string]inter
 	// Subject.Names, so it has to be read out by OID. Fall back to
 	// serialNumber (2.5.4.5), which earlier certificates and test fixtures
 	// used, so both continue to resolve.
+	//
+	// The serialNumber fallback does not apply to a natural-person certificate
+	// (NCP-n/QCP-n policy). ETSI TS 119 475 5.1.5 puts a natural person's
+	// semantic identifier (e.g. PNOSE-...) in serialNumber; that identifies the
+	// person, so relabelling it organization_identifier - and classifying the
+	// certificate legal_person when it also names an affiliated organisation -
+	// was wrong.
+	naturalPerson := SubjectKindFromPolicies(cert) == SubjectKindNaturalPerson
 	orgID := SubjectOrganizationIdentifier(cert)
+	if naturalPerson {
+		orgID = realOrganizationIdentifier(cert)
+	}
 	if orgID != "" {
 		identity["organization_identifier"] = orgID
-		delete(identity, "serial_number")
+		// Only an organisation identifier that came from serialNumber replaces
+		// it. A natural person's serialNumber is their own identifier and stays,
+		// next to the affiliated organisation's real identifier.
+		if !naturalPerson {
+			delete(identity, "serial_number")
+		}
 	}
 
 	// Determine subject type (natural vs legal person). Keyed off the same
@@ -200,11 +218,7 @@ func (p *WRPACProfile) ExtractIdentity(credential interface{}) (map[string]inter
 	// directly classified a conformant legal-person certificate, which
 	// carries the value in 2.5.4.97, as a natural person. Reusing the one
 	// value keeps the two decisions from ever disagreeing.
-	if len(cert.Subject.Organization) > 0 && orgID != "" {
-		identity["subject_type"] = "legal_person"
-	} else {
-		identity["subject_type"] = "natural_person"
-	}
+	identity["subject_type"] = wrpacSubjectType(cert, orgID, naturalPerson)
 
 	// Certificate policy classification
 	policyOIDStrs := CertPolicyOIDStrings(cert)
@@ -274,18 +288,16 @@ func extractSubjectAttribute(cert *x509.Certificate, oid asn1.ObjectIdentifier) 
 
 // ValidateCredential performs WRPAC-specific validation on an X.509 certificate.
 // Checks required by the profile beyond basic chain verification:
-//   - keyUsage must include nonRepudiation (Type A, B, or F per ETSI EN 319 412)
 //   - subjectAltName must be present with at least one contact method
 //   - certificatePolicies must contain at least one WRPAC policy OID
+//
+// keyUsage is deliberately not checked: ETSI TS 119 411-8 specifies none, and
+// an access certificate authenticates the relying party (digitalSignature),
+// it does not commit to content (contentCommitment/nonRepudiation).
 func (p *WRPACProfile) ValidateCredential(credential interface{}) error {
 	cert, ok := credential.(*x509.Certificate)
 	if !ok {
 		return fmt.Errorf("wrpac: expected *x509.Certificate, got %T", credential)
-	}
-
-	// Check keyUsage — WRPAC requires nonRepudiation (contentCommitment)
-	if cert.KeyUsage&x509.KeyUsageContentCommitment == 0 {
-		return fmt.Errorf("wrpac: certificate keyUsage does not include nonRepudiation (contentCommitment)")
 	}
 
 	// Check subjectAltName — must contain at least one contact method
@@ -335,4 +347,14 @@ func SubjectOrganizationIdentifier(cert *x509.Certificate) string {
 		}
 	}
 	return cert.Subject.SerialNumber
+}
+
+// wrpacSubjectType classifies the subject as "legal_person" or "natural_person".
+// A certificate whose policy OIDs say natural person is one; otherwise it is a
+// legal person when it names an organisation and has an organisation identifier.
+func wrpacSubjectType(cert *x509.Certificate, orgID string, naturalPerson bool) string {
+	if !naturalPerson && len(cert.Subject.Organization) > 0 && orgID != "" {
+		return "legal_person"
+	}
+	return "natural_person"
 }

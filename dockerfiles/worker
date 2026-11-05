@@ -6,7 +6,7 @@
 # toolchains — the tool-install steps below no-op when they detect the
 # tools are already present.
 # Keep the golang tag aligned with dockerfiles/gobuild's FROM.
-ARG GOBUILD_IMAGE=golang:1.27.1-bookworm
+ARG GOBUILD_IMAGE=golang:1.27.3-bookworm
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .

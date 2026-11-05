@@ -115,6 +115,7 @@ func (s *SendStream) StreamID() StreamID {
 // Write writes data to the stream.
 // Write can be made to time out using [SendStream.SetWriteDeadline].
 // If the stream was canceled, the error is a [StreamError].
+// If the stream was closed, the error is [ErrStreamClosed].
 func (s *SendStream) Write(p []byte) (int, error) {
 	return s.WriteWithLimit(p, nil)
 }
@@ -177,7 +178,7 @@ func (s *SendStream) tryWriteAll(p []byte) (bool /* is newly completed */, bool 
 		return false, false, s.shutdownErr
 	}
 	if s.finishedWriting {
-		return false, false, fmt.Errorf("write on closed stream %d", s.streamID)
+		return false, false, ErrStreamClosed
 	}
 	if len(p) == 0 {
 		return false, false, nil
@@ -198,23 +199,21 @@ func (s *SendStream) tryWriteAll(p []byte) (bool /* is newly completed */, bool 
 		s.nextFrame.DataLenPresent = true
 		s.nextFrame.Data = s.nextFrame.Data[:0]
 	}
-	l := len(s.nextFrame.Data)
-	if l+len(p) > cap(s.nextFrame.Data) {
+	if len(s.nextFrame.Data)+len(p) > cap(s.nextFrame.Data) {
 		// Pooled STREAM frames must keep their packet-sized buffer.
 		// Use a non-pooled frame when the queued data grows beyond that.
+		// append grows the buffer geometrically, so repeated calls don't copy it every time.
 		nextFrame := &wire.StreamFrame{
 			StreamID:       s.streamID,
 			Offset:         s.nextFrame.Offset,
 			DataLenPresent: true,
-			Data:           make([]byte, l+len(p)),
+			Data:           append(s.nextFrame.Data, p...),
 		}
-		copy(nextFrame.Data, s.nextFrame.Data)
 		s.nextFrame.PutBack()
 		s.nextFrame = nextFrame
 	} else {
-		s.nextFrame.Data = s.nextFrame.Data[:l+len(p)]
+		s.nextFrame.Data = append(s.nextFrame.Data, p...)
 	}
-	copy(s.nextFrame.Data[l:], p)
 	s.nextFrameReserved = true
 	return false, true, nil
 }
@@ -237,7 +236,7 @@ func (s *SendStream) write(p []byte, limiter func(int) int) (bool /* is newly co
 		return false, 0, s.shutdownErr
 	}
 	if s.finishedWriting {
-		return false, 0, fmt.Errorf("write on closed stream %d", s.streamID)
+		return false, 0, ErrStreamClosed
 	}
 	if !s.deadline.IsZero() && !monotime.Now().Before(s.deadline) {
 		return false, 0, errDeadline
@@ -473,19 +472,22 @@ func (s *SendStream) popNewStreamFrame(maxDataLen protocol.ByteCount) (_ *wire.S
 		nextFrameReserved := s.nextFrameReserved
 		s.nextFrame = nil
 		s.nextFrameReserved = false
-		if nextFrame.DataLen() > maxDataLen {
-			if nextFrame.DataLen()-maxDataLen > protocol.MaxPacketBufferSize {
-				s.nextFrame = &wire.StreamFrame{
-					Data: make([]byte, nextFrame.DataLen()-maxDataLen),
-				}
-			} else {
-				s.nextFrame = wire.GetStreamFrame()
-				s.nextFrame.Data = s.nextFrame.Data[:nextFrame.DataLen()-maxDataLen]
+		// Only a non-pooled frame holds more than a packet's worth of data.
+		// Send copies, so sent frames don't keep its buffer alive.
+		// Move the rest into a pooled frame once it fits.
+		if nextFrame.DataLen() > protocol.MaxPacketBufferSize {
+			f := s.newPooledStreamFrame(s.writeOffset, nextFrame.Data[:maxDataLen])
+			nextFrame.Data = nextFrame.Data[maxDataLen:]
+			nextFrame.Offset += maxDataLen
+			if nextFrame.DataLen() <= protocol.MaxPacketBufferSize {
+				nextFrame = s.newPooledStreamFrame(nextFrame.Offset, nextFrame.Data)
 			}
-			s.nextFrame.StreamID = s.streamID
-			s.nextFrame.Offset = s.writeOffset + maxDataLen
-			s.nextFrame.DataLenPresent = true
-			copy(s.nextFrame.Data, nextFrame.Data[maxDataLen:])
+			s.nextFrame = nextFrame
+			s.nextFrameReserved = nextFrameReserved
+			return f, true
+		}
+		if nextFrame.DataLen() > maxDataLen {
+			s.nextFrame = s.newPooledStreamFrame(s.writeOffset+maxDataLen, nextFrame.Data[maxDataLen:])
 			nextFrame.Data = nextFrame.Data[:maxDataLen]
 			s.nextFrameReserved = nextFrameReserved
 		} else {
@@ -503,6 +505,17 @@ func (s *SendStream) popNewStreamFrame(maxDataLen protocol.ByteCount) (_ *wire.S
 
 	s.getDataForWriting(f, maxDataLen)
 	return f, s.dataForWriting != nil || s.nextFrame != nil || s.finishedWriting
+}
+
+// newPooledStreamFrame returns a pooled STREAM frame holding a copy of data.
+func (s *SendStream) newPooledStreamFrame(offset protocol.ByteCount, data []byte) *wire.StreamFrame {
+	f := wire.GetStreamFrame()
+	f.StreamID = s.streamID
+	f.Offset = offset
+	f.DataLenPresent = true
+	f.Data = f.Data[:len(data)]
+	copy(f.Data, data)
+	return f
 }
 
 func (s *SendStream) popRetransmissionFrame(maxBytes protocol.ByteCount, v protocol.Version) (_ ackhandler.StreamFrame, hasMore bool) {
@@ -601,7 +614,7 @@ func (s *SendStream) Close() error {
 	}
 	s.sender.onHasStreamData(s.streamID, s) // need to send the FIN, must be called without holding the mutex
 
-	s.ctxCancel(nil)
+	s.ctxCancel(ErrStreamClosed)
 	return nil
 }
 
@@ -612,6 +625,10 @@ func (s *SendStream) Close() error {
 func (s *SendStream) SetReliableBoundary() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	if s.resetErr != nil {
+		return
+	}
 
 	if s.nextFrame != nil {
 		s.reliableSize = max(s.reliableSize, s.writeOffset+s.nextFrame.DataLen())
@@ -824,7 +841,7 @@ func (s *SendStream) SetPriority(urgency int8, incremental bool) {
 // This happens when [SendStream.Close] or [SendStream.CancelWrite] is called, or when the peer
 // cancels the read-side of their stream.
 // The cancellation cause is set to the error that caused the stream to
-// close, or [context.Canceled] in case the stream is closed without error.
+// close, which is [ErrStreamClosed] if [SendStream.Close] was called.
 func (s *SendStream) Context() context.Context {
 	return s.ctx
 }

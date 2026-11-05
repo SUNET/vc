@@ -168,6 +168,12 @@ type TransactionData struct {
 
 	// CredentialIDS REQUIRED. Credential query IDs that can authorize this transaction.
 	CredentialIDS []string `json:"credential_ids,omitempty" bson:"credential_ids,omitempty" validate:"required,dive,required"`
+
+	// TransactionDataHashesAlg OPTIONAL in OpenID4VP 1.0 (Appendix B.3.3.1), REQUIRED by EC TS12 v1.0.1 section 4.2. An ARRAY of hash algorithm names, one of which the wallet MUST use for transaction_data_hashes. Absent means sha-256.
+	TransactionDataHashesAlg []string `json:"transaction_data_hashes_alg,omitempty" bson:"transaction_data_hashes_alg,omitempty"`
+
+	// Payload is the transaction details (EC TS12 section 4.2): a JSON object described by the schema of the transaction type. Left opaque here; see TS12PaymentPayload for the payment type.
+	Payload any `json:"payload,omitempty" bson:"payload,omitempty"`
 }
 
 // Base64Encode encodes the TransactionData struct into a base64 URL-encoded string.

@@ -180,13 +180,14 @@ func TestCrossDevice_FullFlow(t *testing.T) {
 	t.Logf("Navigating to: %s", authorizeURL)
 
 	// Navigate and wait for QR code to render
-	var sessionID string
-	err := chromedp.Run(browserCtx,
-		// Ignore TLS errors at CDP level
-		network.SetExtraHTTPHeaders(network.Headers{}),
+	_, err := chromedp.Call(browserCtx, network.SetExtraHTTPHeaders, network.SetExtraHTTPHeadersParams{Headers: network.Headers{}})
+	require.NoError(t, err, "browser: set extra HTTP headers")
+	err = chromedp.Do(browserCtx,
 		chromedp.Navigate(authorizeURL),
-		chromedp.WaitVisible(`#qr-code`, chromedp.ByID),
-		chromedp.Evaluate(`(() => {
+		chromedp.WaitVisible(chromedp.ID("qr-code")),
+	)
+	require.NoError(t, err, "browser: navigate and wait for QR code")
+	sessionID, err := chromedp.Run(browserCtx, chromedp.Evaluate[string](`(() => {
 			// Extract sessionId from page JavaScript
 			const scripts = document.querySelectorAll('script');
 			for (const s of scripts) {
@@ -200,9 +201,8 @@ func TestCrossDevice_FullFlow(t *testing.T) {
 				if (m) return m[1];
 			}
 			return '';
-		})()`, &sessionID),
-	)
-	require.NoError(t, err, "browser: navigate and extract session ID")
+		})()`))
+	require.NoError(t, err, "browser: extract session ID")
 	require.NotEmpty(t, sessionID, "session ID must be extracted from page")
 	t.Logf("Phase 4 complete: session_id=%s, QR code visible", sessionID)
 
@@ -287,21 +287,23 @@ func TestCrossDevice_QRCodeRenders(t *testing.T) {
 	authorizeURL := fmt.Sprintf("%s/authorize?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&state=%s&code_challenge=%s&code_challenge_method=S256",
 		verifierPublicURL, vpClient.ClientID, url.QueryEscape(oauthRedirect), url.QueryEscape("openid pid"), uuid.New().String(), codeChallenge)
 
-	var qrSrc, sessionID string
-	err := chromedp.Run(browserCtx,
+	err := chromedp.Do(browserCtx,
 		chromedp.Navigate(authorizeURL),
-		chromedp.WaitVisible(`#qr-code`, chromedp.ByID),
-		chromedp.AttributeValue(`#qr-code`, "src", &qrSrc, nil, chromedp.ByID),
-		chromedp.Evaluate(`(() => {
+		chromedp.WaitVisible(chromedp.ID("qr-code")),
+	)
+	require.NoError(t, err, "browser navigation failed")
+	qrAttr, err := chromedp.Run(browserCtx, chromedp.AttributeValue(chromedp.ID("qr-code"), "src"))
+	require.NoError(t, err, "browser: read QR src")
+	qrSrc := qrAttr.Value
+	sessionID, err := chromedp.Run(browserCtx, chromedp.Evaluate[string](`(() => {
 			const scripts = document.querySelectorAll('script');
 			for (const s of scripts) {
 				const match = s.textContent.match(/sessionId:\s*'([^']+)'/);
 				if (match) return match[1];
 			}
 			return '';
-		})()`, &sessionID),
-	)
-	require.NoError(t, err, "browser navigation failed")
+		})()`))
+	require.NoError(t, err, "browser: extract session ID")
 	assert.NotEmpty(t, qrSrc, "QR code image must have src attribute")
 	assert.NotEmpty(t, sessionID, "session ID must be extractable from page")
 	assert.Contains(t, qrSrc, "/qr/", "QR src must point to /qr/ endpoint")
@@ -334,19 +336,19 @@ func TestCrossDevice_SSENotification(t *testing.T) {
 		verifierPublicURL, vpClient.ClientID, url.QueryEscape(callbackServer.RedirectURI()), url.QueryEscape("openid pid"), vpState, codeChallenge)
 
 	// Navigate and wait for QR + SSE connection to establish
-	var sessionID string
-	err := chromedp.Run(browserCtx,
+	err := chromedp.Do(browserCtx,
 		chromedp.Navigate(authorizeURL),
-		chromedp.WaitVisible(`#qr-code`, chromedp.ByID),
-		chromedp.Evaluate(`(() => {
+		chromedp.WaitVisible(chromedp.ID("qr-code")),
+	)
+	require.NoError(t, err)
+	sessionID, err := chromedp.Run(browserCtx, chromedp.Evaluate[string](`(() => {
 			const scripts = document.querySelectorAll('script');
 			for (const s of scripts) {
 				const match = s.textContent.match(/sessionId:\s*'([^']+)'/);
 				if (match) return match[1];
 			}
 			return '';
-		})()`, &sessionID),
-	)
+		})()`))
 	require.NoError(t, err)
 	require.NotEmpty(t, sessionID)
 
