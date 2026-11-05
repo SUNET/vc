@@ -8,6 +8,7 @@ import (
 	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 
+	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -20,7 +21,9 @@ import (
 // shared test suite rather than three separate ones.
 func newTestServiceWithMongo(t *testing.T, client *mongo.Client) *Service {
 	t.Helper()
-	return newTestServiceWithMongoDatabase(t, client, "vc")
+	var mongoCfg model.Mongo
+	require.NoError(t, defaults.Set(&mongoCfg))
+	return newTestServiceWithMongoDatabase(t, client, mongoCfg.APIGWDatabaseName)
 }
 
 // newTestServiceWithMongoDatabase is newTestServiceWithMongo with the apigw
