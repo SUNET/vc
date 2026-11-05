@@ -105,6 +105,10 @@ The issuer reads the wallet's entries from its verified `jwt` and
 proof, where `auxiliary_data` is a property of the Verifiable Presentation
 (section 6.2 of the extension).
 
+A credential carries a `to_issuer` commitment only when the wallet sent
+it. For an optional entry the wallet leaves out, the issuer removes any
+value the source data holds at its path.
+
 ## Unique commitments
 
 `unique` makes the issuer accept one commitment per value of a key, in
@@ -114,10 +118,20 @@ either direction. `key` lists claims of the credential:
 - one claim accepts one commitment per value of that claim;
 - several claims accept one commitment per combination of their values.
 
-The issuer keeps the first commitment for each key value, and answers a
-different one with `auxiliary_data_conflict`. The nym_auth rulebook allows
-one `psc` per subject, and `ssc` identifies the subject, so each source
-scope of `nym_auth` adds:
+The issuer records the first commitment for each key value, once the
+request has passed its checks and before it signs the credential. A
+different commitment for a recorded key value refuses the request:
+
+- on a `to_issuer` entry, whose commitment the wallet sent, with
+  `auxiliary_data_conflict`;
+- on a `to_wallet` entry, whose commitment the issuer derived, with
+  `credential_request_denied`.
+
+With a `random` opening each issuance draws a new commitment, so a unique
+`to_wallet` entry issues once per key value until a reset.
+
+The nym_auth rulebook allows one `psc` per subject, and `ssc` identifies
+the subject, so each source scope of `nym_auth` adds:
 
 ```yaml
                 - hash_commitment:
@@ -127,9 +141,17 @@ scope of `nym_auth` adds:
                         - [eu.europa.ec.eudi.nym_auth.1, ssc]
 ```
 
+Every source scope of a credential sets the same unique entries, with the
+same key, and the configuration is refused otherwise.
+
 The record lives in the apigw database (`unique_commitments`), which
 decides between replicas. It holds the SHA-256 of the key and its values.
 Each key of an entry has its own records.
+
+The shipped configs key the `psc` record by the issued `ssc`, which
+derives from the `hkdf` secret, `nym_auth_seed.key` (`NYM_AUTH_SEED` on
+Fly). Replacing the secret changes every subject's `ssc`, orphans every
+record, and lets every subject register a new `psc`.
 
 ### Finding and resetting a commitment
 
@@ -139,8 +161,9 @@ their wallet account and was re-identified.
 
 In the admin UI, **Commitments** finds the commitment for the values an
 operator enters, shows when it was recorded, and resets it with a case
-reference. Through the API, both calls take the entry and a value per key
-part:
+reference. Reset needs an operator signed in through
+`apigw.api_server.api_auth.oidc`. Through the API, both calls take the
+entry and a value per key part:
 
 ```
 POST /api/v1/auxiliary_data/lookup
@@ -179,13 +202,14 @@ record. The reset answers:
 | 204 | The commitment is reset. |
 | 400 | The scope has no unique entry with this path and key, or a part has no value, or its inputs fit no `hkdf` or `hmac` opening. |
 | 403 | The caller is anonymous: a reset needs an API token or an OIDC admin session. |
-| 404 | Nothing is on record for this key value. |
+| 404 | Nothing is on record for this key value, or a concurrent reset removed it first. |
 | 409 | The evidence reference already reset an earlier commitment. |
 
 Each call is logged with the scope, the entry, the operator and the
-outcome, and a reset with its evidence reference. Each reset adds a row to
-`unique_commitment_resets` with the operator, the time, the evidence
-reference and the SHA-256 of the removed commitment.
+outcome, and a reset with its evidence reference. Each reset that removes
+a commitment adds a row to `unique_commitment_resets` with the operator,
+the time, the evidence reference and the SHA-256 of the removed
+commitment.
 
 Both are admin API routes. Where `apigw.api_server.api_auth.rules` are
 set, an operator needs a rule such as:
@@ -239,7 +263,8 @@ Fly deploy provisions one per environment as the `NYM_AUTH_SEED` secret.
 **Back the secret up, and keep it.** Every opening this deployment issues
 is a function of it. A new secret gives every subject a new opening and a
 new commitment, and the lost secret takes the ability to reproduce any
-earlier opening with it.
+earlier opening with it. Records keyed by such a commitment are orphaned
+too ([Unique commitments](#unique-commitments)).
 
 ### `claim`
 
