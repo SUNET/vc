@@ -26,7 +26,39 @@ import (
 // pinned here. The fetch still goes through LoadDocument, so scheme and
 // address policy apply to it.
 func (l *CachingDocumentLoader) PinRemoteContext(url string) error {
-	return l.pinContext(url, make(map[string]bool), 0)
+	return l.pinContext(url, make(map[string]bool), 0, false)
+}
+
+// RefreshRemoteContext pins a context again, ignoring what is already
+// cached, so a document that has changed at its source is picked up.
+//
+// Separate from PinRemoteContext because pinning stores with no TTL: the
+// pinned document would otherwise answer the refresh out of the cache and
+// the fetch would never happen.
+//
+// A failure leaves the previously pinned documents in place. Each document
+// in the closure is replaced only once its own fresh copy has loaded, so a
+// refresh that dies partway leaves every document either refreshed or as it
+// was, never empty - the service keeps running on what it validated at
+// boot.
+func (l *CachingDocumentLoader) RefreshRemoteContext(url string) error {
+	return l.pinContext(url, make(map[string]bool), 0, true)
+}
+
+// loadForPin loads one document of a pinned closure.
+//
+// A refresh deliberately bypasses the cache, which is the whole point of
+// refreshing; an ordinary pin goes through LoadDocument so a preloaded or
+// already-pinned document is reused and an operator-configured source is
+// honoured.
+func (l *CachingDocumentLoader) loadForPin(url string, refresh bool) (*ld.RemoteDocument, error) {
+	if !refresh {
+		return l.LoadDocument(url)
+	}
+	if doc, configured, err := l.loadFromSource(url); configured {
+		return doc, err
+	}
+	return l.fetchContext(url)
 }
 
 // maxPinDepth bounds how far pinning follows references, and
@@ -58,7 +90,7 @@ const (
 // because it has gone, despite the configuration having been "pinned" at
 // startup. The point of pinning is that what was validated at boot is what
 // gets used, and that only holds if it covers the whole closure.
-func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, depth int) error {
+func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, depth int, refresh bool) error {
 	if url == "" || seen[url] {
 		return nil
 	}
@@ -72,7 +104,7 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 	}
 	seen[url] = true
 
-	doc, err := l.LoadDocument(url)
+	doc, err := l.loadForPin(url, refresh)
 	if err != nil {
 		return err
 	}
@@ -80,7 +112,7 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 
 	// The processor will ask for this one by name during expansion.
 	if doc.ContextURL != "" && doc.ContextURL != url {
-		if err := l.pinContext(doc.ContextURL, seen, depth+1); err != nil {
+		if err := l.pinContext(doc.ContextURL, seen, depth+1, refresh); err != nil {
 			return fmt.Errorf("context %q links to %q: %w", url, doc.ContextURL, err)
 		}
 	}
@@ -100,7 +132,7 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 		return fmt.Errorf("context %q references %q, which is not an http(s) URL and cannot be pinned", url, unsupported[0])
 	}
 	for _, ref := range references {
-		if err := l.pinContext(ref, seen, depth+1); err != nil {
+		if err := l.pinContext(ref, seen, depth+1, refresh); err != nil {
 			return fmt.Errorf("context %q references %q: %w", url, ref, err)
 		}
 	}

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"net"
 	"net/http"
 	neturl "net/url"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -44,6 +46,104 @@ type CachingDocumentLoader struct {
 	client *http.Client
 	cache  *ttlcache.Cache[string, *ld.RemoteDocument]
 	log    *logger.Log
+
+	// sourcesMu guards sources, which an operator's configuration sets
+	// once at startup and every LoadDocument then reads.
+	sourcesMu sync.RWMutex
+	sources   map[string]ContextSource
+}
+
+// ContextSource is where one context document's bytes come from, when the
+// operator has provided a copy rather than letting the URL be dereferenced.
+//
+// Exactly one field is set. File reads from disk and makes no request at
+// all; URL fetches a mirror through the ordinary path, so the scheme and
+// address policy apply to it unchanged.
+type ContextSource struct {
+	File string
+	URL  string
+}
+
+// SetContextSources installs the operator's copies of context documents.
+//
+// Consulted by LoadDocument as well as by pinning, so a source applies
+// however the context is reached: pinned at startup, re-fetched by a
+// refresh, or loaded on first use under the lazy policy. A source that only
+// covered pinning would silently stop applying in the one mode that never
+// pins.
+func (l *CachingDocumentLoader) SetContextSources(sources map[string]ContextSource) {
+	l.sourcesMu.Lock()
+	defer l.sourcesMu.Unlock()
+	l.sources = maps.Clone(sources)
+}
+
+// contextSource returns the configured source for a URL, if there is one.
+func (l *CachingDocumentLoader) contextSource(url string) (ContextSource, bool) {
+	l.sourcesMu.RLock()
+	defer l.sourcesMu.RUnlock()
+	source, ok := l.sources[url]
+	return source, ok
+}
+
+// loadFromSource loads a context from the operator's copy of it, reporting
+// whether a copy was configured at all.
+//
+// The document is returned under the CANONICAL url - the one the credential
+// names and the one the processor will ask for again - whichever source it
+// came from. A mirror that answered under its own URL would be cached under
+// that URL and fetched again under the canonical one.
+func (l *CachingDocumentLoader) loadFromSource(url string) (*ld.RemoteDocument, bool, error) {
+	source, ok := l.contextSource(url)
+	if !ok {
+		return nil, false, nil
+	}
+	switch {
+	case source.File != "":
+		doc, err := l.readContextFile(url, source.File)
+		return doc, true, err
+	case source.URL != "":
+		doc, err := l.fetchContext(source.URL)
+		if err != nil {
+			return nil, true, fmt.Errorf("JSON-LD context %q from its configured mirror: %w", url, err)
+		}
+		// Re-homed onto the canonical URL. DocumentURL is also what
+		// relative references inside the document resolve against, and
+		// resolving them against the mirror would point the closure at
+		// the mirror's layout rather than the publisher's.
+		doc.DocumentURL = url
+		return doc, true, nil
+	default:
+		return nil, true, fmt.Errorf("JSON-LD context %q has a source with neither file nor url", url)
+	}
+}
+
+// readContextFile reads a context document from a path the operator
+// configured.
+//
+// Capped at the same size as a fetched document: the cap is there so one
+// context cannot exhaust memory, and that is as true of a file as of a
+// response body.
+func (l *CachingDocumentLoader) readContextFile(url, path string) (*ld.RemoteDocument, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("JSON-LD context %q from %q: %w", url, path, err)
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(io.LimitReader(file, maxContextBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading JSON-LD context %q from %q: %w", url, path, err)
+	}
+	if len(body) > maxContextBytes {
+		return nil, fmt.Errorf("JSON-LD context %q at %q is larger than the %d byte limit", url, path, maxContextBytes)
+	}
+
+	var document any
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("JSON-LD context %q at %q is not valid JSON: %w", url, path, err)
+	}
+
+	return &ld.RemoteDocument{DocumentURL: url, Document: document}, nil
 }
 
 // schemeOf returns the scheme of a context URL, or "" if it has none.
@@ -279,6 +379,18 @@ func contextLinkTarget(resp *http.Response) (string, error) {
 func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, error) {
 	if item := l.cache.Get(url); item != nil {
 		return item.Value(), nil
+	}
+
+	// An operator's own copy wins over dereferencing the URL. Checked here
+	// rather than only while pinning so it also applies under the lazy
+	// startup policy, where nothing is pinned and this is the only path a
+	// context is ever loaded by.
+	if doc, configured, err := l.loadFromSource(url); configured {
+		if err != nil {
+			return nil, err
+		}
+		l.cache.Set(url, doc, ttlcache.DefaultTTL)
+		return doc, nil
 	}
 
 	// Fetched here rather than by json-gold's loader, which calls os.Open for
