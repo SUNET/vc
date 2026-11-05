@@ -115,6 +115,9 @@ and its replacement:
 config.yaml:37: $.apigw.data_sources.presentation.scopes.nym_auth.from.pid.required_claims.birthdate: deprecated claim spelling birthdate: []; write {path: [birthdate]}, or run migrate_claim_paths
 ```
 
+A spelling that a YAML alias or merge key reads warns once per read, at
+the line that holds it.
+
 A later release refuses them. Rewrite each file with `migrate_claim_paths`
 before then.
 
@@ -176,3 +179,8 @@ map to the keyed form when the keyed form maps the same claims:
 
 It leaves any other map as written and prints why. Such a map keeps loading
 with its warning.
+
+It leaves a file with a YAML alias, merge key or repeated key as written,
+and prints a line, when a rewrite in place would miss a spelling the alias
+reads or change what the alias reads. Rewrite by hand the spellings its
+warnings at load name.

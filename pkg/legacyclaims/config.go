@@ -498,7 +498,9 @@ func (d *Document) stringPath(path ast.Node, nullString bool) error {
 			return err
 		}
 		d.replace(start, end, text)
-		d.record(component, strings.TrimSpace(string(d.src[start:end])), text)
+		if err := d.record(component, strings.TrimSpace(string(d.src[start:end])), text); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -22,7 +22,13 @@ type Document struct {
 	// lines holds the byte offset at which each line starts.
 	lines []int
 	root  ast.Node
-	edits []edit
+	// layout is what Resolve reads of the aliases, merge keys and repeated
+	// keys below the root.
+	layout layout
+	// origin maps the text Resolve writes to the lines of the file, and is
+	// nil for the text of the file.
+	origin []segment
+	edits  []edit
 	// rewrites holds one record per spelling the edits upgrade.
 	rewrites []Rewrite
 }
@@ -54,10 +60,11 @@ type Rewrite struct {
 }
 
 // Parse parses the YAML text of file. Like gopkg.in/yaml.v2, it reads the
-// first document of a stream. Comments before the first "---" belong to no
-// document, and a document of comments holds nothing.
+// first document of a stream, and a mapping may repeat a key. Comments
+// before the first "---" belong to no document, and a document of comments
+// holds nothing.
 func Parse(file string, src []byte) (*Document, error) {
-	parsed, err := parser.ParseBytes(src, parser.ParseComments)
+	parsed, err := parser.ParseBytes(src, parser.ParseComments, parser.AllowDuplicateMapKey())
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
@@ -72,7 +79,37 @@ func Parse(file string, src []byte) (*Document, error) {
 		}
 		break
 	}
+	if d.layout, err = scanLayout(d.root); err != nil {
+		return nil, d.fail(err)
+	}
 	return d, nil
+}
+
+// fileLine returns the line of the file that holds an offset of the text.
+func (d *Document) fileLine(offset int) int {
+	if d.origin == nil {
+		return d.lineOf(offset)
+	}
+	i, found := slices.BinarySearchFunc(d.origin, offset, func(s segment, offset int) int { return s.start - offset })
+	if !found {
+		i--
+	}
+	return d.origin[max(i, 0)].line
+}
+
+// lineAt returns the line of the file at a position of the text.
+func (d *Document) lineAt(pos *token.Position) (int, error) {
+	if pos == nil {
+		return 0, errors.New("a YAML token has no position in the text")
+	}
+	if d.origin == nil {
+		return pos.Line, nil
+	}
+	offset, err := d.offset(pos)
+	if err != nil {
+		return 0, err
+	}
+	return d.fileLine(offset), nil
 }
 
 // fail names the file in an error of an upgrade.
@@ -115,7 +152,7 @@ func (d *Document) Bytes() ([]byte, error) {
 	at := 0
 	for _, e := range edits {
 		if e.start < at {
-			return nil, fmt.Errorf("%s: two upgrades of the claim spellings overlap at line %d", d.file, d.lineOf(e.start))
+			return nil, fmt.Errorf("%s: two upgrades of the claim spellings overlap at line %d", d.file, d.fileLine(e.start))
 		}
 		out.Write(d.src[at:e.start])
 		out.WriteString(e.text)
@@ -145,14 +182,19 @@ func (d *Document) insert(offset int, text string) {
 }
 
 // record notes an upgraded spelling at node.
-func (d *Document) record(node ast.Node, old, new string) {
+func (d *Document) record(node ast.Node, old, new string) error {
+	line, err := d.lineAt(node.GetToken().Position)
+	if err != nil {
+		return err
+	}
 	d.rewrites = append(d.rewrites, Rewrite{
 		File: d.file,
 		Path: node.GetPath(),
-		Line: node.GetToken().Position.Line,
+		Line: line,
 		Old:  old,
 		New:  new,
 	})
+	return nil
 }
 
 // offset returns the byte offset of a token position. A column counts
@@ -183,7 +225,7 @@ func (d *Document) tokenSpan(tk *token.Token) (int, int, error) {
 	}
 	text := strings.TrimSpace(tk.Origin)
 	if text == "" || !bytes.HasPrefix(d.src[start:], []byte(text)) {
-		return 0, 0, fmt.Errorf("line %d: the text of %q is not where its token says", tk.Position.Line, tk.Value)
+		return 0, 0, fmt.Errorf("line %d: the text of %q is not where its token says", d.fileLine(start), tk.Value)
 	}
 	return start, start + len(text), nil
 }
@@ -204,7 +246,11 @@ func (d *Document) span(n ast.Node) (int, int, error) {
 	default:
 		return d.tokenSpan(n.GetToken())
 	}
-	return 0, 0, fmt.Errorf("line %d: %s is no scalar or flow collection", n.GetToken().Position.Line, n.GetPath())
+	line, err := d.lineAt(n.GetToken().Position)
+	if err != nil {
+		return 0, 0, err
+	}
+	return 0, 0, fmt.Errorf("line %d: %s is no scalar or flow collection", line, n.GetPath())
 }
 
 // flowSpan returns the byte range from a flow collection's opening

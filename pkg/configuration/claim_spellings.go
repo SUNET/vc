@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 
 	"github.com/SUNET/vc/pkg/legacyclaims"
@@ -16,12 +17,23 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// configType is the type a configuration file decodes into.
+var configType = reflect.TypeFor[model.Cfg]()
+
+// fileDataSources is the part of a configuration file decodeDataSources
+// decodes.
+type fileDataSources struct {
+	APIGW struct {
+		DataSources model.DataSources `yaml:"data_sources"`
+	} `yaml:"apigw"`
+}
+
 // decodeShared decodes a configuration file into cfg. The claim spellings
 // of earlier releases outside apigw.data_sources are upgraded, and
 // apigw.data_sources is emptied: decodeDataSources reads it once the
 // credential schemas are loaded.
 func decodeShared(file string, src []byte, cfg *model.Cfg) ([]legacyclaims.Rewrite, error) {
-	doc, err := legacyclaims.Parse(file, src)
+	doc, err := legacyclaims.Resolve(file, src, configType)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +57,7 @@ func decodeShared(file string, src []byte, cfg *model.Cfg) ([]legacyclaims.Rewri
 // Each claim spelling of an earlier release is upgraded in the shape of
 // the credential that holds it, which cfg's credential metadata gives.
 func decodeDataSources(file string, src []byte, cfg *model.Cfg) (model.DataSources, []legacyclaims.Rewrite, error) {
-	doc, err := legacyclaims.Parse(file, src)
+	doc, err := legacyclaims.Resolve(file, src, reflect.TypeFor[fileDataSources]())
 	if err != nil {
 		return model.DataSources{}, nil, err
 	}
@@ -56,11 +68,7 @@ func decodeDataSources(file string, src []byte, cfg *model.Cfg) (model.DataSourc
 	if err != nil {
 		return model.DataSources{}, nil, err
 	}
-	var decoded struct {
-		APIGW struct {
-			DataSources model.DataSources `yaml:"data_sources"`
-		} `yaml:"apigw"`
-	}
+	var decoded fileDataSources
 	if err := yaml.Unmarshal(text, &decoded); err != nil {
 		return model.DataSources{}, nil, err
 	}
@@ -104,14 +112,42 @@ func (s credentialShapes) Document(scope string) (legacyclaims.Shape, error) {
 // of a configuration file, keeping every comment. It loads the schema of a
 // credential whose document shape a data source claim needs; schemaPath
 // maps the schema file path of the credential metadata to the file to
-// read, and nil reads each path as written.
+// read, and nil reads each path as written. The rewrite of a file with a
+// YAML alias, merge key or repeated key must decode as the file does and
+// hold no earlier spelling; otherwise UpgradeFile refuses the file with
+// legacyclaims.ErrInPlace.
 func UpgradeFile(ctx context.Context, file string, src []byte, schemaPath func(string) string) ([]byte, []legacyclaims.Rewrite, error) {
-	cfg := &model.Cfg{}
-	if _, err := decodeShared(file, src, cfg); err != nil {
-		return nil, nil, err
-	}
 	doc, err := legacyclaims.Parse(file, src)
 	if err != nil {
+		return nil, nil, err
+	}
+	if !doc.Flattens() {
+		return upgradeConfig(ctx, file, src, doc, schemaPath)
+	}
+	want, err := decodeConfig(ctx, file, src, schemaPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	want.Deprecations = nil
+	// A rewrite in place that fails, or whose text decodes otherwise, met
+	// a spelling an alias, a merge key or a repeated key reads.
+	text, rewrites, err := upgradeConfig(ctx, file, src, doc, schemaPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", file, legacyclaims.ErrInPlace)
+	}
+	got, err := decodeConfig(ctx, file, text, schemaPath)
+	if err != nil || len(got.Deprecations) > 0 || !reflect.DeepEqual(want, got) {
+		return nil, nil, fmt.Errorf("%s: %w", file, legacyclaims.ErrInPlace)
+	}
+	return text, rewrites, nil
+}
+
+// upgradeConfig upgrades the claim spellings of doc, which holds the text
+// of the configuration file src or the text gopkg.in/yaml.v2 decodes from
+// it.
+func upgradeConfig(ctx context.Context, file string, src []byte, doc *legacyclaims.Document, schemaPath func(string) string) ([]byte, []legacyclaims.Rewrite, error) {
+	cfg := &model.Cfg{}
+	if _, err := decodeShared(file, src, cfg); err != nil {
 		return nil, nil, err
 	}
 	shapes := credentialShapes{cfg: cfg, load: schemaLoader(ctx, cfg, schemaPath)}
@@ -173,7 +209,17 @@ func DecodeFile(ctx context.Context, file string, schemaPath func(string) string
 	if err != nil {
 		return nil, err
 	}
-	text, rewrites, err := UpgradeFile(ctx, file, src, schemaPath)
+	return decodeConfig(ctx, file, src, schemaPath)
+}
+
+// decodeConfig decodes the text of a configuration file as DecodeFile
+// decodes the file.
+func decodeConfig(ctx context.Context, file string, src []byte, schemaPath func(string) string) (*model.Cfg, error) {
+	doc, err := legacyclaims.Resolve(file, src, configType)
+	if err != nil {
+		return nil, err
+	}
+	text, rewrites, err := upgradeConfig(ctx, file, src, doc, schemaPath)
 	if err != nil {
 		return nil, err
 	}

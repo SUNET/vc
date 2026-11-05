@@ -8,6 +8,11 @@
 // as written, because the keyed form would map other claims, and a line
 // per file it rewrites. A second run changes nothing.
 //
+// It leaves a file as written, and prints a line, when a YAML alias, merge
+// key or repeated key reads a claim spelling that a rewrite in place would
+// miss or give another meaning. The warnings at load name each spelling of
+// such a file.
+//
 // A configuration names its credential schemas by deployment paths, such
 // as /metadata/pid_mdoc.mdoc.json. -schemas maps such a prefix to a local
 // directory: -schemas /metadata=./metadata.
@@ -70,6 +75,10 @@ func migrate(ctx context.Context, file string, schemas prefixes, dryRun bool, ou
 		return err
 	}
 	upgraded, rewrites, err := upgrade(ctx, file, src, schemas.apply)
+	if errors.Is(err, legacyclaims.ErrInPlace) {
+		_, err := fmt.Fprintf(out, "%s: left as written: %v; rewrite the claim spellings its warnings at load name\n", file, legacyclaims.ErrInPlace)
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -114,17 +123,10 @@ func upgrade(ctx context.Context, file string, src []byte, schemaPath func(strin
 	if err != nil {
 		return nil, nil, err
 	}
-	if !legacyclaims.IsTemplateFile(doc) {
-		return configuration.UpgradeFile(ctx, file, src, schemaPath)
+	if legacyclaims.IsTemplateFile(doc) {
+		return configuration.UpgradeTemplateFile(file, src)
 	}
-	if err := legacyclaims.UpgradeTemplates(doc, true); err != nil {
-		return nil, nil, err
-	}
-	text, err := doc.Bytes()
-	if err != nil {
-		return nil, nil, err
-	}
-	return text, doc.Rewrites(), nil
+	return configuration.UpgradeFile(ctx, file, src, schemaPath)
 }
 
 // prefixes maps path prefixes to local directories.

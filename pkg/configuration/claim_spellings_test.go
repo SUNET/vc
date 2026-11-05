@@ -312,6 +312,139 @@ func TestDecodeReadsTheDocumentYAMLv2Reads(t *testing.T) {
 	}
 }
 
+// earlierScope holds the fields of a data source scope the way the earlier
+// release decoded them: a map of claims, and a list of derivations.
+type earlierScope struct {
+	AuthProvider string         `yaml:"auth_provider"`
+	Defaults     map[string]any `yaml:"defaults"`
+	From         map[string]struct {
+		Derivations []map[string]map[string]string `yaml:"derivations"`
+	} `yaml:"from"`
+}
+
+// earlierDataSources is the part of a configuration file the earlier
+// release decoded for the rows below.
+type earlierDataSources struct {
+	APIGW struct {
+		DataSources struct {
+			Assertion struct {
+				Scopes map[string]earlierScope `yaml:"scopes"`
+			} `yaml:"assertion"`
+			Presentation struct {
+				Scopes map[string]earlierScope `yaml:"scopes"`
+			} `yaml:"presentation"`
+		} `yaml:"data_sources"`
+	} `yaml:"apigw"`
+}
+
+// A file with an alias, a merge key or a repeated key loads as its twin
+// written out by hand does. gopkg.in/yaml.v2 decodes both equal into the
+// earlier release's types: an alias stands for its node in the role where
+// it stands, a merge key adds the entries of its mappings, and a key a
+// struct repeats adds to a struct or a map. Each warning names the line
+// that holds the spelling.
+func TestAliasesMergeKeysAndRepeatedKeysLoadAsYAMLv2ReadsThem(t *testing.T) {
+	const assertion = "apigw:\n  data_sources:\n    assertion:\n      scopes:\n"
+	const presentation = "apigw:\n  data_sources:\n    presentation:\n      scopes:\n        nym_auth:\n          from:\n"
+	tests := []struct {
+		name, file, twin string
+		lines            []int
+	}{
+		{
+			name:  "an alias of an anchor outside the claims",
+			file:  "x-defaults: &defaults\n  address.country: SE\n" + assertion + "        ehic:\n          auth_provider: oidc\n          defaults: *defaults\n",
+			twin:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n",
+			lines: []int{2},
+		},
+		{
+			name:  "an alias read in the roles of two credentials",
+			file:  presentation + "            pid:\n              derivations: &derivations\n                - copy: {input: a.b.c, output: x}\n            pid_mdoc:\n              derivations: *derivations\n",
+			twin:  presentation + "            pid:\n              derivations:\n                - copy: {input: a.b.c, output: x}\n            pid_mdoc:\n              derivations:\n                - copy: {input: a.b.c, output: x}\n",
+			lines: []int{9, 9, 9, 9},
+		},
+		{
+			name:  "a merge key in a map of claims",
+			file:  "x-defaults: &defaults\n  address.country: SE\n" + assertion + "        ehic:\n          auth_provider: oidc\n          defaults: {<<: *defaults, issuing_authority: X}\n",
+			twin:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n            issuing_authority: X\n",
+			lines: []int{2, 9},
+		},
+		{
+			name:  "a merge key in a scope that sets the map of claims again",
+			file:  assertion + "        ehic: &ehic\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n        pid:\n          <<: *ehic\n          defaults:\n            issuing_authority: X\n",
+			twin:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n        pid:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n            issuing_authority: X\n",
+			lines: []int{8, 8, 12},
+		},
+		{
+			name:  "a key a struct repeats",
+			file:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n" + assertion + "        pid:\n          auth_provider: oidc\n          defaults:\n            issuing_authority: X\n",
+			twin:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n        pid:\n          auth_provider: oidc\n          defaults:\n            issuing_authority: X\n",
+			lines: []int{8, 16},
+		},
+		{
+			name:  "a key a map repeats",
+			file:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n        ehic:\n          defaults:\n            issuing_authority: X\n",
+			twin:  assertion + "        ehic:\n          defaults:\n            issuing_authority: X\n",
+			lines: []int{11},
+		},
+		{
+			name:  "a merge key and an alias no field reads",
+			file:  "x-defaults: &defaults\n  address.country: SE\nx-unread:\n  <<: 1\n  self: &self [*self]\n" + assertion + "        ehic:\n          auth_provider: oidc\n          defaults: *defaults\n",
+			twin:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            address.country: SE\n",
+			lines: []int{2},
+		},
+		{
+			name:  "a block scalar the alias moves",
+			file:  "x-defaults: &defaults\n  note: |\n    line one\n      line two\n  address.country: SE\n" + assertion + "        ehic:\n          auth_provider: oidc\n          defaults: *defaults\n",
+			twin:  assertion + "        ehic:\n          auth_provider: oidc\n          defaults:\n            note: \"line one\\n  line two\\n\"\n            address.country: SE\n",
+			lines: []int{2, 5},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var earlier, earlierTwin earlierDataSources
+			require.NoError(t, yaml.Unmarshal([]byte(tt.file), &earlier))
+			require.NoError(t, yaml.Unmarshal([]byte(tt.twin), &earlierTwin))
+			require.Equal(t, earlierTwin, earlier, "the twin is the file gopkg.in/yaml.v2 reads")
+
+			got, rewrites, err := decodeDataSources("aliases.yaml", []byte(tt.file), rolesCfg())
+			require.NoError(t, err)
+			want, _, err := decodeDataSources("twin.yaml", []byte(tt.twin), rolesCfg())
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+			lines := make([]int, len(rewrites))
+			for i, rewrite := range rewrites {
+				lines[i] = rewrite.Line
+			}
+			assert.Equal(t, tt.lines, lines)
+		})
+	}
+}
+
+// A presentation request file with an alias loads as its twin written out
+// by hand does, which gopkg.in/yaml.v2 reads as the same document.
+func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
+	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - id: age\n          format: dc+sd-jwt\n          claims:\n            - path: [age_over_18]\n    claim_mappings:%s\n"
+	file := "x-mappings: &mappings\n  age_over_18: age_over_18\n" + fmt.Sprintf(template, " *mappings")
+	twin := fmt.Sprintf(template, "\n      age_over_18: age_over_18")
+	var earlier, earlierTwin any
+	require.NoError(t, yaml.Unmarshal([]byte(file), &earlier))
+	require.NoError(t, yaml.Unmarshal([]byte(twin), &earlierTwin))
+	delete(earlier.(map[any]any), "x-mappings")
+	require.Equal(t, earlierTwin, earlier, "the twin is the file gopkg.in/yaml.v2 reads")
+
+	load := func(text string) *PresentationRequestConfig {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "templates.yaml"), []byte(text), 0o600))
+		config, err := LoadPresentationRequests(t.Context(), dir)
+		require.NoError(t, err)
+		return config
+	}
+	got, want := load(file), load(twin)
+	assert.Equal(t, want.Templates, got.Templates)
+	require.Len(t, got.Deprecations, 1)
+	assert.Equal(t, 12, got.Deprecations[0].Line)
+}
+
 // A binding attribute of the earlier release, a dotted name, reads as one
 // key per segment, as the verifier split it. A binding attribute that
 // selects every element of an array is refused.

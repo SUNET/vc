@@ -46,8 +46,7 @@ func (d *Document) replaceScalar(n ast.Node, p claimpath.Pointer) error {
 		return err
 	}
 	d.replace(start, end, text)
-	d.record(n, string(d.src[start:end]), text)
-	return nil
+	return d.record(n, string(d.src[start:end]), text)
 }
 
 // listEntry is one entry of a map keyed by dotted names, in the list form.
@@ -155,8 +154,7 @@ func (d *Document) convertEntry(mapping *ast.MappingNode, mv *ast.MappingValueNo
 		}
 		d.insert(end, "}")
 	}
-	d.record(mv, strings.TrimSpace(oldKey)+": "+valueText.old, "{"+head+", "+item.valueField+": "+valueText.new+"}"+item.note)
-	return nil
+	return d.record(mv, strings.TrimSpace(oldKey)+": "+valueText.old, "{"+head+", "+item.valueField+": "+valueText.new+"}"+item.note)
 }
 
 // convertBareEntry rewrites a map entry whose value is an empty list as a
@@ -171,8 +169,7 @@ func (d *Document) convertBareEntry(mapping *ast.MappingNode, mv *ast.MappingVal
 	} else {
 		d.replace(keyStart, end, "- "+head)
 	}
-	d.record(mv, oldKey+": []", "{"+head+"}"+item.note)
-	return nil
+	return d.record(mv, oldKey+": []", "{"+head+"}"+item.note)
 }
 
 // isEmptyList reports whether a node is a sequence without elements.
