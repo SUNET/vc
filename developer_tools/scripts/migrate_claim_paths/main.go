@@ -86,13 +86,25 @@ func migrate(ctx context.Context, file string, schemas prefixes, dryRun bool, ou
 	if bytes.Equal(upgraded, src) {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "%s: rewrote %d claim spellings\n", file, len(rewrites)-kept); err != nil {
+	verb := "rewrote"
+	if dryRun {
+		verb = "would rewrite"
+	}
+	if _, err := fmt.Fprintf(out, "%s: %s %s\n", file, verb, spellings(len(rewrites)-kept)); err != nil {
 		return err
 	}
 	if dryRun {
 		return nil
 	}
 	return os.WriteFile(file, upgraded, info.Mode().Perm())
+}
+
+// spellings counts claim spellings in words.
+func spellings(n int) string {
+	if n == 1 {
+		return "1 claim spelling"
+	}
+	return fmt.Sprintf("%d claim spellings", n)
 }
 
 // upgrade returns the text of a file with its claim spellings upgraded,
