@@ -112,6 +112,22 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 			claim:   copyOf(1, false),
 			want:    claimpath.Keys("a", "b"),
 		},
+		{
+			name:    "the input of a primitive that read the whole name as one key",
+			dotted:  derivations("            - yyyymmdd_to_iso: {input: address.birthdate}\n"),
+			pointer: derivations("            - yyyymmdd_to_iso: {input: [address.birthdate]}\n"),
+			claim: func(ds model.DataSources) claimpath.Pointer {
+				return ds.Presentation.Scopes["nym_auth"].From["pid"].Derivations[0].YYYYMMDDToISO.Input
+			},
+			want: claimpath.Keys("address.birthdate"),
+		},
+		{
+			name:    "a key a primitive wrote as the whole name, read by a later derivation",
+			dotted:  derivations("            - swamid_highest_assurance_level: {input: assurance_level, output: a.b}\n            - copy: {input: a.b, output: birth_date}\n"),
+			pointer: derivations("            - swamid_highest_assurance_level: {input: [assurance_level], output: [a.b]}\n            - copy: {input: [a.b], output: [" + nymAuth + ", birth_date]}\n"),
+			claim:   copyOf(1, false),
+			want:    claimpath.Keys("a.b"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

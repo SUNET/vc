@@ -45,6 +45,23 @@ func (l *lazy) dotted(name string) (claimpath.Pointer, error) {
 	return shape.Dotted(name)
 }
 
+func (l *lazy) literal(name string) (claimpath.Pointer, error) {
+	shape, err := l.read()
+	if err != nil {
+		return claimpath.Pointer{}, err
+	}
+	return shape.Literal(name)
+}
+
+// reader returns the literal reading of a claim name when literal is
+// set, and the dotted reading otherwise.
+func (l *lazy) reader(literal bool) reader {
+	if literal {
+		return l.literal
+	}
+	return l.dotted
+}
+
 func (l *lazy) topLevel(name string) (claimpath.Pointer, error) {
 	shape, err := l.read()
 	if err != nil {
