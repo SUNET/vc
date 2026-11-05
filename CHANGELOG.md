@@ -154,9 +154,10 @@
   presentation_requests/*.yaml` rewrites configuration and presentation
   request files in place and keeps their comments. It leaves a
   `claim_mappings` map as written when the keyed form would map other
-  claims, and prints why. It leaves a file as written, and prints a line,
-  when a rewrite in place would miss or change a spelling a YAML alias
-  reads.
+  claims, and prints why. It leaves a file with a YAML alias, merge key or
+  repeated key as written, and prints a line, when an alias stands where it
+  reads claims, or when a rewrite in place would change what the file
+  loads.
 
 ### Note
 

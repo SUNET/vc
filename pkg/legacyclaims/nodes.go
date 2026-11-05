@@ -3,6 +3,7 @@ package legacyclaims
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -99,6 +100,55 @@ func child(n ast.Node, key string) (*ast.MappingValueNode, error) {
 		}
 	}
 	return nil, nil
+}
+
+// decoded returns the values of key that gopkg.in/yaml.v2 decodes from the
+// mapping n, in the order it decodes them: each entry of key, and where a
+// merge key stands, the values of key in the mappings it merges, the first
+// mapping of a list last. The last value is the one a struct keeps.
+func decoded(n ast.Node, key string) ([]ast.Node, error) {
+	list, err := entries(n)
+	if err != nil {
+		return nil, err
+	}
+	var values []ast.Node
+	for _, entry := range list {
+		if _, merge := entry.Key.(*ast.MergeKeyNode); !merge {
+			name, err := keyOf(entry)
+			if err != nil {
+				return nil, err
+			}
+			if name == key {
+				values = append(values, entry.Value)
+			}
+			continue
+		}
+		sources, err := mergedMappings(entry.Value)
+		if err != nil {
+			return nil, err
+		}
+		for _, source := range slices.Backward(sources) {
+			merged, err := decoded(source, key)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, merged...)
+		}
+	}
+	return values, nil
+}
+
+// mergedMappings returns the mappings a merge key merges: its value, or
+// each item of a sequence.
+func mergedMappings(n ast.Node) ([]ast.Node, error) {
+	n, err := unwrap(n)
+	if err != nil {
+		return nil, err
+	}
+	if s, ok := n.(*ast.SequenceNode); ok {
+		return s.Values, nil
+	}
+	return []ast.Node{n}, nil
 }
 
 // descend returns the node at a path of mapping keys, or nil when a key

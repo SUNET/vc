@@ -420,29 +420,90 @@ func TestAliasesMergeKeysAndRepeatedKeysLoadAsYAMLv2ReadsThem(t *testing.T) {
 	}
 }
 
-// A presentation request file with an alias loads as its twin written out
-// by hand does, which gopkg.in/yaml.v2 reads as the same document.
-func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
-	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - id: age\n          format: dc+sd-jwt\n          claims:\n            - path: [age_over_18]\n    claim_mappings:%s\n"
-	file := "x-mappings: &mappings\n  age_over_18: age_over_18\n" + fmt.Sprintf(template, " *mappings")
-	twin := fmt.Sprintf(template, "\n      age_over_18: age_over_18")
-	var earlier, earlierTwin any
-	require.NoError(t, yaml.Unmarshal([]byte(file), &earlier))
-	require.NoError(t, yaml.Unmarshal([]byte(twin), &earlierTwin))
-	delete(earlier.(map[any]any), "x-mappings")
-	require.Equal(t, earlierTwin, earlier, "the twin is the file gopkg.in/yaml.v2 reads")
+// earlierTemplates is the part of a presentation request file the earlier
+// release decoded for the rows below, in its types: a claim path is a list
+// of strings and nulls, and claim_mappings a map.
+type earlierTemplates struct {
+	Templates []struct {
+		ID   string `yaml:"id"`
+		DCQL struct {
+			Credentials []struct {
+				ID     string `yaml:"id"`
+				Format string `yaml:"format"`
+				Claims []struct {
+					Path []*string `yaml:"path"`
+				} `yaml:"claims"`
+			} `yaml:"credentials"`
+		} `yaml:"dcql"`
+		ClaimMappings map[string]string `yaml:"claim_mappings"`
+	} `yaml:"templates"`
+}
 
-	load := func(text string) *PresentationRequestConfig {
+// A presentation request file with an alias, a merge key or a repeated key
+// loads as its twin written out by hand does, which gopkg.in/yaml.v2 reads
+// as the same templates. A credential query reads its own mappings: the
+// claims a merge key sets are upgraded, and a key it repeats refuses the
+// file, as gopkg.in/yaml.v2 refuses it. Each warning names the line that
+// holds the spelling.
+func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
+	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - %s\n    claim_mappings:%s\n"
+	const query = "id: age\n          format: dc+sd-jwt\n          claims:\n            - path: [age_over_18]"
+	const mappings = "\n      age_over_18: age_over_18"
+	tests := []struct {
+		name, file, twin string
+		lines            []int
+		// refused is the error gopkg.in/yaml.v2 refuses the file with.
+		refused string
+	}{
+		{
+			name:  "an alias of the claim mappings",
+			file:  "x-mappings: &mappings\n  age_over_18: age_over_18\n" + fmt.Sprintf(template, query, " *mappings"),
+			twin:  fmt.Sprintf(template, query, mappings),
+			lines: []int{12},
+		},
+		{
+			name:  "claims a merge key sets in a credential query",
+			file:  "x-claims: &claims\n  claims:\n    - path: [name_by_language, no]\n" + fmt.Sprintf(template, "<<: *claims\n          id: age\n          format: dc+sd-jwt", mappings),
+			twin:  fmt.Sprintf(template, "id: age\n          format: dc+sd-jwt\n          claims:\n            - path: [name_by_language, no]", mappings),
+			lines: []int{3, 12},
+		},
+		{
+			name:    "a key a credential query repeats",
+			file:    fmt.Sprintf(template, "id: other\n          "+query, mappings),
+			refused: "credential query: id is named more than once, and YAML keeps only the last",
+		},
+	}
+	load := func(text string) (*PresentationRequestConfig, error) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "templates.yaml"), []byte(text), 0o600))
-		config, err := LoadPresentationRequests(t.Context(), dir)
-		require.NoError(t, err)
-		return config
+		return LoadPresentationRequests(t.Context(), dir)
 	}
-	got, want := load(file), load(twin)
-	assert.Equal(t, want.Templates, got.Templates)
-	require.Len(t, got.Deprecations, 1)
-	assert.Equal(t, 12, got.Deprecations[0].Line)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.refused != "" {
+				var read PresentationRequestConfig
+				require.ErrorContains(t, yaml.Unmarshal([]byte(tt.file), &read), tt.refused)
+				_, err := load(tt.file)
+				require.ErrorContains(t, err, tt.refused)
+				return
+			}
+			var earlier, earlierTwin earlierTemplates
+			require.NoError(t, yaml.Unmarshal([]byte(tt.file), &earlier))
+			require.NoError(t, yaml.Unmarshal([]byte(tt.twin), &earlierTwin))
+			require.Equal(t, earlierTwin, earlier, "the twin is the file gopkg.in/yaml.v2 reads")
+
+			got, err := load(tt.file)
+			require.NoError(t, err)
+			want, err := load(tt.twin)
+			require.NoError(t, err)
+			assert.Equal(t, want.Templates, got.Templates)
+			lines := make([]int, len(got.Deprecations))
+			for i, deprecation := range got.Deprecations {
+				lines[i] = deprecation.Line
+			}
+			assert.Equal(t, tt.lines, lines)
+		})
+	}
 }
 
 // A binding attribute of the earlier release, a dotted name, reads as one

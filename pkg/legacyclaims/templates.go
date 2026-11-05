@@ -71,6 +71,8 @@ type query struct {
 
 // templateDCQL upgrades the claim paths of a template's dcql, which main
 // read as lists of strings and nulls, and returns its credential queries.
+// A credential query reads its mappings as written, so the upgrade reads
+// each value it decodes through merge keys and repeated keys.
 func (d *Document) templateDCQL(template ast.Node) ([]query, error) {
 	credentials, err := descend(template, "dcql", "credentials")
 	if err != nil {
@@ -82,22 +84,8 @@ func (d *Document) templateDCQL(template ast.Node) ([]query, error) {
 	}
 	queries := make([]query, 0, len(list))
 	for _, credential := range list {
-		claims, err := descend(credential, "claims")
-		if err != nil {
+		if err := d.queryClaims(credential); err != nil {
 			return nil, err
-		}
-		claimList, err := items(claims)
-		if err != nil {
-			return nil, err
-		}
-		for _, claim := range claimList {
-			path, err := descend(claim, "path")
-			if err != nil {
-				return nil, err
-			}
-			if err := d.stringPath(path, false); err != nil {
-				return nil, err
-			}
 		}
 		id, err := scalarValue(credential, "id")
 		if err != nil {
@@ -122,14 +110,40 @@ func (d *Document) templateDCQL(template ast.Node) ([]query, error) {
 	return queries, nil
 }
 
-// scalarValue returns the text of the scalar under key of mapping n, or
-// "" when it is absent or null.
+// queryClaims upgrades the path of each claim of a credential query.
+func (d *Document) queryClaims(credential ast.Node) error {
+	lists, err := decoded(credential, "claims")
+	if err != nil {
+		return err
+	}
+	for _, claims := range lists {
+		claimList, err := items(claims)
+		if err != nil {
+			return err
+		}
+		for _, claim := range claimList {
+			paths, err := decoded(claim, "path")
+			if err != nil {
+				return err
+			}
+			for _, path := range paths {
+				if err := d.stringPath(path, false); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// scalarValue returns the text of the scalar a struct keeps under key of
+// mapping n, or "" when it is absent or null.
 func scalarValue(n ast.Node, key string) (string, error) {
-	value, err := descend(n, key)
-	if err != nil || value == nil {
+	values, err := decoded(n, key)
+	if err != nil || len(values) == 0 {
 		return "", err
 	}
-	value, err = unwrap(value)
+	value, err := unwrap(values[len(values)-1])
 	if err != nil || isNull(value) {
 		return "", err
 	}

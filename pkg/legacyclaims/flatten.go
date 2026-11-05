@@ -23,6 +23,18 @@ var ErrInPlace = errors.New("its YAML aliases, merge keys or repeated keys read 
 // maxFlattened bounds the text the aliases of a document expand to.
 const maxFlattened = 64 << 20
 
+// mark is what the text of a node holds that gopkg.in/yaml.v2 reads
+// beyond the node.
+type mark uint8
+
+const (
+	// holdsAlias marks a text that holds an alias.
+	holdsAlias mark = 1 << iota
+	// holdsKeys marks a text that holds a merge key, or a key its mapping
+	// repeats.
+	holdsKeys
+)
+
 // layout is what flattening reads of a document beyond its nodes.
 type layout struct {
 	// targets maps each alias to the node its anchor names.
@@ -30,9 +42,9 @@ type layout struct {
 	// owners maps each node of a block collection to the position of the
 	// key or dash that holds it.
 	owners map[ast.Node]*token.Position
-	// special holds each node whose text holds an alias, a merge key or a
-	// key its mapping repeats.
-	special map[ast.Node]bool
+	// marks holds the mark of each node whose text holds an alias, a merge
+	// key or a key its mapping repeats.
+	marks map[ast.Node]mark
 }
 
 // scanLayout reads the layout of a document's root.
@@ -40,7 +52,7 @@ func scanLayout(root ast.Node) (layout, error) {
 	l := layout{
 		targets: map[*ast.AliasNode]ast.Node{},
 		owners:  map[ast.Node]*token.Position{},
-		special: map[ast.Node]bool{},
+		marks:   map[ast.Node]mark{},
 	}
 	_, err := l.scan(root, nil, map[string]ast.Node{})
 	return l, err
@@ -51,21 +63,21 @@ func scanLayout(root ast.Node) (layout, error) {
 // collection, and nil elsewhere. anchors maps each anchor name to the node
 // it names, and a later anchor of the same name replaces it, as in
 // gopkg.in/yaml.v2.
-func (l *layout) scan(n ast.Node, owner *token.Position, anchors map[string]ast.Node) (bool, error) {
+func (l *layout) scan(n ast.Node, owner *token.Position, anchors map[string]ast.Node) (mark, error) {
 	if n == nil {
-		return false, nil
+		return 0, nil
 	}
 	if owner != nil {
 		l.owners[n] = owner
 	}
-	special, err := l.scanBelow(n, owner, anchors)
-	if special {
-		l.special[n] = true
+	m, err := l.scanBelow(n, owner, anchors)
+	if m != 0 {
+		l.marks[n] = m
 	}
-	return special, err
+	return m, err
 }
 
-func (l *layout) scanBelow(n ast.Node, owner *token.Position, anchors map[string]ast.Node) (bool, error) {
+func (l *layout) scanBelow(n ast.Node, owner *token.Position, anchors map[string]ast.Node) (mark, error) {
 	switch v := n.(type) {
 	case *ast.AnchorNode:
 		anchors[v.Name.GetToken().Value] = v.Value
@@ -76,56 +88,58 @@ func (l *layout) scanBelow(n ast.Node, owner *token.Position, anchors map[string
 		name := v.Value.GetToken().Value
 		target, ok := anchors[name]
 		if !ok {
-			return false, fmt.Errorf("line %d: unknown anchor '%s' referenced", v.GetToken().Position.Line, name)
+			return 0, fmt.Errorf("line %d: unknown anchor '%s' referenced", v.GetToken().Position.Line, name)
 		}
 		l.targets[v] = target
-		return true, nil
+		return holdsAlias, nil
 	case *ast.MappingNode:
 		return l.scanEntries(v.Values, v.IsFlowStyle, anchors)
 	case *ast.MappingValueNode:
 		return l.scanEntries([]*ast.MappingValueNode{v}, v.IsFlowStyle, anchors)
 	case *ast.SequenceNode:
-		special := false
+		var m mark
 		for i, item := range v.Values {
-			s, err := l.scan(item, entryPosition(v, i), anchors)
+			itemMark, err := l.scan(item, entryPosition(v, i), anchors)
 			if err != nil {
-				return false, err
+				return 0, err
 			}
-			special = special || s
+			m |= itemMark
 		}
-		return special, nil
+		return m, nil
 	case *ast.MappingKeyNode:
 		return l.scan(v.Value, nil, anchors)
 	}
-	return false, nil
+	return 0, nil
 }
 
 // scanEntries reads the layout of the entries of a mapping.
-func (l *layout) scanEntries(entries []*ast.MappingValueNode, flow bool, anchors map[string]ast.Node) (bool, error) {
-	special := false
+func (l *layout) scanEntries(entries []*ast.MappingValueNode, flow bool, anchors map[string]ast.Node) (mark, error) {
+	var m mark
 	names := map[string]bool{}
 	for _, mv := range entries {
 		if _, merge := mv.Key.(*ast.MergeKeyNode); merge {
-			special = true
+			m |= holdsKeys
 		} else if name, ok := scalarKey(unwrapKey(mv.Key)); ok {
-			special = special || names[name]
+			if names[name] {
+				m |= holdsKeys
+			}
 			names[name] = true
 		}
-		keySpecial, err := l.scan(mv.Key, nil, anchors)
+		keyMark, err := l.scan(mv.Key, nil, anchors)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		var owner *token.Position
 		if !flow {
 			owner = mv.Key.GetToken().Position
 		}
-		valueSpecial, err := l.scan(mv.Value, owner, anchors)
+		valueMark, err := l.scan(mv.Value, owner, anchors)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
-		special = special || keySpecial || valueSpecial
+		m |= keyMark | valueMark
 	}
-	return special, nil
+	return m, nil
 }
 
 // entryPosition returns the position of the dash of item i of a block
@@ -169,15 +183,17 @@ func scalarKey(key ast.Node) (string, bool) {
 // Flattens reports whether the document holds an alias, a merge key or a
 // key a mapping repeats.
 func (d *Document) Flattens() bool {
-	return d.root != nil && d.layout.special[d.root]
+	return d.root != nil && d.layout.marks[d.root] != 0
 }
 
 // Resolve parses the YAML text of file as Parse does. When the document
 // holds an alias, a merge key or a key a mapping repeats, the upgrade
 // reads the text gopkg.in/yaml.v2 decodes from it into a value of type
 // root: each alias as the node it names, and each mapping as the entries
-// it sets, less the keys no field of a struct reads. Each rewrite names
-// the line of file that holds the spelling.
+// it sets, less the keys no field of a struct reads. A value of a type
+// that decodes itself keeps the entries of its mappings as written, merge
+// keys and repeated keys included, since that type reads them. Each
+// rewrite names the line of file that holds the spelling.
 func Resolve(file string, src []byte, root reflect.Type) (*Document, error) {
 	d, err := Parse(file, src)
 	if err != nil || !d.Flattens() {
@@ -190,13 +206,69 @@ func Resolve(file string, src []byte, root reflect.Type) (*Document, error) {
 	f.out.write("\n", lastLine(d.root))
 	flat, err := Parse(file, f.out.buf.Bytes())
 	if err != nil {
-		return nil, fmt.Errorf("%s: the text without aliases, merge keys and repeated keys: %w", file, err)
-	}
-	if flat.Flattens() {
-		return nil, fmt.Errorf("%s: the text without aliases, merge keys and repeated keys still holds one", file)
+		return nil, fmt.Errorf("%s: the text gopkg.in/yaml.v2 decodes: %w", file, err)
 	}
 	flat.origin = f.out.origin
+	if err := flat.flattener().check(flat.root, root); err != nil {
+		return nil, fmt.Errorf("%s: the text gopkg.in/yaml.v2 decodes %w", file, err)
+	}
 	return flat, nil
+}
+
+// check refuses an alias in the text of n, and a merge key or a repeated
+// key in a mapping gopkg.in/yaml.v2 decodes into a struct or a map. n is
+// decoded into type t.
+func (f *flattener) check(n ast.Node, t reflect.Type) error {
+	m := f.d.layout.marks[n]
+	if m == 0 || m == holdsKeys && keepsKeys(t) {
+		return nil
+	}
+	switch v := n.(type) {
+	case *ast.AliasNode:
+		return f.refuse(v, "an alias")
+	case *ast.AnchorNode:
+		return f.check(v.Value, t)
+	case *ast.TagNode:
+		return f.check(v.Value, t)
+	case *ast.SequenceNode:
+		for _, item := range v.Values {
+			if err := f.check(item, elementType(t)); err != nil {
+				return err
+			}
+		}
+	case *ast.MappingNode, *ast.MappingValueNode:
+		list, err := entries(v)
+		if err != nil {
+			return err
+		}
+		names := map[string]bool{}
+		for _, mv := range list {
+			_, merge := mv.Key.(*ast.MergeKeyNode)
+			name, scalar := scalarKey(unwrapKey(mv.Key))
+			if !keepsKeys(t) && (merge || scalar && names[name]) {
+				return f.refuse(mv.Key, "a merge key or a repeated key")
+			}
+			names[name] = true
+			ft, _ := fieldType(t, name)
+			if err := f.check(mv.Key, nil); err != nil {
+				return err
+			}
+			if err := f.check(mv.Value, ft); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// refuse reports the line of the file that holds n, a node the text
+// gopkg.in/yaml.v2 decodes holds in error.
+func (f *flattener) refuse(n ast.Node, what string) error {
+	line, err := f.d.lineAt(n.GetToken().Position)
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("holds %s read at line %d", what, line)
 }
 
 // rootKeys returns the keys the root mapping of the document sets,
@@ -247,8 +319,9 @@ func (o *output) newline(col, line int) {
 }
 
 // flattener writes the text gopkg.in/yaml.v2 decodes from a document,
-// without aliases, merge keys or repeated keys. It copies each part of the
-// text that holds none of them, re-indented.
+// without aliases, and without merge keys or repeated keys where a struct
+// or a map reads them. It copies each part of the text that holds none of
+// them, re-indented.
 type flattener struct {
 	d   *Document
 	out output
@@ -268,7 +341,8 @@ func (d *Document) flattener() *flattener {
 // value writes the value of an entry or a sequence item whose key or dash
 // is at column col of the line being written. A field that a mapping sets
 // more than once has several layers, which value writes as the one value
-// gopkg.in/yaml.v2 decodes from them into type t.
+// gopkg.in/yaml.v2 decodes from them into type t. Inside a value of a type
+// that keeps the keys of its mappings, t is that type.
 func (f *flattener) value(layers []ast.Node, t reflect.Type, col int) error {
 	if err := f.count(); err != nil {
 		return err
@@ -291,7 +365,7 @@ func (f *flattener) write(layers []ast.Node, t reflect.Type, col int) error {
 		case *ast.AliasNode:
 			return f.alias(v, t, col)
 		}
-		if !f.d.layout.special[layers[0]] {
+		if f.d.layout.marks[layers[0]] == 0 {
 			copied, err := f.copy(layers[0], col)
 			if copied || err != nil {
 				return err
@@ -300,6 +374,9 @@ func (f *flattener) write(layers []ast.Node, t reflect.Type, col int) error {
 	}
 	switch v := f.target(layers[len(layers)-1]).(type) {
 	case *ast.MappingNode, *ast.MappingValueNode:
+		if keepsKeys(t) {
+			return f.asWritten(v, t, col)
+		}
 		return f.mapping(layers, t, col)
 	case *ast.SequenceNode:
 		return f.sequence(v, t, col)
@@ -513,6 +590,35 @@ func (f *flattener) mapping(layers []ast.Node, t reflect.Type, col int) error {
 	return nil
 }
 
+// asWritten writes each entry of a mapping of a value of type t, a type
+// that keeps the keys of its mappings, in block style: its merge keys, and
+// each key it repeats, stay.
+func (f *flattener) asWritten(n ast.Node, t reflect.Type, col int) error {
+	list, err := entries(n)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		f.out.write(" {}", n.GetToken().Position.Line)
+		return nil
+	}
+	for _, mv := range list {
+		line := mv.Key.GetToken().Position.Line
+		text := mv.Key.GetToken().Value
+		if _, merge := mv.Key.(*ast.MergeKeyNode); !merge {
+			if text, err = f.keyText(mv.Key); err != nil {
+				return err
+			}
+		}
+		f.out.newline(col+2, line)
+		f.out.write(text+":", line)
+		if err := f.value([]ast.Node{mv.Value}, t, col+2); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // sequence writes a sequence in block style.
 func (f *flattener) sequence(s *ast.SequenceNode, t reflect.Type, col int) error {
 	if len(s.Values) == 0 {
@@ -715,6 +821,16 @@ func decodesItself(t reflect.Type) bool {
 	return t.Implements(yamlUnmarshaler) || reflect.PointerTo(t).Implements(yamlUnmarshaler)
 }
 
+// keepsKeys reports whether a value of type t is written with the entries
+// of its mappings as written, merge keys and repeated keys included: t
+// decodes itself, and the value it reads is the one the file holds.
+// ClaimMappings reads the entries of a map: the earlier release read
+// claim_mappings into one.
+func keepsKeys(t reflect.Type) bool {
+	t = indirect(t)
+	return t != nil && decodesItself(t) && t != claimMappingsType
+}
+
 // indirect returns the type a pointer type points to.
 func indirect(t reflect.Type) reflect.Type {
 	for t != nil && t.Kind() == reflect.Pointer {
@@ -755,10 +871,13 @@ func combines(parent reflect.Type, name string) bool {
 // fieldType returns the type of the value at key name of a mapping
 // decoded into type t, or nil when that type is unknown, and whether
 // gopkg.in/yaml.v2 reads the value. It skips the value of a key no field
-// of a struct names.
+// of a struct names. Inside a value of a type that keeps the keys of its
+// mappings, the type is t.
 func fieldType(t reflect.Type, name string) (reflect.Type, bool) {
 	t = indirect(t)
 	switch {
+	case keepsKeys(t):
+		return t, true
 	case t == nil || decodesItself(t):
 		return nil, true
 	case t.Kind() == reflect.Map:
@@ -790,10 +909,13 @@ func fieldType(t reflect.Type, name string) (reflect.Type, bool) {
 }
 
 // elementType returns the type of the items of a sequence decoded into
-// type t.
+// type t, and t inside a value of a type that keeps the keys of its
+// mappings.
 func elementType(t reflect.Type) reflect.Type {
 	t = indirect(t)
 	switch {
+	case keepsKeys(t):
+		return t
 	case t == nil || decodesItself(t):
 		return nil
 	case t.Kind() == reflect.Slice, t.Kind() == reflect.Array:
