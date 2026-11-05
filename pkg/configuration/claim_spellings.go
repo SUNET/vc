@@ -3,12 +3,15 @@ package configuration
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/model"
 
+	"github.com/creasty/defaults"
 	ts11client "github.com/sirosfoundation/go-ts11client"
 	"gopkg.in/yaml.v2"
 )
@@ -159,21 +162,68 @@ func loadSchema(ctx context.Context, cfg *model.Cfg, scope string, meta *model.C
 	return nil
 }
 
-// LoadFile decodes a configuration file the way the services read it, with
-// the claim spellings of earlier releases upgraded, and returns the
-// upgraded spellings. It applies no defaults and no secrets.
-func LoadFile(ctx context.Context, file string) (*model.Cfg, []legacyclaims.Rewrite, error) {
+// DecodeFile decodes a configuration file the way the services decode it,
+// with the claim spellings of earlier releases upgraded into
+// cfg.Deprecations. It loads the schema of a credential only when a data
+// source claim needs its document shape; schemaPath maps the schema file
+// path of the credential metadata to the file to read, and nil reads each
+// path as written. DecodeFile applies no defaults and no secrets.
+func DecodeFile(ctx context.Context, file string, schemaPath func(string) string) (*model.Cfg, error) {
 	src, err := os.ReadFile(filepath.Clean(file))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	text, rewrites, err := UpgradeFile(ctx, file, src, nil)
+	text, rewrites, err := UpgradeFile(ctx, file, src, schemaPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	cfg := &model.Cfg{}
 	if err := yaml.Unmarshal(text, cfg); err != nil {
-		return nil, nil, fmt.Errorf("parsing %s: %w", file, err)
+		return nil, fmt.Errorf("parsing %s: %w", file, err)
 	}
-	return cfg, rewrites, nil
+	cfg.Deprecations = rewrites
+	return cfg, nil
+}
+
+// LoadFile reads the claims of a configuration file the way the apigw
+// reads them: it upgrades the claim spellings of earlier releases into
+// cfg.Deprecations, loads each credential schema, and checks each claim
+// against the shape of its credential and each VCTM the issuer filters.
+// schemaPath maps the schema file path of the credential metadata to the
+// file to read, and nil reads each path as written. LoadFile applies no
+// secrets and runs none of New's other checks.
+func LoadFile(ctx context.Context, file string, schemaPath func(string) string) (*model.Cfg, error) {
+	src, err := os.ReadFile(filepath.Clean(file))
+	if err != nil {
+		return nil, err
+	}
+	cfg := &model.Cfg{}
+	if cfg.Deprecations, err = decodeShared(file, src, cfg); err != nil {
+		return nil, err
+	}
+	if err := defaults.Set(cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Common == nil || len(cfg.Common.CredentialMetadata) == 0 {
+		return nil, fmt.Errorf("%s: common.credential_metadata is required for the apigw service", file)
+	}
+	if err := checkCredentialMetadataEntries(cfg); err != nil {
+		return nil, err
+	}
+	load := schemaLoader(ctx, cfg, schemaPath)
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if err := load(scope, cfg.Common.CredentialMetadata[scope]); err != nil {
+			return nil, err
+		}
+	}
+	if err := readDataSources(cfg, file, src); err != nil {
+		return nil, err
+	}
+	if err := cfg.CheckClaimPaths(); err != nil {
+		return nil, err
+	}
+	if err := checkFilterable(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }

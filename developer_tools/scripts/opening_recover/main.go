@@ -161,11 +161,11 @@ func flagGiven(flags *flag.FlagSet, name string) bool {
 // loadConfig parses the config file as the issuer does, and writes a line
 // to warn for each claim spelling of an earlier release it upgraded.
 func loadConfig(ctx context.Context, path string, warn io.Writer) (*model.Cfg, error) {
-	cfg, rewrites, err := configuration.LoadFile(ctx, path)
+	cfg, err := configuration.DecodeFile(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	for _, rewrite := range rewrites {
+	for _, rewrite := range cfg.Deprecations {
 		if _, err := fmt.Fprintln(warn, rewrite); err != nil {
 			return nil, err
 		}
