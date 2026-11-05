@@ -466,7 +466,7 @@ type ClaimDefaults []ClaimDefault
 // Overlapping defaults (["identity"] and ["identity", "country"]) are
 // rejected because merging them is otherwise order-dependent.
 func (d ClaimDefaults) Merge(doc map[string]any, shape claimpath.Shape) error {
-	if err := d.CheckDistinct(); err != nil {
+	if err := d.checkDistinct(); err != nil {
 		return err
 	}
 	for _, claim := range d {
@@ -484,9 +484,9 @@ func (d ClaimDefaults) Merge(doc map[string]any, shape claimpath.Shape) error {
 	return nil
 }
 
-// CheckDistinct refuses two defaults of which one claim holds the other,
+// checkDistinct refuses two defaults of which one claim holds the other,
 // since merging them would depend on their order.
-func (d ClaimDefaults) CheckDistinct() error {
+func (d ClaimDefaults) checkDistinct() error {
 	for i, a := range d {
 		for _, b := range d[i+1:] {
 			if a.Path.HasPrefix(b.Path) || b.Path.HasPrefix(a.Path) {

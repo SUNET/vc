@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"time"
 
 	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
@@ -106,7 +105,7 @@ func checkAssertion(c *Cfg, ds *DataSources) error {
 	for _, scope := range slices.Sorted(maps.Keys(ds.Assertion.Scopes)) {
 		where := fmt.Sprintf("apigw.data_sources.assertion.scopes.%s", scope)
 		s := ds.Assertion.Scopes[scope]
-		if err := c.checkDefaults(s.Defaults, scope, s.ExpiryDuration); err != nil {
+		if err := c.checkDefaults(s.Defaults, scope); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
 		if err := c.checkDerivations(SourceScope{Source: DataSourceAssertion, Scope: scope, Derivations: s.Derivations}); err != nil {
@@ -139,7 +138,7 @@ func checkPresentation(c *Cfg, ds *DataSources) error {
 				return fmt.Errorf("%s.from.%s.%w", where, presented, err)
 			}
 		}
-		if err := c.checkDefaults(s.Defaults, scope, s.ExpiryDuration); err != nil {
+		if err := c.checkDefaults(s.Defaults, scope); err != nil {
 			return fmt.Errorf("%s.%w", where, err)
 		}
 	}
@@ -234,9 +233,8 @@ func (c *Cfg) checkRequiredClaims(claims RequiredClaims, presented string) error
 	return nil
 }
 
-// checkDefaults locates the default claims in the issued document, and
-// checks them against the claims MergeDefaults computes.
-func (c *Cfg) checkDefaults(defaults ClaimDefaults, scope, expiryDuration string) error {
+// checkDefaults locates the default claims in the issued document.
+func (c *Cfg) checkDefaults(defaults ClaimDefaults, scope string) error {
 	if len(defaults) == 0 {
 		return nil
 	}
@@ -248,13 +246,6 @@ func (c *Cfg) checkDefaults(defaults ClaimDefaults, scope, expiryDuration string
 		if _, err := document.LocateOne(claim.Path); err != nil {
 			return fmt.Errorf("defaults[%d].path: %w", i, err)
 		}
-	}
-	resolved, err := defaults.resolve(time.Time{}, expiryDuration, document)
-	if err != nil {
-		return fmt.Errorf("defaults: %w", err)
-	}
-	if err := resolved.CheckDistinct(); err != nil {
-		return fmt.Errorf("defaults: %w", err)
 	}
 	return nil
 }

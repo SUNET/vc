@@ -23,8 +23,9 @@ import (
 )
 
 // The upgrade reads each dotted claim name in the shape of the role that
-// holds it, as the earlier release read it at run time. The expected
-// pointers are written by hand.
+// holds it, as the earlier release read it at run time, and the checks at
+// load accept the files the earlier release loaded. The expected pointers
+// are written by hand.
 func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	const nymAuth = "eu.europa.ec.eudi.nym_auth.1"
 	presentation := func(from, claims string) string {
@@ -81,6 +82,13 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 			dotted:  "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        address.country: SE\n",
 			pointer: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        - {path: [address, country], value: SE}\n",
 			claim:   func(ds model.DataSources) claimpath.Pointer { return ds.Assertion.Scopes["ehic"].Defaults[0].Path },
+			want:    claimpath.Keys("address", "country"),
+		},
+		{
+			name:    "defaults of which one holds the other",
+			dotted:  "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        address: {country: NO}\n        address.country: SE\n",
+			pointer: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        - {path: [address], value: {country: NO}}\n        - {path: [address, country], value: SE}\n",
+			claim:   func(ds model.DataSources) claimpath.Pointer { return ds.Assertion.Scopes["ehic"].Defaults[1].Path },
 			want:    claimpath.Keys("address", "country"),
 		},
 		{
