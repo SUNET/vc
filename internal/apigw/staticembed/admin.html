@@ -450,7 +450,7 @@
             <template x-if="view === 'commitments' && uniqueCommitmentEntries.length > 0">
                 <div>
                     <h2 class="h4 mb-3">Commitments</h2>
-                    <template x-if="unrestricted">
+                    <template x-if="!hasOperator">
                         <div class="alert alert-warning small">Resets need operator sign-in (<code>apigw.api_server.api_auth.oidc</code>).</div>
                     </template>
                     <div class="card shadow-sm">
@@ -498,7 +498,7 @@
                                         <label class="form-label" for="hc-evidence">Case reference</label>
                                         <input id="hc-evidence" class="form-control" x-model="hc.evidence" required maxlength="256" autocomplete="off">
                                     </div>
-                                    <button class="btn btn-danger" type="submit" :disabled="unrestricted || hc.busy">Reset commitment</button>
+                                    <button class="btn btn-danger" type="submit" :disabled="!hasOperator || hc.busy">Reset commitment</button>
                                     <button class="btn btn-link" type="button" @click="hc.found = null">Cancel</button>
                                 </form>
                             </template>

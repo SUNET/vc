@@ -62,6 +62,7 @@ window.adminApp = function () {
     return {
         authenticated: false,
         unrestricted: false,
+        hasOperator: false,
         subject: '',
         scopes: [],
         scopeTemplates: {},
@@ -73,8 +74,9 @@ window.adminApp = function () {
         view: 'datastore',
         sidebarOpen: false,
 
-        // Commitment lookup and reset
-        hc: { entry: 0, values: [], evidence: '', busy: false, found: null, message: null },
+        // Commitment lookup and reset. generation counts the lookups and the
+        // edits of the form.
+        hc: { entry: 0, values: [], evidence: '', busy: false, found: null, message: null, generation: 0 },
 
         // Datastore state
         ds: {
@@ -199,6 +201,7 @@ window.adminApp = function () {
                     this.uniqueCommitmentEntries = data.unique_commitment_entries || [];
                     this.clearCommitmentForm();
                     this.unrestricted = data.unrestricted || false;
+                    this.hasOperator = data.has_operator || false;
                     this.csrfToken = data.csrf_token || '';
                     this.searchDocuments();
                 }
@@ -237,12 +240,14 @@ window.adminApp = function () {
             this.hc.evidence = '';
             this.hc.found = null;
             this.hc.message = null;
+            this.hc.generation++;
         },
 
         /** The values changed, so what was found no longer applies. */
         commitmentEdited() {
             this.hc.found = null;
             this.hc.message = null;
+            this.hc.generation++;
         },
 
         /** Trim the entered values, so the browser refuses a blank one as missing. */
@@ -270,7 +275,8 @@ window.adminApp = function () {
             };
         },
 
-        async commitmentCall(path, body) {
+        /** POST body to path. A failure shows while current() holds. */
+        async commitmentCall(path, body, current = () => true) {
             this.hc.busy = true;
             this.hc.message = null;
             try {
@@ -280,26 +286,29 @@ window.adminApp = function () {
                     body: JSON.stringify(body),
                 });
             } catch (e) {
-                this.hc.message = { kind: 'error', text: e.message };
+                if (current()) this.hc.message = { kind: 'error', text: e.message };
                 return null;
             } finally {
                 this.hc.busy = false;
             }
         },
 
-        /** Look up the commitment on record for the entered values. */
+        /** Look up the commitment on record for the entered values. The reply applies while the form holds the values it was sent for. */
         async findCommitment(form) {
             if (!await this.commitmentFormValid(form)) return;
+            const generation = ++this.hc.generation;
+            const current = () => generation === this.hc.generation;
             this.hc.found = null;
-            const resp = await this.commitmentCall('/api/v1/auxiliary_data/lookup', this.commitmentQuery());
-            if (!resp) return;
+            const resp = await this.commitmentCall('/api/v1/auxiliary_data/lookup', this.commitmentQuery(), current);
+            if (!resp || !current()) return;
             if (resp.ok) {
                 const body = await resp.json();
-                this.hc.found = { recordedAt: new Date(body.recorded_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) };
+                if (current()) this.hc.found = { recordedAt: new Date(body.recorded_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) };
             } else if (resp.status === 404) {
                 this.nothingRecorded();
             } else {
-                this.hc.message = { kind: 'error', text: await errorMessage(resp) };
+                const text = await errorMessage(resp);
+                if (current()) this.hc.message = { kind: 'error', text };
             }
         },
 
