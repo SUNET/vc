@@ -124,6 +124,37 @@
   credential-offer store has an expiry mechanism to bound growth with.
 - `GET /offers/:scope` is rate limited, configurable via the new
   `apigw.rate_limit.credential_offer_requests_per_minute` (default 20).
+- **Claims path pointers**: every field that names a claim of a credential
+  takes a claims path pointer (OpenID4VP 1.0 section 7), such as
+  `[address, locality]`, `[nationalities, null]`, `[nationalities, 0]`, or
+  `[eu.europa.ec.eudi.pid.1, birth_date]` for an mdoc element.
+  - `required_claims` is a list of `{path, values}`, `defaults` a list of
+    `{path, value}`, `identity_attributes` a list of `{path, attribute}`
+    and `document_claims` a list of `{from, to}`.
+  - A presentation request template's `claim_mappings` is `"*"`, or a map
+    from DCQL credential query id to `{path, claim}` entries that maps each
+    presentation through the entries of the query it answers.
+  - `identity_match.claims` of `POST /api/v1/issuance/prepare` is a list of
+    `{path, equals}`. A malformed pointer is answered with `400
+    invalid_claims_path`.
+
+  [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists the fields.
+
+### Deprecated
+
+- **The claim spellings of earlier releases**: dotted claim names, the maps
+  keyed by them and the `claim_mappings` map of claim names load with their
+  meaning. Each logs a warning that names the file, the line and the
+  replacement. `POST /api/v1/issuance/prepare` with an
+  `identity_match.claims` object answers with `Deprecation: @1793836800`
+  (RFC 9745). A later release refuses them.
+
+  **Migration:** after `make build-migrate-claim-paths`,
+  `./bin/migrate_claim_paths -schemas /metadata=./metadata config.yaml
+  presentation_requests/*.yaml` rewrites configuration and presentation
+  request files in place and keeps their comments. It leaves a
+  `claim_mappings` map as written when the keyed form would map other
+  claims, and prints why.
 
 ### Note
 

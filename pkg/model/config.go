@@ -543,10 +543,9 @@ type AttributeMapping map[string]AttributeConfig
 // a derivation on the target scope; see the Derivation Primitives catalog
 // (pkg/credential/primitives).
 type AttributeConfig struct {
-	// Claim is the target claim. A dotted string is read as a claim of
-	// the document the mapping writes: split on dots for an auth
-	// provider, and as a claim of the scope's credential for an
-	// external_api scope.
+	// Claim is the claims path pointer of the target claim in the
+	// document the mapping writes: the claims of an auth provider, or the
+	// credential document of an external_api scope.
 	Claim claimpath.Pointer `yaml:"claim" validate:"required" doc_example:"[identity, given_name]"`
 
 	// Required indicates if this attribute must be present in the assertion/response

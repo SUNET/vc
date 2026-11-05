@@ -161,7 +161,7 @@ secret for each subject, so the issuer holds no secret of its own:
 - hash_commitment:
     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
     opening:
-      claim: {input: nym_auth_opening}
+      claim: {input: [nym_auth_opening]}
 ```
 
 The extension requires at least 128 bits of entropy in an opening (section

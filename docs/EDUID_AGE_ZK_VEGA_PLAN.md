@@ -117,12 +117,12 @@ checklist so nothing is silently deferred.
    `metadata/vctm_eduid_age_verification.json`'s claim set so `given_name`,
    `birthdate`, address, etc. never reach the issued age credential.
 4. **Allowed `assurance_level` URIs per-scope.** Add a
-   `required_claims map[string][]string` field on the new
-   `PresentationScope` under `data_sources.presentation`. Each key must be
-   present on the verified presentation; a populated list is an allow-list
-   compared verbatim (empty list = presence-only). For
-   `eduid_age_verification`, set
-   `assurance_level: [http://www.swamid.se/policy/assurance/al2, .../al3]`
+   `required_claims` list of `{path, values}` entries on the new
+   `PresentationScope` under `data_sources.presentation`. Each path must be
+   present on the verified presentation; `values` is an allow-list
+   compared verbatim, and an entry without `values` checks presence only.
+   For `eduid_age_verification`, set
+   `- {path: [assurance_level], values: [http://www.swamid.se/policy/assurance/al2, .../al3]}`
    in `fly/{dev,demo}/config.yaml`. `VCICredential` returns
    `HTTP 403 forbidden_claim_value` on mismatch.
 5. **`presentation_requests/eduid_age_verification.yaml`.** The eduID
