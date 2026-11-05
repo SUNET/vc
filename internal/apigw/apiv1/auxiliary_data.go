@@ -156,25 +156,35 @@ func uniqueCommitments(scope string, derivations []primitives.Derivation, suppor
 		if !present {
 			continue
 		}
-		fromWallet, err := sentByWallet(supported, hc.Path)
-		if err != nil {
-			return nil, fmt.Errorf("scope %q: %w", scope, err)
-		}
-		texts, err := keyTexts(doc, hc.Unique.Key)
-		if err != nil {
-			return nil, fmt.Errorf("scope %q: %w", scope, err)
-		}
-		keyHash, err := uniqueKeyHash(hc.Unique.Key, texts)
+		u, err := newUniqueCommitment(scope, hc, commitment, supported, doc)
 		if err != nil {
 			return nil, err
 		}
-		unique = append(unique, uniqueCommitment{
-			key:        db.UniqueCommitmentKey{Scope: scope, Path: hc.Path, KeyHash: keyHash},
-			commitment: commitment,
-			fromWallet: fromWallet,
-		})
+		unique = append(unique, u)
 	}
 	return unique, nil
+}
+
+// newUniqueCommitment is commitment under the record key of the key value
+// doc carries for hc.
+func newUniqueCommitment(scope string, hc *primitives.HashCommitmentArgs, commitment []byte, supported openid4vci.AuxiliaryDataSupported, doc *commitmentDocument) (uniqueCommitment, error) {
+	fromWallet, err := sentByWallet(supported, hc.Path)
+	if err != nil {
+		return uniqueCommitment{}, fmt.Errorf("scope %q: %w", scope, err)
+	}
+	texts, err := keyTexts(doc, hc.Unique.Key)
+	if err != nil {
+		return uniqueCommitment{}, fmt.Errorf("scope %q: %w", scope, err)
+	}
+	keyHash, err := uniqueKeyHash(hc.Unique.Key, texts)
+	if err != nil {
+		return uniqueCommitment{}, err
+	}
+	return uniqueCommitment{
+		key:        db.UniqueCommitmentKey{Scope: scope, Path: hc.Path, KeyHash: keyHash},
+		commitment: commitment,
+		fromWallet: fromWallet,
+	}, nil
 }
 
 // sentByWallet reports whether the entry at path is a to_issuer entry,
