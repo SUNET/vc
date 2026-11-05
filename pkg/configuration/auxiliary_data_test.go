@@ -206,6 +206,11 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"a key part that is the entry itself": {func(c *model.Cfg) {
 			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{psc}}})
 		}, "is the entry itself, which every commitment matches"},
+		"a key part that is an optional to_issuer entry": {func(c *model.Cfg) {
+			opt := []string{ssc[0], "opt"}
+			c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: opt}}
+			derivation(c).Unique = &primitives.UniqueArgs{Key: [][]string{opt}}
+		}, "is an optional to_issuer entry, which a wallet may leave out"},
 		"a source scope without the unique entry of another": {func(c *model.Cfg) {
 			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{ssc}}})
 			from := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From

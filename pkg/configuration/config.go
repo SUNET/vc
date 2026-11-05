@@ -576,18 +576,22 @@ func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet, 
 	return nil
 }
 
-// checkUniqueKey accepts key parts that are elements of the credential's
-// MDDL other than the entry, which every commitment would match.
+// checkUniqueKey accepts key parts that are claims of the credential's type
+// metadata. It refuses the entry itself, which every commitment matches,
+// and an optional to_issuer entry, which a wallet may leave out.
 func checkUniqueKey(meta *model.CredentialMetadata, hc *primitives.HashCommitmentArgs) error {
 	if hc.Unique == nil {
 		return nil
 	}
+	toIssuer := entryPaths(meta.AuxiliaryDataSupported().ToIssuer)
 	for _, part := range hc.Unique.Key {
-		if slices.Equal(part, hc.Path) {
+		switch {
+		case slices.Equal(part, hc.Path):
 			return fmt.Errorf("key part %q is the entry itself, which every commitment matches", part)
-		}
-		if !claimDeclared(meta, part) {
+		case !claimDeclared(meta, part):
 			return fmt.Errorf("the type metadata declares no claim at key part %q", part)
+		case toIssuer[claimsPathKey(part)] != nil && !claimMandatory(meta, part):
+			return fmt.Errorf("key part %q is an optional to_issuer entry, which a wallet may leave out", part)
 		}
 	}
 	return nil

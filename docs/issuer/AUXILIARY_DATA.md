@@ -118,6 +118,9 @@ either direction. `key` lists claims of the credential:
 - one claim accepts one commitment per value of that claim;
 - several claims accept one commitment per combination of their values.
 
+A key claim cannot be the entry itself, or a `to_issuer` entry whose claim
+the type metadata leaves optional.
+
 The issuer records the first commitment for each key value, once the
 request has passed its checks and before it signs the credential. A
 different commitment for a recorded key value refuses the request:
