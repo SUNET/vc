@@ -89,13 +89,18 @@ no other way to be issued, and that is what the endpoint always did.
 1. On the base scope, set `allow_preauth_offer: true`.
 2. Move whatever mints offers from `<type>_offer` to `<type>`. The offer's
    `credential_configuration_ids` changes with it.
-3. Delete the `<type>_offer` scope, its `credential_metadata` entry, and
+3. Wait until every offer minted from `<type>_offer` has been redeemed or
+   has expired (an offer is valid for 5 minutes), and until the issuance
+   sessions those offers started have completed or expired.
+4. Delete the `<type>_offer` scope, its `credential_metadata` entry, and
    its issuer credential configuration.
 
-Do them in that order. Step 3 before step 2 leaves offers naming a
-configuration id the issuer no longer publishes, and the wallet resolves
-that id against `credential_configurations_supported` — so the offer
-becomes unredeemable rather than merely wrong.
+Do them in that order. Step 2 changes only newly minted offers; offers
+already issued still name `<type>_offer`. Step 4 before step 2 or step 3
+leaves offers naming a configuration id the issuer no longer publishes,
+and the wallet resolves that id against
+`credential_configurations_supported` — so the offer becomes
+unredeemable rather than merely wrong.
 
 For the same reason, **do not try to hide a twin by removing it from the
 issuer metadata while offers still name it.** That map is a resolution
