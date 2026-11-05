@@ -54,15 +54,23 @@ type Rewrite struct {
 }
 
 // Parse parses the YAML text of file. Like gopkg.in/yaml.v2, it reads the
-// first document of a stream.
+// first document of a stream. Comments before the first "---" belong to no
+// document, and a document of comments holds nothing.
 func Parse(file string, src []byte) (*Document, error) {
 	parsed, err := parser.ParseBytes(src, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	d := &Document{file: file, src: src, lines: lineStarts(src)}
-	if len(parsed.Docs) > 0 {
-		d.root = parsed.Docs[0].Body
+	for _, doc := range parsed.Docs {
+		_, comments := doc.Body.(*ast.CommentGroupNode)
+		if comments && doc.Start == nil {
+			continue
+		}
+		if !comments {
+			d.root = doc.Body
+		}
+		break
 	}
 	return d, nil
 }
