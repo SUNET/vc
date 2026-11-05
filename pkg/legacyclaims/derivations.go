@@ -19,6 +19,11 @@ import (
 // merged with the earlier outputs. An output reads the issued document,
 // where main wrote it. written holds the outputs of derivations the
 // upgrade put before the list's own.
+//
+// A primitive that readsLiterally reads each claim name as one key. Each
+// other primitive reads a name as one key per segment, or as one key when
+// an earlier derivation writes that key: main's lookup tried the whole
+// name first.
 func (u *configUpgrade) derivations(list ast.Node, source, issued *lazy, written []claimpath.Pointer) error {
 	nodes, err := items(list)
 	if err != nil {
@@ -87,13 +92,14 @@ func (u *configUpgrade) derivation(name string, args ast.Node, source, issued *l
 	if name == "hash_commitment" {
 		return nil, u.openingInputs(args, source)
 	}
+	literal := readsLiterally(name)
 	input, err := child(args, "input")
 	if err != nil {
 		return nil, err
 	}
 	var in inputClaim
 	if input != nil {
-		if in, err = u.input(input.Value, source, issued, written); err != nil {
+		if in, err = u.input(input.Value, source, issued, written, literal); err != nil {
 			return nil, fmt.Errorf("input: %w", err)
 		}
 	}
@@ -102,7 +108,7 @@ func (u *configUpgrade) derivation(name string, args ast.Node, source, issued *l
 		return nil, err
 	}
 	if output != nil && !emptyClaim(output.Value) {
-		out, _, err := u.pointer(output.Value, issued.dotted)
+		out, _, err := u.pointer(output.Value, issued.reader(literal))
 		if err != nil {
 			return nil, fmt.Errorf("output: %w", err)
 		}
@@ -112,9 +118,19 @@ func (u *configUpgrade) derivation(name string, args ast.Node, source, issued *l
 	case name == "age_over_thresholds":
 		return ageOutputs(args, issued)
 	case writesInPlace(name) && !in.path.IsZero():
-		return u.inPlace(args, input, output, in, issued)
+		return u.inPlace(args, input, output, in, issued.reader(literal))
 	}
 	return nil, nil
+}
+
+// readsLiterally reports whether main's primitive looked its input up, and
+// wrote its output, at one key: the whole claim name.
+func readsLiterally(name string) bool {
+	switch name {
+	case "age_over_thresholds", "yyyymmdd_to_iso", "swamid_highest_assurance_level":
+		return true
+	}
+	return false
 }
 
 // inputClaim is a derivation's input, and main's dotted name when the
@@ -125,19 +141,26 @@ type inputClaim struct {
 	record int
 }
 
-// input reads a derivation's input.
-func (u *configUpgrade) input(n ast.Node, source, issued *lazy, written []claimpath.Pointer) (inputClaim, error) {
+// input reads a derivation's input: in the literal reading when literal
+// is set, and otherwise in the literal reading of a key an earlier
+// derivation writes, or in the dotted reading.
+func (u *configUpgrade) input(n ast.Node, source, issued *lazy, written []claimpath.Pointer, literal bool) (inputClaim, error) {
+	readings := []bool{true}
+	if !literal {
+		readings = append(readings, false)
+	}
 	read := func(name string) (claimpath.Pointer, error) {
 		if len(written) > 0 {
-			shape, err := issued.read()
-			if err != nil {
+			if _, err := issued.read(); err != nil {
 				return claimpath.Pointer{}, err
 			}
-			if p, err := shape.Dotted(name); err == nil && writtenBefore(written, p) {
-				return p, nil
+			for _, reading := range readings {
+				if p, err := issued.reader(reading)(name); err == nil && writtenBefore(written, p) {
+					return p, nil
+				}
 			}
 		}
-		return source.dotted(name)
+		return source.reader(literal)(name)
 	}
 	path, name, err := u.pointer(n, read)
 	if err != nil || name == "" {
@@ -163,14 +186,14 @@ func emptyClaim(n ast.Node) bool {
 }
 
 // inPlace returns the claim a primitive writes without an output: its
-// input's claim. main wrote it at the input's dotted name in the issued
-// document, so when that reads as another pointer than the input, the
-// upgrade writes the output.
-func (u *configUpgrade) inPlace(args ast.Node, input, output *ast.MappingValueNode, in inputClaim, issued *lazy) ([]claimpath.Pointer, error) {
+// input's claim. main wrote it at the input's name in the issued
+// document, which read reads, so when that reads as another pointer than
+// the input, the upgrade writes the output.
+func (u *configUpgrade) inPlace(args ast.Node, input, output *ast.MappingValueNode, in inputClaim, read reader) ([]claimpath.Pointer, error) {
 	if in.dotted == "" {
 		return []claimpath.Pointer{in.path}, nil
 	}
-	out, err := issued.dotted(in.dotted)
+	out, err := read(in.dotted)
 	if err != nil {
 		return nil, fmt.Errorf("output: %w", err)
 	}

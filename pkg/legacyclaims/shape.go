@@ -81,6 +81,20 @@ func (s Shape) Dotted(name string) (claimpath.Pointer, error) {
 	return first, nil
 }
 
+// Literal reads a claim name as one key, the whole name: main's
+// age_over_thresholds, yyyymmdd_to_iso and swamid_highest_assurance_level
+// looked their input up, and wrote their output, at that key. A presented
+// mdoc holds a claim under its qualified name, the key Dotted locates.
+func (s Shape) Literal(name string) (claimpath.Pointer, error) {
+	switch s.kind {
+	case qualifiedReading:
+		return s.Dotted(name)
+	case 0:
+		return claimpath.Pointer{}, errors.New("the shape is unset")
+	}
+	return s.document.Key(name)
+}
+
 // TopLevel reads the name of a top-level key of the document.
 func (s Shape) TopLevel(name string) (claimpath.Pointer, error) {
 	if strings.Contains(name, ".") {
