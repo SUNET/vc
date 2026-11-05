@@ -36,7 +36,7 @@ func TestGeneratedSecretsExampleLoads(t *testing.T) {
 		"an operator copying this example must get a secrets file that loads")
 
 	// And it is not vacuously loadable by being empty.
-	assert.Contains(t, block, "seeds:", "the seed sources are the section this guard was added for")
+	assert.Contains(t, block, "client_secret:", "the example carries the per-service secrets")
 	assert.NotContains(t, block, `issuer: "`,
 		"a struct section must never be emitted as a scalar")
 }
@@ -49,7 +49,7 @@ func secretsExampleBlock(t *testing.T, doc string) string {
 	for _, b := range blocks {
 		// The secrets example is the one carrying the per-service
 		// secret sections rather than main-configuration keys.
-		if strings.Contains(b[1], "registry:") && strings.Contains(b[1], "verifier:") && strings.Contains(b[1], "seeds:") {
+		if strings.Contains(b[1], "registry:") && strings.Contains(b[1], "verifier:") && strings.Contains(b[1], "client_secret:") {
 			return b[1]
 		}
 	}

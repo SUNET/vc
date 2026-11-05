@@ -1,0 +1,26 @@
+{
+  "description": "dc+sd-jwt is reserved, not defined in this version.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "dc+sd-jwt",
+      "vct_values": [
+        "urn:x"
+      ]
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "source_format_unsupported"
+  }
+}

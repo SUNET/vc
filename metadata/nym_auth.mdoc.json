@@ -1,0 +1,30 @@
+{
+  "format": "mso_mdoc",
+  "doctype": "eu.europa.ec.eudi.nym_auth.1",
+  "display": [
+    {
+      "locale": "en-US",
+      "name": "Nym authentication",
+      "description": "Anonymous/pseudonymous authentication attestation for zero-knowledge pseudonym and age predicate presentations",
+      "background_color": "#006400",
+      "text_color": "#ffffff"
+    }
+  ],
+  "claims": {
+    "eu.europa.ec.eudi.nym_auth.1": {
+      "birth_date": {
+        "mandatory": true,
+        "value_type": "full-date",
+        "display": [{ "locale": "en-US", "name": "Date of birth" }]
+      },
+      "ssc": {
+        "mandatory": true,
+        "value_type": "bstr"
+      },
+      "psc": {
+        "mandatory": false,
+        "value_type": "bstr"
+      }
+    }
+  }
+}

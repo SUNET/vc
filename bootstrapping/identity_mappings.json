@@ -1599,6 +1599,38 @@
       "created_at": "0001-01-01T00:00:00Z"
     }
   ],
+  "200": [
+    {
+      "authentic_source_person_id": "authentic_source_person_id_200",
+      "authentic_source": "Skatteverket",
+      "attributes": {
+        "birth_date": "2011-06-15",
+        "family_name": "Young",
+        "given_name": "Alex"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "authentic_source_person_id": "authentic_source_person_id_200",
+      "authentic_source": "SUNET",
+      "attributes": {
+        "birth_date": "2011-06-15",
+        "family_name": "Young",
+        "given_name": "Alex"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "authentic_source_person_id": "authentic_source_person_id_200",
+      "authentic_source": "Ladok",
+      "attributes": {
+        "birth_date": "2011-06-15",
+        "family_name": "Young",
+        "given_name": "Alex"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    }
+  ],
   "70": [
     {
       "authentic_source_person_id": "authentic_source_person_id_70",

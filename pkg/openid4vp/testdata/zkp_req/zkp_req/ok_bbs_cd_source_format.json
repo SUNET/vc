@@ -1,0 +1,41 @@
+{
+  "description": "bbs_cd (held, not implemented in wallets yet) plans like mso_mdoc: source_format and schema_id_value are read, hashdh-bls12381g1 is an opaque prf string. Nothing here may break when bbs_cd arrives.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "bbs_cd",
+      "schema_id_value": "eu.europa.ec.eudi.nym_auth.bbs.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "nym",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 1,
+          "prf": "hashdh-bls12381g1"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "pseudonym",
+          "handle": "nym",
+          "params": {
+            "config": "known-offender-matching-ssc",
+            "ver": 1,
+            "prf": "hashdh-bls12381g1"
+          }
+        }
+      ],
+      "system_filter": {},
+      "source_format": "bbs_cd",
+      "meta_doctype": null,
+      "meta_schema_id": "eu.europa.ec.eudi.nym_auth.bbs.1"
+    }
+  }
+}

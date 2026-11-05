@@ -1,0 +1,23 @@
+{
+  "description": "ver is a number with a fraction.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "h",
+        "params": {
+          "ver": 1.5
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "param_wrong_type"
+  }
+}

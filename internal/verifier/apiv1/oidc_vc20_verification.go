@@ -89,7 +89,7 @@ func (c *Client) requireMultiplePermitted(session *cache.AuthorizationContext, q
 	// a relaxation, and must not be read off a query the single-query fallback guessed at.
 	scope := c.oidcScopeFor(session, queryID)
 	requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
-	if !ok || !requested.Multiple {
+	if !ok || !requested.AllowsMultiple() {
 		return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", count)
 	}
 	return nil

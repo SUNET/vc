@@ -1,0 +1,34 @@
+These vectors are vendored verbatim from
+
+    https://github.com/sirosfoundation/siros-dc-matcher
+    crates/siros-dc-matcher-core/tests/vectors/{zkp_req,zkp_req_response,zkp_req_unsat,proof_time}
+
+commit 93047bc7b8a22117fbc9b4c8cd59ce7cd742e8d3, which is main: the squash
+merge of https://github.com/sirosfoundation/siros-dc-matcher/pull/50. No tag
+and no release, so a commit rather than a tag is the pin.
+
+Vendored from that pull request's head (69e6be12) and re-pinned when it
+merged; the vectors are byte-identical between the two, so the merge moved the
+provenance and not the bytes.
+
+The normative text is docs/zkp_req_request.md and docs/zkp_req_response.md in
+that repository, which follow nym_auth rulebook v0.4. Where the rulebook and
+those documents differ, the rulebook wins; where the archive circuits and
+either differ on circuit semantics, the archive wins.
+
+    set digest 9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac
+
+computed the way the matcher's scripts/vectors_digest.sh computes it: the
+sha256 of the `sha256sum` manifest of every *.json under the four directories,
+LC_ALL=C sorted, paths relative to this directory, README.md excluded. Counts
+at that commit: zkp_req 54, zkp_req_response 143, zkp_req_unsat 43,
+proof_time 1.
+
+They are the shared conformance set for every implementation that speaks
+zkp_req - the Rust matcher, the Kotlin and Swift SDKs, and this verifier.
+Vendored rather than fetched so the test suite does not depend on the network,
+and the digest is pinned in the test that loads them.
+
+Re-vendor rather than edit. A local change turns a cross-implementation check
+into a self-consistency one that passes while the implementations disagree -
+which is the single failure this file exists to prevent.

@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
@@ -78,6 +80,28 @@ type DatastoreScope struct {
 	// to pre-authorized credential offers only; wallet-initiated PAR/authorize
 	// requests for such a scope are rejected.
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc preauth"`
+
+	// AllowPreAuthOffer lets an operator mint a pre-authorized credential
+	// offer for this scope WITHOUT making the scope pre-authorized.
+	//
+	// auth_provider answers "how does a user authenticate when THEY start
+	// the flow". Whether the issuer may also hand out a pre-authorized
+	// offer is a different question - it is a grant type, not an identity
+	// provider - and conflating the two is why a deployment needing both
+	// has had to configure the same credential twice, once per scope,
+	// which then appears twice in every published list.
+	//
+	// Set this and the scope keeps its auth_provider: a wallet that starts
+	// the flow itself still authenticates exactly as before, and the
+	// rejection of wallet-initiated PAR/authorize for a REAL preauth scope
+	// is untouched. Only the admin mint endpoint changes its mind.
+	//
+	// It is refused at startup on a deployment where that endpoint is not
+	// behind an authenticated principal, because there the flag would be a
+	// login bypass: the credential this scope gates behind a login could
+	// be minted as an offer by anyone who can reach the port. See
+	// pkg/configuration's checkPreAuthOfferExposure.
+	AllowPreAuthOffer bool `yaml:"allow_preauth_offer,omitempty" doc_example:"true"`
 
 	// AuthenticSource names the identity-mapping namespace used to resolve the
 	// authenticated user to an authentic_source_person_id for datastore
@@ -318,23 +342,16 @@ type PresentationConfig struct {
 // PresentationScope configures a credential type whose data is derived from
 // another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 type PresentationScope struct {
-	// FromScope names the credential scope the wallet must present (e.g. "eduid").
-	// The presented credential is verified against the issuer trust chain before
+	// From lists the credentials the wallet may present, keyed by their
+	// credential scope (e.g. "eduid"). The wallet presents one of them. The
+	// presented credential is verified against the issuer trust chain before
 	// its claims are consumed.
-	FromScope string `yaml:"from_scope" validate:"required" doc_example:"\"eduid\""`
+	From map[string]PresentedCredential `yaml:"from" validate:"required,min=1,dive" doc_key:"presented credential scope"`
 
 	// AuthProvider is fixed to "openid4vp" for now; kept as a field for
 	// symmetry with the other data sources and so future providers can be
 	// added without a config-shape change.
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp" default:"openid4vp"`
-
-	// RequiredClaims maps a claim path on the presented credential to an
-	// allow-list of exact-match values. Empty list = presence-only (any
-	// value passes). Populated list = the claim's value must equal one of
-	// the listed strings (or, when the claim is an array, at least one
-	// array element must match). Every key must be present on the
-	// presented credential's verified claims; missing keys fail issuance.
-	RequiredClaims map[string][]string `yaml:"required_claims" validate:"required,min=1" doc_key:"claim path"`
 
 	// Defaults holds claim values injected into the derived credential
 	// document for fields the presented credential does not carry
@@ -345,6 +362,18 @@ type PresentationScope struct {
 	// now+duration (formatted as ISO YYYY-MM-DD). Same semantics as
 	// AssertionScope.ExpiryDuration.
 	ExpiryDuration string `yaml:"expiry_duration,omitempty" doc_example:"\"8760h\""`
+}
+
+// PresentedCredential configures one credential a presentation scope
+// accepts.
+type PresentedCredential struct {
+	// RequiredClaims maps a claim path on the presented credential to an
+	// allow-list of exact-match values. Empty list = presence-only (any
+	// value passes). Populated list = the claim's value must equal one of
+	// the listed strings (or, when the claim is an array, at least one
+	// array element must match). Every key must be present on the
+	// presented credential's verified claims; missing keys fail issuance.
+	RequiredClaims map[string][]string `yaml:"required_claims" validate:"required,min=1" doc_key:"claim path"`
 
 	// Derivations are generic post-verification steps that compute additional
 	// claims from the presented credential's own claims
@@ -731,8 +760,9 @@ func (ds *DataSources) LookupScopePolicyConfig(scope, authProvider string) *Scop
 }
 
 // DerivationsFor returns the Derivations list configured on whichever scope
-// (datastore, assertion, external_api, or presentation) owns the given
-// credential type. Returns nil if the scope is unknown or has no derivations.
+// (datastore, assertion or external_api) owns the given credential type.
+// Presentation scopes configure derivations per presented credential
+// (PresentationScope.From). Returns nil if the scope is unknown or has no derivations.
 // The lookup order mirrors LookupCredentialSources.
 //
 // Prefer DerivationsForSource when the caller knows which data source is in
@@ -749,9 +779,6 @@ func (ds *DataSources) DerivationsFor(credentialType string) []primitives.Deriva
 		return cred.Derivations
 	}
 	if cred, ok := ds.ExternalAPI.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
-		return cred.Derivations
-	}
-	if cred, ok := ds.Presentation.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
 		return cred.Derivations
 	}
 	return nil
@@ -781,11 +808,54 @@ func (ds *DataSources) DerivationsForSource(credentialType string, source DataSo
 			return cred.Derivations
 		}
 	case DataSourcePresentation:
-		if cred, ok := ds.Presentation.Scopes[credentialType]; ok {
-			return cred.Derivations
-		}
+		// Configured per presented credential: PresentationScope.From.
+		return nil
 	case "":
 		return ds.DerivationsFor(credentialType)
 	}
 	return nil
+}
+
+// SourceScope is one data source's configuration of a credential scope. A
+// presentation scope has one per credential it accepts.
+type SourceScope struct {
+	Source DataSourceType
+	Scope  string
+	// Presented is the accepted credential's scope, for a presentation
+	// source.
+	Presented string
+	// RequiredClaims are the required_claims of a presentation source. Its
+	// source data holds these claims alone.
+	RequiredClaims map[string][]string
+	Derivations    []primitives.Derivation
+}
+
+// Where is the configuration path of the source scope.
+func (s SourceScope) Where() string {
+	where := fmt.Sprintf("apigw.data_sources.%s.scopes.%s", s.Source, s.Scope)
+	if s.Presented != "" {
+		where += ".from." + s.Presented
+	}
+	return where
+}
+
+// SourceScopes returns every source scope, ordered by Where.
+func (ds *DataSources) SourceScopes() []SourceScope {
+	var out []SourceScope
+	for scope, s := range ds.Datastore.Scopes {
+		out = append(out, SourceScope{Source: DataSourceDatastore, Scope: scope, Derivations: s.Derivations})
+	}
+	for scope, s := range ds.Assertion.Scopes {
+		out = append(out, SourceScope{Source: DataSourceAssertion, Scope: scope, Derivations: s.Derivations})
+	}
+	for scope, s := range ds.ExternalAPI.Scopes {
+		out = append(out, SourceScope{Source: DataSourceExternalAPI, Scope: scope, Derivations: s.Derivations})
+	}
+	for scope, s := range ds.Presentation.Scopes {
+		for presented, accepted := range s.From {
+			out = append(out, SourceScope{Source: DataSourcePresentation, Scope: scope, Presented: presented, RequiredClaims: accepted.RequiredClaims, Derivations: accepted.Derivations})
+		}
+	}
+	slices.SortFunc(out, func(a, b SourceScope) int { return strings.Compare(a.Where(), b.Where()) })
+	return out
 }

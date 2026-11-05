@@ -11,6 +11,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/issuance"
@@ -245,12 +246,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// birthdate that only the external API returns).
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
 		if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-			derived, derr := credential.ApplyDerivations(derivs, cc.identity, time.Now())
+			cc.openingClaims = primitives.OpeningInputs(derivs, cc.identity)
+			derived, replaced, derr := credential.ApplyDerivationsReplacing(derivs, cc.identity, time.Now(), nil)
 			if derr != nil {
 				span.SetStatus(codes.Error, derr.Error())
 				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
 			}
-			credential.MergeNestedClaims(cc.identity, derived)
+			credential.MergeDerived(cc.identity, derived, replaced)
 		}
 	}
 
@@ -604,6 +606,10 @@ type callbackClaims struct {
 	// already declared exactly which claims the credential gets, and filtering
 	// that output on top would overrule their configuration.
 	filter bool
+
+	// openingClaims are the claims the scope's hash_commitment openings read,
+	// taken before derivations and filtering change or drop them.
+	openingClaims map[string]any
 }
 
 // newCallbackClaims applies the configured attribute mapper, if any, and
@@ -717,7 +723,8 @@ func (c *Client) buildOIDCDocument(cc *callbackClaims, authenticSource string, m
 		Meta: &model.MetaData{
 			AuthenticSource: authenticSource,
 		},
-		DocumentData: documentData,
+		DocumentData:  documentData,
+		OpeningClaims: cc.openingClaims,
 	}, nil
 }
 
