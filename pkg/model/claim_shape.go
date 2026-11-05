@@ -14,10 +14,11 @@ func (c *CredentialMetadata) PresentedShape() claimpath.Shape {
 }
 
 // DocumentShape returns how the document data of a credential of this type
-// holds its claims: an mdoc as one key per data element its MDDL declares,
-// a JSON-based credential as its JSON object.
+// holds its claims: an mso_mdoc as one key per data element its MDDL
+// declares, and a credential of each other format, whose schema is a VCTM,
+// as its JSON object.
 func (c *CredentialMetadata) DocumentShape() (claimpath.Shape, error) {
-	if !openid4vp.IsMdocFormat(c.Format) && !openid4vp.IsMdocZkFormat(c.Format) {
+	if !openid4vp.IsMdocFormat(c.Format) {
 		return claimpath.Nested(), nil
 	}
 	mddl := c.GetMDDL()
