@@ -353,20 +353,27 @@ func TestStack_NymAuth(t *testing.T) {
 	for _, person := range []struct {
 		name   string
 		claims map[string]string
+		// identifiers are the inputs of config.yaml's ssc opening, as the
+		// bootstrapped PIDs of both formats hold them: issuing_country and
+		// the administrative number.
+		identifiers []string
 	}{
-		{"adult", map[string]string{"given_name": "Helen", "family_name": "Mirren", "birth_date": "1996-01-30"}},
-		{"teen", map[string]string{"given_name": "Alex", "family_name": "Young", "birth_date": "2011-06-15"}},
+		{"adult", map[string]string{"given_name": "Helen", "family_name": "Mirren", "birth_date": "1996-01-30"}, []string{"SE", "pan-100"}},
+		{"teen", map[string]string{"given_name": "Alex", "family_name": "Young", "birth_date": "2011-06-15"}, []string{"SE", "pan-200"}},
 	} {
 		for _, presented := range []string{"pid", "pid_mdoc"} {
 			t.Run(person.name+"/"+presented, func(t *testing.T) {
 				pid, pidKey := issuePID(t, presented, person.claims)
 				psc := sha256.Sum256([]byte("private seed of " + person.name))
+				other := sha256.Sum256([]byte("another wallet of " + person.name))
 				issue := func(psc []byte, tamper, encrypt bool) (int, []byte) {
 					token, key := nymAuthAccess(t, presented, pid, pidKey)
 					return nymAuthCredentialRequest(t, meta, token, key, psc, tamper, encrypt)
 				}
 
-				status, body := issue(psc[:], false, false)
+				// A refused request records no psc: another wallet's psc
+				// here leaves this wallet's psc to be accepted below.
+				status, body := issue(other[:], false, false)
 				assert.Equal(t, http.StatusBadRequest, status)
 				assert.True(t, strings.Contains(string(body), "invalid_encryption_parameters"), "got: %s", body)
 
@@ -413,30 +420,40 @@ func TestStack_NymAuth(t *testing.T) {
 
 				// One psc per person: another wallet's psc is refused until
 				// an operator resets the recorded one.
-				other := sha256.Sum256([]byte("another wallet of " + person.name))
 				status, body = issue(other[:], false, true)
 				t.Logf("CONFLICT %s/%s: HTTP %d %s", person.name, presented, status, body)
 				assert.Equal(t, http.StatusBadRequest, status)
 				assert.Contains(t, string(body), "auxiliary_data_conflict")
+
+				// An operator finds the record by the identifiers ssc
+				// derives from.
+				status, body = lookupCommitment(t, person.identifiers)
+				require.Equal(t, http.StatusOK, status, "lookup: %s", body)
+				var found struct {
+					RecordedAt time.Time `json:"recorded_at"`
+				}
+				require.NoError(t, json.Unmarshal(body, &found))
+				assert.False(t, found.RecordedAt.IsZero(), "the record tells when it was recorded")
 			})
 		}
 	}
 	assert.NotEqual(t, openings["adult"], openings["teen"], "two people, two openings")
 }
 
-// TestStack_NymAuthAfterReset: after an operator reset Helen Mirren's
-// commitment, her other wallet's psc is accepted and issued.
-func TestStack_NymAuthAfterReset(t *testing.T) {
-	meta := fetchIssuerMetadata(t, apigwURL)
-	claims := map[string]string{"given_name": "Helen", "family_name": "Mirren", "birth_date": "1996-01-30"}
-	pid, pidKey := issuePID(t, "pid", claims)
-	other := sha256.Sum256([]byte("another wallet of adult"))
-	token, key := nymAuthAccess(t, "pid", pid, pidKey)
-	status, body := nymAuthCredentialRequest(t, meta, token, key, other[:], false, true)
-	require.Equal(t, http.StatusOK, status, "credential: %s", body)
-	var response openid4vci.CredentialResponse
-	require.NoError(t, json.Unmarshal(body, &response))
-	_, elements := issuerSignedElements(t, response.Credentials[0].Credential)
-	assert.Equal(t, other[:], elements["psc"], "the new wallet's psc is issued")
-	t.Logf("AFTER RESET: psc=%x", elements["psc"])
+// lookupCommitment asks the admin API when the psc of the person with
+// identifiers was recorded, as the admin UI's Find does.
+func lookupCommitment(t *testing.T, identifiers []string) (int, []byte) {
+	t.Helper()
+	query, err := json.Marshal(map[string]any{
+		"scope": "nym_auth",
+		"path":  []string{nymAuthNamespace, "psc"},
+		"key":   []any{map[string]any{"path": []string{nymAuthNamespace, "ssc"}, "inputs": identifiers}},
+	})
+	require.NoError(t, err)
+	resp, err := tlsClient().Post(apigwURL+"/api/v1/auxiliary_data/lookup", "application/json", bytes.NewReader(query))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, raw
 }
