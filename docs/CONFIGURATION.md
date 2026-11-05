@@ -78,7 +78,6 @@ Shared configuration used across all services.
 
 > **Constraint** (`postgres`, `mariadb`): When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs.
 
-support a relational storage backend as an alternative to MongoDB.
 Backend selection is config-time only: a running service uses exactly
 one backend for its whole lifetime.
 
@@ -204,6 +203,8 @@ stay in-process and do not cross nodes.
 
 > **Path:** `.common.credential_registry`
 
+When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
+
 | Field              | Type       | Description                                                                                                                                                                                                   | Example | Default | Required         |
 | ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
 | `enable`           | `bool`     | Registry-backed resolution for any scope that sets vct or doctype instead of a local file/URL. Existing vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes are entirely unaffected either way. | -       | `false` | No               |
@@ -272,8 +273,6 @@ sets none of them is an OpenID4VP 1.0 deployment.
 
 > **Path:** `.common.credential_metadata.<credential scope>.auxiliary_data`
 
-credential configuration.
-
 | Field       | Type    | Description                                                                        | Example | Default | Required |
 | ----------- | ------- | ---------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `to_wallet` | `array` | The entries the Credential Issuer sends in each response that carries Credentials. | -       | -       | No       |
@@ -283,6 +282,7 @@ credential configuration.
 
 > **Path:** `.common.credential_metadata.<credential scope>.auxiliary_data.to_wallet[]`, `.common.credential_metadata.<credential scope>.auxiliary_data.to_issuer[]`
 
+Its members other than
 Type are those of hash_commitment.
 
 | Field        | Type       | Description                                                                                                           | Example                                   | Default | Required |
@@ -365,8 +365,8 @@ Configuration for the API Gateway service that handles credential issuance reque
 >
 > **Constraint** (`rules`, `rules_file`): Authorization rules require JWKS or OIDC to be enabled.
 
-JWKS and OIDC are mutually exclusive
-If neither is enabled, no authentication is applied (open access)
+JWKS and OIDC are mutually exclusive.
+If neither is enabled, no authentication is applied (open access).
 
 When Rules (and/or RulesFile) are configured, each authenticated request is
 checked against a SPOCP engine. A query of the form
@@ -697,7 +697,7 @@ Impossible calendar dates surface as a hard error.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].swamid_highest_assurance_level`, `<scope>.derivations[].swamid_highest_assurance_level`
 
-swamid_highest_assurance_level primitive. Reduces a multi-valued
+Reduces a multi-valued
 eduPersonAssurance claim to the strongest recognised SWAMID URI; hard
 errors if the input is present but no SWAMID URI is recognised.
 
@@ -907,8 +907,6 @@ a derivation on the target scope; see the Derivation Primitives catalog
 
 > **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>`
 
-another credential presented by the wallet via OpenID4VP during OpenID4VCI.
-
 | Field             | Type     | Description                                                                                                                                                                                                                  | Example   | Default     | Required |
 | ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------- | -------- |
 | `from`            | `object` | The credentials the wallet may present, keyed by their credential scope (e.g. "eduid"). The wallet presents one of them. The presented credential is verified against the issuer trust chain before its claims are consumed. | -         | -           | Yes      |
@@ -919,8 +917,6 @@ another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 ### `from` entry
 
 > **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>`
-
-accepts.
 
 | Field             | Type     | Description                                                                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
 | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1030,6 +1026,8 @@ A single language tag applies to all localized child elements.
 ### `logo`
 
 > **Path:** `.apigw.auth_providers.saml.metadata.ui_info.logo`
+
+Width and height are required by the spec.
 
 | Field    | Type     | Description | Example | Default | Required |
 | -------- | -------- | ----------- | ------- | ------- | -------- |
@@ -1355,6 +1353,8 @@ that can name both settings and say which combination was written.
 
 > **Path:** `.apigw.issuer_metadata.display[]`
 
+Below is a non-exhaustive list of valid parameters that MAY be included:
+
 | Field    | Type     | Description                                                                                                                                                                                                        | Example | Default | Required |
 | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `name`   | `string` | Name: OPTIONAL. String value of a display name for the Credential Issuer.                                                                                                                                          | -       | -       | No       |
@@ -1364,6 +1364,8 @@ that can name both settings and say which combination was written.
 ### `logo`
 
 > **Path:** `.apigw.issuer_metadata.display[].logo`
+
+Below is a non-exhaustive list of parameters that MAY be included:
 
 | Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1662,7 +1664,7 @@ is a known and accepted property of this format rather than an oversight.
 
 > **Path:** `.issuer.zk_circuits`
 
-catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here
+CacheTTL lives here
 rather than on the shared ZkCircuitsConfig because only the issuer's
 resolver honours it - the verifier reads Sources alone, so a cache_ttl
 under verifier.zk_circuits would be a silent no-op.
@@ -1772,9 +1774,6 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 ### `zkp_req`
 
 > **Path:** `.verifier.preferred_vp_formats.zkp_req`
-
-vp_formats_supported: which proof systems and circuits the Verifier will
-accept a proof from.
 
 Entirely an open map, with the two known arrays as a convenience. The
 rulebook's own example wraps the same information in a
@@ -1990,8 +1989,8 @@ as the human-readable label.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.zk_system_type[]`
 
-array — a verifier's declaration of one ZK proof system + circuit variant
-it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
+It is a verifier's declaration of one ZK proof system + circuit
+variant it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
 (`{"id": ..., "system": ..., ...params}`, e.g.
 `{"id": "longfellow-libzk-v1_8_1_4259_2945", "system": "longfellow-libzk-v1",
 "num_attributes": 1, "circuit_hash": "...", "block_enc_hash": ...,
@@ -2012,9 +2011,6 @@ are intentionally loosely typed at this layer.
 ### `req` entry
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.req[]`
-
-query: a function, a handle its result is returned under, and the
-function's parameters.
 
 A circuit_zk preset needs two things to be published - a non-empty req,
 and verifier.preferred_vp_formats.circuit_zk advertising the format:
@@ -2086,7 +2082,7 @@ could not produce the bad requests a negative test needs.
 
 > **Path:** `.verifier.zk_circuits`
 
-(pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
+The verifier uses it to resolve a presented
 "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
 the issuer resolves wire-shape constraints from the same sources through
 its own IssuerZkCircuitsConfig, which adds a resolver cache.
@@ -2116,8 +2112,6 @@ block would make the answer to each depend on the other.
 ### `circuits`
 
 > **Path:** `.verifier.nym_auth.circuits`
-
-where their bytes come from.
 
 | Field     | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
 | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -2206,6 +2200,13 @@ Configuration for the Registry service that manages credential status.
 ## Secrets File Reference
 
 The structure of the separate secrets file.
+
+When Common.SecretFilePath is set, ApplySecrets merges these values
+into the main config: the Mongo URI is only used when the main config
+has none. For each service section (apigw, registry, verifier) that
+is present in the secrets file, the corresponding secret fields in
+the main config are cleared and replaced by the secrets-file values.
+Sections omitted from the secrets file are left untouched.
 
 ### Secrets file structure
 
