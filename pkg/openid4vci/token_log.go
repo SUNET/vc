@@ -4,10 +4,12 @@ package openid4vci
 // token type, scope, state, expiries, the number of authorization details,
 // and whether each token and the c_nonce are set. zapr calls it for every
 // call site that logs a TokenResponse.
-func (t *TokenResponse) MarshalLog() any {
-	if t == nil {
-		return nil
-	}
+//
+// Value receiver, for the reason cache.AuthorizationContext.MarshalLog
+// gives: a pointer receiver leaves a logged TokenResponse VALUE on
+// zapr's reflection path, where the access token and the refresh token
+// are printed in full.
+func (t TokenResponse) MarshalLog() any {
 	return map[string]any{
 		"token_type":               t.TokenType,
 		"expires_in":               t.ExpiresIn,
