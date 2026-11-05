@@ -552,7 +552,7 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 
 	// Step 5: Credential request with DPoP
 	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
-	credResp := doCredentialRequest(t, credEndpoint, tokenResp.AccessToken, tokenResp.CNonce,
+	credResp := doCredentialRequest(t, credEndpoint, issuerMeta.CredentialIssuer, tokenResp.AccessToken, tokenResp.CNonce,
 		"pid", signingKey)
 	require.NotEmpty(t, credResp.Credentials, "must receive at least one credential")
 	t.Logf("credentials_received=%d notification_id=%s", len(credResp.Credentials), credResp.NotificationID)
@@ -897,7 +897,10 @@ func TestStack_VCI_Credential_NoDPoP(t *testing.T) {
 	require.NotEmpty(t, tokenResp.AccessToken)
 
 	// Build credential request body
-	proofJWT := walletflow.ProofJWT(t, rewriteInternalToPublic(issuerMeta.CredentialEndpoint),
+	// The Credential Issuer IDENTIFIER, not the credential endpoint:
+	// OpenID4VCI fixes the proof JWT's aud as the identifier, and the
+	// issuer compares against its own.
+	proofJWT := walletflow.ProofJWT(t, issuerMeta.CredentialIssuer,
 		tokenResp.CNonce, oauthClientID, signingKey)
 	reqBody, _ := json.Marshal(map[string]any{
 		"credential_configuration_id": "pid",
@@ -955,6 +958,60 @@ func TestStack_VCI_Credential_NoDPoP(t *testing.T) {
 		assert.True(t, resp.StatusCode >= 400 && resp.StatusCode < 500,
 			"credential with wrong ATH should be 4xx, got %d: %s", resp.StatusCode, string(body))
 	})
+}
+
+// TestStack_VCI_Credential_UnadvertisedProofType sends pid, which advertises
+// jwt and attestation key proofs, a di_vp key proof whose proofValue is no
+// signature. OpenID4VCI 1.0 Appendix F.2 requires the Credential Issuer to
+// "validate that the W3C Verifiable Presentation used as a proof is actually
+// signed with a key in the possession of the Holder". Accepting it issues an
+// SD-JWT whose cnf.jwk is {"kid": "<verificationMethod>"}: a JWK without kty
+// (RFC 7517, Section 4.1), so no key binds the credential.
+func TestStack_VCI_Credential_UnadvertisedProofType(t *testing.T) {
+	authCode, codeVerifier, signingKey := getAuthCodeForNegativeTests(t)
+	oauth2Meta := fetchOAuth2Metadata(t, apigwURL)
+	issuerMeta := fetchIssuerMetadata(t, apigwURL)
+	require.NotContains(t, issuerMeta.CredentialConfigurationsSupported["pid"].ProofTypesSupported, "di_vp")
+	tokenResp := doTokenRequest(t, rewritePublicToInternal(oauth2Meta.TokenEndpoint), authCode, codeVerifier, signingKey)
+
+	verificationMethod := "did:key:z6MkvrFpBNCoYewiaeBLgjUDvLxUtnK5R6mqh5XPvLsrPsro#z6MkvrFpBNCoYewiaeBLgjUDvLxUtnK5R6mqh5XPvLsrPsro"
+	reqBody, _ := json.Marshal(map[string]any{
+		"credential_configuration_id": "pid",
+		"proofs": map[string]any{"di_vp": []any{map[string]any{
+			"@context": []string{"https://www.w3.org/ns/credentials/v2"},
+			"type":     []string{"VerifiablePresentation"},
+			"proof": map[string]any{
+				"type": "DataIntegrityProof", "cryptosuite": "eddsa-rdfc-2022",
+				"proofPurpose": "authentication", "verificationMethod": verificationMethod,
+				"domain": issuerMeta.CredentialIssuer, "challenge": tokenResp.CNonce,
+				"proofValue": "zNotASignature",
+			},
+		}}},
+	})
+	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
+	req, _ := http.NewRequest(http.MethodPost, credEndpoint, bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "DPoP "+tokenResp.AccessToken)
+	req.Header.Set("DPoP", walletflow.DPoPProof(t, http.MethodPost, rewriteInternalToPublic(credEndpoint), tokenResp.AccessToken, signingKey))
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		var credResp openid4vci.CredentialResponse
+		require.NoError(t, json.Unmarshal(body, &credResp))
+		jws := strings.Split(credResp.Credentials[0].Credential, "~")[0]
+		payload, err := base64.RawURLEncoding.DecodeString(strings.Split(jws, ".")[1])
+		require.NoError(t, err)
+		var claims struct {
+			Cnf json.RawMessage `json:"cnf"`
+		}
+		require.NoError(t, json.Unmarshal(payload, &claims))
+		t.Fatalf("issued an SD-JWT with cnf %s", claims.Cnf)
+	}
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "%s", body)
+	assert.Contains(t, string(body), openid4vci.ErrInvalidProof, "%s", body)
 }
 
 // ---------- VP: Verifier Flow ----------
@@ -1063,7 +1120,7 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	require.NotEmpty(t, tokenResp.AccessToken)
 
 	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
-	credResp := doCredentialRequest(t, credEndpoint, tokenResp.AccessToken, tokenResp.CNonce,
+	credResp := doCredentialRequest(t, credEndpoint, issuerMeta.CredentialIssuer, tokenResp.AccessToken, tokenResp.CNonce,
 		"pid", signingKey)
 	require.NotEmpty(t, credResp.Credentials, "VCI must issue credential")
 	realCredential := credResp.Credentials[0].Credential
@@ -1327,10 +1384,17 @@ func doTokenRequest(t *testing.T, tokenEndpoint, code, codeVerifier string, sign
 	return tokenResp
 }
 
-func doCredentialRequest(t *testing.T, credEndpoint, accessToken, cNonce, credConfigID string, signingKey *ecdsa.PrivateKey) openid4vci.CredentialResponse {
+// doCredentialRequest posts a Credential Request.
+//
+// audience is the Credential Issuer Identifier, which is what the proof
+// JWT's aud has to be - a different value from credEndpoint, which is
+// where the request is posted. A separate parameter, and not derived
+// from credEndpoint, because deriving it is how this came to send the
+// endpoint in the first place.
+func doCredentialRequest(t *testing.T, credEndpoint, audience, accessToken, cNonce, credConfigID string, signingKey *ecdsa.PrivateKey) openid4vci.CredentialResponse {
 	t.Helper()
 
-	proofJWT := walletflow.ProofJWT(t, rewriteInternalToPublic(credEndpoint), cNonce, oauthClientID, signingKey)
+	proofJWT := walletflow.ProofJWT(t, audience, cNonce, oauthClientID, signingKey)
 
 	reqBody := map[string]any{
 		"credential_configuration_id": credConfigID,

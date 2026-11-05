@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -294,6 +295,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	document := &model.CompleteDocument{}
+	var openingSource map[string]any
 
 	// For child sessions created in the pre-auth multi-client flow, use the
 	// source session ID (the original pre-auth code) for document lookup.
@@ -336,6 +338,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 			return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 		}
 
+		// Before the derivations below replace the document: an opening
+		// reads the source's claims, not the credential's.
+		openingSource = openingSourceClaims(authContext, document)
+
 		// Apply the scope's configured derivations to the cached document.
 		// Presentation is handled above (its derivations run against
 		// VerifiedClaims, not against the assembled doc). Assertion sources
@@ -363,11 +369,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// output feeds the next, so a dependent derivation must
 				// read the verified value rather than one a previous step
 				// computed over it.
-				derived, err := credential.ApplyDerivationsPinned(derivs, docData, time.Now(), proved)
+				derived, replaced, err := credential.ApplyDerivationsReplacing(derivs, docData, time.Now(), proved)
 				if err != nil {
 					return nil, err
 				}
-				credential.MergeNestedClaims(docData, derived)
+				credential.MergeDerived(docData, derived, replaced)
 
 				// Reapplied last. The configuration says these claims come
 				// from the presentation, so they win - but a derivation
@@ -413,6 +419,9 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 	} else {
 		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "proof or proofs parameter is required"}
+	}
+	if err := c.requireAdvertisedProofType(scope, req.ProofType()); err != nil {
+		return nil, err
 	}
 
 	// Resolve the expected c_nonce: extract nonce from the proof and check if
@@ -520,7 +529,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	if err != nil {
 		return nil, err
 	}
-	derivations, sourceClaims := c.sourceDerivations(scope, authContext, document.DocumentData)
+	derivations, sourceClaims := c.sourceDerivations(scope, authContext, openingSource)
 	documentData, toWallet, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
 	if err != nil {
 		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)
@@ -849,6 +858,20 @@ func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cac
 	c.log.Debug("credential request selected a configuration other than the first authorized scope",
 		"configuration_id", configurationID, "first_authorized_scope", scope)
 	return configurationID, configurationID, format, nil
+}
+
+// requireAdvertisedProofType accepts a key proof of a type the credential
+// configuration lists in proof_types_supported (OpenID4VCI 1.0, Section
+// 12.2.4).
+func (c *Client) requireAdvertisedProofType(scope, proofType string) error {
+	advertised := c.issuerMetadata.CredentialConfigurationsSupported[scope].ProofTypesSupported
+	if _, ok := advertised[proofType]; ok {
+		return nil
+	}
+	return &openid4vci.Error{
+		Err:              openid4vci.ErrInvalidProof,
+		ErrorDescription: fmt.Sprintf("credential configuration %q takes key proofs of type %s", scope, strings.Join(slices.Sorted(maps.Keys(advertised)), ", ")),
+	}
 }
 
 // sameCredentialFormat reports whether two format identifiers name the same

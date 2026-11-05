@@ -175,7 +175,63 @@ func normaliseFullDate(v any) (string, error) {
 		// wallet happened to choose. One instant, one issued date.
 		return fullDate(d.UTC())
 	}
-	return "", fmt.Errorf("%q is neither a full-date nor a date-time", s)
+	return "", errors.New("a date claim is neither a full-date nor a date-time")
+}
+
+// epochTime returns the UTC instant a CBOR tag 1 carries, if v is one.
+// epochFullDate reads the same tag as a date; both use time.Unix in UTC,
+// so they agree on the day.
+func epochTime(v any) (time.Time, bool) {
+	tag, ok := v.(cbor.Tag)
+	if p, isPtr := v.(*cbor.Tag); isPtr {
+		if p == nil {
+			return time.Time{}, false
+		}
+		tag, ok = *p, true
+	}
+	if !ok || tag.Number != 1 {
+		return time.Time{}, false
+	}
+	switch n := tag.Content.(type) {
+	case uint64:
+		if n > math.MaxInt64 {
+			return time.Time{}, false
+		}
+		return time.Unix(int64(n), 0).UTC(), true
+	case int64:
+		return time.Unix(n, 0).UTC(), true
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return time.Time{}, false
+		}
+		seconds := math.Floor(n)
+		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
+			return time.Time{}, false
+		}
+		// The fraction is part of the instant, and dropping it moves the
+		// timestamp: 0.5 would store as ...00:00:00Z and -0.5 as
+		// 1969-12-31T23:59:59Z, each a verified value silently changed.
+		// Seconds FLOOR (epochFullDate's comment has why), so the
+		// remainder is always in [0,1) and the nanoseconds are positive
+		// for a negative epoch too.
+		//
+		// The nanoseconds floor as well, rather than round. Rounding can
+		// reach 1,000,000,000, which time.Unix carries into the NEXT
+		// second - so -1e-10, an instant a tenth of a nanosecond before
+		// the epoch, would become 1970-01-01T00:00:00Z while
+		// epochFullDate normalises the same value to 1969-12-31. Two
+		// paths, two dates, from one presented claim. Flooring keeps the
+		// instant inside the second it belongs to and keeps the two
+		// agreeing; sub-nanosecond precision is lost either way, and
+		// losing it downward is the only direction that cannot change
+		// the date.
+		nanos := int64(math.Floor((n - seconds) * float64(time.Second)))
+		if nanos > int64(time.Second)-1 {
+			nanos = int64(time.Second) - 1
+		}
+		return time.Unix(int64(seconds), nanos).UTC(), true
+	}
+	return time.Time{}, false
 }
 
 // epochFullDate converts a CBOR tag 1 epoch, refusing the values that
@@ -190,18 +246,18 @@ func epochFullDate(content any) (string, error) {
 	switch n := content.(type) {
 	case uint64:
 		if n > math.MaxInt64 {
-			return "", fmt.Errorf("epoch %d is beyond the representable range", n)
+			return "", errors.New("an epoch date claim is beyond the representable range")
 		}
 		return fullDate(time.Unix(int64(n), 0).UTC())
 	case int64:
 		return fullDate(time.Unix(n, 0).UTC())
 	case float64:
 		if math.IsNaN(n) || math.IsInf(n, 0) {
-			return "", fmt.Errorf("epoch %v is not a number", n)
+			return "", errors.New("an epoch date claim is not a finite number")
 		}
 		seconds := math.Floor(n)
 		if seconds > math.MaxInt64 || seconds < math.MinInt64 {
-			return "", fmt.Errorf("epoch %v is beyond the representable range", n)
+			return "", errors.New("an epoch date claim is beyond the representable range")
 		}
 		return fullDate(time.Unix(int64(seconds), 0).UTC())
 	}
@@ -218,7 +274,7 @@ func epochFullDate(content any) (string, error) {
 // and no verifier reading it gets the date the holder presented.
 func fullDate(t time.Time) (string, error) {
 	if year := t.Year(); year < 1 || year > 9999 {
-		return "", fmt.Errorf("year %d is outside the range an RFC 3339 full-date can express", year)
+		return "", errors.New("a date claim's year is outside the range an RFC 3339 full-date can express")
 	}
 	return t.Format(time.DateOnly), nil
 }
@@ -257,6 +313,12 @@ func documentValue(v any) (any, error) {
 	case cbor.Tag, *cbor.Tag:
 		if s, ok := claimString(typed); ok {
 			return s, nil
+		}
+		// normaliseFullDate also accepts a tag 1 epoch: store it as the
+		// timestamp string a time.Time becomes, which parses back to the
+		// same UTC date.
+		if t, ok := epochTime(typed); ok {
+			return jsonTimestamp(t)
 		}
 		return nil, fmt.Errorf("value of type %T is a CBOR tag this build cannot represent", v)
 
@@ -332,12 +394,12 @@ func documentValue(v any) (any, error) {
 
 	case int64:
 		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
-			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
+			return nil, errors.New("an integer claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 		}
 		return typed, nil
 	case uint64:
 		if typed > maxExactJSONInt {
-			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", typed)
+			return nil, errors.New("an integer claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 		}
 		return typed, nil
 
@@ -355,7 +417,7 @@ func documentValue(v any) (any, error) {
 			return nil, err
 		}
 		if typed > maxExactJSONInt || typed < -maxExactJSONInt {
-			return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", typed)
+			return nil, errors.New("a number claim beyond ±2^53 exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value")
 		}
 		return typed, nil
 
@@ -429,11 +491,11 @@ func bignumValue(n *big.Int) (any, error) {
 		return nil, errors.New("a claim value of nil *big.Int is not a number this document can carry")
 	}
 	if !n.IsInt64() {
-		return nil, fmt.Errorf("%s cannot be carried exactly through the issued document, where numbers are float64", n)
+		return nil, errors.New("a bignum claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 	}
 	v := n.Int64()
 	if v > maxExactJSONInt || v < -maxExactJSONInt {
-		return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", v)
+		return nil, errors.New("a bignum claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 	}
 	return v, nil
 }
@@ -443,19 +505,19 @@ func bignumValue(n *big.Int) (any, error) {
 func numberValue(n json.Number) (any, error) {
 	if i, err := n.Int64(); err == nil {
 		if i > maxExactJSONInt || i < -maxExactJSONInt {
-			return nil, fmt.Errorf("%d cannot be carried exactly through the issued document, where numbers are float64", i)
+			return nil, errors.New("an integer claim beyond ±2^53 cannot be carried exactly through the issued document, where numbers are float64")
 		}
 		return i, nil
 	}
 	f, err := n.Float64()
 	if err != nil {
-		return nil, fmt.Errorf("a claim value of %q is not a number this document can carry", n.String())
+		return nil, errors.New("a claim value that does not parse as a number cannot be carried in this document")
 	}
 	if err := refuseNonFinite(f); err != nil {
 		return nil, err
 	}
 	if f > maxExactJSONInt || f < -maxExactJSONInt {
-		return nil, fmt.Errorf("%v exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value", f)
+		return nil, errors.New("a number claim beyond ±2^53 exceeds the range a JSON number carries exactly, so it cannot be copied from the presentation without risking a changed value")
 	}
 	return f, nil
 }

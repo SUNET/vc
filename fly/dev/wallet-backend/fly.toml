@@ -2,7 +2,8 @@ app = "sunet-vc-wallet-backend"
 primary_region = "arn"
 
 [build]
-  image = "ghcr.io/sirosfoundation/go-wallet-backend:latest"
+  #image = "ghcr.io/sirosfoundation/go-wallet-backend:latest"
+  image = "docker.sunet.se/iam_vc/go-wallet-backend:latest"
 
 # engine role adds the WebSocket v2 flow orchestrator on port 8082, which the
 # wallet-frontend needs for OID4VP presentations; auth adds /auth/* AS routes.
@@ -31,7 +32,8 @@ primary_region = "arn"
   WALLET_LOGGING_FORMAT = "json"
   WALLET_AS_SIGNING_KEY_PATH = "/secrets/as_signing_key.pem"
   WALLET_AS_EXTERNAL_URL = "https://sunet-vc-wallet.fly.dev"
-  WALLET_AS_AUDIENCES = "wallet-backend"
+  # Legacy (HMAC) tokens use the RP ID as audience, so it must be listed.
+  WALLET_AS_AUDIENCES = "wallet-backend,sunet-vc-wallet.fly.dev"
   WALLET_AS_DEFAULT_MAX_TAC = "rwlid"
   # Advertised to the wallet-frontend via /status so it uses the WebSocket
   # transport (which populates dcqlQuery); Caddy routes /api/v2/* internally.

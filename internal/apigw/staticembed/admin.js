@@ -170,14 +170,18 @@ window.adminApp = function () {
             setTimeout(() => toast.remove(), 5000);
         },
 
-        /** Fetch wrapper that adds CSRF token header to mutating requests. */
-        apiFetch(url, opts = {}) {
+        /** Fetch wrapper that adds CSRF token header to mutating requests and shows the login screen on 401. */
+        async apiFetch(url, opts = {}) {
             opts.credentials = 'same-origin';
             const method = (opts.method || 'GET').toUpperCase();
             if (method !== 'GET' && method !== 'HEAD' && this.csrfToken) {
                 opts.headers = { ...opts.headers, 'X-CSRF-Token': this.csrfToken };
             }
-            return fetch(url, opts);
+            const resp = await fetch(url, opts);
+            if (resp.status === 401) {
+                this.authenticated = false;
+            }
+            return resp;
         },
 
         async init() {
@@ -226,7 +230,7 @@ window.adminApp = function () {
             if (v === 'commitments') this.clearCommitmentForm();
         },
 
-        /** Empty the commitment form for the selected entry: a list per hkdf part, a string per other part. */
+        /** Empty the commitment form for the selected entry: a list per part derived from identifiers, a string per other part. */
         clearCommitmentForm() {
             const entry = this.uniqueCommitmentEntries[this.hc.entry];
             this.hc.values = entry ? entry.key.map(part => part.inputs ? part.inputs.map(() => '') : '') : [];

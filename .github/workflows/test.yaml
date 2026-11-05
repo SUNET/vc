@@ -112,6 +112,16 @@ jobs:
           # targets, and both are cached on the resolved revision, so both
           # need resolving the same way. One step rather than two so the
           # ls-remote handling below exists once.
+          # The Makefile's own default, not a second copy of it. These
+          # refs are pinned there (ZK_CRED_LONGFELLOW_REF is a commit of
+          # the crate's nym_auth branch), and a cache key resolved from a
+          # hardcoded "main" would track a ref the build does not use:
+          # bumping the pin would leave the key unchanged and restore a
+          # stage built from the OLD pin. Same resolver as
+          # .github/workflows/docker-build-push.yml.
+          read_ref() {
+            sed -n "s/^$1[[:space:]]*?=[[:space:]]*//p" Makefile | head -n1
+          }
           resolve() {
             local name="$1" repo="$2" ref="$3" sha refs
             if printf '%s' "$ref" | grep -Eiq '^[0-9a-f]{40}$'; then
@@ -134,8 +144,13 @@ jobs:
             fi
             echo "$sha"
           }
-          echo "sha=$(resolve zk-cred-longfellow https://github.com/sirosfoundation/zk-cred-longfellow.git "${ZK_CRED_LONGFELLOW_REF:-main}")" >> "$GITHUB_OUTPUT"
-          echo "vega_sha=$(resolve zk-cred-vega https://github.com/sirosfoundation/zk-cred-vega.git "${ZK_CRED_VEGA_REF:-main}")" >> "$GITHUB_OUTPUT"
+          LONGFELLOW_REF=$(read_ref ZK_CRED_LONGFELLOW_REF)
+          VEGA_REF=$(read_ref ZK_CRED_VEGA_REF)
+          for pair in "ZK_CRED_LONGFELLOW_REF=$LONGFELLOW_REF" "ZK_CRED_VEGA_REF=$VEGA_REF"; do
+            case "$pair" in *=) echo "::error::could not read ${pair%=} default from Makefile"; exit 1 ;; esac
+          done
+          echo "sha=$(resolve zk-cred-longfellow https://github.com/sirosfoundation/zk-cred-longfellow.git "$LONGFELLOW_REF")" >> "$GITHUB_OUTPUT"
+          echo "vega_sha=$(resolve zk-cred-vega https://github.com/sirosfoundation/zk-cred-vega.git "$VEGA_REF")" >> "$GITHUB_OUTPUT"
 
       - name: Cache the built C ABI library
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

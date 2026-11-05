@@ -36,7 +36,8 @@ type ResetUniqueCommitmentRequest struct {
 }
 
 // KeyValue is the value of a key part: Value as the credential carries
-// it, or the Inputs a to_wallet part with an hkdf opening derives from.
+// it, or the Inputs a to_wallet part with an hkdf or hmac opening derives
+// from.
 type KeyValue struct {
 	Path   []string `json:"path" validate:"required,min=1"`
 	Value  *string  `json:"value,omitempty"`
@@ -139,7 +140,8 @@ func (c *Client) uniqueEntry(query *UniqueCommitmentQuery) (model.UniqueEntry, e
 }
 
 // keyHashes returns the record keys the values can name. A part derived
-// with hkdf gives one value per distinct opening of the source scopes.
+// with hkdf or hmac gives one value per distinct opening of the source
+// scopes.
 func (c *Client) keyHashes(scope string, entry model.UniqueEntry, values []KeyValue) ([][]byte, error) {
 	candidates := make([][]string, 0, len(entry.Key))
 	for i, part := range entry.Key {
@@ -170,11 +172,11 @@ func (c *Client) partTexts(scope string, part model.KeyPart, value KeyValue) ([]
 		return c.derivedTexts(scope, part, value.Inputs)
 	}
 	return nil, helpers.NewErrorDetailsWithStatus("invalid_key",
-		fmt.Sprintf("key part %q takes a value, or inputs where it is a to_wallet entry with an hkdf opening", part.Path), http.StatusBadRequest)
+		fmt.Sprintf("key part %q takes a value, or inputs where it is a to_wallet entry with an hkdf or hmac opening", part.Path), http.StatusBadRequest)
 }
 
 // derivedTexts derives a part's commitment from the identifiers with each
-// hkdf opening that takes their number.
+// hkdf or hmac opening that takes their number.
 func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs []string) ([]string, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	toWallet := entryLike(meta.AuxiliaryDataSupported().ToWallet,
@@ -188,7 +190,7 @@ func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs []string)
 	}
 	var texts []string
 	for _, opening := range part.Openings {
-		if len(opening.Inputs) != len(inputs) {
+		if len(opening.InputClaims()) != len(inputs) {
 			continue
 		}
 		text, err := derivedText(opening, *toWallet, carrier, inputs)
@@ -201,14 +203,14 @@ func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs []string)
 	}
 	if len(texts) == 0 {
 		return nil, helpers.NewErrorDetailsWithStatus("invalid_key",
-			fmt.Sprintf("no hkdf opening of key part %q takes %d inputs", part.Path, len(inputs)), http.StatusBadRequest)
+			fmt.Sprintf("no hkdf or hmac opening of key part %q takes %d inputs", part.Path, len(inputs)), http.StatusBadRequest)
 	}
 	return texts, nil
 }
 
-// derivedText is the commitment text an hkdf opening derives from inputs,
-// as the entry's claim carries it.
-func derivedText(opening *primitives.HKDFOpeningArgs, entry openid4vci.AuxiliaryDataEntry, carrier commitmentCarrier, inputs []string) (string, error) {
+// derivedText is the commitment text an hkdf or hmac opening derives from
+// inputs, as the entry's claim carries it.
+func derivedText(opening primitives.ValueOpener, entry openid4vci.AuxiliaryDataEntry, carrier commitmentCarrier, inputs []string) (string, error) {
 	raw, err := opening.OpenValues(inputs)
 	if errors.Is(err, primitives.ErrInvalidClaimInput) {
 		return "", helpers.NewErrorDetailsWithStatus("invalid_key", err.Error(), http.StatusBadRequest)
@@ -253,8 +255,8 @@ type ResettableKeyPart struct {
 	Path []string `json:"path"`
 	// Label names a part the operator enters as the credential carries it.
 	Label string `json:"label,omitempty"`
-	// Inputs name, in order, the identifiers a part derived with hkdf
-	// takes instead.
+	// Inputs name, in order, the identifiers a part derived with hkdf or
+	// hmac takes instead.
 	Inputs []string `json:"inputs,omitempty"`
 }
 
@@ -277,14 +279,14 @@ func ResettableEntries(cfg *model.Cfg, scopes []string) []ResettableEntry {
 	return entries
 }
 
-// resettableKeyPart labels a key part: by the inputs of its first hkdf
-// opening, or by its claim.
+// resettableKeyPart labels a key part: by the inputs of its first hkdf or
+// hmac opening, or by its claim.
 func resettableKeyPart(meta *model.CredentialMetadata, part model.KeyPart) ResettableKeyPart {
 	if len(part.Openings) == 0 {
 		return ResettableKeyPart{Path: part.Path, Label: claimName(meta, part.Path)}
 	}
-	inputs := make([]string, 0, len(part.Openings[0].Inputs))
-	for _, input := range part.Openings[0].Inputs {
+	inputs := make([]string, 0, len(part.Openings[0].InputClaims()))
+	for _, input := range part.Openings[0].InputClaims() {
 		inputs = append(inputs, humanize(input))
 	}
 	return ResettableKeyPart{Path: part.Path, Inputs: inputs}

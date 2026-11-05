@@ -69,6 +69,13 @@ func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path []string, encoding str
 	if claim.ValueType != want {
 		return fmt.Errorf("path %q is a %s element; a commitment in %s needs a %s element", path, claim.ValueType, held, want)
 	}
+	// The mdoc signer reads a document by element identifier alone, so a
+	// commitment would land in every namespace that declares it.
+	for namespace, elements := range mddl.Claims {
+		if _, ok := elements[path[1]]; ok && namespace != path[0] {
+			return fmt.Errorf("path %q: the MDDL also declares element %q in namespace %q, and the signer cannot tell them apart", path, path[1], namespace)
+		}
+	}
 	return nil
 }
 

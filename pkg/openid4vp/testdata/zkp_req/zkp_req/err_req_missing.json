@@ -1,0 +1,14 @@
+{
+  "description": "No req and no claims._req.",
+  "query": {
+    "id": "q",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    }
+  },
+  "expect": {
+    "error": "req_missing_or_empty"
+  }
+}

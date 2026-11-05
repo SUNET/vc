@@ -26,13 +26,32 @@ import (
 
 // sourceDerivations returns the derivations of the data source this
 // issuance uses, and the claims they read: the verified presented claims
-// for a presentation source, the document data otherwise.
-func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, document map[string]any) ([]primitives.Derivation, map[string]any) {
+// for a presentation source, source otherwise.
+func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, source map[string]any) ([]primitives.Derivation, map[string]any) {
 	if authContext.DataSource == string(model.DataSourcePresentation) {
 		accepted := c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[authContext.PresentedScope]
-		return accepted.Derivations, authContext.VerifiedClaims
+		return accepted.Derivations, storedClaims(authContext.VerifiedClaims)
 	}
-	return c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)), document
+	return c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)), source
+}
+
+// openingSourceClaims returns the claims an opening reads for a source other
+// than a presentation, as the source supplied them: a datastore or external
+// API document before its derivations run, and for an assertion the claims
+// the callback captured before it derived and filtered them. A document
+// cached without them gives its document data.
+func openingSourceClaims(authContext *cache.AuthorizationContext, document *model.CompleteDocument) map[string]any {
+	if authContext.DataSource == string(model.DataSourceAssertion) && len(document.OpeningClaims) > 0 {
+		return document.OpeningClaims
+	}
+	return document.DocumentData
+}
+
+// storedClaims is claims as plain maps and slices: a Mongo-backed store
+// returns nested objects as bson.D, which dotted claim paths cannot walk.
+func storedClaims(claims map[string]any) map[string]any {
+	normalised, _ := normalizeBSONValue(claims).(map[string]any)
+	return normalised
 }
 
 // applyAuxiliaryData writes the commitments of scope's auxiliary_data into
@@ -85,7 +104,7 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 		if err != nil {
 			return nil, err
 		}
-		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment); err != nil {
+		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment, false); err != nil {
 			return nil, err
 		}
 		delivered = append(delivered, openid4vci.AuxiliaryDataEntry{
@@ -185,7 +204,7 @@ func uniqueKeyHash(key [][]string, texts []string) ([]byte, error) {
 // writeCommitments writes each commitment the wallet sent at its path.
 func writeCommitments(doc *commitmentDocument, commitments []pathCommitment) error {
 	for _, commitment := range commitments {
-		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value); err != nil {
+		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value, true); err != nil {
 			return err
 		}
 	}
@@ -247,8 +266,11 @@ func newCommitmentDocument(format string, documentData []byte) (*commitmentDocum
 	return &commitmentDocument{commitmentCarrier: carrier, claims: claims}, nil
 }
 
-// setCommitment writes a commitment at path, in the entry's encoding.
-func (d *commitmentDocument) setCommitment(path []string, encoding string, commitment []byte) error {
+// setCommitment writes a commitment at path, in the entry's encoding. A
+// value already there is a server fault, unless the wallet sent the
+// commitment: then an equal value stands, and a different one is a
+// conflict the wallet can see.
+func (d *commitmentDocument) setCommitment(path []string, encoding string, commitment []byte, fromWallet bool) error {
 	text, err := d.claimText(encoding, commitment)
 	if err != nil {
 		return fmt.Errorf("path %q: %w", path, err)
@@ -258,7 +280,12 @@ func (d *commitmentDocument) setCommitment(path []string, encoding string, commi
 		return err
 	}
 	if existing, present := parent[key]; present && existing != nil {
-		return fmt.Errorf("the document data already carries a value at %q", path)
+		if !fromWallet {
+			return fmt.Errorf("the document data already carries a value at %q", path)
+		}
+		if existing != text {
+			return &openid4vci.Error{Err: openid4vci.ErrAuxiliaryDataConflict, ErrorDescription: fmt.Sprintf("auxiliary_data: the issuer holds a different commitment for %q", path)}
+		}
 	}
 	parent[key] = text
 	d.written = append(d.written, pathCommitment{path: path, encoding: encoding, value: commitment})
@@ -413,8 +440,6 @@ func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4v
 		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("to_issuer of this credential lists no entry for %q", entry.Path))
 	case entry.Alg != want.Alg:
 		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q must use alg %s", entry.Path, want.Alg))
-	case entry.Opening != "" || entry.Encoding != "" || entry.Required:
-		return pathCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %q carries only type, alg, path and commitment", entry.Path))
 	}
 	value, err := base64.RawURLEncoding.DecodeString(entry.Commitment)
 	if err != nil || len(value) != sha256.Size {

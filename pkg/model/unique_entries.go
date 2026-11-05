@@ -21,8 +21,8 @@ type KeyPart struct {
 	// Path is the claims path pointer of the claim.
 	Path []string
 	// Openings derive the claim from identifiers, one per source scope in
-	// which the claim is a to_wallet entry with an hkdf opening.
-	Openings []*primitives.HKDFOpeningArgs
+	// which the claim is a to_wallet entry with an hkdf or hmac opening.
+	Openings []primitives.ValueOpener
 }
 
 // UniqueEntries returns the unique entries of the credential scope: one per
@@ -42,8 +42,8 @@ func (ds *DataSources) UniqueEntries(scope string) []UniqueEntry {
 	return entries
 }
 
-// addUniqueEntry adds the unique entry hc configures, with the hkdf
-// openings of its key parts in derivations.
+// addUniqueEntry adds the unique entry hc configures, with the hkdf and
+// hmac openings of its key parts in derivations.
 func addUniqueEntry(entries []UniqueEntry, derivations []primitives.Derivation, hc *primitives.HashCommitmentArgs) []UniqueEntry {
 	i := slices.IndexFunc(entries, func(e UniqueEntry) bool {
 		return slices.Equal(e.Path, hc.Path) && slices.EqualFunc(e.Key, hc.Unique.Key, func(part KeyPart, path []string) bool {
@@ -58,8 +58,12 @@ func addUniqueEntry(entries []UniqueEntry, derivations []primitives.Derivation, 
 		entries, i = append(entries, entry), len(entries)
 	}
 	for k, part := range entries[i].Key {
-		if derived := primitives.HashCommitmentFor(derivations, part.Path); derived != nil && derived.Opening != nil && derived.Opening.HKDF != nil {
-			entries[i].Key[k].Openings = append(entries[i].Key[k].Openings, derived.Opening.HKDF)
+		derived := primitives.HashCommitmentFor(derivations, part.Path)
+		if derived == nil || derived.Opening == nil {
+			continue
+		}
+		if opening, keyed := derived.Opening.Keyed(); keyed {
+			entries[i].Key[k].Openings = append(entries[i].Key[k].Openings, opening)
 		}
 	}
 	return entries

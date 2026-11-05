@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // With nym_auth as the example: the issuer derives ssc's opening from the
@@ -117,9 +119,6 @@ func TestAuxiliaryData(t *testing.T) {
 		scope   string
 		entries []openid4vci.AuxiliaryDataEntry
 	}{
-		"the entry carries only type, alg, path and commitment": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
-			e.Encoding = "hex"
-		})},
 		"the commitment is a sha-256 hash": {"nym_auth", with(func(e *openid4vci.AuxiliaryDataEntry) {
 			e.Commitment = base64.RawURLEncoding.EncodeToString(walletPSC[:31])
 		})},
@@ -136,6 +135,16 @@ func TestAuxiliaryData(t *testing.T) {
 		assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err, rule)
 	}
 
+	// The issuer already holds a commitment at a to_issuer path: the same one
+	// stands, a different one is auxiliary_data_conflict.
+	stored := base64.StdEncoding.EncodeToString(walletPSC[:])
+	source := map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-200"}
+	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"`+stored+`"}`), fromWallet)
+	require.NoError(t, err, "the wallet sends the commitment the issuer holds")
+	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"AAAA"}`), fromWallet)
+	require.ErrorAs(t, err, &vciErr, "the wallet sends another commitment")
+	assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err)
+
 	proof := func(payload string) openid4vci.ProofJWTToken {
 		return openid4vci.ProofJWTToken("e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".c2ln")
 	}
@@ -144,6 +153,12 @@ func TestAuxiliaryData(t *testing.T) {
 		proof(`{}`),
 	}}})
 	require.ErrorAs(t, err, &vciErr, "key proofs that disagree are refused")
+	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
+
+	_, err = walletAuxiliaryData(&openid4vci.CredentialRequest{Proofs: &openid4vci.Proofs{JWT: []openid4vci.ProofJWTToken{
+		proof(`{"auxiliary_data":[{"type":"hash_commitment","alg":"sha-256","path":["eu.europa.ec.eudi.nym_auth.1","psc"],"commitment":"JhQM6yeuK84BoGVVSxbLL9HjjeiBERnWHEZSIIMqwd0","required":false}]}`),
+	}}})
+	require.ErrorAs(t, err, &vciErr, "an entry from the wallet carries only type, alg, path and commitment")
 	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
 
 	// One commitment per subject: the same person's new wallet is refused,
@@ -356,4 +371,111 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	assert.Equal(t, want, disclosed, "the holder can withhold each commitment")
 	assert.NotContains(t, payload["commitments"], "ssc")
 	assert.NotContains(t, payload["commitments"], "psc")
+}
+
+// Nested verified claims reload from a Mongo-backed store as bson.D and
+// bson.A, and a dotted opening input must still resolve in them.
+func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
+	stored, err := bson.Marshal(&cache.AuthorizationContext{
+		DataSource:     string(model.DataSourcePresentation),
+		PresentedScope: "pid",
+		VerifiedClaims: map[string]any{"subject": map[string]any{"pan": "pan-1", "list": []any{map[string]any{"a": "b"}}}},
+	})
+	require.NoError(t, err)
+	var authContext cache.AuthorizationContext
+	require.NoError(t, bson.Unmarshal(stored, &authContext))
+	require.IsType(t, bson.D{}, authContext.VerifiedClaims["subject"], "the premise: the store returns bson.D")
+
+	c := &Client{cfg: &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
+		Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{"pid": {}}}},
+	}}}}}
+
+	_, claims := c.sourceDerivations("nym_auth", &authContext, nil)
+	secret := []byte(strings.Repeat("s", 32))
+	secretPath := filepath.Join(t.TempDir(), "seed.key")
+	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
+	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"subject.pan"}, Bytes: 16}
+	hc := primitives.HashCommitmentArgs{Path: []string{"commitments", "ssc"}, Opening: &primitives.OpeningArgs{HKDF: &opening}}
+	_, err = hc.NewOpening(claims)
+	require.NoError(t, err, "subject.pan resolves in the normalised claims")
+	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
+}
+
+// An opening reads the claims its source supplied. For an assertion that is
+// what the callback captured, which the document filter may have dropped; for
+// the other sources it is the document before its derivations run.
+func TestOpeningSourceClaims(t *testing.T) {
+	document := &model.CompleteDocument{
+		DocumentData:  map[string]any{"given_name": "Alex"},
+		OpeningClaims: map[string]any{"personal_administrative_number": "pan-1"},
+	}
+	assertion := &cache.AuthorizationContext{DataSource: string(model.DataSourceAssertion)}
+	datastore := &cache.AuthorizationContext{DataSource: string(model.DataSourceDatastore)}
+
+	assert.Equal(t, document.OpeningClaims, openingSourceClaims(assertion, document), "the captured claims, not the filtered document")
+	assert.Equal(t, document.DocumentData, openingSourceClaims(datastore, document), "a datastore document is the source")
+	assert.Equal(t, document.DocumentData, openingSourceClaims(assertion, &model.CompleteDocument{DocumentData: document.DocumentData}),
+		"a document cached without captured claims gives its data")
+}
+
+// An opening that reads a claim the OIDC document filter drops still works,
+// because the callback captured the claim before the filter.
+func TestOIDCDocumentCarriesTheOpeningClaims(t *testing.T) {
+	c, _, _, _ := claimsTestClient(t)
+	cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), nil)
+	require.NoError(t, err)
+	cc.openingClaims = map[string]any{"sub": "opening-input"}
+
+	doc, err := c.buildOIDCDocument(cc, "https://issuer.example", true)
+	require.NoError(t, err)
+	assert.NotContains(t, doc.DocumentData, "sub", "the document filter drops the claim")
+	assert.Equal(t, map[string]any{"sub": "opening-input"}, doc.OpeningClaims)
+
+	encoded, err := json.Marshal(map[string]*model.CompleteDocument{"d": doc})
+	require.NoError(t, err)
+	var back map[string]*model.CompleteDocument
+	require.NoError(t, json.Unmarshal(encoded, &back))
+	assert.Equal(t, doc.OpeningClaims, back["d"].OpeningClaims, "the claims survive the JSON cache")
+}
+
+// A memory store hands every request the same claims, so normalising them
+// must not write into them.
+func TestStoredClaimsLeavesTheCachedClaimsUnchanged(t *testing.T) {
+	nested := map[string]any{"pan": "pan-1"}
+	items := []any{map[string]any{"a": "b"}}
+	cached := map[string]any{"subject": nested, "list": items}
+
+	normalised := storedClaims(cached)
+
+	assert.Equal(t, map[string]any{"subject": map[string]any{"pan": "pan-1"}, "list": []any{map[string]any{"a": "b"}}}, normalised)
+	normalised["subject"].(map[string]any)["pan"] = "changed"
+	normalised["list"].([]any)[0] = "changed"
+	assert.Equal(t, "pan-1", nested["pan"], "the cached object is not shared")
+	assert.IsType(t, map[string]any{}, items[0], "the cached array is not shared")
+}
+
+// A claim opening is the bytes the claim holds, and the credential carries
+// their SHA-256. The claim is base64url of the bytes 00 to 0f, whose
+// SHA-256 is from `openssl dgst -sha256`.
+func TestAuxiliaryDataClaimOpening(t *testing.T) {
+	ssc := []string{"commitments", "ssc"}
+	vctm := &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{{Path: []*string{&ssc[0], &ssc[1]}, SD: "always"}}}
+	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+		"example": {Format: "dc+sd-jwt", VCTM: vctm, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+			ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Encoding: "hex"}},
+		}},
+	}}}}
+	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+		Path:    ssc,
+		Opening: &primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: "nym_auth_opening"}},
+	}}}
+	const claim = "AAECAwQFBgcICQoLDA0ODw"
+
+	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations, map[string]any{"nym_auth_opening": claim}, []byte(`{}`), nil)
+	require.NoError(t, err)
+	require.Len(t, toWallet, 1)
+	assert.Equal(t, claim, toWallet[0].Opening, "the opening is the claim's bytes")
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+	assert.Equal(t, map[string]any{"ssc": "be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991"}, doc["commitments"])
 }

@@ -164,6 +164,13 @@ apigw:
           scopes:
             - "pid"
             - "diploma"
+    credential_offers:
+      # Must be byte-identical to apigw.public_url.
+      issuer_url: "http://apigw.vc.docker:8080"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
 
 # Common SAML Attribute OIDs Reference:
 # ------------------------------------------

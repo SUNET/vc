@@ -234,6 +234,42 @@ type AuthorizationContext struct {
 	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	// TransactionData holds the transaction_data entries exactly as sent in
+	// the request: base64url strings, in request order. OpenID4VP 1.0
+	// Appendix B hashes the string as received, so validation must use these
+	// bytes and never a re-encoding of a decoded object.
+	TransactionData []string `json:"transaction_data,omitempty" bson:"transaction_data,omitempty"`
+	// TransactionDataResponseModes are the response_mode values the request
+	// objects for this session were issued with. An EC TS12 KB-JWT echoes the
+	// response_mode of the request, so it is checked against what was issued
+	// at the time, not against whatever the receiving node is configured with
+	// now.
+	TransactionDataResponseModes []string `json:"transaction_data_response_modes,omitempty" bson:"transaction_data_response_modes,omitempty"`
+
+	// DCQLQueryExact carries the same query as JSON text, which is the
+	// only representation that keeps its numbers.
+	//
+	// BSON does not. The driver's json.Number encoder tries Int64 and
+	// then Float64, so a req param beyond either - a decimal past float64
+	// precision, an integer past int64 - is ROUNDED in the stored
+	// document, and the replica that reads it back sends a different
+	// request than the one that wrote it. A req param is an input to a
+	// proof, so that is two systems computing different pseudonyms from
+	// what reads as one configuration.
+	//
+	// Additive on purpose. Replacing dcql_query's representation would
+	// have broken a rolling upgrade in BOTH directions: a new replica
+	// cannot read an old document-valued query, and an old replica cannot
+	// read a new string-valued one, so a session bouncing between
+	// versions fails intermittently for as long as the rollout lasts.
+	// Written alongside and preferred on read, it is safe either way -
+	// an old replica ignores a field it does not model and keeps the
+	// behaviour it already had, and a new one gets the exact copy
+	// whenever there is one.
+	//
+	// Once every replica writes this, dcql_query can be dropped. That is
+	// a separate change, and it needs the rollout to have finished.
+	DCQLQueryExact string `json:"-" bson:"dcql_query_exact,omitempty"`
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//

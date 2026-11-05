@@ -1131,7 +1131,7 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 		},
 		{
 			file: "handlers_issuer.go", fn: "VCICredential",
-			calls: []string{"provedClaims", "restoreProvedClaims", "ApplyDerivationsPinned"},
+			calls: []string{"provedClaims", "restoreProvedClaims", "ApplyDerivationsReplacing", "openingSourceClaims"},
 		},
 	} {
 		t.Run(tc.fn, func(t *testing.T) {
@@ -1141,6 +1141,86 @@ func TestTheHandlersAreWiredToTheseHelpers(t *testing.T) {
 					"%s does not call %s: the helper's own tests would still pass, and a verified claim would reach the credential unpinned",
 					tc.fn, name)
 			}
+		})
+	}
+}
+
+// A tag 1 epoch may carry a fraction, and the fraction is part of the instant.
+// Flooring it to the second moves the timestamp - and the moved value is what
+// gets cached and copied into an issued document, as if the holder had proved
+// it. The direction differs by sign, which is why both are here: seconds
+// FLOOR (see epochFullDate), so a negative epoch's remainder is still
+// positive and -0.5 is 1969-12-31T23:59:59.5Z, not ...:59Z and not ...:58.5Z.
+func TestAFractionalEpochKeepsItsFraction(t *testing.T) {
+	for name, tc := range map[string]struct {
+		content any
+		want    string
+	}{
+		"half a second after the epoch":  {0.5, "1970-01-01T00:00:00.5Z"},
+		"half a second before it":        {-0.5, "1969-12-31T23:59:59.5Z"},
+		"a quarter second before it":     {-0.25, "1969-12-31T23:59:59.75Z"},
+		"a whole second, as a float":     {1.0, "1970-01-01T00:00:01Z"},
+		"a negative whole second":        {-1.0, "1969-12-31T23:59:59Z"},
+		"an integer epoch is unaffected": {int64(632361600), "1990-01-15T00:00:00Z"},
+		// A tenth of a nanosecond before the epoch. Rounding the fraction
+		// would reach 1,000,000,000ns and carry into the next second,
+		// landing on 1970-01-01 - a different DATE from the one
+		// epochFullDate gives the same value, copied into issuance.
+		"just before midnight, sub-nanosecond": {-1e-10, "1969-12-31T23:59:59.999999999Z"},
+		"the last nanosecond of 1969":          {-1e-9, "1969-12-31T23:59:59.999999999Z"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := documentValue(cbor.Tag{Number: 1, Content: tc.content})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// The invariant behind the flooring: for the same tag 1 value, the timestamp
+// path and the full-date path must name the same DAY. They are two readings of
+// one presented claim, and a verified birth date that depends on which target
+// the scope asked for is the bug this whole file exists to prevent.
+func TestATimestampAndAFullDateAgreeOnTheDay(t *testing.T) {
+	for _, epoch := range []float64{-1e-10, -1e-9, -0.5, -1, 0, 0.5, 632361600.25} {
+		date, err := normaliseFullDate(cbor.Tag{Number: 1, Content: epoch})
+		require.NoError(t, err)
+
+		stamp, err := documentValue(cbor.Tag{Number: 1, Content: epoch})
+		require.NoError(t, err)
+
+		text, ok := stamp.(string)
+		require.True(t, ok, "a timestamp claim is stored as text, got %T", stamp)
+		require.Equal(t, date, text[:len(date)],
+			"epoch %v dates to %s as a full-date but %s as a timestamp", epoch, date, text)
+	}
+}
+
+// The refusal reason reaches a log, so it must not carry the holder's claim
+// value: the value is exactly what this copy exists to keep out of places it
+// does not belong, and an identifier rejected for being too large is still an
+// identifier. What an operator needs is WHICH claim and WHY, and both survive
+// - documentObject names the member, and the reason names the constraint.
+func TestARefusedClaimDoesNotPutItsValueInTheError(t *testing.T) {
+	tooBig, ok := new(big.Int).SetString("18446744073709551617", 10)
+	require.True(t, ok)
+
+	for name, claim := range map[string]any{
+		"an int64 past 2^53":    int64(9007199254740993),
+		"a uint64 past 2^53":    uint64(9007199254740993),
+		"a float64 past 2^53":   float64(9007199254740994),
+		"a json.Number":         json.Number("9007199254740993"),
+		"an unparseable number": json.Number("9007199254740993x"),
+		"a bignum value":        *tooBig,
+		"a bignum pointer":      tooBig,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := documentObject(map[string]any{"identifier": claim})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "identifier",
+				"the operator still has to learn which claim was refused")
+			require.NotRegexp(t, `[0-9]{6,}`, err.Error(),
+				"no run of digits long enough to be the claim value, in any formatting of it: %s", err.Error())
 		})
 	}
 }

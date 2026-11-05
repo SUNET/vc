@@ -1,0 +1,34 @@
+{
+  "description": "Two pseudonym items.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "a",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 1,
+          "prf": "sha-256"
+        }
+      },
+      {
+        "fn_id": "pseudonym",
+        "return": "b",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 1,
+          "prf": "sha-256"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "pseudonym_repeated"
+  }
+}

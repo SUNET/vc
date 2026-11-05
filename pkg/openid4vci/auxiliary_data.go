@@ -151,6 +151,11 @@ func decodeWalletAuxiliaryData(claim json.RawMessage) ([]AuxiliaryDataEntry, err
 	return entries, nil
 }
 
+// walletAbsentMembers are the hash_commitment members an entry from the
+// Wallet must not carry, whatever their value: opening belongs to a
+// response, encoding and required to metadata.
+var walletAbsentMembers = []string{"opening", "encoding", "required"}
+
 // decodeWalletEntry decodes one entry the Wallet sent. recognized is false
 // for an entry of another type than hash_commitment.
 func decodeWalletEntry(item json.RawMessage) (entry AuxiliaryDataEntry, recognized bool, err error) {
@@ -162,6 +167,15 @@ func decodeWalletEntry(item json.RawMessage) (entry AuxiliaryDataEntry, recogniz
 	}
 	if head.Type != AuxiliaryDataTypeHashCommitment {
 		return AuxiliaryDataEntry{}, false, nil
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(item, &members); err != nil {
+		return AuxiliaryDataEntry{}, false, err
+	}
+	for _, name := range walletAbsentMembers {
+		if _, present := members[name]; present {
+			return AuxiliaryDataEntry{}, false, fmt.Errorf("an entry from the Wallet carries no %q", name)
+		}
 	}
 	if err := json.Unmarshal(item, &entry); err != nil {
 		return AuxiliaryDataEntry{}, false, err
