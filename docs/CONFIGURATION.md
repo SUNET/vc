@@ -2112,9 +2112,9 @@ could not produce the bad requests a negative test needs.
 
 > **Path:** `.verifier.combined_presentation.binding_attributes[]`
 
-| Field   | Type       | Description                                                         | Example                                                    | Default | Required |
-| ------- | ---------- | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
-| `paths` | `[]string` | Claim paths that must ALL match across credentials (AND semantics). | `["family_name", "birth_date", "place_of_birth.locality"]` | -       | Yes      |
+| Field   | Type                    | Description                                                                                                                                                                              | Example                                                             | Default | Required |
+| ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------- | -------- |
+| `paths` | `[]claims path pointer` | The claims path pointers of the claims that must ALL match across credentials (AND semantics). Each selects one claim of the verified claims of every credential, read as a JSON object. | `[["family_name"], ["birth_date"], ["place_of_birth", "locality"]]` | -       | Yes      |
 
 ### `revocation`
 

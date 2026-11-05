@@ -64,12 +64,13 @@ func UpgradeConfig(d *Document, shapes Shapes) error {
 
 // UpgradeShared rewrites the claim spellings outside apigw.data_sources,
 // which read no credential schema: the auth provider attribute mappings,
-// the verifier presets, and the auxiliary_data paths.
+// the verifier presets and binding attributes, and the auxiliary_data
+// paths.
 func UpgradeShared(d *Document) error {
 	if d.root == nil {
 		return nil
 	}
-	for _, upgrade := range []func() error{d.upgradeAuthProviders, d.upgradePresets, d.upgradeAuxiliaryData} {
+	for _, upgrade := range []func() error{d.upgradeAuthProviders, d.upgradePresets, d.upgradeBindingAttributes, d.upgradeAuxiliaryData} {
 		if err := upgrade(); err != nil {
 			return d.fail(err)
 		}
@@ -376,6 +377,36 @@ func (d *Document) presetScope(n ast.Node) error {
 				return err
 			}
 			if err := d.stringPath(path, key != "validations"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// upgradeBindingAttributes upgrades the paths of each binding attribute of
+// the verifier's combined presentation. Main split each on dots in the
+// verified claims of every credential.
+func (d *Document) upgradeBindingAttributes() error {
+	attributes, err := descend(d.root, "verifier", "combined_presentation", "binding_attributes")
+	if err != nil {
+		return err
+	}
+	list, err := items(attributes)
+	if err != nil {
+		return err
+	}
+	for _, attribute := range list {
+		paths, err := descend(attribute, "paths")
+		if err != nil {
+			return err
+		}
+		claims, err := items(paths)
+		if err != nil {
+			return err
+		}
+		for _, claim := range claims {
+			if _, _, err := d.pointer(claim, Nested().Dotted); err != nil {
 				return err
 			}
 		}

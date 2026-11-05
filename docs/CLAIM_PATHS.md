@@ -34,6 +34,7 @@ An mdoc claim is `[namespace, element]`, such as
 | `input` and `output` of each derivation primitive | pointer |
 | `hash_commitment.path`, the `inputs` of an `hkdf` or `hmac` opening, the `input` of a `claim` opening | pointer, list of pointers |
 | `verifier.presets.*.credentials.*.{claims,exclude_claims,validations}[].path` | pointer |
+| `verifier.combined_presentation.binding_attributes[].paths` | list of pointers, each selecting one claim of the verified claims of every credential |
 | `dcql.credentials[].claims[].path` of a presentation request template | pointer |
 | `claim_mappings` of a presentation request template | see below |
 | `identity_match.claims` of `POST /api/v1/issuance/prepare` | list of `{path, equals}` |
@@ -137,6 +138,7 @@ A dotted name reads as the role that holds it read it:
 | A claim of the issued document: the values of `document_claims`, the keys of `defaults`, derivation outputs, the derivation inputs of the other sources, an external API `attribute_mapping` | one key per segment | one key per segment; a first segment the MDDL declares as an element gains its namespace, the first in sorted order |
 | A derivation input that an earlier derivation of the list writes, or a claim beneath one | a claim of the issued document | a claim of the issued document |
 | An auth provider's `attribute_mapping` | one key per segment | |
+| A verifier `binding_attributes` path | one key per segment | one key per segment |
 
 An earlier `claim_mappings` map merges the claims of all presentations,
 a later presentation's claim replacing an earlier one, and reads each name

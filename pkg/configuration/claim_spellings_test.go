@@ -288,6 +288,31 @@ func TestDecodeReadsTheDocumentYAMLv2Reads(t *testing.T) {
 	}
 }
 
+// A binding attribute of the earlier release, a dotted name, reads as one
+// key per segment, as the verifier split it. A binding attribute that
+// selects every element of an array is refused.
+func TestBindingAttributesReadAsTheEarlierReleaseDid(t *testing.T) {
+	const binding = "verifier:\n  combined_presentation:\n    binding_attributes:\n      - paths: %s\n"
+	decode := func(paths string) (*model.Cfg, error) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(binding, paths)), 0o600))
+		cfg, err := DecodeFile(t.Context(), path, nil)
+		if err != nil {
+			return nil, err
+		}
+		return cfg, cfg.CheckClaimPaths()
+	}
+
+	cfg, err := decode("[family_name, place_of_birth.locality]")
+	require.NoError(t, err)
+	want := []claimpath.Pointer{claimpath.Keys("family_name"), claimpath.Keys("place_of_birth", "locality")}
+	assert.Equal(t, want, cfg.Verifier.CombinedPresentation.BindingAttributes[0].Paths)
+
+	_, err = decode("[[nationalities, null]]")
+	require.ErrorContains(t, err, "verifier.combined_presentation.binding_attributes[0].paths[0]: ")
+	require.ErrorContains(t, err, "selects every element of an array")
+}
+
 // A string where the earlier release read an array, such as a DCQL claims
 // path, reaches the strict decoder, which refuses it.
 func TestStringPointerRefusedWhereNoNameWasRead(t *testing.T) {

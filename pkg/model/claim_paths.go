@@ -20,8 +20,14 @@ import (
 //
 // A derivation reads its source data and writes the issued document; see
 // primitives.CheckDerivations. The credential metadata schemas must be
-// loaded.
+// loaded. Each binding attribute of the verifier's combined presentation
+// selects one claim.
 func (c *Cfg) CheckClaimPaths() error {
+	if c.Verifier != nil && c.Verifier.CombinedPresentation != nil {
+		if err := c.Verifier.CombinedPresentation.CheckPaths(); err != nil {
+			return fmt.Errorf("verifier.combined_presentation.%w", err)
+		}
+	}
 	if c.APIGW == nil {
 		return nil
 	}
