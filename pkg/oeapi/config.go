@@ -47,8 +47,8 @@ type AttributeMapping map[string]AttributeConfig
 // (canonicalisation, case folding, date reformatting) is expressed as
 // derivations on the target scope.
 type AttributeConfig struct {
-	// Claim is the target claim. A dotted string is read as a claim of
-	// the credential's document.
+	// Claim is the claims path pointer of the target claim in the
+	// credential's document.
 	Claim claimpath.Pointer `yaml:"claim" validate:"required"`
 
 	// Required indicates if this attribute must be present

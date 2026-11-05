@@ -424,7 +424,7 @@ Credential mappings define how OIDC claims are transformed into credential claim
 - **claim**: Target claim in the credential, as a claims path pointer (OpenID4VP 1.0 section 7)
   - Example: `[given_name]` for flat structure
   - Example: `[identity, given_name]` for nested structure
-  - A dotted string such as `"identity.given_name"` is read as one key per dot-separated segment
+  - The dotted string `"identity.given_name"` is a deprecated spelling of `[identity, given_name]`: see [Deprecated spellings](CLAIM_PATHS.md#deprecated-spellings)
 
 - **required**: Whether this claim must be present (boolean)
   - If `true` and claim is missing, authentication fails
