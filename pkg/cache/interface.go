@@ -58,6 +58,20 @@ type AuthContextStore interface {
 	// Update updates an existing authorization context.
 	Update(ctx context.Context, doc *AuthorizationContext) error
 
+	// SetDisplayPreferences writes only the session's display preferences,
+	// leaving every other field of the stored context as it is.
+	//
+	// Read-modify-write through Get + Update cannot be used for these: the
+	// preference request reads the whole context, the user may decline (or a
+	// presentation may complete) while the browser is deciding, and writing the
+	// read-back context then replaces the recorded outcome with the pending
+	// session it was read from. ClaimOutcome exists so the first outcome wins;
+	// this is what keeps a preference from being the second.
+	//
+	// walletFollowsRedirect is left alone when nil. A session that is gone is
+	// ErrNoDocuments.
+	SetDisplayPreferences(ctx context.Context, sessionID string, showCredentialDetails bool, walletFollowsRedirect *bool) error
+
 	// Delete removes an authorization context by session ID.
 	Delete(ctx context.Context, id string) error
 

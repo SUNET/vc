@@ -885,6 +885,34 @@ func (c *MemoryStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContex
 	return true, nil
 }
 
+// SetDisplayPreferences writes only the display preferences, on the stored
+// document, under the lock. See AuthContextStore.SetDisplayPreferences.
+//
+// The stored pointer is re-read here rather than taken from the caller:
+// ClaimOutcome replaces it with the copy that carries the outcome, so a caller
+// holding the pointer it read earlier would be writing into a document the
+// store has already discarded - and persisting that one back is exactly how the
+// outcome was being lost.
+func (c *MemoryStore) SetDisplayPreferences(_ context.Context, sessionID string, showCredentialDetails bool, walletFollowsRedirect *bool) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+	doc := item.Value()
+	doc.ShowCredentialDetails = showCredentialDetails
+	if walletFollowsRedirect != nil {
+		doc.WalletFollowsRedirect = *walletFollowsRedirect
+	}
+	return nil
+}
+
 // ClaimIssuerState atomically replaces the issuer-initiated handle with the
 // exchange that claims it. See AuthContextStore.ClaimIssuerState.
 //
