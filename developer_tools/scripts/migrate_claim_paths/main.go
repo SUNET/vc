@@ -8,10 +8,10 @@
 // as written, because the keyed form would map other claims, and a line
 // per file it rewrites. A second run changes nothing.
 //
-// It leaves a file as written, and prints a line, when a YAML alias, merge
-// key or repeated key reads a claim spelling that a rewrite in place would
-// miss or give another meaning. The warnings at load name each spelling of
-// such a file.
+// It leaves a file with a YAML alias, merge key or repeated key as written,
+// and prints a line, when an alias stands where it reads claims, or when a
+// rewrite in place would change what the file loads. The warnings at load
+// name each spelling of such a file.
 //
 // A configuration names its credential schemas by deployment paths, such
 // as /metadata/pid_mdoc.mdoc.json. -schemas maps such a prefix to a local

@@ -118,6 +118,7 @@ func TestMigrateRewritesAFileWithAliasesWhenItKeepsItsMeaning(t *testing.T) {
 	const mapping = "apigw:\n  auth_providers:\n    oidc:\n      attribute_mapping:\n        birthdate:\n          claim: %s\n"
 	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - id: age\n          format: dc+sd-jwt\n%s          claims:\n            - path: [age_over_18]\n    claim_mappings:\n%s"
 	const meta = "x-meta: &meta\n  vct_values: [urn:credential:age:1]\n"
+	const mdoc = "templates:\n  - id: mdl\n    oidc_scopes: [mdl]\n    dcql:\n      credentials:\n        - <<: {format: mso_mdoc}\n          id: mdl\n          meta:\n            doctype_value: org.iso.18013.5.1.mDL\n          claims:\n            - path: [org.iso.18013.5.1, family_name]\n    claim_mappings:\n%s"
 	tests := []struct {
 		name, file string
 		// want is the file once converted, and empty when the converter
@@ -141,6 +142,11 @@ func TestMigrateRewritesAFileWithAliasesWhenItKeepsItsMeaning(t *testing.T) {
 		{
 			name: "a template whose alias reads a claim the keyed form drops",
 			file: fmt.Sprintf(template, "", "      age_over_18: &claim age_over_18\n    description: *claim\n"),
+		},
+		{
+			name: "a template whose credential query takes its format from a merge key",
+			file: fmt.Sprintf(mdoc, "      family_name: family_name\n"),
+			want: fmt.Sprintf(mdoc, "      mdl:\n        - {path: [org.iso.18013.5.1, family_name], claim: family_name}\n"),
 		},
 	}
 	for _, tt := range tests {

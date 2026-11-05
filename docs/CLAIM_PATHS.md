@@ -181,6 +181,6 @@ It leaves any other map as written and prints why. Such a map keeps loading
 with its warning.
 
 It leaves a file with a YAML alias, merge key or repeated key as written,
-and prints a line, when a rewrite in place would miss a spelling the alias
-reads or change what the alias reads. Rewrite by hand the spellings its
-warnings at load name.
+and prints a line, when an alias stands where it reads claims, or when a
+rewrite in place would change what the file loads. Rewrite by hand the
+spellings its warnings at load name.
