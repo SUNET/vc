@@ -175,21 +175,35 @@ func TestJSONLDContextSourcesAreValidated(t *testing.T) {
 		}}
 	}
 
+	// Each source is built INSIDE its subtest. Built in the table literal,
+	// the permission case's helper ran before any t.Run - and its
+	// root-user t.Skip then skipped the whole of this test, taking the
+	// missing-file, directory, both-set and apigw cases with it.
 	for _, tc := range []struct {
 		name   string
-		source model.JSONLDContextSource
+		source func(t *testing.T) model.JSONLDContextSource
 		want   string
 	}{
-		{"neither file nor url", model.JSONLDContextSource{}, "set either file or url"},
-		{"both file and url", model.JSONLDContextSource{File: path, URL: "https://m.example.org/x"}, "set one"},
-		{"a file that is not there", model.JSONLDContextSource{File: filepath.Join(t.TempDir(), "absent")}, "cannot be read"},
+		{"neither file nor url", func(*testing.T) model.JSONLDContextSource {
+			return model.JSONLDContextSource{}
+		}, "set either file or url"},
+		{"both file and url", func(*testing.T) model.JSONLDContextSource {
+			return model.JSONLDContextSource{File: path, URL: "https://m.example.org/x"}
+		}, "set one"},
+		{"a file that is not there", func(t *testing.T) model.JSONLDContextSource {
+			return model.JSONLDContextSource{File: filepath.Join(t.TempDir(), "absent")}
+		}, "cannot be read"},
 		// os.Stat would pass both of these, and the failure would then
 		// land on the first credential that needed the context.
-		{"a directory", model.JSONLDContextSource{File: t.TempDir()}, "is a directory"},
-		{"a file this process cannot open", model.JSONLDContextSource{File: unreadableFile(t)}, "cannot be read"},
+		{"a directory", func(t *testing.T) model.JSONLDContextSource {
+			return model.JSONLDContextSource{File: t.TempDir()}
+		}, "is a directory"},
+		{"a file this process cannot open", func(t *testing.T) model.JSONLDContextSource {
+			return model.JSONLDContextSource{File: unreadableFile(t)}
+		}, "cannot be read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkJSONLDContextSources(cfgWithSource(tc.source))
+			err := checkJSONLDContextSources(cfgWithSource(tc.source(t)))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 			assert.Contains(t, err.Error(), "common.jsonld_contexts.sources",
@@ -258,4 +272,62 @@ func TestRefreshIntervalCanBeTurnedOff(t *testing.T) {
 		cfg.Common.JSONLDContexts.RefreshInterval = &zero
 		assert.Zero(t, pinnerOptions(cfg, "verifier", logger.NewSimple("test")).RefreshInterval)
 	})
+}
+
+// ExpandTypes always prepends the VC 2.0 base context, and an operator may
+// configure their own copy of THAT. Installing the source evicts the
+// embedded document - which is pinned with no expiry - so unless the base
+// context joins the pinned set it would be loaded lazily on the ordinary
+// one-hour TTL, outside the pin and refresh policy every other context
+// obeys, free to expire or change while readiness still passes.
+func TestAConfiguredBaseContextIsPinnedToo(t *testing.T) {
+	log := logger.NewSimple("test")
+
+	basePath := filepath.Join(t.TempDir(), "vc-v2.jsonld")
+	require.NoError(t, os.WriteFile(basePath,
+		[]byte(`{"@context":{"VerifiableCredential":"https://www.w3.org/2018/credentials#VerifiableCredential"}}`), 0o600))
+
+	t.Run("it is pinned when a source is configured for it", func(t *testing.T) {
+		cfg := &model.Cfg{Common: &model.Common{
+			JSONLDContexts: model.JSONLDContexts{
+				Sources: map[string]model.JSONLDContextSource{credential.ContextV2: {File: basePath}},
+			},
+		}}
+		require.NoError(t, resolveW3CContexts(context.Background(), cfg, "verifier", log))
+
+		pinner := takePinner(t)
+		assert.NoError(t, pinner.HealthProbe(context.Background()))
+		assert.True(t, contextIsPinned(t, credential.ContextV2),
+			"the operator's copy of the base context must be pinned, not left on the ordinary TTL")
+	})
+
+	t.Run("an unreadable one fails the boot under required", func(t *testing.T) {
+		cfg := &model.Cfg{Common: &model.Common{
+			JSONLDContexts: model.JSONLDContexts{
+				StartupPolicy: model.JSONLDContextRequired,
+				Sources: map[string]model.JSONLDContextSource{
+					credential.ContextV2: {File: filepath.Join(t.TempDir(), "absent.jsonld")},
+				},
+			},
+		}}
+		err := resolveW3CContexts(context.Background(), cfg, "verifier", log)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "common.jsonld_contexts.sources")
+	})
+
+	t.Run("nothing is added when no source names it", func(t *testing.T) {
+		require.NoError(t, resolveW3CContexts(context.Background(), &model.Cfg{Common: &model.Common{}}, "verifier", log))
+		pinner := takePinner(t)
+		assert.Empty(t, pinner.Pending())
+	})
+}
+
+// contextIsPinned reports whether the global loader holds this URL with no
+// expiry, which is what pinning means.
+func contextIsPinned(t *testing.T, url string) bool {
+	t.Helper()
+	doc, err := credential.GetGlobalLoader().LoadDocument(url)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	return credential.GetGlobalLoader().IsPinned(url)
 }

@@ -499,3 +499,84 @@ func TestPinnerBootRetryRereadsTheSource(t *testing.T) {
 	assert.NoError(t, p.Pin(context.Background(), []PinGroup{scopeGroup(root)}),
 		"the second attempt has to re-read the root, not the copy the first attempt cached")
 }
+
+// Closures overlap. One scope's root can reference a context another scope
+// also uses, and a refresh replaces every document it reaches - so a group
+// that was verified against the previous copy of a shared context would
+// otherwise keep that verdict, indefinitely when refreshing is off.
+func TestPinnerRecheckesOtherGroupsWhenASharedContextChanges(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	clock := newTestClock()
+	dir := t.TempDir()
+	const shared = "https://ctx.invalid/shared.jsonld"
+	const bRoot = "https://ctx.invalid/b-root.jsonld"
+	sharedPath := writeContext(t, dir, "shared.jsonld", `{"@context":{"S":"https://example.org/S"}}`)
+	bRootPath := filepath.Join(dir, "b-root.jsonld")
+	loader.SetContextSources(map[string]ContextSource{
+		shared: {File: sharedPath},
+		bRoot:  {File: bRootPath},
+	})
+
+	aVerified := 0
+	groupA := scopeGroup(shared)
+	groupA.Name = "common.credential_metadata.a"
+	groupA.Verify = func() error { aVerified++; return nil }
+
+	groupB := scopeGroup(bRoot)
+	groupB.Name = "common.credential_metadata.b"
+	groupB.Verify = func() error { return nil }
+
+	// Refreshing OFF, which is the case where a stale verdict would never
+	// be corrected by anything else.
+	p := newTestPinner(t, loader, clock, PinnerOptions{Policy: PolicyBestEffort})
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{groupA, groupB}))
+	require.Equal(t, 1, aVerified, "precondition: A verified against the shared context")
+
+	// B's root turns up, and references the context A was verified
+	// against - which B's retry re-fetches, replacing A's copy.
+	require.NoError(t, os.WriteFile(bRootPath,
+		[]byte(`{"@context":["`+shared+`",{"B":"https://example.org/B"}]}`), 0o600))
+	require.NoError(t, os.WriteFile(sharedPath, []byte(`{"@context":{"S":"https://example.org/S2"}}`), 0o600))
+	clock.advance(time.Hour)
+	p.tick(context.Background())
+
+	assert.Equal(t, "https://example.org/S2", termIRI(t, loader, shared, "S"),
+		"precondition: B's retry did replace the shared document")
+	assert.Equal(t, 2, aVerified,
+		"A has to be re-checked against the context that was swapped under it")
+}
+
+// pinContext caches each document BEFORE walking its references, so a
+// refresh that fails on a reference has already replaced the documents
+// above it. Treating that as "nothing changed" leaves the group's verdict
+// describing documents the cache no longer holds.
+func TestPinnerFailedRefreshThatStillReplacedDocumentsRechecks(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	clock := newTestClock()
+	dir := t.TempDir()
+	const root = "https://ctx.invalid/writes-then-fails.jsonld"
+	const leaf = "https://ctx.invalid/writes-then-fails-leaf.jsonld"
+	rootPath := writeContext(t, dir, "root.jsonld", `{"@context":{"Root":"https://example.org/Root"}}`)
+	loader.SetContextSources(map[string]ContextSource{
+		root: {File: rootPath},
+		leaf: {File: filepath.Join(dir, "never-written.jsonld")},
+	})
+
+	verified := 0
+	group := scopeGroup(root)
+	group.Verify = func() error { verified++; return nil }
+
+	p := newTestPinner(t, loader, clock, PinnerOptions{Policy: PolicyRequired, RefreshInterval: time.Hour})
+	require.NoError(t, p.Pin(context.Background(), []PinGroup{group}))
+	require.Equal(t, 1, verified)
+
+	// The root now references a context that cannot be loaded. The
+	// refresh replaces the root and then fails on the reference.
+	require.NoError(t, os.WriteFile(rootPath,
+		[]byte(`{"@context":["`+leaf+`",{"Root":"https://example.org/Root"}]}`), 0o600))
+	clock.advance(2 * time.Hour)
+	p.tick(context.Background())
+
+	assert.Equal(t, 2, verified,
+		"the root was replaced before the reference failed, so the group has to be re-checked")
+}

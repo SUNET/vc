@@ -26,7 +26,8 @@ import (
 // pinned here. The fetch still goes through LoadDocument, so scheme and
 // address policy apply to it.
 func (l *CachingDocumentLoader) PinRemoteContext(url string) error {
-	return l.pinContext(url, make(map[string]bool), 0, false)
+	_, err := l.pinContext(url, make(map[string]bool), 0, false)
+	return err
 }
 
 // RefreshRemoteContext pins a context again, ignoring what is already
@@ -41,7 +42,13 @@ func (l *CachingDocumentLoader) PinRemoteContext(url string) error {
 // refresh that dies partway leaves every document either refreshed or as it
 // was, never empty - the service keeps running on what it validated at
 // boot.
-func (l *CachingDocumentLoader) RefreshRemoteContext(url string) error {
+// It reports whether it WROTE anything, which a failure does not settle:
+// pinContext caches each document before walking that document's
+// references, so a refresh that dies on a reference has already replaced
+// the documents above it. A caller that treated a failed refresh as "no
+// change" would keep serving a verdict earned against documents that are
+// no longer the ones in the cache.
+func (l *CachingDocumentLoader) RefreshRemoteContext(url string) (bool, error) {
 	return l.pinContext(url, make(map[string]bool), 0, true)
 }
 
@@ -90,30 +97,33 @@ const (
 // because it has gone, despite the configuration having been "pinned" at
 // startup. The point of pinning is that what was validated at boot is what
 // gets used, and that only holds if it covers the whole closure.
-func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, depth int, refresh bool) error {
+func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, depth int, refresh bool) (bool, error) {
 	if url == "" || seen[url] {
-		return nil
+		return false, nil
 	}
 	if depth > maxPinDepth {
-		return fmt.Errorf("context %q nests deeper than %d levels", url, maxPinDepth)
+		return false, fmt.Errorf("context %q nests deeper than %d levels", url, maxPinDepth)
 	}
 	// Counted across the WHOLE closure, not per level: seen holds every
 	// distinct URL this pin has reached, so its size is the crawl so far.
 	if len(seen) >= maxPinnedContexts {
-		return fmt.Errorf("pinning reaches more than %d contexts, refusing to fetch %q", maxPinnedContexts, url)
+		return false, fmt.Errorf("pinning reaches more than %d contexts, refusing to fetch %q", maxPinnedContexts, url)
 	}
 	seen[url] = true
 
 	doc, err := l.loadForPin(url, refresh)
 	if err != nil {
-		return err
+		return false, err
 	}
 	l.cache.Set(url, doc, ttlcache.NoTTL)
+	wrote := true
 
 	// The processor will ask for this one by name during expansion.
 	if doc.ContextURL != "" && doc.ContextURL != url {
-		if err := l.pinContext(doc.ContextURL, seen, depth+1, refresh); err != nil {
-			return fmt.Errorf("context %q links to %q: %w", url, doc.ContextURL, err)
+		linkWrote, err := l.pinContext(doc.ContextURL, seen, depth+1, refresh)
+		wrote = wrote || linkWrote
+		if err != nil {
+			return wrote, fmt.Errorf("context %q links to %q: %w", url, doc.ContextURL, err)
 		}
 	}
 
@@ -124,19 +134,21 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 		base = url
 	}
 	references, unsupported := referencedContexts(doc.Document, base)
-	if len(unsupported) > 0 {
+	if len(unsupported) > 0 { //nolint:nestif // one guard, not nesting
 		// Refused here rather than left for issuance. A pinned closure that
 		// silently excludes a reference is the failure this whole function
 		// exists to prevent - startup reports the context pinned and the
 		// first credential to need that reference fails to sign.
-		return fmt.Errorf("context %q references %q, which is not an http(s) URL and cannot be pinned", url, unsupported[0])
+		return wrote, fmt.Errorf("context %q references %q, which is not an http(s) URL and cannot be pinned", url, unsupported[0])
 	}
 	for _, ref := range references {
-		if err := l.pinContext(ref, seen, depth+1, refresh); err != nil {
-			return fmt.Errorf("context %q references %q: %w", url, ref, err)
+		refWrote, err := l.pinContext(ref, seen, depth+1, refresh)
+		wrote = wrote || refWrote
+		if err != nil {
+			return wrote, fmt.Errorf("context %q references %q: %w", url, ref, err)
 		}
 	}
-	return nil
+	return wrote, nil
 }
 
 // referencedContexts collects the context URLs a loaded document refers to by

@@ -283,13 +283,25 @@ func (p *Pinner) attempt(state *pinGroupState, refresh bool) error {
 
 	remaining := make([]string, 0, len(pending))
 	var problems []error
+	wrote := false
 	for _, url := range pending {
-		if err := p.pin(url, refresh); err != nil {
+		urlWrote, err := p.pin(url, refresh)
+		wrote = wrote || urlWrote
+		if err != nil {
 			remaining = append(remaining, url)
 			problems = append(problems, p.describe(state.group, url, err))
 			continue
 		}
 		p.log.Info("pinned JSON-LD context", "config", state.group.Name, "url", url)
+	}
+
+	// Pinning walks a closure, and closures overlap: one scope's root can
+	// reference a context another scope also uses, and a refresh replaces
+	// every document it reaches. A group that was verified against the
+	// previous copy of a shared context would otherwise keep that verdict
+	// for as long as refreshing is off - which it can be.
+	if wrote {
+		defer p.recheckOtherGroups(state)
 	}
 
 	p.mu.Lock()
@@ -330,11 +342,13 @@ func (p *Pinner) runVerify(state *pinGroupState) error {
 }
 
 // pin acquires one context document and its closure.
-func (p *Pinner) pin(url string, refresh bool) error {
+// It reports whether the cache was written, which a returned error does
+// not settle: pinning stores each document before walking its references.
+func (p *Pinner) pin(url string, refresh bool) (bool, error) {
 	if refresh {
 		return p.loader.RefreshRemoteContext(url)
 	}
-	return p.loader.PinRemoteContext(url)
+	return false, p.loader.PinRemoteContext(url)
 }
 
 // describe renders a pin failure in the operator's own vocabulary: the
@@ -519,11 +533,17 @@ func (p *Pinner) refreshAll(_ context.Context) {
 		var problems []error
 		replaced := false
 		for _, url := range state.group.URLs {
-			if err := p.pin(url, true); err != nil {
+			// The write flag is taken whatever the outcome: a refresh
+			// that fails on a reference has ALREADY replaced the
+			// documents above it, so treating a failed refresh as "no
+			// change" would leave the group's verdict describing
+			// documents the cache no longer holds.
+			urlReplaced, err := p.pin(url, true)
+			replaced = replaced || urlReplaced
+			if err != nil {
 				problems = append(problems, p.describe(state.group, url, err))
 				continue
 			}
-			replaced = true
 		}
 
 		if len(problems) > 0 {
@@ -544,6 +564,37 @@ func (p *Pinner) refreshAll(_ context.Context) {
 		// the verdict earned by a set that is no longer the set in use.
 		if replaced {
 			p.reportVerify(state)
+			p.recheckOtherGroups(state)
+		}
+	}
+}
+
+// recheckOtherGroups re-runs the deferred check of every OTHER group whose
+// contexts are all pinned, after documents have been replaced.
+//
+// Conservative on purpose: it re-checks every fully pinned group rather
+// than working out which closures overlapped. Expansion is cheap, the
+// groups are a handful of scopes, and this runs at most once per refresh
+// or retry - whereas getting an overlap calculation subtly wrong leaves a
+// scope reporting ready against a context it was never checked against.
+func (p *Pinner) recheckOtherGroups(changed *pinGroupState) {
+	p.mu.Lock()
+	groups := slices.Clone(p.groups)
+	p.mu.Unlock()
+
+	for _, state := range groups {
+		if state == changed || state.group.Verify == nil {
+			continue
+		}
+		p.mu.Lock()
+		pending := len(state.pending)
+		p.mu.Unlock()
+		if pending > 0 {
+			continue
+		}
+		if err := p.runVerify(state); err != nil {
+			p.log.Error(err, "a shared JSON-LD context changed and this scope no longer checks out",
+				"config", state.group.Name)
 		}
 	}
 }

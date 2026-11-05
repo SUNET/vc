@@ -428,6 +428,14 @@ func (l *CachingDocumentLoader) preloadContexts() {
 	}
 }
 
+// IsPinned reports whether this URL is held with no expiry, which is what
+// pinning means: the document that was validated is the one that will be
+// used, rather than one re-fetched when a TTL lapses.
+func (l *CachingDocumentLoader) IsPinned(url string) bool {
+	item := l.cache.Get(url)
+	return item != nil && item.ExpiresAt().IsZero()
+}
+
 // AddContext adds a context to the cache manually
 func (l *CachingDocumentLoader) AddContext(url string, content string) {
 	var doc any

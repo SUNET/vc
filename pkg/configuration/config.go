@@ -984,6 +984,22 @@ func resolveW3CContexts(ctx context.Context, cfg *model.Cfg, serviceName string,
 		}
 	}
 
+	// ExpandTypes always prepends the VC 2.0 base context, and an
+	// operator may configure a copy of THAT. Installing the source evicts
+	// the embedded document, which is pinned with no expiry, so without
+	// this the override would be loaded lazily on the ordinary one-hour
+	// TTL - outside the pin and refresh policy that every other context
+	// here obeys, and free to expire or change while readiness still
+	// passes. Added only when a source is configured for it; otherwise
+	// the embedded copy is already pinned and there is nothing to do.
+	if hasContextSource(cfg, credential.ContextV2) {
+		groups = append(groups, credential.PinGroup{
+			Name:        "common.jsonld_contexts.sources",
+			URLs:        []string{credential.ContextV2},
+			Consequence: "so no W3C credential of any scope can be processed",
+		})
+	}
+
 	pinner := credential.NewPinner(loader, pinnerOptions(cfg, serviceName, log))
 	if err := pinner.Pin(ctx, groups); err != nil {
 		return err
@@ -1005,6 +1021,16 @@ func contextConsequence(serviceName string) string {
 		return "so credentials of this type cannot be signed"
 	}
 	return "so presentations of this credential type cannot be verified"
+}
+
+// hasContextSource reports whether the operator configured their own copy
+// of one particular context.
+func hasContextSource(cfg *model.Cfg, url string) bool {
+	if cfg.Common == nil {
+		return false
+	}
+	_, ok := cfg.Common.JSONLDContexts.Sources[url]
+	return ok
 }
 
 // contextSources converts the operator's configured copies into the form
