@@ -484,7 +484,7 @@ func (rc *RDFCredential) ToCompactJSON() ([]byte, error) {
 
 	// Fallback to W3C VC v2 context
 	context := map[string]any{
-		"@context": []any{
+		jsonLDContextKey: []any{
 			"https://www.w3.org/ns/credentials/v2",
 		},
 	}
@@ -526,7 +526,7 @@ func (rc *RDFCredential) Context() (any, error) {
 	if err := json.Unmarshal([]byte(rc.originalJSON), &doc); err != nil {
 		return nil, err
 	}
-	return doc["@context"], nil
+	return doc[jsonLDContextKey], nil
 }
 
 // NQuads returns the N-Quads representation without normalization
@@ -644,32 +644,9 @@ func wrapEmbeddedCredentialsInGraphs(node any) bool {
 	changed := false
 	switch n := node.(type) {
 	case map[string]any:
-		for term, graphContainer := range verifiableCredentialTerms {
-			value, ok := n[term]
-			if !ok {
-				continue
-			}
-			switch v := value.(type) {
-			case map[string]any:
-				if wrapped, did := graphWrap(v, graphContainer); did {
-					n[term] = wrapped
-					changed = true
-				}
-			case []any:
-				for i, item := range v {
-					itemMap, ok := item.(map[string]any)
-					if !ok {
-						continue
-					}
-					if wrapped, did := graphWrap(itemMap, graphContainer); did {
-						v[i] = wrapped
-						changed = true
-					}
-				}
-			}
-		}
+		changed = wrapCredentialTerms(n)
 		for key, child := range n {
-			if key == "@context" {
+			if key == jsonLDContextKey {
 				continue
 			}
 			if wrapEmbeddedCredentialsInGraphs(child) {
@@ -681,6 +658,42 @@ func wrapEmbeddedCredentialsInGraphs(node any) bool {
 			if wrapEmbeddedCredentialsInGraphs(item) {
 				changed = true
 			}
+		}
+	}
+	return changed
+}
+
+// wrapCredentialTerms wraps the embedded credentials held directly under one node's
+// verifiableCredential keys, and reports whether it changed anything.
+func wrapCredentialTerms(node map[string]any) bool {
+	changed := false
+	for term, graphContainer := range verifiableCredentialTerms {
+		switch v := node[term].(type) {
+		case map[string]any:
+			if wrapped, did := graphWrap(v, graphContainer); did {
+				node[term] = wrapped
+				changed = true
+			}
+		case []any:
+			if wrapCredentialList(v, graphContainer) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// wrapCredentialList wraps, in place, each object in a list of embedded credentials.
+func wrapCredentialList(list []any, graphContainer bool) bool {
+	changed := false
+	for i, item := range list {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if wrapped, did := graphWrap(itemMap, graphContainer); did {
+			list[i] = wrapped
+			changed = true
 		}
 	}
 	return changed

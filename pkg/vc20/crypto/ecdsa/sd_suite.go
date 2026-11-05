@@ -673,16 +673,12 @@ func derivedDocumentQuads(cred *credential.RDFCredential, labelMap map[string]st
 	return mappedQuads, nil
 }
 
-func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof *DerivedProofValueArray, proofMap map[string]any) error {
-	// 1. Verify Base Signature
-	// Reconstruct signed data.
-	// We need proofHash, ephemeralPub, mandatoryHash.
-
-	// Proof Hash
+// derivedProofConfigHash is the hash of the canonical proof configuration: the proof
+// without its proofValue and id, as Sign configured it.
+func derivedProofConfigHash(proofMap map[string]any) ([32]byte, error) {
 	delete(proofMap, "proofValue")
 	delete(proofMap, "https://w3id.org/security#proofValue")
 	delete(proofMap, "https://www.w3.org/ns/credentials#proofValue")
-	// Remove id to match Sign configuration
 	delete(proofMap, "id")
 	delete(proofMap, "@id")
 
@@ -691,19 +687,48 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	}
 	proofConfigBytes, err := json.Marshal(proofMap)
 	if err != nil {
-		return fmt.Errorf("failed to marshal proof config: %w", err)
+		return [32]byte{}, fmt.Errorf("failed to marshal proof config: %w", err)
 	}
 	ldOpts := ld.NewJsonLdOptions("")
 	ldOpts.Algorithm = ld.AlgorithmURDNA2015
 	proofCred, err := credential.NewRDFCredentialFromJSON(proofConfigBytes, ldOpts)
 	if err != nil {
-		return fmt.Errorf("failed to create proof config credential: %w", err)
+		return [32]byte{}, fmt.Errorf("failed to create proof config credential: %w", err)
 	}
 	proofCanonical, err := proofCred.CanonicalForm()
 	if err != nil {
-		return fmt.Errorf("failed to canonicalize proof config: %w", err)
+		return [32]byte{}, fmt.Errorf("failed to canonicalize proof config: %w", err)
 	}
-	proofHash := sha256.Sum256([]byte(proofCanonical))
+	return sha256.Sum256([]byte(proofCanonical)), nil
+}
+
+// selectDerivedMandatory resolves the derived proof's mandatoryIndexes against the disclosed
+// document's quads, refusing an index that is out of range or listed twice.
+func selectDerivedMandatory(mappedQuads []string, indexes []int) (map[int]bool, []string, error) {
+	mandatorySet := make(map[int]bool, len(indexes))
+	var mandatoryQuads []string
+	for _, idx := range indexes {
+		if idx < 0 || idx >= len(mappedQuads) {
+			return nil, nil, fmt.Errorf("mandatory index %d is outside the %d N-Quads of the disclosed document", idx, len(mappedQuads))
+		}
+		if mandatorySet[idx] {
+			return nil, nil, fmt.Errorf("mandatory index %d is listed twice", idx)
+		}
+		mandatorySet[idx] = true
+		mandatoryQuads = append(mandatoryQuads, mappedQuads[idx])
+	}
+	return mandatorySet, mandatoryQuads, nil
+}
+
+func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof *DerivedProofValueArray, proofMap map[string]any) error {
+	// 1. Verify Base Signature
+	// Reconstruct signed data.
+	// We need proofHash, ephemeralPub, mandatoryHash.
+
+	proofHash, err := derivedProofConfigHash(proofMap)
+	if err != nil {
+		return err
+	}
 
 	// The mandatory quads are the ones the derived proof's mandatoryIndexes name in the disclosed
 	// document's relabelled, sorted N-Quads (the issuer signed over them with the ephemeral key's
@@ -712,26 +737,14 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	if err != nil {
 		return err
 	}
-	mandatorySet := make(map[int]bool, len(proof.MandatoryIndexes))
-	var mandatoryQuads []string
-	for _, idx := range proof.MandatoryIndexes {
-		if idx < 0 || idx >= len(mappedQuads) {
-			return fmt.Errorf("mandatory index %d is outside the %d N-Quads of the disclosed document", idx, len(mappedQuads))
-		}
-		if mandatorySet[idx] {
-			return fmt.Errorf("mandatory index %d is listed twice", idx)
-		}
-		mandatorySet[idx] = true
-		mandatoryQuads = append(mandatoryQuads, mappedQuads[idx])
+	mandatorySet, mandatoryQuads, err := selectDerivedMandatory(mappedQuads, proof.MandatoryIndexes)
+	if err != nil {
+		return err
 	}
 
 	// Per W3C spec hashMandatoryNQuads: the joined mandatory N-Quads, a newline after each; the
 	// hash of the empty string when there are none.
-	mandatoryJoined := ""
-	if len(mandatoryQuads) > 0 {
-		mandatoryJoined = strings.Join(mandatoryQuads, "\n") + "\n"
-	}
-	mandatoryHash := sha256.Sum256([]byte(mandatoryJoined))
+	mandatoryHash := hashMandatoryNQuads(mandatoryQuads)
 
 	ephemeralPub := proof.PublicKey
 

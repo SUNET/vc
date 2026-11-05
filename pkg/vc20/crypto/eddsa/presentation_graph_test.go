@@ -89,42 +89,7 @@ func TestSign_PresentationMatchesOtherImplementation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			priv, _, vp := fixtureKeys(t, path)
 			want := vp["proof"].(map[string]any)
-			unsigned := map[string]any{}
-			for k, v := range vp {
-				if k != "proof" {
-					unsigned[k] = v
-				}
-			}
-			raw, err := json.Marshal(unsigned)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cred, err := credential.NewRDFCredentialFromJSON(raw, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			created, err := time.Parse(time.RFC3339, want["created"].(string))
-			if err != nil {
-				t.Fatal(err)
-			}
-			signed, err := NewSuite().Sign(cred, priv, &SignOptions{
-				VerificationMethod: want["verificationMethod"].(string),
-				ProofPurpose:       want["proofPurpose"].(string),
-				Created:            created,
-				Domain:             want["domain"].(string),
-				Challenge:          want["challenge"].(string),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var got map[string]any
-			if err := json.Unmarshal([]byte(signed.OriginalJSON()), &got); err != nil {
-				t.Fatal(err)
-			}
-			gotProof, _ := got["proof"].(map[string]any)
-			if gotProof == nil {
-				t.Fatalf("signed presentation has no proof: %s", signed.OriginalJSON())
-			}
+			gotProof := signLikeFixture(t, priv, vp)
 			if _, _, err := multibase.Decode(gotProof["proofValue"].(string)); err != nil {
 				t.Fatal(err)
 			}
@@ -133,4 +98,48 @@ func TestSign_PresentationMatchesOtherImplementation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// signLikeFixture signs the fixture presentation, minus its proof, with the options its own
+// proof carries, and returns the proof this package produced.
+func signLikeFixture(t *testing.T, priv ed25519.PrivateKey, vp map[string]any) map[string]any {
+	t.Helper()
+	want := vp["proof"].(map[string]any)
+	unsigned := map[string]any{}
+	for k, v := range vp {
+		if k != "proof" {
+			unsigned[k] = v
+		}
+	}
+	raw, err := json.Marshal(unsigned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := credential.NewRDFCredentialFromJSON(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := time.Parse(time.RFC3339, want["created"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := NewSuite().Sign(cred, priv, &SignOptions{
+		VerificationMethod: want["verificationMethod"].(string),
+		ProofPurpose:       want["proofPurpose"].(string),
+		Created:            created,
+		Domain:             want["domain"].(string),
+		Challenge:          want["challenge"].(string),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(signed.OriginalJSON()), &got); err != nil {
+		t.Fatal(err)
+	}
+	gotProof, _ := got["proof"].(map[string]any)
+	if gotProof == nil {
+		t.Fatalf("signed presentation has no proof: %s", signed.OriginalJSON())
+	}
+	return gotProof
 }

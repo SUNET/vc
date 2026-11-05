@@ -62,28 +62,35 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	}
 
 	for queryID, tokens := range documents {
-		// One credential per query unless the query said otherwise.
-		// CredentialQuery.Multiple defaults to false, and the claim
-		// extraction that follows MERGES every token returned under a query
-		// - so a wallet appending a second credential could overwrite the
-		// first one's claims in the session even though the request never
-		// permitted more than one. Each of them verifies; that is not the
-		// question.
-		if len(tokens) > 1 {
-			// requestedQueryExact, not requestedQuery: permission to
-			// return several credentials is a relaxation, and must not be
-			// read off a query the single-query fallback guessed at.
-			scope := c.oidcScopeFor(session, queryID)
-			requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
-			if !ok || !requested.Multiple {
-				return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", len(tokens))
-			}
+		if err := c.requireMultiplePermitted(session, queryID, len(tokens)); err != nil {
+			return err
 		}
 		for _, token := range tokens {
 			if err := c.verifyOneVC20ForOIDC(ctx, resolver, session, queryID, token); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// requireMultiplePermitted refuses more than one credential under a query unless the
+// query said otherwise.
+//
+// CredentialQuery.Multiple defaults to false, and the claim extraction that follows
+// MERGES every token returned under a query - so a wallet appending a second credential
+// could overwrite the first one's claims in the session even though the request never
+// permitted more than one. Each of them verifies; that is not the question.
+func (c *Client) requireMultiplePermitted(session *cache.AuthorizationContext, queryID string, count int) error {
+	if count <= 1 {
+		return nil
+	}
+	// requestedQueryExact, not requestedQuery: permission to return several credentials is
+	// a relaxation, and must not be read off a query the single-query fallback guessed at.
+	scope := c.oidcScopeFor(session, queryID)
+	requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
+	if !ok || !requested.Multiple {
+		return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", count)
 	}
 	return nil
 }
