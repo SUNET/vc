@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -168,7 +169,7 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 
 	for _, quad := range nonMandatoryQuads {
 		// Hash the UTF-8 representation of the N-Quad
-		hash := sha256.Sum256([]byte(quad))
+		hash := sha256.Sum256(nQuadSignatureInput(quad))
 
 		// Sign with ephemeral key
 		r, s, err := ecdsa.Sign(rand.Reader, ephemeralKey, hash[:])
@@ -618,13 +619,75 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 
 	// Verify each signature against its corresponding N-Quad
 	for i, quad := range nonMandatoryQuads {
-		hash := sha256.Sum256([]byte(quad))
+		hash := sha256.Sum256(nQuadSignatureInput(quad))
 		if !verifySignature(ephemeralKey, hash[:], proof.Signatures[i]) {
 			return fmt.Errorf("signature verification failed for N-Quad %d", i)
 		}
 	}
 
 	return nil
+}
+
+// nQuadSignatureInput is what a per-quad signature covers: the N-Quad as the canonical form
+// writes it, with its terminating newline (the same bytes hashMandatoryNQuads joins).
+func nQuadSignatureInput(quad string) []byte {
+	return []byte(quad + "\n")
+}
+
+// derivedDocumentQuads returns the disclosed document's N-Quads as the holder's derived proof
+// refers to them: blank nodes relabelled through the proof's label map, then sorted. The
+// mandatory indexes and the order of the per-quad signatures both index into this list.
+func derivedDocumentQuads(cred *credential.RDFCredential, labelMap map[string]string) ([]string, error) {
+	// Instead of CredentialWithoutProof, we use the original JSON and remove proof manually
+	// to preserve blank node IDs.
+	var credJSON any
+	originalJSON := cred.OriginalJSON()
+	if originalJSON != "" {
+		if err := json.Unmarshal([]byte(originalJSON), &credJSON); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal original JSON: %w", err)
+		}
+	} else {
+		// Fallback
+		jsonBytes, err := json.Marshal(cred)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get JSON: %w", err)
+		}
+		if err := json.Unmarshal(jsonBytes, &credJSON); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+		}
+	}
+
+	// Remove proof
+	removeProof(credJSON)
+
+	// Replace labels with URNs
+	replaceLabelsWithURNs(credJSON, labelMap)
+
+	// Create new credential from modified map
+	modBytes, err := json.Marshal(credJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal modified credential: %w", err)
+	}
+	ldOpts := ld.NewJsonLdOptions("")
+	ldOpts.Algorithm = ld.AlgorithmURDNA2015
+	modCred, err := credential.NewRDFCredentialFromJSON(modBytes, ldOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create modified credential: %w", err)
+	}
+
+	// Get Canonical Form (this will preserve URNs)
+	nquadsStr, err := modCred.CanonicalForm()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get canonical form: %w", err)
+	}
+
+	// Replace URNs with blank nodes in N-Quads
+	// <urn:bn:HMAC> -> _:HMAC
+	nquadsStr = replaceURNsInNQuads(nquadsStr)
+
+	mappedQuads := parseNQuads(nquadsStr)
+	sort.Strings(mappedQuads)
+	return mappedQuads, nil
 }
 
 func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof *DerivedProofValueArray, proofMap map[string]any) error {
@@ -659,50 +722,33 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	}
 	proofHash := sha256.Sum256([]byte(proofCanonical))
 
-	// Mandatory Hash
-	// We need to reconstruct mandatory quads from the derived document.
-	// The derived document contains mandatory quads AND revealed non-mandatory quads.
-	// How do we distinguish?
-	// The proof has `MandatoryIndexes`? No, `MandatoryIndexes` in DerivedProofValue is for something else?
-	// Spec: "mandatoryIndexes: A list of indices into the mandatory N-Quads list."
-	// Wait, if we don't have the full list of mandatory quads, how do we verify the hash?
-	// Ah, the Derived Proof does NOT contain the mandatory hash?
-	// The Base Signature signs the mandatory hash.
-	// So the Verifier must be able to reconstruct the mandatory hash.
-	// This implies the Verifier must have ALL mandatory quads.
-	// Yes, mandatory quads are always revealed.
-	// So we extract mandatory quads from the derived document.
-	// But we also have revealed non-mandatory quads.
-	// We need to know which are which.
-	// The `MandatoryIndexes` might help?
-	// Or maybe we just assume all quads in the derived document are either mandatory or revealed non-mandatory.
-	// But to verify the Base Signature, we need the hash of ONLY the mandatory quads.
-	// If we can't separate them, we can't verify.
+	// The mandatory quads are the ones the derived proof's mandatoryIndexes name in the disclosed
+	// document's relabelled, sorted N-Quads (the issuer signed over them with the ephemeral key's
+	// signatures and base signature), so the base signature can only be checked once they are known.
+	mappedQuads, err := derivedDocumentQuads(cred, proof.LabelMap)
+	if err != nil {
+		return err
+	}
+	mandatorySet := make(map[int]bool, len(proof.MandatoryIndexes))
+	var mandatoryQuads []string
+	for _, idx := range proof.MandatoryIndexes {
+		if idx < 0 || idx >= len(mappedQuads) {
+			return fmt.Errorf("mandatory index %d is outside the %d N-Quads of the disclosed document", idx, len(mappedQuads))
+		}
+		if mandatorySet[idx] {
+			return fmt.Errorf("mandatory index %d is listed twice", idx)
+		}
+		mandatorySet[idx] = true
+		mandatoryQuads = append(mandatoryQuads, mappedQuads[idx])
+	}
 
-	// Spec Section 3.6 Verification:
-	// "Transform the derived document to an RDF dataset."
-	// "Filter the N-Quads to find those that are mandatory."
-	// "This filtering is done by matching the N-Quads against the mandatory pointers."
-	// BUT the mandatory pointers are in the Base Proof, which we don't have!
-	// The Derived Proof doesn't have mandatory pointers.
-	// Wait, does the Derived Proof contain the mandatory pointers?
-	// The `BaseProofValue` has them. The `DerivedProofValue` does NOT.
-	// So how does the verifier know what is mandatory?
-	// Maybe the verifier is supposed to know the schema?
-	// Or maybe `MandatoryIndexes` tells us?
-	// Spec says: "mandatoryIndexes: A list of integers... indices into the list of mandatory N-Quads."
-	// This seems to imply we have a list.
-
-	// Let's check the spec again about `DerivedProofValue`.
-	// It has `mandatoryIndexes`.
-	// Maybe I missed something.
-
-	// Actually, if `MandatoryPointers` was empty (as we implemented), then `mandatoryHash` is hash of empty string.
-	// So we can verify if we assume no mandatory quads.
-	// If there ARE mandatory quads, we need to know which ones they are.
-
-	// For now, assume empty mandatory quads.
-	mandatoryHash := sha256.Sum256([]byte(""))
+	// Per W3C spec hashMandatoryNQuads: the joined mandatory N-Quads, a newline after each; the
+	// hash of the empty string when there are none.
+	mandatoryJoined := ""
+	if len(mandatoryQuads) > 0 {
+		mandatoryJoined = strings.Join(mandatoryQuads, "\n") + "\n"
+	}
+	mandatoryHash := sha256.Sum256([]byte(mandatoryJoined))
 
 	ephemeralPub := proof.PublicKey
 
@@ -719,65 +765,8 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	}
 
 	// 2. Verify Revealed Quads
-	// We need to apply the LabelMap BEFORE canonicalization to ensure stable IDs.
-	// We replace mapped blank nodes with URNs in the JSON-LD.
-
-	// Instead of CredentialWithoutProof, we use the original JSON and remove proof manually
-	// to preserve blank node IDs.
-	var credJSON any
-	originalJSON := cred.OriginalJSON()
-	if originalJSON != "" {
-		if err := json.Unmarshal([]byte(originalJSON), &credJSON); err != nil {
-			return fmt.Errorf("failed to unmarshal original JSON: %w", err)
-		}
-	} else {
-		// Fallback
-		jsonBytes, err := json.Marshal(cred)
-		if err != nil {
-			return fmt.Errorf("failed to get JSON: %w", err)
-		}
-		if err := json.Unmarshal(jsonBytes, &credJSON); err != nil {
-			return fmt.Errorf("failed to unmarshal JSON: %w", err)
-		}
-	}
-
-	// Remove proof
-	removeProof(credJSON)
-
-	// Replace labels with URNs
-	replaceLabelsWithURNs(credJSON, proof.LabelMap)
-
-	// Create new credential from modified map
-	modBytes, err := json.Marshal(credJSON)
-	if err != nil {
-		return fmt.Errorf("failed to marshal modified credential: %w", err)
-	}
-	ldOpts = ld.NewJsonLdOptions("")
-	ldOpts.Algorithm = ld.AlgorithmURDNA2015
-	modCred, err := credential.NewRDFCredentialFromJSON(modBytes, ldOpts)
-	if err != nil {
-		return fmt.Errorf("failed to create modified credential: %w", err)
-	}
-
-	// Get Canonical Form (this will preserve URNs)
-	nquadsStr, err := modCred.CanonicalForm()
-	if err != nil {
-		return fmt.Errorf("failed to get canonical form: %w", err)
-	}
-
-	// Replace URNs with blank nodes in N-Quads
-	// <urn:bn:HMAC> -> _:HMAC
-	nquadsStr = replaceURNsInNQuads(nquadsStr)
-
-	mappedQuads := parseNQuads(nquadsStr)
-
-	// Separate mandatory and non-mandatory quads using MandatoryIndexes
-	// MandatoryIndexes contains indices into the mapped quads that are mandatory
-	mandatorySet := make(map[int]bool)
-	for _, idx := range proof.MandatoryIndexes {
-		mandatorySet[idx] = true
-	}
-
+	// The non-mandatory quads are the ones left over; each carries a signature made with the
+	// ephemeral key.
 	// Collect non-mandatory quads - these are the ones we verify signatures for
 	var nonMandatoryQuads []string
 	for i, quad := range mappedQuads {
@@ -800,7 +789,7 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 
 	// Verify each signature against its corresponding N-Quad
 	for i, quad := range nonMandatoryQuads {
-		hash := sha256.Sum256([]byte(quad))
+		hash := sha256.Sum256(nQuadSignatureInput(quad))
 
 		if !verifySignature(ephemeralKey, hash[:], proof.Signatures[i]) {
 			return fmt.Errorf("signature verification failed for N-Quad %d", i)
