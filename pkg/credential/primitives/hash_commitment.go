@@ -24,7 +24,8 @@ type HashCommitmentArgs struct {
 // UniqueArgs configures unique.
 //
 // The issuer accepts one commitment per value of key, until an operator
-// resets it.
+// resets it. With a random opening each issuance draws a new commitment, so
+// the credential issues once per value of key until a reset.
 type UniqueArgs struct {
 	// Key lists claims path pointers of the credential. An empty list
 	// makes one commitment for the entry.
