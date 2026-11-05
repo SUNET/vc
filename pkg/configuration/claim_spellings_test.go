@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
 // The upgrade reads each dotted claim name in the shape of the role that
@@ -256,6 +258,32 @@ func TestLoadingWarnsOncePerLegacySpelling(t *testing.T) {
 			slices.Sort(warned)
 			require.NotEmpty(t, marked)
 			assert.Equal(t, marked, warned)
+		})
+	}
+}
+
+// Decoding reads the document of a stream that gopkg.in/yaml.v2 reads: a
+// file with the earlier spelling decodes equal to yaml.v2's reading of the
+// file with the current spelling.
+func TestDecodeReadsTheDocumentYAMLv2Reads(t *testing.T) {
+	const mapping = "apigw:\n  auth_providers:\n    oidc:\n      attribute_mapping:\n        birthdate:\n          claim: %s\n"
+	earlier, current := fmt.Sprintf(mapping, "birthdate"), fmt.Sprintf(mapping, "[birthdate]")
+	const other = "apigw:\n  public_url: https://other.example\n"
+	for name, stream := range map[string]func(document string) string{
+		"one document":           func(d string) string { return d },
+		"comments before ---":    func(d string) string { return "# comment\n---\n" + d },
+		"two documents":          func(d string) string { return d + "---\n" + other },
+		"a document of comments": func(d string) string { return "---\n# comment\n---\n" + d },
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(stream(earlier)), 0o600))
+			got, err := DecodeFile(t.Context(), path, nil)
+			require.NoError(t, err)
+			want := &model.Cfg{}
+			require.NoError(t, yaml.Unmarshal([]byte(stream(current)), want))
+			got.Deprecations = nil
+			assert.Equal(t, want, got)
 		})
 	}
 }
