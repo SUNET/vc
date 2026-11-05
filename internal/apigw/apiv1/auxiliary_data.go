@@ -101,6 +101,27 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	return appliedAuxiliaryData{documentData: out, toWallet: toWallet, unique: unique}, nil
 }
 
+// admitAuxiliaryData applies scope's Credential Auxiliary Data to
+// documentData, and records the unique commitments as the last check before
+// signing. A request refused here records no commitment, and of two
+// concurrent requests for one key value the store admits one.
+func (c *Client) admitAuxiliaryData(ctx context.Context, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry, responseEncrypted bool) (appliedAuxiliaryData, error) {
+	applied, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
+	if err != nil {
+		return appliedAuxiliaryData{}, err
+	}
+	if len(applied.toWallet) > 0 && !responseEncrypted {
+		return appliedAuxiliaryData{}, &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidEncryptionParameters,
+			ErrorDescription: "this credential sends an opening: request credential_response_encryption",
+		}
+	}
+	if err := c.recordUniqueCommitments(ctx, applied.unique); err != nil {
+		return appliedAuxiliaryData{}, err
+	}
+	return applied, nil
+}
+
 // deliverOpenings fulfils each to_wallet entry with the source's
 // hash_commitment derivation, and returns the entries with their openings.
 func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []openid4vci.AuxiliaryDataEntry, derivations []primitives.Derivation, sourceClaims map[string]any) ([]openid4vci.AuxiliaryDataEntry, error) {
