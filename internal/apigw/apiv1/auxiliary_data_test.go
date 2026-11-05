@@ -87,14 +87,10 @@ func nymAuthSubject(pan string) map[string]any {
 	return map[string]any{"issuing_country": "SE", "personal_administrative_number": pan}
 }
 
-// issueAuxiliaryData applies scope's auxiliary_data and records its unique
-// commitments, as VCICredential does.
+// issueAuxiliaryData admits scope's auxiliary_data for a request that asks
+// for an encrypted response.
 func issueAuxiliaryData(t *testing.T, c *Client, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) (appliedAuxiliaryData, error) {
-	applied, err := c.applyAuxiliaryData(t.Context(), scope, derivations, sourceClaims, documentData, fromWallet)
-	if err != nil {
-		return appliedAuxiliaryData{}, err
-	}
-	return applied, c.recordUniqueCommitments(t.Context(), applied.unique)
+	return c.admitAuxiliaryData(t.Context(), scope, derivations, sourceClaims, documentData, fromWallet, true)
 }
 
 // With nym_auth as the example: the issuer derives ssc's opening from the
@@ -221,10 +217,13 @@ func TestUniqueCommitmentReset(t *testing.T) {
 	_, first := wallet("the first wallet's private seed")
 	secondPSC, second := wallet("the second wallet's private seed")
 
-	_, err := issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, first)
-	require.NoError(t, err)
-	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, second)
+	_, err := c.admitAuxiliaryData(t.Context(), "nym_auth", derivations, nymAuthSubject("pan-200"), document, second, false)
 	var vciErr *openid4vci.Error
+	require.ErrorAs(t, err, &vciErr, "an opening needs an encrypted response")
+	assert.Equal(t, openid4vci.ErrInvalidEncryptionParameters, vciErr.Err)
+	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, first)
+	require.NoError(t, err, "the refused request recorded nothing")
+	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, second)
 	require.ErrorAs(t, err, &vciErr, "the record holds the first wallet's psc")
 	assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err)
 	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations[:1], nymAuthSubject("pan-200"), document, second)
