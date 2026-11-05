@@ -17,6 +17,10 @@ func compactTerm(iri string) string {
 	if !ok {
 		return iri
 	}
+	// The query is not part of the path. Left on, it either rides along on the term
+	// ("Diploma?version=1") or supplies the last slash itself ("?next=/Other" yielding
+	// "Other"), and a wallet matching on either finds no credential.
+	rest, _, _ = strings.Cut(rest, "?")
 	// Only the path counts: a slash in the scheme separator or a bare host is not a segment.
 	rest = strings.TrimRight(rest, "/")
 	if i := strings.LastIndex(rest, "/"); i >= 0 && i < len(rest)-1 {

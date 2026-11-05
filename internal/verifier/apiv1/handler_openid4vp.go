@@ -301,8 +301,17 @@ func responseModeRequiresEncryption(responseMode string) bool {
 // type_values are compact terms, for wallets that match a credential's own
 // type array. The object passed in is never modified: the cached request
 // object and the session keep the expanded form the response check matches.
+//
+// Not the Digital Credentials API request, which is signed through here too:
+// VerificationRequestObject serves whatever dcAPIAuthorizationRequest cached. The
+// compatibility this buys is one wallet's, reached by request_uri; a browser-mediated
+// request goes to whichever wallet the platform picks, and handing that one compact
+// terms where it expects expanded IRIs loses it the credential.
 func (c *Client) wireRequestObject(requestObject *openid4vp.RequestObject) *openid4vp.RequestObject {
 	if requestObject == nil || requestObject.DCQLQuery == nil || !c.cfg.CompactW3CTypeValues() {
+		return requestObject
+	}
+	if requestObject.ResponseMode == openid4vp.ResponseModeDCAPIJWT {
 		return requestObject
 	}
 	wire := *requestObject

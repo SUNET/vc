@@ -91,3 +91,29 @@ func TestVerificationRequestObject_CompactTypeValues(t *testing.T) {
 
 	assert.Equal(t, [][]string{{"VerifiableCredential", "IndividualIDCredential"}}, signedTypeValues(t, signed))
 }
+
+// The Digital Credentials API request is signed through the same place, and must not be
+// compacted: that request goes to whichever wallet the browser picks, not to the one
+// this switch exists for. dcAPIAuthorizationRequest caches a WithDCAPIRequest copy under
+// its own id, which VerificationRequestObject then serves - the path reproduced here.
+func TestVerificationRequestObject_DCAPIKeepsExpandedTypeValues(t *testing.T) {
+	client := newSigningTestClient(t)
+	enableCompactTypeValues(client)
+
+	_, err := client.CreateRequestObject(t.Context(), "session-dcapi", w3cTestDCQL(), "nonce", nil)
+	require.NoError(t, err)
+	cached, err := client.GetRequestObject(t.Context(), "session-dcapi")
+	require.NoError(t, err)
+
+	dcAPI := cached.WithDCAPIRequest("https://verifier.example")
+	require.Equal(t, openid4vp.ResponseModeDCAPIJWT, dcAPI.ResponseMode)
+	ok, err := client.cacheService.RequestObject.SetNX(t.Context(), "dcapi-request-object", dcAPI)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	signed, err := client.VerificationRequestObject(t.Context(), &VerificationRequestObjectRequest{ID: "dcapi-request-object"})
+	require.NoError(t, err)
+
+	assert.Equal(t, [][]string{{compactTestVC, compactTestID}}, signedTypeValues(t, signed),
+		"a dc_api request keeps the expanded IRIs OpenID4VP 1.0 B.3.2 defines")
+}
