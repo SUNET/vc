@@ -81,12 +81,15 @@ func TestEndpointDatastorePreAuthOffer_AnonymousSessionAndScopeCollisions(t *tes
 	})
 	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "datastore/preauth-offer", http.StatusOK, s.endpointDatastorePreAuthOffer)
 
-	offer := func(subject, body string) *httptest.ResponseRecorder {
+	offer := func(subject, body string, headers ...string) *httptest.ResponseRecorder {
 		login := httptest.NewRecorder()
 		engine.ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/login?subject="+subject, nil))
 
 		req := httptest.NewRequest(http.MethodPost, "/datastore/preauth-offer", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		for i := 0; i+1 < len(headers); i += 2 {
+			req.Header.Set(headers[i], headers[i+1])
+		}
 		for _, c := range login.Result().Cookies() {
 			req.AddCookie(c)
 		}
@@ -134,6 +137,20 @@ func TestEndpointDatastorePreAuthOffer_AnonymousSessionAndScopeCollisions(t *tes
 		w := offer("alice", `{"scope":"twin","Scope":"diploma","authentic_source":"SUNET","document_id":"doc-1"}`)
 		assert.NotEqual(t, http.StatusOK, w.Code, "an ambiguous body must not be acted on: %s", w.Body.String())
 		assert.Nil(t, api.seen, "neither reading may reach the handler")
+	})
+
+	// SessionOrAPIAuth finds no resource pair in "{}" and skips the SPOCP check;
+	// headers must not be able to fill in the fields it never looked at.
+	t.Run("scope, source and document cannot come from headers", func(t *testing.T) {
+		api.seen = nil
+		offer("alice", `{}`,
+			"Scope", "diploma", "AuthenticSource", "SUNET", "DocumentID", "doc-1")
+		// This harness installs no gin validator, so an empty request may reach the handler.
+		if api.seen != nil {
+			assert.Empty(t, api.seen.Scope, "a Scope header must not set the scope")
+			assert.Empty(t, api.seen.AuthenticSource, "an AuthenticSource header must not set the source")
+			assert.Empty(t, api.seen.DocumentID, "a DocumentID header must not set the document")
+		}
 	})
 }
 
