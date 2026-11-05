@@ -56,12 +56,12 @@ func (m *mongoUniqueCommitments) record(ctx context.Context, key storedKey) (uni
 	return row, nil
 }
 
-func (m *mongoUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) error {
+func (m *mongoUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error) {
 	_, err := m.resets.InsertOne(ctx, row)
 	if mongo.IsDuplicateKeyError(err) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 func (m *mongoUniqueCommitments) resetPrevious(ctx context.Context, key storedKey, evidenceRef string) (string, error) {
@@ -73,8 +73,23 @@ func (m *mongoUniqueCommitments) resetPrevious(ctx context.Context, key storedKe
 	return row.PreviousSHA256, nil
 }
 
-func (m *mongoUniqueCommitments) deleteCommitment(ctx context.Context, key storedKey, commitment string) error {
+func (m *mongoUniqueCommitments) deleteCommitment(ctx context.Context, key storedKey, commitment string) (bool, error) {
 	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "commitment": commitment}
-	_, err := m.records.DeleteOne(ctx, filter)
-	return err
+	result, err := m.records.DeleteOne(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+	return result.DeletedCount > 0, nil
+}
+
+func (m *mongoUniqueCommitments) deleteReset(ctx context.Context, key storedKey, evidenceRef string) error {
+	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "evidence_ref": evidenceRef}
+	result, err := m.resets.DeleteOne(ctx, filter)
+	if err != nil {
+		return err
+	}
+	if result.DeletedCount == 0 {
+		return errResetRowGone
+	}
+	return nil
 }

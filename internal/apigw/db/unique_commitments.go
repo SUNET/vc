@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"go.opentelemetry.io/otel/codes"
@@ -23,13 +24,22 @@ type uniqueCommitmentBackend interface {
 	insertCommitment(ctx context.Context, row uniqueCommitmentRow) error
 	// record returns the row of key, or ErrNoDocuments.
 	record(ctx context.Context, key storedKey) (uniqueCommitmentRow, error)
-	insertReset(ctx context.Context, row uniqueCommitmentResetRow) error
+	// insertReset reports whether it stored row.
+	insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error)
 	// resetPrevious returns the previous commitment hash the reset with
 	// evidenceRef recorded for key.
 	resetPrevious(ctx context.Context, key storedKey, evidenceRef string) (string, error)
-	// deleteCommitment removes the row of key that holds commitment.
-	deleteCommitment(ctx context.Context, key storedKey, commitment string) error
+	// deleteCommitment removes the row of key that holds commitment, and
+	// reports whether there was one.
+	deleteCommitment(ctx context.Context, key storedKey, commitment string) (bool, error)
+	// deleteReset removes the reset row of key with evidenceRef, and
+	// returns errResetRowGone when there is none.
+	deleteReset(ctx context.Context, key storedKey, evidenceRef string) error
 }
+
+// errResetRowGone is returned when the reset row a reset stored is gone
+// before the reset removes it.
+var errResetRowGone = errors.New("the approval this reset stored is gone")
 
 // storedKey is a UniqueCommitmentKey as the rows store it: the path
 // JSON-encoded and the key hash base64url.
@@ -128,7 +138,9 @@ func (h *UniqueCommitments) Reset(ctx context.Context, key UniqueCommitmentKey, 
 
 // reset records the approval before it removes the commitment. A retry
 // with the same evidence reference completes a reset interrupted between
-// the two, and is refused once the key holds another commitment.
+// the two, and is refused once the key holds another commitment. When a
+// concurrent reset removed the commitment first, reset removes the
+// approval it stored and returns ErrNoDocuments.
 func (h *UniqueCommitments) reset(ctx context.Context, key UniqueCommitmentKey, approval UniqueCommitmentReset) error {
 	k, err := storedKeyOf(key)
 	if err != nil {
@@ -144,7 +156,8 @@ func (h *UniqueCommitments) reset(ctx context.Context, key UniqueCommitmentKey, 
 	}
 	row := uniqueCommitmentResetRow{Scope: k.Scope, Path: k.Path, KeyHash: k.KeyHash, EvidenceRef: approval.EvidenceRef,
 		PreviousSHA256: previous, ApprovedBy: approval.ApprovedBy, ApprovedAt: approval.At.UTC()}
-	if err := h.backend.insertReset(ctx, row); err != nil {
+	inserted, err := h.backend.insertReset(ctx, row)
+	if err != nil {
 		return err
 	}
 	recorded, err := h.backend.resetPrevious(ctx, k, approval.EvidenceRef)
@@ -154,7 +167,21 @@ func (h *UniqueCommitments) reset(ctx context.Context, key UniqueCommitmentKey, 
 	if recorded != previous {
 		return ErrResetEvidenceUsed
 	}
-	return h.backend.deleteCommitment(ctx, k, stored.Commitment)
+	removed, err := h.backend.deleteCommitment(ctx, k, stored.Commitment)
+	switch {
+	case err != nil:
+		return err
+	case removed:
+		return nil
+	case inserted:
+		// Another reset removed the commitment, and its approval is the one
+		// on record, so this call removes the row it stored. A row it found
+		// in place can be that approval, under the same evidence reference.
+		if err := h.backend.deleteReset(ctx, k, approval.EvidenceRef); err != nil {
+			return err
+		}
+	}
+	return ErrNoDocuments
 }
 
 // sha256Of is the base64url SHA-256 of the commitment a stored base64url
