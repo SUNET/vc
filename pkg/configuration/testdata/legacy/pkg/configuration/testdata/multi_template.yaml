@@ -1,0 +1,45 @@
+# Multi-file configuration example
+# This shows how to define all templates in a single file
+
+templates:
+  - id: "basic_pid"
+    name: "Basic PID"
+    description: "Basic personal identification"
+    version: "1.0"
+    oidc_scopes:
+      - "pid"
+    dcql:
+      credentials:
+        - id: "pid_credential"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eu.europa.ec.eudi:pid:1"
+          claims:
+            - path: ["given_name"]
+            - path: ["family_name"]
+    claim_mappings:
+      given_name: "given_name"
+      family_name: "family_name"
+    enabled: true
+
+  - id: "basic_ehic"
+    name: "Basic EHIC"
+    description: "Basic health insurance card"
+    version: "1.0"
+    oidc_scopes:
+      - "ehic"
+    dcql:
+      credentials:
+        - id: "ehic_credential"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eu.europa.ec.eudi:ehic:1"
+          claims:
+            - path: ["card_number"]
+    claim_mappings:
+      card_number: "ehic_number"
+    enabled: true
+
+default_template: "basic_pid"

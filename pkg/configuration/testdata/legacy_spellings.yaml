@@ -1,0 +1,48 @@
+# Each line marked "# legacy" holds one claim spelling of the earlier
+# release; loading the file warns once per marked line.
+common:
+  credential_metadata:
+    pid:
+      format: dc+sd-jwt
+      vctm_file_path: /metadata/vctm_pid.json
+    ehic:
+      format: dc+sd-jwt
+      vctm_file_path: /metadata/vctm_ehic.json
+    nym_auth:
+      format: mso_mdoc
+      mddl_file_path: /metadata/nym_auth.mdoc.json
+apigw:
+  auth_providers:
+    oidc:
+      attribute_mapping:
+        birthdate:
+          claim: birthdate # legacy
+  data_sources:
+    datastore:
+      scopes:
+        ehic:
+          auth_scopes:
+            pid:
+              auth_claims:
+                - given_name # legacy
+                - family_name # legacy
+    presentation:
+      scopes:
+        nym_auth:
+          defaults:
+            issuing_country: SE # legacy
+          from:
+            pid:
+              required_claims:
+                birthdate: [] # legacy
+              derivations:
+                - copy:
+                    input: birthdate # legacy
+                    output: birth_date # legacy
+verifier:
+  presets:
+    PID:
+      credentials:
+        pid:
+          claims:
+            - path: [nationalities, "null"] # legacy

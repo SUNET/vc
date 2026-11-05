@@ -1,0 +1,16 @@
+# Each line marked "# legacy" holds one claim spelling of the earlier
+# release; loading the file warns once per marked line.
+id: legacy_spellings
+oidc_scopes: [pid]
+dcql:
+  credentials:
+    - id: pid
+      format: dc+sd-jwt
+      meta:
+        vct_values: [urn:eudi:pid:1]
+      claims:
+        - path: [given_name]
+        - path: [address, locality]
+claim_mappings: # legacy
+  given_name: given_name
+  address.locality: locality

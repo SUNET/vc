@@ -1,0 +1,313 @@
+---
+common:
+  mongo:
+    uri: mongodb://mongo:27017
+  production: false
+
+  credential_metadata:
+    pid:
+      vctm_file_path: "/metadata/vctm_pid.json"
+      format: "dc+sd-jwt"
+    ehic:
+      vctm_file_path: "/metadata/vctm_ehic.json"
+      format: "dc+sd-jwt"
+    pid_mdoc:
+      mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
+      format: "mso_mdoc"
+    mdl:
+      mddl_file_path: "/metadata/mdl.mdoc.json"
+      format: "mso_mdoc"
+    nym_auth:
+      mddl_file_path: "/metadata/nym_auth.mdoc.json"
+      format: "mso_mdoc"
+      auxiliary_data:
+        to_wallet:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, ssc]}
+        to_issuer:
+          - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, psc]}
+issuer:
+  issuer_url: "https://apigw.vc.docker:8080"
+  mdoc:
+    certificate_chain_path: "/pki/signing_ec_chain.pem"
+  api_server:
+    addr: :8080
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_issuer.crt"
+      key_file_path: "/pki/tls_issuer.key"
+  grpc_server:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  jwt_attribute:
+    issuer: https://issuer.sunet.se
+    enable_not_before: true
+    valid_duration: 3600
+    verifiable_credential_type: "https://credential.sunet.se/identity_credential"
+  pseudonym_seed: true
+verifier:
+  api_server:
+    addr: :8080
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_verifier.crt"
+      key_file_path: "/pki/tls_verifier.key"
+  public_url: "https://verifier.vc.docker:8080"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  outbound:
+    oidc_provider:
+      issuer: "https://verifier.vc.docker:8080"
+      subject_type: "public"
+      subject_salt: "dev-salt-verifier"
+      code_duration: 300
+      session_duration: 3600
+      access_token_duration: 3600
+      id_token_duration: 3600
+      # Dynamic Client Registration authorization policy for POST /register
+      # Modes: open (default), static (file bearer token), jwt (JWKS validation)
+      # The token file must hold a single RFC 6750 b64token on one line
+      # (letters, digits, and - . _ ~ + / with optional trailing =);
+      # anything else is refused at startup, since no Authorization
+      # header could carry it.
+      # dynamic_registration_auth:
+      #   mode: "static"
+      #   static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
+      # Or JWT mode. jwks_uri and issuer must be https: the key set decides
+      # which registration tokens verify, so over plaintext anyone on the
+      # path picks the keys. Private/loopback addresses are fine over TLS.
+      # dynamic_registration_auth:
+      #   mode: "jwt"
+      #   jwt:
+      #     jwks_uri: "https://auth.example.com/.well-known/jwks.json"
+      #     issuer: "https://auth.example.com"
+      #     audience: "vc-verifier-register"
+      #     allowed_signing_algs: ["RS256", "ES256"]
+      #     # Omit for the 60s default; set 0 to turn the tolerance off.
+      #     clock_skew_seconds: 60
+  inbound:
+    openid4vp:
+      token_endpoint: "https://verifier.vc.docker:8080/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
+            - "ehic"
+      supported_credentials:
+        - vct: "urn:eudi:pid:1"
+          scopes:
+            - "pid"
+        - vct: "urn:eudi:ehic:1"
+          scopes:
+            - "ehic"
+  presets:
+    "PID":
+      featured: true
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
+    "EHIC":
+      featured: true
+      credentials:
+        ehic:
+    "PID Age Over 18":
+      category: "Selective disclosure"
+      credentials:
+        pid:
+          claims:
+            - path: ["birthdate"]
+          validations:
+            - rule: "age_over"
+              path: ["birthdate"]
+              value: 18
+    "PID + EHIC":
+      category: "Combined"
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
+        ehic:
+
+registry:
+  api_server:
+    addr: :8080
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_registry.crt"
+      key_file_path: "/pki/tls_registry.key"
+  public_url: "https://localhost:8080"
+  grpc_server:
+    addr: :8090
+    # mTLS configuration (optional)
+    # tls:
+    #   enable: true
+    #   cert_file_path: "/pki/grpc_server.crt"
+    #   key_file_path: "/pki/grpc_server.key"
+    #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
+    #   # Pin specific certs by fingerprint
+    #   allowed_client_fingerprints:
+    #     "sha256:aa:bb:cc:...":  "apigw-prod"
+    #   # Allow certs by Subject DN (key is friendly name, value is Subject DN)
+    #   allowed_client_dns:
+    #     apigw-acme: "CN=apigw.example.com,O=MyOrg"
+  # Token Status Lists configuration per draft-ietf-oauth-status-list
+  token_status_lists:
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+  admin_gui:
+    enable: true
+    username: "admin"
+    password: "admin_1234"
+
+apigw:
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  api_server:
+    addr: :8080
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_apigw.crt"
+      key_file_path: "/pki/tls_apigw.key"
+    api_auth:
+      oidc:
+        enable: false
+        issuer_url: "http://mock-oauth2.vc.docker:8080/default"
+        audience: "vc-apigw"
+        client_id: "vc-apigw"
+        client_secret: "vc-apigw-secret"
+        redirect_uri: "https://apigw.vc.docker:8080/ui/callback"
+        scopes: ["openid", "profile"]
+  public_url: "https://apigw.vc.docker:8080"
+  issuer_metadata:
+    credential_encryption:
+      keys:
+        - private_key_path: "/pki/credential_encryption.pem"
+  issuer_client:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
+  identity_mapping_import:
+    file_paths:
+      - "bootstrapping/identity_mappings.json"
+    users:
+      - "100"
+      - "102"
+      - "200"
+  data_sources:
+    datastore:
+      import:
+        file_paths:
+          - "bootstrapping/diploma.json"
+          - "bootstrapping/ehic.json"
+          - "bootstrapping/elm.json"
+          - "bootstrapping/pda1.json"
+          - "bootstrapping/pid.json"
+          - "bootstrapping/mdl.json"
+          - "bootstrapping/pid_mdoc.json"
+        users:
+          - "100"
+          - "102"
+          - "200"
+      scopes:
+        pid:
+          auth_provider: oidc
+          authentic_source: "Skatteverket"
+          auth_claims: ["given_name", "family_name", "birth_date"]
+        ehic:
+          auth_provider: openid4vp
+          authentic_source: "Skatteverket"
+          auth_scopes:
+            pid:
+              auth_claims: ["given_name", "family_name", "birth_date"]
+        pid_mdoc:
+          auth_provider: oidc
+          authentic_source: "Skatteverket"
+          auth_claims: ["given_name", "family_name", "birth_date"]
+        mdl:
+          auth_provider: oidc
+          authentic_source: "Skatteverket"
+          auth_claims: ["given_name", "family_name", "birth_date"]
+        # Example: a credential issuable only via /api/v1/datastore/preauth_offer.
+        # Wallet-initiated PAR requests for this scope are rejected.
+        #microcredential:
+        #  auth_provider: preauth
+    presentation:
+      scopes:
+        nym_auth:
+          from:
+            pid:
+              required_claims:
+                birthdate: []
+                issuing_country: []
+                personal_administrative_number: []
+              derivations:
+                - copy: {input: birthdate, output: birth_date}
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf:
+                        secret_path: "/pki/nym_auth_seed.key"
+                        inputs: [issuing_country, personal_administrative_number]
+                        bytes: 16
+            pid_mdoc:
+              required_claims:
+                eu.europa.ec.eudi.pid.1.birth_date: []
+                eu.europa.ec.eudi.pid.1.issuing_country: []
+                eu.europa.ec.eudi.pid.1.administrative_number: []
+              derivations:
+                - copy: {input: eu.europa.ec.eudi.pid.1.birth_date, output: birth_date}
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+                    opening:
+                      hkdf:
+                        secret_path: "/pki/nym_auth_seed.key"
+                        inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
+                        bytes: 16
+  auth_providers:
+    # preauth (data_sources scopes with auth_provider: preauth).
+    # Set enable_pin: true to require a PIN on pre-authorized credential offers.
+    #preauth:
+    #  enable_pin: true
+    oidc:
+      enable: true
+      issuer_url: "http://mock-oauth2.vc.docker:8080/default"
+      redirect_uri: "https://apigw.vc.docker:8080/oidcrp/callback"
+      scopes: ["openid", "profile"]
+      session_duration: 300
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "vc-apigw"
+          client_secret: "vc-apigw-secret"
+  delivery:
+    openid4vci:
+      token_endpoint: "https://apigw.vc.docker:8080/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "http://localhost:3000"
+          scopes:
+            - "pid"
+            - "ehic"
+            - "pid_mdoc"
+            - "mdl"
+            - "nym_auth"
+    credential_offers:
+      issuer_url: "https://apigw.vc.docker:8080"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
+
+
