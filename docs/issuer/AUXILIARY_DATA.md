@@ -127,6 +127,9 @@ different commitment for a recorded key value refuses the request:
 - on a `to_wallet` entry, whose commitment the issuer derived, with
   `credential_request_denied`.
 
+A refused request leaves no record: of a credential's unique entries, the
+issuer records all or none.
+
 With a `random` opening each issuance draws a new commitment, so a unique
 `to_wallet` entry issues once per key value until a reset.
 

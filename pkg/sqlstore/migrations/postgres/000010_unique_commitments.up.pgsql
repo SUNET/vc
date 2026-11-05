@@ -7,6 +7,9 @@ CREATE TABLE unique_commitments (
     key_hash     VARCHAR(64) NOT NULL,
     commitment   VARCHAR(128) NOT NULL,
     accepted_at  TIMESTAMPTZ NOT NULL,
+    -- The Accept call that may remove the row, or empty once the row stays
+    -- until a reset.
+    releasable_by VARCHAR(32) NOT NULL,
     PRIMARY KEY (scope, path, key_hash)
 );
 

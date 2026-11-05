@@ -201,29 +201,30 @@ func sentByWallet(supported openid4vci.AuxiliaryDataSupported, path []string) (b
 }
 
 // recordUniqueCommitments records each unique commitment for its key value
-// (section 6.4, step 5).
+// (section 6.4, step 5), or none. Another commitment on record for a key
+// value refuses the request. A to_issuer entry is the wallet's, so that is
+// auxiliary_data_conflict (section 6.4, steps 1 and 5). A to_wallet entry is
+// the issuer's own value, so the request is denied (OpenID4VCI 1.0 section
+// 8.3.1.2).
 func (c *Client) recordUniqueCommitments(ctx context.Context, unique []uniqueCommitment) error {
-	for _, u := range unique {
-		if err := c.acceptUniqueCommitment(ctx, u); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// acceptUniqueCommitment records u for its key value, and refuses it when
-// another commitment is on record for that value. A to_issuer entry is the
-// wallet's, so another commitment is auxiliary_data_conflict (section 6.4,
-// steps 1 and 5). A to_wallet entry is the issuer's own value, so the
-// request is denied (OpenID4VCI 1.0 section 8.3.1.2).
-func (c *Client) acceptUniqueCommitment(ctx context.Context, u uniqueCommitment) error {
-	stored, err := c.uniqueCommitmentStore.Accept(ctx, u.key, u.commitment, time.Now())
-	if err != nil {
-		return fmt.Errorf("scope %q: %w", u.key.Scope, err)
-	}
-	if bytes.Equal(stored, u.commitment) {
+	if len(unique) == 0 {
 		return nil
 	}
+	commitments := make([]db.UniqueCommitment, 0, len(unique))
+	for _, u := range unique {
+		commitments = append(commitments, db.UniqueCommitment{Key: u.key, Commitment: u.commitment})
+	}
+	err := c.uniqueCommitmentStore.Accept(ctx, commitments, time.Now())
+	var conflict *db.UniqueCommitmentConflict
+	switch {
+	case err == nil:
+		return nil
+	case !errors.As(err, &conflict):
+		return fmt.Errorf("scope %q: %w", unique[0].key.Scope, err)
+	case conflict.Index < 0 || conflict.Index >= len(unique):
+		return fmt.Errorf("scope %q: the store names commitment %d of %d", unique[0].key.Scope, conflict.Index, len(unique))
+	}
+	u := unique[conflict.Index]
 	code := openid4vci.ErrCredentialRequestDenied
 	if u.fromWallet {
 		code = openid4vci.ErrAuxiliaryDataConflict

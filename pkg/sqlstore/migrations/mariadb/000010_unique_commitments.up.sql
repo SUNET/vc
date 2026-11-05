@@ -9,6 +9,9 @@ CREATE TABLE unique_commitments (
     key_hash     VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     commitment   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     accepted_at  TIMESTAMP NOT NULL,
+    -- The Accept call that may remove the row, or empty once the row stays
+    -- until a reset.
+    releasable_by VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     PRIMARY KEY (scope, path, key_hash)
 ) ENGINE=InnoDB;
 
