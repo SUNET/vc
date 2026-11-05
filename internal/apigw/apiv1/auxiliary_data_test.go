@@ -329,12 +329,23 @@ type memoryRecord struct {
 	at         time.Time
 }
 
-func (m memoryCommitments) Accept(_ context.Context, key db.UniqueCommitmentKey, commitment []byte, at time.Time) ([]byte, error) {
-	k := fmt.Sprint(key)
-	if _, ok := m[k]; !ok {
-		m[k] = memoryRecord{commitment: commitment, at: at}
+func (m memoryCommitments) Accept(_ context.Context, commitments []db.UniqueCommitment, at time.Time) error {
+	var stored []string
+	for i, c := range commitments {
+		k := fmt.Sprint(c.Key)
+		record, ok := m[k]
+		switch {
+		case !ok:
+			m[k] = memoryRecord{commitment: c.Commitment, at: at}
+			stored = append(stored, k)
+		case !bytes.Equal(record.commitment, c.Commitment):
+			for _, k := range stored {
+				delete(m, k)
+			}
+			return &db.UniqueCommitmentConflict{Index: i}
+		}
 	}
-	return m[k].commitment, nil
+	return nil
 }
 
 func (m memoryCommitments) Find(_ context.Context, key db.UniqueCommitmentKey) (db.UniqueCommitmentRecord, error) {

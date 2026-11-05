@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/codes"
@@ -24,6 +26,12 @@ type uniqueCommitmentBackend interface {
 	insertCommitment(ctx context.Context, row uniqueCommitmentRow) error
 	// record returns the row of key, or ErrNoDocuments.
 	record(ctx context.Context, key storedKey) (uniqueCommitmentRow, error)
+	// keepCommitment empties the releasable_by of the row of key that holds
+	// commitment, if there is one.
+	keepCommitment(ctx context.Context, key storedKey, commitment string) error
+	// releaseCommitment removes the row of key whose releasable_by is call,
+	// if there is one.
+	releaseCommitment(ctx context.Context, key storedKey, call string) error
 	// insertReset reports whether it stored row.
 	insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error)
 	// resetPrevious returns the previous commitment hash the reset with
@@ -63,6 +71,15 @@ type uniqueCommitmentRow struct {
 	KeyHash    string    `bson:"key_hash" db:"key_hash"`
 	Commitment string    `bson:"commitment" db:"commitment"`
 	AcceptedAt time.Time `bson:"accepted_at" db:"accepted_at"`
+	// ReleasableBy names the Accept call that stored the row, which removes
+	// the row when it fails. It is empty once another call accepted the
+	// same commitment: the row then stays until a reset.
+	ReleasableBy string `bson:"releasable_by" db:"releasable_by"`
+}
+
+// key is the key the row is stored under.
+func (r uniqueCommitmentRow) key() storedKey {
+	return storedKey{Scope: r.Scope, Path: r.Path, KeyHash: r.KeyHash}
 }
 
 type uniqueCommitmentResetRow struct {
@@ -79,32 +96,92 @@ type uniqueCommitmentResetRow struct {
 }
 
 // Accept implements UniqueCommitmentStore.
-func (h *UniqueCommitments) Accept(ctx context.Context, key UniqueCommitmentKey, commitment []byte, at time.Time) ([]byte, error) {
+func (h *UniqueCommitments) Accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error {
 	ctx, span := h.Service.tracer.Start(ctx, "db:vc:unique_commitment:accept")
 	defer span.End()
 
-	stored, err := h.accept(ctx, key, commitment, at)
+	err := h.accept(ctx, commitments, at)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 	}
-	return stored, err
+	return err
 }
 
-func (h *UniqueCommitments) accept(ctx context.Context, key UniqueCommitmentKey, commitment []byte, at time.Time) ([]byte, error) {
-	k, err := storedKeyOf(key)
-	if err != nil {
-		return nil, err
+// acceptRounds bounds the rounds of acceptRow. A row that another call
+// may still remove takes two rounds, and each concurrent removal of the
+// key's row one more.
+const acceptRounds = 4
+
+// errAcceptRounds is returned when concurrent removals of a key's row left
+// every round of acceptRow undecided.
+var errAcceptRounds = errors.New("the commitment on record changed during every round of the accept")
+
+// accept stores the commitments as releasable by a random call name, and
+// on a failure removes the rows that name may still remove. A failed
+// removal is the error returned, so the caller cannot take it for a
+// conflict.
+func (h *UniqueCommitments) accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error {
+	call := rand.Text()
+	rows := make([]uniqueCommitmentRow, 0, len(commitments))
+	for _, c := range commitments {
+		k, err := storedKeyOf(c.Key)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, uniqueCommitmentRow{Scope: k.Scope, Path: k.Path, KeyHash: k.KeyHash,
+			Commitment: base64.RawURLEncoding.EncodeToString(c.Commitment), AcceptedAt: at.UTC(), ReleasableBy: call})
 	}
-	row := uniqueCommitmentRow{Scope: k.Scope, Path: k.Path, KeyHash: k.KeyHash,
-		Commitment: base64.RawURLEncoding.EncodeToString(commitment), AcceptedAt: at.UTC()}
-	if err := h.backend.insertCommitment(ctx, row); err != nil {
-		return nil, err
+	for i, row := range rows {
+		if err := h.acceptRow(ctx, row, i); err != nil {
+			if released := h.release(ctx, rows[:i+1], call); released != nil {
+				return fmt.Errorf("%w, after: %v", released, err)
+			}
+			return err
+		}
 	}
-	stored, err := h.backend.record(ctx, k)
-	if err != nil {
-		return nil, err
+	return nil
+}
+
+// acceptRow stores row when its key holds no row, and accepts a row that
+// holds the same commitment. A row that another call stored and may
+// still remove is made to stay before it is accepted, so that call's
+// failure leaves what this call accepted.
+func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentRow, index int) error {
+	for range acceptRounds {
+		if err := h.backend.insertCommitment(ctx, row); err != nil {
+			return err
+		}
+		stored, err := h.backend.record(ctx, row.key())
+		switch {
+		case errors.Is(err, ErrNoDocuments):
+			// A reset, or the release of the call that stored the row,
+			// removed it after the insert.
+			continue
+		case err != nil:
+			return err
+		case stored.Commitment != row.Commitment:
+			return &UniqueCommitmentConflict{Index: index}
+		case stored.ReleasableBy == "" || stored.ReleasableBy == row.ReleasableBy:
+			return nil
+		}
+		if err := h.backend.keepCommitment(ctx, row.key(), row.Commitment); err != nil {
+			return err
+		}
 	}
-	return base64.RawURLEncoding.DecodeString(stored.Commitment)
+	return errAcceptRounds
+}
+
+// release removes the rows of rows' keys that call stored and may still
+// remove. It runs when ctx is cancelled as well: a cancelled request is
+// refused too.
+func (h *UniqueCommitments) release(ctx context.Context, rows []uniqueCommitmentRow, call string) error {
+	ctx = context.WithoutCancel(ctx)
+	for _, row := range rows {
+		if err := h.backend.releaseCommitment(ctx, row.key(), call); err != nil {
+			return fmt.Errorf("removing the commitments of a refused accept: %w", err)
+		}
+	}
+	return nil
 }
 
 // Find implements UniqueCommitmentStore.

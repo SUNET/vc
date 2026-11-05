@@ -56,6 +56,18 @@ func (m *mongoUniqueCommitments) record(ctx context.Context, key storedKey) (uni
 	return row, nil
 }
 
+func (m *mongoUniqueCommitments) keepCommitment(ctx context.Context, key storedKey, commitment string) error {
+	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "commitment": commitment}
+	_, err := m.records.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"releasable_by": ""}})
+	return err
+}
+
+func (m *mongoUniqueCommitments) releaseCommitment(ctx context.Context, key storedKey, call string) error {
+	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "releasable_by": call}
+	_, err := m.records.DeleteOne(ctx, filter)
+	return err
+}
+
 func (m *mongoUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error) {
 	_, err := m.resets.InsertOne(ctx, row)
 	if mongo.IsDuplicateKeyError(err) {

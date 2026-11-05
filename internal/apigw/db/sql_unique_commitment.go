@@ -22,15 +22,15 @@ func NewSQLUniqueCommitmentColl(service *Service, db *sqlx.DB, dialect sqlstore.
 }
 
 func (s *sqlUniqueCommitments) insertCommitment(ctx context.Context, row uniqueCommitmentRow) error {
-	query := s.dialect.Rebind(`INSERT INTO unique_commitments (scope, path, key_hash, commitment, accepted_at) VALUES (?, ?, ?, ?, ?) ` +
+	query := s.dialect.Rebind(`INSERT INTO unique_commitments (scope, path, key_hash, commitment, accepted_at, releasable_by) VALUES (?, ?, ?, ?, ?, ?) ` +
 		s.dialect.UpsertClause([]string{"scope", "path", "key_hash"}, nil))
-	_, err := s.db.ExecContext(ctx, query, row.Scope, row.Path, row.KeyHash, row.Commitment, row.AcceptedAt)
+	_, err := s.db.ExecContext(ctx, query, row.Scope, row.Path, row.KeyHash, row.Commitment, row.AcceptedAt, row.ReleasableBy)
 	return err
 }
 
 func (s *sqlUniqueCommitments) record(ctx context.Context, key storedKey) (uniqueCommitmentRow, error) {
 	var row uniqueCommitmentRow
-	query := s.dialect.Rebind(`SELECT scope, path, key_hash, commitment, accepted_at FROM unique_commitments WHERE scope = ? AND path = ? AND key_hash = ?`)
+	query := s.dialect.Rebind(`SELECT scope, path, key_hash, commitment, accepted_at, releasable_by FROM unique_commitments WHERE scope = ? AND path = ? AND key_hash = ?`)
 	if err := s.db.GetContext(ctx, &row, query, key.Scope, key.Path, key.KeyHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return row, ErrNoDocuments
@@ -38,6 +38,18 @@ func (s *sqlUniqueCommitments) record(ctx context.Context, key storedKey) (uniqu
 		return row, err
 	}
 	return row, nil
+}
+
+func (s *sqlUniqueCommitments) keepCommitment(ctx context.Context, key storedKey, commitment string) error {
+	query := s.dialect.Rebind(`UPDATE unique_commitments SET releasable_by = '' WHERE scope = ? AND path = ? AND key_hash = ? AND commitment = ?`)
+	_, err := s.db.ExecContext(ctx, query, key.Scope, key.Path, key.KeyHash, commitment)
+	return err
+}
+
+func (s *sqlUniqueCommitments) releaseCommitment(ctx context.Context, key storedKey, call string) error {
+	query := s.dialect.Rebind(`DELETE FROM unique_commitments WHERE scope = ? AND path = ? AND key_hash = ? AND releasable_by = ?`)
+	_, err := s.db.ExecContext(ctx, query, key.Scope, key.Path, key.KeyHash, call)
+	return err
 }
 
 func (s *sqlUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error) {
