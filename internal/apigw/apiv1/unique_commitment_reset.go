@@ -292,30 +292,32 @@ func resettableKeyPart(meta *model.CredentialMetadata, part model.KeyPart) Reset
 	return ResettableKeyPart{Path: part.Path, Inputs: inputs}
 }
 
-// credentialName is the credential's display name, or its scope.
+// credentialName is the credential's name as the consent page shows it, or
+// its scope.
 func credentialName(meta *model.CredentialMetadata, scope string) string {
 	if meta == nil {
 		return scope
 	}
-	if meta.MDDL != nil && len(meta.MDDL.Display) > 0 {
-		return meta.MDDL.Display[0].Name
+	display := mddlCredentialDisplay(meta.MDDL, "")
+	if display == nil {
+		display = vctmCredentialDisplay(meta.GetVCTM(), "")
 	}
-	if vctm := meta.GetVCTM(); vctm != nil && len(vctm.Display) > 0 {
-		return vctm.Display[0].Name
+	if display == nil || display.Name == "" {
+		return scope
 	}
-	return scope
+	return display.Name
 }
 
-// claimName is the display name the type metadata gives the claim at path,
-// or its last segment as words.
+// claimName is the display label the type metadata gives the claim at
+// path, or its last segment as words.
 func claimName(meta *model.CredentialMetadata, path []string) string {
 	if meta != nil && meta.MDDL != nil && len(path) == 2 {
-		if display := meta.MDDL.Claims[path[0]][path[1]].Display; len(display) > 0 {
-			return display[0].Name
+		if label := meta.MDDL.Claims[path[0]][path[1]].Label(); label != "" {
+			return label
 		}
 	}
 	if meta != nil {
-		if claim, ok := meta.GetVCTM().ClaimAt(path); ok && len(claim.Display) > 0 {
+		if claim, ok := meta.GetVCTM().ClaimAt(path); ok && len(claim.Display) > 0 && claim.Display[0].Label != "" {
 			return claim.Display[0].Label
 		}
 	}

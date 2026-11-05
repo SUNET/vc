@@ -121,15 +121,27 @@ type ClaimMetadata struct {
 	SVGID string `json:"svg_id,omitempty"`
 }
 
+// Label is the claim's display label: the Label of its first display
+// entry, else that entry's Name, else empty.
+func (c ClaimMetadata) Label() string {
+	if len(c.Display) == 0 {
+		return ""
+	}
+	if c.Display[0].Label != "" {
+		return c.Display[0].Label
+	}
+	return c.Display[0].Name
+}
+
 // ClaimDisplay is a localized display label for a claim.
 type ClaimDisplay struct {
 	Locale string `json:"locale"`
 	Name   string `json:"name"`
 	// Label is a display label distinct from Name, for schemas that declare
 	// both. Attributes/Presentation below still key off Name (their
-	// existing, established behavior); Label is consumed by Generate's
-	// mso_mdoc credential_metadata.claims mapping (pkg/model/config.go),
-	// which falls back to Name when Label is empty.
+	// existing, established behavior); ClaimMetadata.Label and Generate's
+	// mso_mdoc credential_metadata.claims mapping (pkg/model/config.go) take
+	// Label, and fall back to Name when it is empty.
 	Label string `json:"label,omitempty"`
 }
 
@@ -228,12 +240,8 @@ func (s *MDDLSchema) SVGValues(data map[string]any) map[string]SVGValue {
 			if !ok {
 				continue
 			}
-			label := meta.Display[0].Label
-			if label == "" {
-				label = meta.Display[0].Name
-			}
 			result[meta.SVGID] = SVGValue{
-				Label: label,
+				Label: meta.Label(),
 				Value: value,
 			}
 		}
