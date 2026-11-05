@@ -508,6 +508,12 @@ func NewValidator() (*validator.Validate, error) {
 		if len(scope.ZKSystemType) > 0 && scope.Format != openid4vp.FormatMsoMdocZk {
 			sl.ReportError(scope.Format, "Format", "Format", "zk_system_type_requires_mso_mdoc_zk_format", scope.Format)
 		}
+		// Same shape: the UI serves source_format only for the circuit_zk
+		// format, so on any other it would be dropped without a trace. The
+		// value is not judged - see VerificationPresetScope.SourceFormat.
+		if scope.SourceFormat != "" && !openid4vp.IsZkpReqFormat(scope.Format) {
+			sl.ReportError(scope.Format, "Format", "Format", "source_format_requires_circuit_zk_format", scope.Format)
+		}
 	}, model.VerificationPresetScope{})
 
 	// Register struct-level validation for IssuancePolicy: query_template

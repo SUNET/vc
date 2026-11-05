@@ -6,8 +6,9 @@ templates:
     description: "Request basic educational identity data"
     version: "1.0"
     oidc_scopes:
+      # Keep `profile` on eudi_pid_basic only — LoadPresentationRequests
+      # rejects a scope declared by two templates (#861).
       - "eduid"
-      - "profile"
     dcql:
       credentials:
         - id: "eduid"

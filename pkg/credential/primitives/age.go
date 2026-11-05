@@ -114,12 +114,13 @@ func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[s
 	if now.IsZero() {
 		now = time.Now()
 	}
+	// The errors name the constraint, never the birthdate: they reach logs.
 	bd, err := time.Parse("2006-01-02", birthdate)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid birthdate %q: %w", ErrInvalidClaimInput, birthdate, err)
+		return nil, fmt.Errorf("%w: birthdate is not a YYYY-MM-DD date", ErrInvalidClaimInput)
 	}
 	if bd.After(now) {
-		return nil, fmt.Errorf("%w: birthdate %q is in the future", ErrInvalidClaimInput, birthdate)
+		return nil, fmt.Errorf("%w: birthdate is in the future", ErrInvalidClaimInput)
 	}
 	age := now.Year() - bd.Year()
 	ageThisYear := age

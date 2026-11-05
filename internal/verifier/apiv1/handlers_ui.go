@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"time"
 
@@ -68,10 +69,19 @@ type UIPreset struct {
 
 // UIPresetCredential is a credential query within a preset.
 type UIPresetCredential struct {
-	ID          string                      `json:"id"`
-	Format      string                      `json:"format"`
-	Meta        UIPresetMeta                `json:"meta"`
-	Claims      []UIPresetClaim             `json:"claims,omitempty"`
+	ID     string          `json:"id"`
+	Format string          `json:"format"`
+	Meta   UIPresetMeta    `json:"meta"`
+	Claims []UIPresetClaim `json:"claims,omitempty"`
+	// Req is the circuit_zk format's requested calculations, from the
+	// preset's VerificationPresetScope.Req.
+	//
+	// It has to reach the browser. The picker builds the DCQL query here
+	// and posts it back, so a req that stayed server-side would leave the
+	// UI sending a circuit_zk query that asks for nothing - and such a
+	// query discloses nothing either, so the wallet would have no reason
+	// to return anything at all.
+	Req         []openid4vp.ReqItem         `json:"req,omitempty"`
 	Validations []openid4vp.ClaimValidation `json:"validations,omitempty"`
 }
 
@@ -92,6 +102,10 @@ type UIPresetMeta struct {
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
+	// SourceFormat is meta.source_format, set for circuit_zk scopes from
+	// VerificationPresetScope.SourceFormat. It has to reach the browser, which
+	// posts this meta back as the query's meta.
+	SourceFormat string `json:"source_format,omitempty"`
 }
 
 // UIPresetClaim is a claim path within a preset credential.
@@ -145,7 +159,10 @@ func validZKSystemTypes(specs []openid4vp.ZKSystemTypeSpec) bool {
 // override a scope to a W3C identifier while keeping vct_values.
 func constraintFamily(format string) string {
 	switch format {
-	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+	// circuit_zk is matched on doctype_value too (the nym_auth rulebook's
+	// own examples carry one), so an mdoc scope can be requested as a
+	// circuit proof over the same document.
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk, openid4vp.FormatZkpReq:
 		return "doctype"
 	// Not jwt_vc_json: DCQLMetaQuery refuses it, so calling it family-
 	// compatible here would approve an override the query builder then drops.
@@ -284,6 +301,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				Featured:    model.BoolVal(def.Featured, false),
 				Credentials: make([]UIPresetCredential, 0, len(preset)),
 			}
+			// Set when a credential cannot be requested in a way that
+			// would change what the preset ASKS FOR rather than merely
+			// which of several credentials it collects. A preset is a
+			// named request: publishing "PID + Pseudonym" as PID-only
+			// gives an operator a button that silently does something
+			// else, which is worse than no button.
+			abandonPreset := false
+
 			scopeKeys := make([]string, 0, len(preset))
 			for scope := range preset {
 				scopeKeys = append(scopeKeys, scope)
@@ -342,16 +367,91 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 							"preset", label, "scope", scope)
 						continue
 					}
+					// Same shape of defect for circuit_zk, from the other
+					// direction: the query discloses nothing, so every value
+					// it yields is named in req. With req empty the preset
+					// publishes a button that asks a wallet for nothing and
+					// gets nothing back - which looks like a wallet fault
+					// and is not one.
+					if scopeCfg.Format == openid4vp.FormatZkpReq && len(scopeCfg.Req) == 0 {
+						c.log.Error(nil, "preset omitted from the verifier UI: a circuit_zk credential has no req",
+							"preset", label, "scope", scope)
+						abandonPreset = true
+						break
+					}
+					// req crosses the browser, where every number is a
+					// float64. A param that cannot survive that is a proof
+					// input the wallet would compute over a DIFFERENT value
+					// than the one configured - and the only symptom is two
+					// systems disagreeing about who someone is, with nothing
+					// malformed to point at. Refused here, where the
+					// operator can still fix it.
+					// A circuit_zk query is answered with a PROOF, and
+					// which circuits a verifier will accept one from lives
+					// in client_metadata.vp_formats_supported.circuit_zk -
+					// nowhere else. vpFormatsOrDefault's default names
+					// only dc+sd-jwt and mso_mdoc, so a deployment that
+					// never configured preferred_vp_formats would publish
+					// this preset and then send the query alongside
+					// metadata declaring no support for its format at all.
+					//
+					// No default is invented here. The circuit filter
+					// names proof systems and circuit identifiers that are
+					// deployment-specific, and guessing one would pin this
+					// verifier to whichever implementation happened to be
+					// in front of me. An empty circuit_zk object is a
+					// perfectly good answer - the shared vectors read a
+					// missing filter as "any circuit" - but it has to be
+					// the operator's answer.
+					if scopeCfg.Format == openid4vp.FormatZkpReq &&
+						vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats).ZkpReq == nil {
+						c.log.Error(nil, "preset omitted from the verifier UI: circuit_zk is not advertised in verifier.preferred_vp_formats, so a wallet would be asked for a proof the request declares no support for",
+							"preset", label, "scope", scope)
+						abandonPreset = true
+						break
+					}
+					if err := reqSurvivesTheBrowser(scopeCfg.Req); err != nil {
+						c.log.Error(err, "preset omitted from the verifier UI: a req param cannot survive the browser's JSON round trip",
+							"preset", label, "scope", scope)
+						abandonPreset = true
+						break
+					}
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
+					uiCred.Req = scopeCfg.Req
+					if scopeCfg.Format == openid4vp.FormatZkpReq {
+						uiCred.Meta.SourceFormat = scopeCfg.SourceFormat
+					}
 				}
 
 				// scopeCfg may be nil (scope with no overrides)
 				if scopeCfg != nil {
 					uiCred.Validations = scopeCfg.Validations
 				}
-				uiCred.Claims = presetClaims(scopeCfg, meta)
+
+				// A circuit_zk query carries no claims at all - it discloses
+				// nothing, and req says what it computes. Falling through to
+				// the VCTM list would attach every claim in the document to
+				// a query whose whole point is to reveal none of them, and
+				// an operator's explicit claims on such a scope are a
+				// configuration mistake worth not silently honouring.
+				if uiCred.Format != openid4vp.FormatZkpReq {
+					uiCred.Claims = presetClaims(scopeCfg, meta)
+				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
+			}
+			// A preset whose circuit_zk credential could not be requested
+			// is not published at all, even when its other credentials
+			// could be. The pseudonym IS what such a preset asks for, so
+			// publishing the rest under the same label is a different
+			// request wearing the configured one's name - and the
+			// configuration reference says the preset is omitted.
+			//
+			// Deliberately unlike the format-family and zk_system_type
+			// drops above, which remove one credential of several that
+			// each stand on their own.
+			if abandonPreset {
+				continue
 			}
 			// An all-dropped preset would ask the wallet for nothing.
 			if len(uiPreset.Credentials) == 0 {
@@ -380,6 +480,13 @@ type UIInteractionRequest struct {
 	// reload mid-flow does not orphan the wallet's outstanding scan.
 	// Otherwise a fresh session id is minted and returned in the reply.
 	SessionID string `json:"session_id,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// Payment, when set, makes this an EC TS12 payment SCA request: a
+	// urn:eudi:sca:payment:1 transaction_data entry is added to the request
+	// and the response is validated against it. Requires verifier.ts12.enable.
+	// A payment is never served from a reused session: every payment request
+	// is a new transaction.
+	Payment *UIPaymentRequest `json:"payment,omitempty" validate:"omitempty"`
 }
 
 type UIInteractionReply struct {
@@ -413,6 +520,16 @@ type UIInteractionReply struct {
 
 // UIInteraction handles front-end interactions, replying with an Authorization Request that contains a Request URI and DCQL query, the latter for UI to show.
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
+	// A request carrying no query at all, which is not merely invalid:
+	// everything below dereferences it, so this PANICS without the
+	// guard. The HTTP binding skips decoding a body of zero length
+	// entirely - no decode, no validation, no error - so a caller that
+	// sends an empty body arrives here with a zero-valued request and
+	// gets a stack trace and a 500 where a 400 was owed.
+	if req == nil || req.DCQLQuery == nil {
+		return nil, invalidInteractionRequest("dcql_query is required")
+	}
+
 	c.log.Debug("uiInteraction", "dcql_query", req.DCQLQuery)
 
 	// Augment BEFORE the reuse check: the stored request object was
@@ -420,6 +537,12 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// same shape before we can compare them for equality.
 	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
+	// A payment is a new transaction every time, so it never joins a reused
+	// session; tryReuseInFlightSession in turn refuses to hand a payment
+	// session to a request that did not ask for one.
+	if req.Payment != nil {
+		req.SessionID = ""
+	}
 	if reply, ok, err := c.tryReuseInFlightSession(ctx, req); err != nil {
 		return nil, err
 	} else if ok {
@@ -451,15 +574,35 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// scopes, finds none, and reports success for a response that answered
 	// a request asking for nothing. Refused here, where the caller can still
 	// be told what was wrong with its request.
+	//
+	// Both refusals here are STRUCTURED 400s. An unstructured error carries
+	// no status, so the status is inferred from its text - and the text
+	// contains a credential query id the caller chose. One named "token"
+	// answers 401 instead of 400 and loses the description with it.
 	if len(req.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "rejected a UI interaction request whose DCQL asks for no credential at all")
-		return nil, errors.New("dcql_query must request at least one credential")
+		return nil, invalidInteraction(req.Payment != nil, "dcql_query must request at least one credential")
 	}
 
 	for _, credential := range req.DCQLQuery.Credentials {
 		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
 			c.log.Error(err, "rejected an invalid credential query from the UI interaction request", "credential_id", credential.ID, "format", credential.Format)
-			return nil, fmt.Errorf("credential query %q is invalid: %w", credential.ID, err)
+			return nil, invalidInteraction(req.Payment != nil, "credential query %q is invalid: %v", credential.ID, err)
+		}
+	}
+
+	// The entries are encoded once, here, and these exact strings go into the
+	// request object AND the session: OpenID4VP hashes the string as
+	// received, so what we compare the wallet's hashes against must be the
+	// bytes we sent, not a later re-encoding.
+	var transactionData, transactionDataModes []string
+	if req.Payment != nil {
+		transactionDataModes = c.issuedResponseModes()
+		var err error
+		transactionData, err = c.buildPaymentTransactionData(req.Payment, req.DCQLQuery)
+		if err != nil {
+			c.log.Error(err, "rejected a payment request")
+			return nil, err
 		}
 	}
 
@@ -483,13 +626,17 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// which types were asked for, whether holder binding was required.
 		// Without it here the request object cache is the only copy, and the
 		// verification path cannot see what it is checking against.
-		DCQLQuery:  req.DCQLQuery,
-		Code:       "",
-		RequestURI: "",
-		WalletURI:  "",
-		Forfeited:  false,
-		State:      state,
-		ClientID:   uiClientID,
+		DCQLQuery:       req.DCQLQuery,
+		TransactionData: transactionData,
+		// What the request objects below are issued with, kept so the
+		// response is checked against it and not against a later config.
+		TransactionDataResponseModes: transactionDataModes,
+		Code:                         "",
+		RequestURI:                   "",
+		WalletURI:                    "",
+		Forfeited:                    false,
+		State:                        state,
+		ClientID:                     uiClientID,
 		// How long the user has to complete the presentation.
 		//
 		// This was 0, and isSessionActive reads 0 as "never expires" - so
@@ -577,6 +724,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		RedirectURI:      "",
 		Scope:            "",
 		DCQLQuery:        req.DCQLQuery,
+		TransactionData:  transactionData,
 		RequestURIMethod: "",
 		VerifierInfo:     c.registrationCertificate.VerifierInfo(),
 	}
@@ -662,6 +810,11 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 		return nil, false, err
 	}
 	if authCtx == nil {
+		return nil, false, nil
+	}
+	// A payment session belongs to its payment. Serving it to a request that
+	// did not ask for one would present an old transaction as a new request.
+	if len(authCtx.TransactionData) > 0 {
 		return nil, false, nil
 	}
 	if !isReusableAuthContext(authCtx) {
@@ -947,7 +1100,11 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 	if err != nil {
 		return nil, err
 	}
-	if c.cfg.Verifier.DigitalCredentials.Enable {
+	// A payment session records the response modes it was issued with and the
+	// response is checked against them, so a resume must not issue a variant
+	// that was not among them (the DC API switched on since).
+	dcAPIAllowed := len(authCtx.TransactionData) == 0 || slices.Contains(authCtx.TransactionDataResponseModes, openid4vp.ResponseModeDCAPIJWT)
+	if c.cfg.Verifier.DigitalCredentials.Enable && dcAPIAllowed {
 		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
@@ -1081,7 +1238,9 @@ func requestableClaims(vctm *sdjwtvc.VCTM) []claimpath.Pointer {
 // augmentDCQLFromVCTM enriches the DCQL query using VCTM metadata.
 // It:
 //   - Replaces parent object paths with their nested sub-paths when the VCTM
-//     defines children (e.g. ["address"] → ["address", "street_address"]).
+//     defines children (e.g. ["address"] → ["address", "street_address"]),
+//     unless a child is sd "never" and so only disclosed with its parent; the
+//     parent is then kept and only its other children are added.
 //   - Removes redundant parent paths when an array-element path is also present
 //     (e.g. removes ["nationalities"] when ["nationalities", null] exists),
 //     because sending both causes wallets to disclose only the parent array
@@ -1099,28 +1258,50 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 	}
 }
 
-// vctmChildPaths returns the VCTM claim paths of two or more components
-// that end in a key or an index, by the rendering of their first key.
-func vctmChildPaths(vctm *sdjwtvc.VCTM) map[string][]claimpath.Pointer {
-	children := map[string][]claimpath.Pointer{}
+// vctmChildren is the VCTM claim paths beneath one top-level claim: the
+// paths of two or more components that end in a key or an index.
+type vctmChildren struct {
+	all []claimpath.Pointer
+	// independent are the children disclosed apart from the parent: those
+	// whose sd is not "never".
+	independent []claimpath.Pointer
+	// atomic is set when a child is sd "never", so it is disclosed only
+	// with its parent.
+	atomic bool
+}
+
+// vctmChildPaths returns the children of each top-level VCTM claim, by the
+// rendering of its pointer.
+func vctmChildPaths(vctm *sdjwtvc.VCTM) map[string]vctmChildren {
+	children := map[string]vctmChildren{}
 	for _, vc := range vctm.Claims {
 		last, ok := vc.Path.Last()
 		if !ok || vc.Path.Len() < 2 || last.IsAll() {
 			continue
 		}
-		if key, ok := vc.Path.FirstKey(); ok {
-			parent := claimpath.Keys(key).String()
-			children[parent] = append(children[parent], vc.Path)
+		key, ok := vc.Path.FirstKey()
+		if !ok {
+			continue
 		}
+		parent := claimpath.Keys(key).String()
+		family := children[parent]
+		family.all = append(family.all, vc.Path)
+		if vc.SD == "never" {
+			family.atomic = true
+		} else {
+			family.independent = append(family.independent, vc.Path)
+		}
+		children[parent] = family
 	}
 	return children
 }
 
-// expandParentClaims replaces each single-key claim with the VCTM paths
-// beneath it, and drops one whose array-element path ["x", null] is also
-// requested: the null path already asks for element-level disclosure, and
-// keeping the parent makes wallets skip the element disclosures.
-func expandParentClaims(claims []openid4vp.ClaimQuery, children map[string][]claimpath.Pointer) []openid4vp.ClaimQuery {
+// expandParentClaims adds, for each single-key claim, the VCTM paths
+// beneath it. It drops the parent when its children replace it, and one
+// whose array-element path ["x", null] is also requested: the null path
+// already asks for element-level disclosure, and keeping the parent makes
+// wallets skip the element disclosures.
+func expandParentClaims(claims []openid4vp.ClaimQuery, children map[string]vctmChildren) []openid4vp.ClaimQuery {
 	existing := make(map[string]bool, len(claims))
 	for _, claim := range claims {
 		existing[claim.Path.String()] = true
@@ -1128,13 +1309,13 @@ func expandParentClaims(claims []openid4vp.ClaimQuery, children map[string][]cla
 	removed := map[string]bool{}
 	var added []openid4vp.ClaimQuery
 	for _, claim := range claims {
-		replacement, replaced := parentReplacement(claim.Path, children, existing)
+		more, replaced := parentReplacement(claim.Path, children, existing)
 		if replaced {
 			removed[claim.Path.String()] = true
-			added = append(added, replacement...)
 		}
+		added = append(added, more...)
 	}
-	if len(removed) == 0 {
+	if len(removed) == 0 && len(added) == 0 {
 		return claims
 	}
 	out := make([]openid4vp.ClaimQuery, 0, len(claims)+len(added))
@@ -1146,10 +1327,12 @@ func expandParentClaims(claims []openid4vp.ClaimQuery, children map[string][]cla
 	return out
 }
 
-// parentReplacement reports whether a single-key claim path is superseded,
-// and returns the VCTM paths beneath it that the query does not have yet.
-// existing records the paths it returns.
-func parentReplacement(path claimpath.Pointer, children map[string][]claimpath.Pointer, existing map[string]bool) ([]openid4vp.ClaimQuery, bool) {
+// parentReplacement returns the VCTM paths beneath a single-key claim path
+// that the query does not have yet, and reports whether they supersede the
+// parent. A parent with an sd "never" child stays, and only its children
+// disclosed apart from it are added. existing records the paths it
+// returns.
+func parentReplacement(path claimpath.Pointer, children map[string]vctmChildren, existing map[string]bool) ([]openid4vp.ClaimQuery, bool) {
 	key, ok := singleKey(path)
 	if !ok {
 		return nil, false
@@ -1157,14 +1340,22 @@ func parentReplacement(path claimpath.Pointer, children map[string][]claimpath.P
 	if existing[claimpath.New(claimpath.Key(key), claimpath.All()).String()] {
 		return nil, true
 	}
+	family, ok := children[path.String()]
+	if !ok {
+		return nil, false
+	}
+	wanted := family.all
+	if family.atomic {
+		wanted = family.independent
+	}
 	var added []openid4vp.ClaimQuery
-	for _, child := range children[path.String()] {
+	for _, child := range wanted {
 		if !existing[child.String()] {
 			added = append(added, openid4vp.ClaimQuery{Path: child})
 			existing[child.String()] = true
 		}
 	}
-	return added, len(children[path.String()]) > 0
+	return added, !family.atomic
 }
 
 // singleKey returns the key of a pointer that is one key.

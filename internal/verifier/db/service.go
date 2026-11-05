@@ -57,7 +57,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	defer cancel()
 
 	// Initialize OIDC collections
-	oidcDB := service.MongoClient.Database("verifier")
+	oidcDB := service.MongoClient.Database(cfg.Common.Mongo.VerifierDatabaseName)
 	clientsColl := &ClientCollection{
 		Service:    service,
 		collection: oidcDB.Collection("clients"),

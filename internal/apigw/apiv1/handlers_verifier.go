@@ -82,7 +82,8 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	c.log.Debug("Signed JWT", "jwt", reply)
+	// The request object carries this exchange's nonce: log its length only.
+	c.log.Debug("Signed JWT", "jwt_bytes", len(reply))
 
 	return reply, nil
 }
@@ -290,7 +291,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("this authorization is answered at the authorization challenge endpoint, not here")
 	}
 
-	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
+	c.log.Debug("VP Response received", "vp_token", vpResponse.VPTokenSummary(), "scope", authCtx.Scopes)
 	outcome, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, &vpResponse, issuanceAuthBinding{
 		Audience:              authCtx.ClientID,
 		MdocSessionTranscript: c.directPostSessionTranscript(authCtx, privateEphemeralJWK),
@@ -477,7 +478,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		}
 	}
 	if vpToken == "" {
-		c.log.Error(nil, "VP Token not found for any credential query", "available_keys", vpResponse.VPToken)
+		c.log.Error(nil, "VP Token not found for any credential query", "available", vpResponse.VPTokenSummary())
 		return nil, errors.New("VP Token not found for any configured credential query")
 	}
 
@@ -786,10 +787,12 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, format)
 		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
-			ID:       authScope,
-			Format:   format,
-			Multiple: false,
-			Meta:     meta,
+			ID:     authScope,
+			Format: format,
+			// Multiple is left unset too: it is a *bool on this branch,
+			// and nil is the specification's default of false - the same
+			// request main sent explicitly.
+			Meta: meta,
 			// Left unset, which is the specification's default of TRUE.
 			//
 			// It said false, which told every wallet that a presentation
@@ -806,8 +809,11 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		Credentials: credentialQueries,
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
-				Options:  options,
-				Required: new(false),
+				Options: options,
+				// The options are alternatives, one per auth scope. As the
+				// only set, an optional one would make the request
+				// require no credential.
+				Required: new(true),
 			},
 		},
 	}, nil

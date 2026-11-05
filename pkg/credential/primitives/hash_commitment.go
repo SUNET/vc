@@ -1,14 +1,9 @@
 package primitives
 
 import (
-	"crypto/hkdf"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/base64url"
@@ -23,33 +18,38 @@ type HashCommitmentArgs struct {
 	Opening OpeningArgs `yaml:"opening" validate:"required"`
 }
 
-// OpeningArgs produces the opening of a hash commitment. Exactly one field
-// is set.
+// OpeningArgs produces the opening of a hash commitment.
+//
+// Exactly one field is set.
 type OpeningArgs struct {
 	// HKDF derives the opening from a secret and claims of the source
 	// data.
 	HKDF *HKDFOpeningArgs `yaml:"hkdf,omitempty"`
+	// HMAC derives the opening from a secret and claims of the source
+	// data.
+	HMAC *HMACOpeningArgs `yaml:"hmac,omitempty"`
 	// Random draws a random opening.
 	Random *RandomOpeningArgs `yaml:"random,omitempty"`
-}
-
-// HKDFOpeningArgs derives the opening with HKDF-SHA256 over the ordered
-// input claims.
-type HKDFOpeningArgs struct {
-	// SecretPath is a file holding the secret, base64url, decoding to at
-	// least 32 bytes.
-	SecretPath string `yaml:"secret_path" validate:"required" doc_example:"\"/pki/nym_auth_seed.key\""`
-	// Inputs are claims of the source data, each a non-empty string.
-	// Their order is part of the derivation.
-	Inputs []claimpath.Pointer `yaml:"inputs" validate:"required,min=1,max=16,dive,required" doc_example:"[[\"issuing_country\"], [\"personal_administrative_number\"]]"`
-	// Bytes is the opening length.
-	Bytes int `yaml:"bytes" validate:"required" doc_example:"16"`
+	// Claim takes the opening from a claim of the source data.
+	Claim *ClaimOpeningArgs `yaml:"claim,omitempty"`
 }
 
 // RandomOpeningArgs draws the opening from crypto/rand.
 type RandomOpeningArgs struct {
-	// Bytes is the opening length.
+	// Bytes is the opening length, 16 to 64.
 	Bytes int `yaml:"bytes" validate:"required" doc_example:"16"`
+}
+
+// ClaimOpeningArgs takes the opening from a claim of the source data.
+//
+// The claim holds a per-subject secret as base64url text, decoding to 16 to
+// 64 bytes. The secret stays out of the credential: the configuration is
+// refused when the credential carries the claim or another derivation
+// reads it.
+type ClaimOpeningArgs struct {
+	// Input is the claim of the source data that holds the opening. A
+	// presentation source lists it in its required_claims.
+	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"nym_auth_opening\"]"`
 }
 
 // Apply implements Applier. The derivation pipeline skips hash_commitment,
@@ -64,14 +64,16 @@ func (a *HashCommitmentArgs) outputs(func(string) (claimpath.Pointer, error)) ([
 	return nil, nil
 }
 
-// resolve reads the dotted hkdf inputs as claims of the source data.
+// resolve reads the dotted opening inputs as claims of the source data.
 func (a *HashCommitmentArgs) resolve(source claimpath.Shape) error {
-	if a.Opening.HKDF == nil {
-		return nil
+	generator, err := a.Opening.generator()
+	if err != nil {
+		return fmt.Errorf("opening: %w", err)
 	}
-	for i := range a.Opening.HKDF.Inputs {
-		if err := source.ResolveOne(&a.Opening.HKDF.Inputs[i]); err != nil {
-			return fmt.Errorf("opening.hkdf.inputs[%d]: %w", i, err)
+	inputs := generator.inputs()
+	for i := range inputs {
+		if err := source.ResolveOne(inputs[i]); err != nil {
+			return fmt.Errorf("opening.%s.inputs[%d]: %w", generator.name(), i, err)
 		}
 	}
 	return nil
@@ -88,6 +90,44 @@ func HashCommitmentFor(list []Derivation, path claimpath.Pointer) *HashCommitmen
 	return nil
 }
 
+// OpeningInputs returns the claims of source, held in shape, that the
+// hash_commitment derivations of list read as opening inputs. Each is a
+// deep copy of the claim at the input's leading keys, held where source
+// holds it, so a later write into source or a filter on it leaves them as
+// they were. An input source lacks is left out.
+func OpeningInputs(list []Derivation, source map[string]any, shape claimpath.Shape) (map[string]any, error) {
+	var out map[string]any
+	for _, d := range list {
+		if d.HashCommitment == nil {
+			continue
+		}
+		_, inputs, err := d.HashCommitment.Opening.Inputs()
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range inputs {
+			keys, ok := path.KeyPrefix()
+			if !ok {
+				return nil, fmt.Errorf("opening input %s starts with no key", path)
+			}
+			value, present, err := shape.Get(source, keys)
+			if errors.Is(err, claimpath.ErrMismatch) || (err == nil && !present) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if out == nil {
+				out = map[string]any{}
+			}
+			if err := shape.Set(out, keys, cloneClaimValue(value)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
+
 // NewOpening produces the opening from the claims of the source data,
 // held in the source shape.
 func (a *HashCommitmentArgs) NewOpening(claims map[string]any, source claimpath.Shape) ([]byte, error) {
@@ -100,123 +140,139 @@ func (a *HashCommitmentArgs) NewOpening(claims map[string]any, source claimpath.
 
 // openingGenerator produces an opening from the claims of the source data.
 type openingGenerator interface {
+	// name is the generator's key under opening.
+	name() string
+	// inputs are the claims of the source data the generator reads.
+	inputs() []*claimpath.Pointer
 	open(claims map[string]any, source claimpath.Shape) ([]byte, error)
+	// validate checks what the configuration fixes: the length, and a
+	// secret.
+	validate() error
 }
 
 // generator returns the one generator the opening sets.
 func (o OpeningArgs) generator() (openingGenerator, error) {
-	switch {
-	case o.HKDF != nil && o.Random == nil:
-		return o.HKDF, nil
-	case o.Random != nil && o.HKDF == nil:
-		return o.Random, nil
-	default:
-		return nil, errors.New("set exactly one of hkdf and random")
+	var set []openingGenerator
+	if o.HKDF != nil {
+		set = append(set, o.HKDF)
 	}
+	if o.HMAC != nil {
+		set = append(set, o.HMAC)
+	}
+	if o.Random != nil {
+		set = append(set, o.Random)
+	}
+	if o.Claim != nil {
+		set = append(set, o.Claim)
+	}
+	if len(set) != 1 {
+		return nil, errors.New("set exactly one of hkdf, hmac, random and claim")
+	}
+	return set[0], nil
 }
 
-// An opening has 16 to 64 bytes: at least 128 bits.
-const (
-	minOpeningBytes = 16
-	maxOpeningBytes = 64
-)
-
 // Validate checks that the opening can be produced: one generator is set,
-// the length is in range, and an hkdf secret loads.
+// its length is in range, and a keyed generator's secret loads.
 func (o OpeningArgs) Validate() error {
-	if _, err := o.generator(); err != nil {
+	generator, err := o.generator()
+	if err != nil {
 		return err
 	}
-	if n := o.bytes(); n < minOpeningBytes || n > maxOpeningBytes {
-		return fmt.Errorf("an opening has %d to %d bytes, got %d", minOpeningBytes, maxOpeningBytes, n)
+	return generator.validate()
+}
+
+// Inputs returns the key of the generator the opening sets, and the claims
+// of the source data it reads.
+func (o OpeningArgs) Inputs() (generator string, claims []claimpath.Pointer, err error) {
+	g, err := o.generator()
+	if err != nil {
+		return "", nil, err
 	}
-	if o.HKDF == nil {
-		return nil
+	inputs := g.inputs()
+	claims = make([]claimpath.Pointer, len(inputs))
+	for i, input := range inputs {
+		claims[i] = *input
 	}
-	if _, err := o.HKDF.secret(); err != nil {
-		return fmt.Errorf("hkdf: %w", err)
+	return g.name(), claims, nil
+}
+
+// Keyed returns the generator of an opening that sets hkdf or hmac alone.
+func (o OpeningArgs) Keyed() (ValueOpener, bool) {
+	generator, err := o.generator()
+	if err != nil {
+		return nil, false
+	}
+	keyed, ok := generator.(ValueOpener)
+	return keyed, ok
+}
+
+// lengthRange is the lengths an opening takes, in bytes.
+type lengthRange struct{ min, max int }
+
+// openingLengths is the range of an opening. Its floor is 128 bits, the
+// entropy section 4.1 of the auxiliary data extension requires.
+var openingLengths = lengthRange{min: 16, max: 64}
+
+func (r lengthRange) check(n int) error {
+	if n < r.min || n > r.max {
+		return fmt.Errorf("an opening has %d to %d bytes, got %d", r.min, r.max, n)
 	}
 	return nil
 }
 
-// bytes is the length the set generator produces.
-func (o OpeningArgs) bytes() int {
-	if o.HKDF != nil {
-		return o.HKDF.Bytes
+// inputClaim returns the value of the claim at path of the source data,
+// held in the source shape, which is a string.
+func inputClaim(claims map[string]any, source claimpath.Shape, path claimpath.Pointer) (string, error) {
+	value, present, err := source.Get(claims, path)
+	if err != nil && !errors.Is(err, claimpath.ErrMismatch) {
+		return "", err
 	}
-	return o.Random.Bytes
+	s, ok := value.(string)
+	if err != nil || !present || !ok {
+		// The value is personal data, so the error names the claim only.
+		return "", fmt.Errorf("%w: opening input %s must be a string", ErrInvalidClaimInput, path)
+	}
+	return s, nil
 }
 
-// minHKDFSecretBytes is the output length of SHA-256.
-const minHKDFSecretBytes = sha256.Size
+func (a *RandomOpeningArgs) name() string                 { return "random" }
+func (a *RandomOpeningArgs) inputs() []*claimpath.Pointer { return nil }
 
-// secret reads the secret file: base64url, at least 32 bytes.
-func (a *HKDFOpeningArgs) secret() ([]byte, error) {
-	secret, err := base64url.ReadFile(a.SecretPath)
-	if err != nil {
-		return nil, fmt.Errorf("the opening secret: %w", err)
+func (a *RandomOpeningArgs) validate() error {
+	if err := openingLengths.check(a.Bytes); err != nil {
+		return fmt.Errorf("%s: %w", a.name(), err)
 	}
-	if len(secret) < minHKDFSecretBytes {
-		return nil, fmt.Errorf("the opening secret in %s is shorter than %d bytes", a.SecretPath, minHKDFSecretBytes)
-	}
-	return secret, nil
-}
-
-func (a *HKDFOpeningArgs) open(claims map[string]any, source claimpath.Shape) ([]byte, error) {
-	values := make([]string, 0, len(a.Inputs))
-	for _, path := range a.Inputs {
-		val, present, err := source.Get(claims, path)
-		s, ok := val.(string)
-		if err != nil || !present || !ok {
-			// The value is a personal identifier, so the error names the
-			// claim only.
-			return nil, fmt.Errorf("%w: hkdf input %s must be a non-empty string", ErrInvalidClaimInput, path)
-		}
-		values = append(values, s)
-	}
-	return a.OpenValues(values)
-}
-
-// OpenValues derives the opening from the values of Inputs, in their order.
-func (a *HKDFOpeningArgs) OpenValues(values []string) ([]byte, error) {
-	if len(values) != len(a.Inputs) {
-		return nil, fmt.Errorf("%w: hkdf takes %d input values, got %d", ErrInvalidClaimInput, len(a.Inputs), len(values))
-	}
-	info := hkdfField(nil, hkdfLabel)
-	info = hkdfField(info, strconv.Itoa(a.Bytes))
-	for i, value := range values {
-		if strings.TrimSpace(value) == "" {
-			return nil, fmt.Errorf("%w: hkdf input %s must be a non-empty string", ErrInvalidClaimInput, a.Inputs[i])
-		}
-		if len(value) > maxHKDFField {
-			// A longer value would wrap its length prefix, and two inputs
-			// would then encode alike.
-			return nil, fmt.Errorf("%w: hkdf input %s is longer than %d bytes", ErrInvalidClaimInput, a.Inputs[i], maxHKDFField)
-		}
-		info = hkdfField(info, value)
-	}
-	secret, err := a.secret()
-	if err != nil {
-		return nil, err
-	}
-	return hkdf.Key(sha256.New, secret, nil, string(info), a.Bytes)
-}
-
-// hkdfLabel separates the hkdf opening from other uses of the secret.
-const hkdfLabel = "vc/hash_commitment/hkdf/v1"
-
-// maxHKDFField is the longest field a two-byte length prefix holds.
-const maxHKDFField = 1<<16 - 1
-
-// hkdfField appends field to info, prefixed with its length.
-func hkdfField(info []byte, field string) []byte {
-	return append(binary.BigEndian.AppendUint16(info, uint16(len(field))), field...)
+	return nil
 }
 
 func (a *RandomOpeningArgs) open(map[string]any, claimpath.Shape) ([]byte, error) {
 	opening := make([]byte, a.Bytes)
 	if _, err := rand.Read(opening); err != nil {
 		return nil, err
+	}
+	return opening, nil
+}
+
+func (a *ClaimOpeningArgs) name() string                 { return "claim" }
+func (a *ClaimOpeningArgs) inputs() []*claimpath.Pointer { return []*claimpath.Pointer{&a.Input} }
+
+// validate accepts every claim: its value is checked when it is read.
+func (a *ClaimOpeningArgs) validate() error {
+	return nil
+}
+
+func (a *ClaimOpeningArgs) open(claims map[string]any, source claimpath.Shape) ([]byte, error) {
+	value, err := inputClaim(claims, source, a.Input)
+	if err != nil {
+		return nil, err
+	}
+	// The value is a secret, so each error names the claim only.
+	opening, err := base64url.Decode(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: opening input %s: %w", ErrInvalidClaimInput, a.Input, err)
+	}
+	if err := openingLengths.check(len(opening)); err != nil {
+		return nil, fmt.Errorf("%w: opening input %s: %w", ErrInvalidClaimInput, a.Input, err)
 	}
 	return opening, nil
 }

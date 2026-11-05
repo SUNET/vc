@@ -64,7 +64,31 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	if err != nil {
 		return err
 	}
-	authCtx.VerifiedClaims = verified
+	// The claims cross the cache before issuance, and a Mongo cache
+	// round-trips them through BSON, which has no form for a cbor.Tag (a
+	// decoded mdoc date). Convert them to storable values first. A claim
+	// with no storable form is refused here, where it can still be named.
+	storable, err := documentObject(verified)
+	if err != nil {
+		// The REASON goes to the log, never to the caller.
+		//
+		// documentValue names the offending value in its error - an
+		// integer outside the exact JSON range is reported with the
+		// integer in it - so returning the wrapped error to the wallet
+		// would echo a holder's claim back over HTTP, in the one place
+		// that is supposed to be keeping claims out of places they do
+		// not belong.
+		//
+		// The caller gets the fact and nothing else; an operator gets
+		// the detail from the log, where the session id is. INFO, not
+		// ERROR: this is the wallet's presentation, not a server fault.
+		c.log.Info("a presented claim cannot be carried through to issuance",
+			"session_id", authCtx.SessionID, "reason", err)
+		return helpers.NewErrorDetailsWithStatus("unrepresentable_claim",
+			"a presented claim cannot be carried through to issuance", 400)
+	}
+
+	authCtx.VerifiedClaims = storable
 	authCtx.PresentedScope = presentedScope
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		return serverFault(fmt.Errorf("failed to persist verified claims: %w", err))
@@ -84,9 +108,9 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// A derivation targeting a nested claim would otherwise write its result
 	// into the holder's verified claims. buildPresentationDocument already
 	// clones for the same reason.
-	previewData := credential.CloneNestedClaims(verified)
+	previewData := credential.CloneNestedClaims(storable)
 	now := time.Now()
-	derived, err := credential.ApplyDerivations(accepted.Derivations, verified, now, shapes)
+	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, storable, now, nil, shapes)
 	if err != nil {
 		// Not every derivation failure is ours. A scope deriving age from
 		// a required birthdate gets whatever the credential carried, and a
@@ -102,7 +126,9 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		}
 		return serverFault(fmt.Errorf("failed to apply derivations for preview: %w", err))
 	}
-	credential.MergeNestedClaims(previewData, derived)
+	if err := credential.MergeDerived(previewData, derived, replaced); err != nil {
+		return serverFault(fmt.Errorf("failed to merge derivations for preview: %w", err))
+	}
 	if err := pScope.MergeDefaults(previewData, now, shapes.Issued); err != nil {
 		return serverFault(fmt.Errorf("failed to merge defaults for preview: %w", err))
 	}
@@ -121,7 +147,8 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 
 // verifiedClaims returns the required claims of a presented credential,
 // each checked against its allow-list, in the shape the presented
-// credential used.
+// credential used. Values are not yet storable: the caller converts them
+// with documentObject before they reach the cache.
 func verifiedClaims(shape claimpath.Shape, presented map[string]any, required model.RequiredClaims) (map[string]any, error) {
 	verified := make(map[string]any, len(required))
 	for _, claim := range required {

@@ -161,7 +161,14 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 		preauthScopes := []string{}
 		if s.cfg.APIGW != nil {
 			for scope, cred := range s.cfg.APIGW.DataSources.Datastore.Scopes {
-				if cred.AuthProvider == model.AuthProviderPreAuth {
+				// Mirrors requirePreAuthScope: a scope qualifies either by
+				// being a preauth twin or by carrying allow_preauth_offer.
+				// Listing only the twins would hide the Offer action for
+				// exactly the scopes this flag exists to serve, and
+				// admin.js refuses them locally before any request is
+				// made - so migrating away from a twin would have removed
+				// the UI workflow even though the handler accepts it.
+				if cred.AuthProvider == model.AuthProviderPreAuth || cred.AllowPreAuthOffer {
 					preauthScopes = append(preauthScopes, scope)
 				}
 			}

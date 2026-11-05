@@ -48,7 +48,8 @@ func claimMandatory(meta *model.CredentialMetadata, path claimpath.Pointer) bool
 // checkMDocCommitmentClaim accepts an element of the MDDL that holds the
 // commitment's bytes as a bstr, or its text in an encoding as a tstr.
 func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path claimpath.Pointer, encoding string) error {
-	if _, _, err := path.MDoc(); err != nil {
+	namespace, element, err := path.MDoc()
+	if err != nil {
 		return err
 	}
 	claim, ok := mddlElement(mddl, path)
@@ -61,6 +62,13 @@ func checkMDocCommitmentClaim(mddl *mdoc.MDDLSchema, path claimpath.Pointer, enc
 	}
 	if claim.ValueType != want {
 		return fmt.Errorf("path %s is a %s element; a commitment in %s needs a %s element", path, claim.ValueType, held, want)
+	}
+	// The mdoc signer reads a document by element identifier alone, so a
+	// commitment would land in every namespace that declares it.
+	for other, elements := range mddl.Claims {
+		if _, ok := elements[element]; ok && other != namespace {
+			return fmt.Errorf("path %s: the MDDL also declares element %q in namespace %q, and the signer cannot tell them apart", path, element, other)
+		}
 	}
 	return nil
 }

@@ -109,10 +109,11 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 }
 
 // validateClaim checks that a mandatory claim is present and that every
-// value the claim's path selects has a JSON type.
+// value the claim's path selects has a JSON type. A mandatory claim whose
+// path selects every element of an array is present in each element.
 func validateClaim(errors *ValidationErrors, claims map[string]any, claim Claim, skipIssuerSupplied bool) {
 	values, err := claim.Path.Select(claims)
-	if err != nil {
+	if err != nil || (claim.Mandatory && !inEveryElement(claims, claim.Path)) {
 		if claim.Mandatory && !(skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path)) {
 			errors.AddError(claim.JSONPath(), "mandatory claim is missing")
 		}
@@ -123,6 +124,38 @@ func validateClaim(errors *ValidationErrors, claims map[string]any, claim Claim,
 			errors.AddError(claim.JSONPath(), err.Error())
 		}
 	}
+}
+
+// inEveryElement reports whether path reaches a value in every element each
+// of its nulls selects: a key or an index that one element lacks is absent.
+func inEveryElement(claims map[string]any, path claimpath.Pointer) bool {
+	components, err := path.Components()
+	return err == nil && reachesEveryElement(claims, components)
+}
+
+func reachesEveryElement(current any, components []claimpath.Component) bool {
+	if len(components) == 0 {
+		return true
+	}
+	c, rest := components[0], components[1:]
+	if key, ok := c.KeyName(); ok {
+		object, isObject := current.(map[string]any)
+		value, present := object[key]
+		return isObject && present && reachesEveryElement(value, rest)
+	}
+	array, ok := current.([]any)
+	if !ok {
+		return false
+	}
+	if index, ok := c.IndexValue(); ok {
+		return index < uint(len(array)) && reachesEveryElement(array[index], rest)
+	}
+	for _, element := range array {
+		if !reachesEveryElement(element, rest) {
+			return false
+		}
+	}
+	return true
 }
 
 // validateClaimValue validates a claim value based on basic type checking

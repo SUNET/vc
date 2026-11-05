@@ -1,0 +1,24 @@
+{
+  "description": "meta.doctype_value is not a string.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": 1
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age-range-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "invalid_meta"
+  }
+}

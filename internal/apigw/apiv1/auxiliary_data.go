@@ -32,33 +32,54 @@ type derivationSource struct {
 
 // sourceDerivations returns the derivations of the data source this
 // issuance uses, and the claims they read: the verified presented claims
-// for a presentation source, the document data otherwise.
-func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, document map[string]any) (derivationSource, error) {
+// for a presentation source, source otherwise.
+func (c *Client) sourceDerivations(scope string, authContext *cache.AuthorizationContext, source map[string]any) (derivationSource, error) {
 	src := model.SourceScope{Source: model.DataSourceType(authContext.DataSource), Scope: scope}
-	source := derivationSource{claims: document}
+	out := derivationSource{claims: source}
 	if src.Source == model.DataSourcePresentation {
 		src.Presented = authContext.PresentedScope
-		source.derivations = c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[src.Presented].Derivations
-		source.claims = authContext.VerifiedClaims
+		out.derivations = c.cfg.APIGW.DataSources.Presentation.Scopes[scope].From[src.Presented].Derivations
+		out.claims = storedClaims(authContext.VerifiedClaims)
 	} else {
-		source.derivations = c.cfg.APIGW.DataSources.DerivationsForSource(scope, src.Source)
+		out.derivations = c.cfg.APIGW.DataSources.DerivationsForSource(scope, src.Source)
 	}
 	shapes, err := c.cfg.DerivationShapes(src)
 	if err != nil {
 		return derivationSource{}, err
 	}
-	source.shape = shapes.Source
-	return source, nil
+	out.shape = shapes.Source
+	return out, nil
+}
+
+// openingSourceClaims returns the claims an opening reads for a source other
+// than a presentation, as the source supplied them: a datastore or external
+// API document before its derivations run, and for an assertion the claims
+// the callback captured before it derived and filtered them. A document
+// cached without them gives its document data.
+func openingSourceClaims(authContext *cache.AuthorizationContext, document *model.CompleteDocument) map[string]any {
+	if authContext.DataSource == string(model.DataSourceAssertion) && len(document.OpeningClaims) > 0 {
+		return document.OpeningClaims
+	}
+	return document.DocumentData
+}
+
+// storedClaims is claims as plain maps and slices: a Mongo-backed store
+// returns nested objects as bson.D, which a claims path pointer cannot
+// walk.
+func storedClaims(claims map[string]any) map[string]any {
+	normalised, _ := normalizeBSONValue(claims).(map[string]any)
+	return normalised
 }
 
 // issueAuxiliaryData applies scope's auxiliary_data with the derivations
-// of the data source this issuance uses.
-func (c *Client) issueAuxiliaryData(ctx context.Context, scope string, authContext *cache.AuthorizationContext, document map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
-	source, err := c.sourceDerivations(scope, authContext, document)
+// of the data source this issuance uses. An opening of a source other than
+// a presentation reads source.
+func (c *Client) issueAuxiliaryData(ctx context.Context, scope string, authContext *cache.AuthorizationContext, source map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) ([]byte, []openid4vci.AuxiliaryDataEntry, error) {
+	derivations, err := c.sourceDerivations(scope, authContext, source)
 	if err != nil {
 		return nil, nil, err
 	}
-	return c.applyAuxiliaryData(ctx, scope, source, documentData, fromWallet)
+	return c.applyAuxiliaryData(ctx, scope, derivations, documentData, fromWallet)
 }
 
 // applyAuxiliaryData writes the commitments of scope's auxiliary_data into
@@ -118,7 +139,7 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 		if err != nil {
 			return nil, err
 		}
-		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment); err != nil {
+		if err := doc.setCommitment(entry.Path, entry.Encoding, commitment, false); err != nil {
 			return nil, err
 		}
 		delivered = append(delivered, openid4vci.AuxiliaryDataEntry{
@@ -134,7 +155,7 @@ func deliverOpenings(ctx context.Context, doc *commitmentDocument, entries []ope
 // writeCommitments writes each commitment the wallet sent at its path.
 func writeCommitments(doc *commitmentDocument, commitments []walletCommitment) error {
 	for _, commitment := range commitments {
-		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value); err != nil {
+		if err := doc.setCommitment(commitment.path, commitment.encoding, commitment.value, true); err != nil {
 			return err
 		}
 	}
@@ -198,8 +219,11 @@ func newCommitmentDocument(meta *model.CredentialMetadata, documentData []byte) 
 	return &commitmentDocument{commitmentCarrier: carrier, shape: shape, claims: claims}, nil
 }
 
-// setCommitment writes a commitment at path, in the entry's encoding.
-func (d *commitmentDocument) setCommitment(path claimpath.Pointer, encoding string, commitment []byte) error {
+// setCommitment writes a commitment at path, in the entry's encoding. A
+// value already there is a server fault, unless the wallet sent the
+// commitment: then an equal value stands, and a different one is a
+// conflict the wallet can see.
+func (d *commitmentDocument) setCommitment(path claimpath.Pointer, encoding string, commitment []byte, fromWallet bool) error {
 	text, err := d.claimText(encoding, commitment)
 	if err != nil {
 		return fmt.Errorf("path %s: %w", path, err)
@@ -209,7 +233,13 @@ func (d *commitmentDocument) setCommitment(path claimpath.Pointer, encoding stri
 		return fmt.Errorf("path %s: %w", path, err)
 	}
 	if present && existing != nil {
-		return fmt.Errorf("the document data already carries a value at %s", path)
+		if !fromWallet {
+			return fmt.Errorf("the document data already carries a value at %s", path)
+		}
+		if existing == text {
+			return nil
+		}
+		return &openid4vci.Error{Err: openid4vci.ErrAuxiliaryDataConflict, ErrorDescription: fmt.Sprintf("auxiliary_data: the issuer holds a different commitment for %s", path)}
 	}
 	return d.shape.Set(d.claims, path, text)
 }
@@ -312,8 +342,6 @@ func acceptedCommitment(toIssuer []openid4vci.AuxiliaryDataEntry, entry openid4v
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("to_issuer of this credential lists no entry for %s", entry.Path))
 	case entry.Alg != want.Alg:
 		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %s must use alg %s", entry.Path, want.Alg))
-	case entry.Opening != "" || entry.Encoding != "" || entry.Required:
-		return walletCommitment{}, invalidAuxiliaryData(fmt.Sprintf("the entry for %s carries only type, alg, path and commitment", entry.Path))
 	}
 	value, err := base64.RawURLEncoding.DecodeString(entry.Commitment)
 	if err != nil || len(value) != sha256.Size {

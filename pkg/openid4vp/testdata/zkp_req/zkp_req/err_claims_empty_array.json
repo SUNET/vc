@@ -1,0 +1,24 @@
+{
+  "description": "claims present even as an empty array: zkp_req has no claims.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "h",
+        "params": {
+          "ge": "2008-10-10"
+        }
+      }
+    ],
+    "claims": []
+  },
+  "expect": {
+    "error": "claims_present"
+  }
+}

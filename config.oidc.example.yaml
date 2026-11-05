@@ -121,6 +121,13 @@ apigw:
           redirect_uri: "https://dev.wallet.sunet.se"
           scopes:
             - "pid"
+    credential_offers:
+      # Must be byte-identical to apigw.public_url.
+      issuer_url: "https://issuer.example.org"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
 
 # Common OIDC Providers Reference:
 # ------------------------------------------

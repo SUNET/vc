@@ -185,6 +185,16 @@ func (s Shape) Set(claims map[string]any, p Pointer, value any) error {
 	return location.set(claims, value)
 }
 
+// Delete removes the one claim p names from claims. An absent claim is
+// left absent.
+func (s Shape) Delete(claims map[string]any, p Pointer) error {
+	location, err := s.LocateOne(p)
+	if err != nil {
+		return err
+	}
+	return location.delete(claims)
+}
+
 // Select returns every claim p selects in claims (see Pointer.Select).
 func (s Shape) Select(claims map[string]any, p Pointer) ([]any, error) {
 	location, err := s.Locate(p)

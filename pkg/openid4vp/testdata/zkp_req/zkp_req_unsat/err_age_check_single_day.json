@@ -1,0 +1,24 @@
+{
+  "description": "ge == le is a one-day range: an exact match, refused.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "mso_mdoc",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "_req": [
+      {
+        "fn_id": "age_check",
+        "return": "age",
+        "params": {
+          "ge": "2010-01-01",
+          "le": "2010-01-01"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "age_check_span_too_short"
+  }
+}

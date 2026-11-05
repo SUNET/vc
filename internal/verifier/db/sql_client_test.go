@@ -3,10 +3,12 @@ package db
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 
+	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -103,13 +105,16 @@ func TestClientCollection_Mongo(t *testing.T) {
 	_, client, cleanup := testsupport.StartMongoContainer(t)
 	defer cleanup()
 
+	var mongoCfg model.Mongo
+	require.NoError(t, defaults.Set(&mongoCfg))
+
 	svc := &Service{MongoClient: client, tracer: tracertest.New(t, nil, testsupport.TestLogger(t), "verifier-db-mongo-test"), log: testsupport.TestLogger(t)}
-	coll := &ClientCollection{Service: svc, collection: mongoClientCollection(client)}
+	coll := &ClientCollection{Service: svc, collection: mongoClientCollection(client, mongoCfg.VerifierDatabaseName)}
 	require.NoError(t, coll.createIndex(t.Context()))
 
 	testClientStoreContract(t, coll)
 }
 
-func mongoClientCollection(client *mongo.Client) *mongo.Collection {
-	return client.Database("verifier").Collection("clients")
+func mongoClientCollection(client *mongo.Client, database string) *mongo.Collection {
+	return client.Database(database).Collection("clients")
 }

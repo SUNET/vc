@@ -1,0 +1,33 @@
+{
+  "description": "bbs_cd (held): known-offender-matching-ssc with prf hashdh-bls12381g1 is satisfiable by the rules.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "zkp_req",
+    "meta": {
+      "source_format": "bbs_cd",
+      "schema_id_value": "eu.europa.ec.eudi.nym_auth.bbs.1"
+    },
+    "_req": [
+      {
+        "fn_id": "pseudonym",
+        "return": "nym",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "ver": 1,
+          "prf": "hashdh-bls12381g1"
+        }
+      },
+      {
+        "fn_id": "age_check",
+        "return": "age",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "satisfiable": true
+  }
+}

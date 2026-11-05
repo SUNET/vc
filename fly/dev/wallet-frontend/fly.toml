@@ -2,7 +2,7 @@ app = "sunet-vc-wallet-frontend"
 primary_region = "arn"
 
 [build]
-  image = "ghcr.io/sirosfoundation/wallet-frontend:latest"
+  image = "docker.sunet.se/iam_vc/wallet-frontend:v0.7.0-syncfix"
 
 # Runs the upstream image's branding helper (populates /usr/share/nginx/branding/custom
 # from BRANDING_* env vars) before nginx's normal entrypoint takes over.

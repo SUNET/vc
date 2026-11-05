@@ -368,6 +368,87 @@ func TestValidateClaims_ArrayValues(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
+	outcomes := "learningOutcomes"
+	title := "title"
+	description := "description"
+
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: claimpath.Keys(outcomes), SD: "always", Mandatory: true},
+			{Path: claimpath.New(claimpath.Key(outcomes), claimpath.All(), claimpath.Key(title)), SD: "never", Mandatory: true},
+			{Path: claimpath.New(claimpath.Key(outcomes), claimpath.All(), claimpath.Key(description)), SD: "never", Mandatory: true},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		outcomes []any
+		missing  []string
+	}{
+		{
+			name: "all elements complete",
+			outcomes: []any{
+				map[string]any{"title": "a", "description": "b"},
+				map[string]any{"title": "c", "description": "d"},
+			},
+		},
+		{
+			// The processing of a claims path returns an error for an
+			// empty selection (OpenID4VP 1.0 section 7.1), so a mandatory
+			// element claim needs an element.
+			name:     "empty array",
+			outcomes: []any{},
+			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},
+		},
+		{
+			name:     "mandatory leaf is null",
+			outcomes: []any{map[string]any{"title": nil, "description": "b"}},
+			missing:  []string{"$.learningOutcomes[*].title"},
+		},
+		{
+			name:     "element missing both fields",
+			outcomes: []any{map[string]any{}},
+			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},
+		},
+		{
+			name: "second element missing description",
+			outcomes: []any{
+				map[string]any{"title": "a", "description": "b"},
+				map[string]any{"title": "c"},
+			},
+			missing: []string{"$.learningOutcomes[*].description"},
+		},
+		{
+			name:     "element is not an object",
+			outcomes: []any{"a"},
+			missing:  []string{"$.learningOutcomes[*].title", "$.learningOutcomes[*].description"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			docData, err := json.Marshal(map[string]any{"learningOutcomes": tt.outcomes})
+			require.NoError(t, err)
+
+			err = ValidateDocument(docData, vctm)
+			if len(tt.missing) == 0 {
+				assert.NoError(t, err)
+				return
+			}
+
+			var verrs *ValidationErrors
+			require.ErrorAs(t, err, &verrs)
+			var fields []string
+			for _, e := range verrs.Errors {
+				fields = append(fields, e.Field)
+			}
+			assert.ElementsMatch(t, tt.missing, fields)
+		})
+	}
+}
+
 func TestValidateClaimPaths_StrictMode_Success(t *testing.T) {
 	givenName := "given_name"
 	familyName := "family_name"

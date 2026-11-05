@@ -210,9 +210,14 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// transform lookup claims prematurely or fail the login when the
 	// assertion simply does not carry a source-only input (e.g. a birthdate
 	// that only the external API returns).
+	// The claims the scope's openings read, taken before derivations change
+	// them: they travel beside the document to issuance.
+	var openingClaims map[string]any
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
 		src := model.SourceScope{Source: credSourceForDerivs.DataSource, Scope: session.CredentialType}
-		if derr := credential.ApplyScopeDerivations(s.cfg, src, claims, time.Now()); derr != nil {
+		var derr error
+		openingClaims, derr = credential.ApplyScopeDerivations(s.cfg, src, claims, time.Now())
+		if derr != nil {
 			span.SetStatus(codes.Error, derr.Error())
 			return nil, fmt.Errorf("SAML derivations failed: %w", derr)
 		}
@@ -263,7 +268,8 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				Meta: &model.MetaData{
 					AuthenticSource: session.IDPEntityID,
 				},
-				DocumentData: claims,
+				DocumentData:  claims,
+				OpeningClaims: openingClaims,
 			}
 			docs := map[string]*model.CompleteDocument{
 				session.IDPEntityID: doc,
@@ -413,8 +419,9 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			}
 		}
 		doc := &model.CompleteDocument{
-			Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
-			DocumentData: claims,
+			Meta:          &model.MetaData{AuthenticSource: session.IDPEntityID},
+			DocumentData:  claims,
+			OpeningClaims: openingClaims,
 		}
 		if err = s.apiv1.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IDPEntityID: doc}); err != nil {
 			span.SetStatus(codes.Error, "failed to store VCI documents")

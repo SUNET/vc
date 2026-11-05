@@ -88,10 +88,12 @@ apigw:
 ```
 
 A `hash_commitment` derivation reads the claims of the source data: the
-verified presented claims for a presentation scope, the document data for
-the others. Each claim is a claims path pointer (OpenID4VP 1.0 section 7):
-`[eu.europa.ec.eudi.pid.1, issuing_country]` names an mdoc element by
-namespace and element identifier.
+verified presented claims for a presentation scope, and for the others the
+claims the source supplied before any derivation or document filter ran. A
+presentation verifies its `required_claims` alone, so each claim an opening
+reads is the path of a `required_claims` entry. Each claim is a claims path
+pointer (OpenID4VP 1.0 section 7): `[eu.europa.ec.eudi.pid.1,
+issuing_country]` names an mdoc element by namespace and element identifier.
 
 The issuer requires `credential_response_encryption` on a request for a
 credential with `to_wallet` entries, and
@@ -108,26 +110,39 @@ proof, where `auxiliary_data` is a property of the Verifiable Presentation
 
 `opening` sets one of:
 
-- `hkdf` derives the opening from a secret and the ordered `inputs`.
-- `random` draws random bytes.
+- `hkdf` derives the opening from a secret and the ordered `inputs`, in 16
+  to 64 `bytes`.
+- `hmac` derives it from the same configuration, in 16 to 32 `bytes`.
+- `claim` takes the opening from a claim of the source data.
+- `random` draws 16 to 64 random `bytes`.
 
-Both take `bytes`, the opening length the credential type defines, from 16
-to 64.
+`bytes` is the opening length the credential type defines. The commitment
+is `SHA-256(opening)`.
+
+### `hkdf` and `hmac`
 
 ```
-opening = HKDF-SHA256(secret, info = lp("vc/hash_commitment/hkdf/v1") || lp(bytes)
-                                     || lp(input_1) || ... || lp(input_n),
-                      length = bytes)
-commitment = SHA-256(opening)
+message = lp(label) || lp(bytes) || lp(input_1) || ... || lp(input_n)
+
+hkdf: opening = HKDF-SHA256(secret, salt = empty, info = message, length = bytes)
+hmac: opening = HMAC-SHA256(secret, message), truncated to bytes
 ```
 
-`lp(x)` is a two-byte big-endian length followed by the bytes, `bytes` is
-written in decimal, and the salt is empty. Each input is a non-empty string
-claim of the source data.
+`label` is `vc/hash_commitment/hkdf/v1` for `hkdf` and
+`vc/hash_commitment/hmac/v1` for `hmac`. `lp(x)` is a two-byte big-endian
+length followed by the bytes, and `bytes` is written in decimal. Each input
+is a non-empty string claim of the source data.
+
+Pick `hmac` when the opening must also be computed where only HMAC is
+available, such as a PKCS#11 HSM without HKDF, and `hkdf` otherwise. An
+`hmac` opening is the HMAC output truncated to at least half its 32 bytes
+(RFC 2104 section 5). The labels differ, so moving an entry from one to the
+other gives every subject a new opening and a new commitment.
 
 The secret file holds the secret **base64url-encoded**, decoding to at
-least 32 bytes. `head -c 32 /dev/urandom | basenc --base64url | tr -d '='`
-produces one. `create_pki.sh` writes one to `developer_tools/pki`, and the
+least 32 bytes, and only its owner can read it.
+`(umask 077; head -c 32 /dev/urandom | basenc --base64url | tr -d '=' > nym_auth_seed.key)`
+writes one. `create_pki.sh` writes one to `developer_tools/pki`, and the
 Fly deploy provisions one per environment as the `NYM_AUTH_SEED` secret.
 
 **Back the secret up, and keep it.** Every opening this deployment issues
@@ -135,11 +150,41 @@ is a function of it. A new secret gives every subject a new opening and a
 new commitment, and the lost secret takes the ability to reproduce any
 earlier opening with it.
 
+### `claim`
+
+`claim` names the claim of the source data, `input`, that holds a
+per-subject secret as base64url text decoding to 16 to 64 bytes. The opening
+is those bytes. Pick it when the authentic source already stores such a
+secret for each subject, so the issuer holds no secret of its own:
+
+```yaml
+- hash_commitment:
+    path: [eu.europa.ec.eudi.nym_auth.1, ssc]
+    opening:
+      claim: {input: nym_auth_opening}
+```
+
+The extension requires at least 128 bits of entropy in an opening (section
+4.1). A low-entropy claim, such as a date of birth or a personal number, can
+only be an `hkdf` or `hmac` input, and never an opening. The length rule
+refuses a date of birth: `1990-01-01` decodes to 7 bytes. A value that is
+absent, not a string, not base64url or out of range fails issuance, and the
+error names the claim only.
+
+The claim is a secret. The configuration is refused when the credential
+carries the claim, or when another derivation reads it. An mdoc carries
+each document key its MDDL declares as an element, and an SD-JWT VC from a
+presentation each claim its VCTM declares. An SD-JWT VC from the
+datastore, an assertion or an external API carries its whole document, so
+there `claim` serves an mdoc only.
+
 ## Who can reproduce an opening
 
-Whoever holds the secret reproduces the opening of any subject from its
-identifiers. The secret belongs in a dedicated file or secret, restricted
-to the issuer, and backed up where it survives the loss of the host.
+Whoever holds the secret of an `hkdf` or `hmac` opening reproduces the
+opening of any subject from its identifiers. The secret belongs in a
+dedicated file or secret, restricted to the issuer, and backed up where it
+survives the loss of the host. Whoever reads the source's claim reads a
+`claim` opening.
 
 Every credential issued to a subject carries the same commitment. It stays
 hidden when a proof is made over it, and it is an equality marker for
@@ -158,12 +203,17 @@ make build-opening-recover
     -expect <commitment in hex>
 ```
 
-`-input` takes the values of the `hkdf` inputs, **in the configured order**,
-as the source data carried them. `-path` names the entry as a JSON claims
-path, such as `["eu.europa.ec.eudi.nym_auth.1","ssc"]`, and can be left out
-when the credential has one `hkdf` entry. The tool prints the commitment of
-each source scope, and the opening only with `-show-opening`. With
-`-expect` it exits 0 on a match and 2 on a mismatch, so it can drive a loop
-over candidates.
+`-input` takes the values of the `hkdf` or `hmac` inputs, **in the
+configured order**, as the source data carried them. `-path` names the
+entry as a JSON claims path, such as `["eu.europa.ec.eudi.nym_auth.1","ssc"]`,
+and can be left out when the credential has one `to_wallet` entry. The tool
+prints the commitment of each source scope, and the opening only with
+`-show-opening`. With `-expect` it exits 0 on a match and 2 on a mismatch,
+so it can drive a loop over candidates.
+
+A `claim` or `random` opening has nothing to derive, and the tool prints the
+reason in place of a commitment: a `claim` opening is read from the source,
+at the claim it names. An entry without an `hkdf` or `hmac` opening is an
+error.
 
 It reads the secret the opening names, so it runs where the secret is.

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/claimpath"
@@ -314,8 +313,9 @@ func (c *Claim) claimKey() string {
 	return key.String()
 }
 
-// walkPath resolves a claim path against nested document data, up to its
-// first null: a null selects the array as a whole.
+// walkPath resolves a claim path against nested document data. A null
+// followed by more components resolves the rest in each element of the
+// array and returns the values; a final null selects the array as a whole.
 // Returns nil for paths the data does not hold and for semantically empty
 // values (empty string, empty slice, empty map) so callers can uniformly
 // skip absent data with a nil check.
@@ -324,16 +324,44 @@ func walkPath(data map[string]any, path claimpath.Pointer) any {
 	if err != nil {
 		return nil
 	}
-	upToAll, ok := path.Prefix(slices.IndexFunc(components, claimpath.Component.IsAll))
-	if !ok {
-		upToAll = path
-	}
-	value, present, err := claimpath.Nested().Get(data, upToAll)
-	if err != nil || !present {
-		// A claim the data does not hold is not shown.
+	if _, ok := components[0].KeyName(); !ok {
 		return nil
 	}
-	return normalizeEmpty(value)
+	return walkFrom(data, components)
+}
+
+// walkFrom is walkPath from an arbitrary node.
+func walkFrom(current any, components []claimpath.Component) any {
+	for i, c := range components {
+		if c.IsAll() {
+			if i == len(components)-1 {
+				return normalizeEmpty(current)
+			}
+			return normalizeEmpty(eachElement(current, components[i+1:]))
+		}
+		next, ok := c.Child(current)
+		if !ok {
+			return nil
+		}
+		current = next
+	}
+	return normalizeEmpty(current)
+}
+
+// eachElement resolves components in each element of array, keeping the
+// values an element holds.
+func eachElement(array any, components []claimpath.Component) []any {
+	elements, ok := array.([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]any, 0, len(elements))
+	for _, element := range elements {
+		if v := walkFrom(element, components); v != nil {
+			values = append(values, v)
+		}
+	}
+	return values
 }
 
 // normalizeEmpty returns nil for semantically empty values (empty string,

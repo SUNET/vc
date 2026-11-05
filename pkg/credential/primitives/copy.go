@@ -14,12 +14,33 @@ type CopyArgs struct {
 	Output claimpath.Pointer `yaml:"output" validate:"required" doc_example:"[\"birth_date\"]"`
 }
 
-// Apply implements Applier. It writes the input claim's value, of any type,
-// at Output. An absent input claim is a no-op.
+// Apply implements Applier. It writes a copy of the input claim's value, of
+// any type, at Output. An absent input claim is a no-op.
 func (a *CopyArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
 	val, present, err := claims.Input(a.Input)
 	if err != nil || !present {
 		return nil, err
 	}
-	return []Write{{Path: a.Output, Value: val}}, nil
+	return []Write{{Path: a.Output, Value: cloneClaimValue(val)}}, nil
+}
+
+// cloneClaimValue deep-copies the objects and arrays of a claim value, so
+// that a write into the copy leaves the source unchanged.
+func cloneClaimValue(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = cloneClaimValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneClaimValue(item)
+		}
+		return out
+	default:
+		return v
+	}
 }

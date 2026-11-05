@@ -463,6 +463,54 @@ func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 			},
 		},
 		{
+			name: "parent kept when children are only disclosed with it",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: claimpath.Keys("awardingBody"), SD: "always"},
+				{Path: claimpath.Keys("awardingBody", "legalName"), SD: "never", Mandatory: true},
+				{Path: claimpath.Keys("awardingBody", "legalIdentifier"), SD: "never"},
+				{Path: claimpath.Keys("learningOutcomes"), SD: "always"},
+				{Path: claimpath.New(claimpath.Key("learningOutcomes"), claimpath.All(), claimpath.Key("title")), SD: "never"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: claimpath.Keys("awardingBody")},
+				{Path: claimpath.Keys("learningOutcomes")},
+			},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("awardingBody"),
+				claimpath.Keys("learningOutcomes"),
+			},
+		},
+		{
+			name: "mixed object: parent kept and separately disclosed child added",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: claimpath.Keys("address"), SD: "always"},
+				{Path: claimpath.Keys("address", "street"), SD: "never"},
+				{Path: claimpath.Keys("address", "city"), SD: "always"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: claimpath.Keys("address")},
+			},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("address"),
+				claimpath.Keys("address", "city"),
+			},
+		},
+		{
+			name: "mixed array: parent kept and separately disclosed element field added",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: claimpath.Keys("degrees"), SD: "always"},
+				{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type")), SD: "never"},
+				{Path: claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("date")), SD: "always"},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: claimpath.Keys("degrees")},
+			},
+			expectedPaths: []claimpath.Pointer{
+				claimpath.Keys("degrees"),
+				claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("date")),
+			},
+		},
+		{
 			name: "mixed: array and simple claims coexist",
 			vctmClaims: []sdjwtvc.Claim{
 				{Path: claimpath.Keys("given_name")},

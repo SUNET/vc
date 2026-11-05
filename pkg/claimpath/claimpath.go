@@ -266,6 +266,15 @@ func (p Pointer) SelectsOne() bool {
 	return p.dotted == "" && len(p.components) > 0 && !slices.ContainsFunc(p.components, Component.IsAll)
 }
 
+// Rebase returns p with its prefix from replaced by to, and whether p
+// starts with from.
+func (p Pointer) Rebase(from, to Pointer) (Pointer, bool) {
+	if !p.HasPrefix(from) {
+		return Pointer{}, false
+	}
+	return to.Append(p.components[len(from.components):]...), true
+}
+
 // Append returns p extended with components.
 func (p Pointer) Append(components ...Component) Pointer {
 	return Pointer{components: append(slices.Clone(p.components), components...), dotted: p.dotted}

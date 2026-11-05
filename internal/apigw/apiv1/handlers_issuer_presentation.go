@@ -32,17 +32,20 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	// claim that the presented credential already carries (and that no
 	// derivation rewrites) still lands in the issued document. The VCTM
 	// filter below drops anything the target credential does not declare.
-	doc := credential.CloneNestedClaims(authCtx.VerifiedClaims)
+	verified := storedClaims(authCtx.VerifiedClaims)
+	doc := credential.CloneNestedClaims(verified)
 
 	shapes, err := c.cfg.DerivationShapes(model.SourceScope{Source: model.DataSourcePresentation, Scope: scope, Presented: authCtx.PresentedScope})
 	if err != nil {
 		return nil, err
 	}
-	derived, err := credential.ApplyDerivations(accepted.Derivations, authCtx.VerifiedClaims, now, shapes)
+	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, verified, now, nil, shapes)
 	if err != nil {
 		return nil, err
 	}
-	credential.MergeNestedClaims(doc, derived)
+	if err := credential.MergeDerived(doc, derived, replaced); err != nil {
+		return nil, err
+	}
 
 	// A default is a claim of the issued document: ["identity", "country"]
 	// goes under the nested identity object.
@@ -104,10 +107,56 @@ func copyDeclaredElements(out, doc map[string]any, claims mdoc.NamespaceClaims) 
 	return nil
 }
 
-// mddlValue is value in the form the MDDL value type takes.
+// mddlValue is value in the form the MDDL value type takes. A map or array
+// keeps only the fields its declared Elements name.
 func mddlValue(meta mdoc.ClaimMetadata, value any) (any, error) {
-	if meta.ValueType != "full-date" {
+	switch {
+	case meta.ValueType == "full-date":
+		return normaliseFullDate(value)
+	case len(meta.Elements) == 0:
 		return value, nil
+	case meta.ValueType == "map":
+		fields, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("expected a map, got %T", value)
+		}
+		return declaredFields(meta.Elements, fields)
+	case meta.ValueType == "array":
+		items, ok := value.([]any)
+		if !ok {
+			return nil, fmt.Errorf("expected an array, got %T", value)
+		}
+		out := make([]any, len(items))
+		for i, item := range items {
+			fields, ok := item.(map[string]any)
+			if !ok {
+				out[i] = item
+				continue
+			}
+			filtered, err := declaredFields(meta.Elements, fields)
+			if err != nil {
+				return nil, fmt.Errorf("array item %d: %w", i, err)
+			}
+			out[i] = filtered
+		}
+		return out, nil
 	}
-	return normaliseFullDate(value)
+	return value, nil
+}
+
+// declaredFields copies the fields of m that elements declares.
+func declaredFields(elements map[string]mdoc.ClaimMetadata, m map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(elements))
+	for name, meta := range elements {
+		value, ok := m[name]
+		if !ok {
+			continue
+		}
+		filtered, err := mddlValue(meta, value)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", name, err)
+		}
+		out[name] = filtered
+	}
+	return out, nil
 }

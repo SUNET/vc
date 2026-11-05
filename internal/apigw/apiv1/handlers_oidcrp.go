@@ -245,10 +245,12 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// birthdate that only the external API returns).
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
 		src := model.SourceScope{Source: credSourceForDerivs.DataSource, Scope: session.CredentialType}
-		if derr := credential.ApplyScopeDerivations(c.cfg, src, cc.identity, time.Now()); derr != nil {
+		openingClaims, derr := credential.ApplyScopeDerivations(c.cfg, src, cc.identity, time.Now())
+		if derr != nil {
 			span.SetStatus(codes.Error, derr.Error())
 			return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
 		}
+		cc.openingClaims = openingClaims
 	}
 
 	// The authenticated claim set. It is deliberately NOT filtered against the
@@ -601,6 +603,10 @@ type callbackClaims struct {
 	// already declared exactly which claims the credential gets, and filtering
 	// that output on top would overrule their configuration.
 	filter bool
+
+	// openingClaims are the claims the scope's hash_commitment openings read,
+	// taken before derivations and filtering change or drop them.
+	openingClaims map[string]any
 }
 
 // newCallbackClaims applies the configured attribute mapper, if any, and
@@ -714,7 +720,8 @@ func (c *Client) buildOIDCDocument(cc *callbackClaims, authenticSource string, m
 		Meta: &model.MetaData{
 			AuthenticSource: authenticSource,
 		},
-		DocumentData: documentData,
+		DocumentData:  documentData,
+		OpeningClaims: cc.openingClaims,
 	}, nil
 }
 

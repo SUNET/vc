@@ -67,6 +67,20 @@ func (c Component) children(element any) ([]any, error) {
 	return nil, nil
 }
 
+// Child returns what a key or an index selects in value: a member of an
+// object, or an element of an array. It reports false when value holds no
+// such member or element, and for null.
+func (c Component) Child(value any) (any, bool) {
+	if c.kind == allKind {
+		return nil, false
+	}
+	children, err := c.children(value)
+	if err != nil || len(children) == 0 {
+		return nil, false
+	}
+	return children[0], true
+}
+
 // String renders the component as its JSON value.
 func (c Component) String() string {
 	return New(c).String()
@@ -167,4 +181,28 @@ func (c Component) put(container any, value any) error {
 		return nil
 	}
 	return fmt.Errorf("%s writes no single element", c)
+}
+
+// delete removes the claim at a pointer of keys and indices whose last
+// component is a key.
+func (p Pointer) delete(root map[string]any) error {
+	n := len(p.components) - 1
+	last := p.components[n]
+	if last.kind != keyKind {
+		return fmt.Errorf("%w: %s, element %d: %s removes no member of an object", ErrMismatch, p, n, last)
+	}
+	var container any = root
+	if n > 0 {
+		parent, present, err := Pointer{components: p.components[:n:n]}.get(root)
+		if err != nil || !present {
+			return err
+		}
+		container = parent
+	}
+	object, ok := container.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%w: %s, element %d: key %q on a %T", ErrMismatch, p, n, last.key, container)
+	}
+	delete(object, last.key)
+	return nil
 }

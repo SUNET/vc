@@ -107,7 +107,25 @@ type Mongo struct {
 	// component matches the secret-detection patterns some review and diff
 	// tools apply, and they redact it and then report the redaction as a
 	// malformed URI.
-	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017/vc\""`
+	//
+	// A database path in the URI (mongodb://host/<db>) does NOT choose where
+	// data is stored: the driver only uses it as the default authSource.
+	// The databases each service writes to are set by APIGWDatabaseName,
+	// VerifierDatabaseName, RegistryDatabaseName and HA.CacheDatabaseName.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017\""`
+	// APIGWDatabaseName is the MongoDB database the apigw keeps its
+	// datastore, identity mappings, credential offers and dynamic client
+	// registrations in. Deployments sharing one MongoDB server must each set
+	// their own, or they read and write each other's documents.
+	APIGWDatabaseName string `yaml:"apigw_database_name" default:"vc"`
+	// VerifierDatabaseName is the MongoDB database the verifier keeps its
+	// OIDC client registrations in. Deployments sharing one MongoDB server
+	// must each set their own.
+	VerifierDatabaseName string `yaml:"verifier_database_name" default:"verifier"`
+	// RegistryDatabaseName is the MongoDB database the registry keeps its
+	// token status lists and credential subjects in. Deployments sharing one
+	// MongoDB server must each set their own.
+	RegistryDatabaseName string `yaml:"registry_database_name" default:"vc_registry"`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
@@ -125,6 +143,8 @@ type HAConfig struct {
 	// Enable enables HA mode; when true caches are backed by MongoDB instead of in-memory storage.
 	Enable bool `yaml:"enable" default:"false"`
 	// CacheDatabaseName is the MongoDB database name used for caches.
+	// Deployments sharing one MongoDB server must each set their own: it
+	// also holds each service's shared secrets, keyed only by service name.
 	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
 	// PubSub configures the optional pub/sub backend (Redis or Valkey)
 	// used for cross-node notifications in HA mode - today just the
@@ -773,8 +793,17 @@ type PresetDefinition struct {
 // VerificationPresetScope defines optional overrides for a credential query within a preset.
 type VerificationPresetScope struct {
 	// Claims lists specific claims to request. If empty, all VCTM claims are used.
+	//
+	// Ignored entirely when the effective format is "circuit_zk". Such a
+	// query discloses no issuer-signed attribute at all - every value it
+	// yields is the output of a function named in Req - so neither these
+	// claims nor the VCTM fall-back are attached to it. Listing claims on
+	// a circuit_zk credential is a configuration mistake rather than an
+	// instruction, and is dropped rather than honoured.
 	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
 	// ExcludeClaims lists claims to exclude from the DCQL query.
+	//
+	// Also ignored for "circuit_zk", which carries no claims to exclude.
 	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
 	// Validations are optional rules applied server-side after claims extraction
 	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
@@ -788,6 +817,60 @@ type VerificationPresetScope struct {
 	// DCQL query has no other way to say which proof system/circuit a
 	// verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `yaml:"zk_system_type,omitempty" validate:"omitempty,dive"`
+
+	// Req is the circuit_zk format's list of requested calculations -
+	// required whenever Format is "circuit_zk", since such a query
+	// discloses nothing and every value comes from a function named here.
+	//
+	// A circuit_zk preset needs TWO things to be published: a non-empty
+	// req here, and verifier.preferred_vp_formats.circuit_zk advertising
+	// the format (an empty mapping will do - see that field). Without
+	// either, the preset is omitted and the reason is logged, rather than
+	// a button being offered that asks a wallet for a proof the request
+	// declares no support for.
+	// A worked example is in the "req entry" section below, which renders
+	// as prose rather than as a table cell - an indented one here is
+	// flattened into a single run-on line an operator cannot copy.
+	//
+	// Passed through to the wire as configured. Nothing judges what it
+	// MEANS unless Validate names a profile: this verifier is how wallets
+	// are tested, so a request that breaks a rulebook on purpose has to
+	// be sendable, and the specifications underneath are still moving.
+	//
+	// One transport restriction applies regardless, because it is not a
+	// judgement about the request. The picker builds the query in the
+	// browser and posts it back, where every number is a float64 - so a
+	// numeric param the browser cannot carry exactly (an integer past
+	// 2^53, or past what the shortest round-tripping decimal denotes; a
+	// decimal with more digits than a float64 holds) would reach the
+	// wallet CHANGED. A param is an input to a proof, so a changed one
+	// yields a different pseudonym, and the only symptom is two systems
+	// disagreeing about who someone is.
+	//
+	// Such a credential is omitted from the preset and the reason is
+	// logged, rather than published and quietly altered. Quote the value
+	// as a string if the exact digits are what you mean.
+	Req []openid4vp.ReqItem `yaml:"req,omitempty" validate:"omitempty,dive"`
+
+	// SourceFormat is meta.source_format of a circuit_zk query: the stored
+	// attestation the proof is made over, "mso_mdoc" or "bbs_cd".
+	//
+	// The rulebook requires it, and wallets refuse a query without it as
+	// invalid_meta. The value is not judged, so a request that omits or
+	// misnames it stays sendable for wallet testing. Setting it on a scope
+	// whose Format is not "circuit_zk" is refused at config load.
+	SourceFormat string `yaml:"source_format,omitempty" doc_example:"\"mso_mdoc\""`
+
+	// Validate names a profile to check this credential's request against
+	// AT STARTUP. Empty means no checking, which is the default.
+	//
+	// Startup rather than request time, and named rather than a strict
+	// flag. An operator who wants to be told their preset violates the
+	// nym_auth rulebook asks for it by name and is told while they are
+	// still editing configuration; traffic is never validated, because a
+	// circuit_zk request that is not a nym_auth request is not invalid and
+	// this server is not the one to decide.
+	Validate string `yaml:"validate,omitempty" validate:"omitempty,oneof=nym_auth" doc_example:"\"nym_auth\""`
 }
 
 // VerificationPresetClaim defines a claim path to request within a credential.
@@ -829,7 +912,16 @@ type Verifier struct {
 	AccessCertificate *AccessCertificate `yaml:"access_certificate,omitempty"`
 	// RegistrationCertificate points at a Relying Party registration certificate (WRPRC, ETSI TS 119 475) issued to this verifier by a national Registrar, to be presented to wallets in the OpenID4VP verifier_info parameter. vc does not issue these.
 	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
-	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
+	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets.
+	//
+	// Required for a circuit_zk preset. The circuit filter - which proof
+	// systems and circuits this Verifier will accept a proof from - lives
+	// at preferred_vp_formats.circuit_zk and nowhere else, so a preset
+	// using that format is NOT PUBLISHED unless it is set. An empty
+	// `circuit_zk: {}` is a complete answer and means "any circuit"; no
+	// default is supplied, because those identifiers are
+	// deployment-specific and guessing one would pin this Verifier to a
+	// single implementation.
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
@@ -841,6 +933,8 @@ type Verifier struct {
 	DigitalCredentials DigitalCredentialsConfig `yaml:"digital_credentials,omitempty"`
 	// AuthorizationPageCSS holds the authorization page styling configuration
 	AuthorizationPageCSS AuthorizationPageCSSConfig `yaml:"authorization_page_css,omitempty"`
+	// TS12 configures EC TS12 payment SCA (transaction_data) support for the standalone verifier. Off by default.
+	TS12 TS12Config `yaml:"ts12,omitempty"`
 	// CredentialDisplay holds the credential display settings
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
@@ -863,6 +957,12 @@ type Verifier struct {
 	// verification. Only consulted by builds with the "zknative" Go build
 	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+
+	// NymAuth configures verification of nym_auth pseudonym proofs
+	// (the "circuit_zk" presentation format). Off unless enable is
+	// set, and only consulted by builds with the "zknative" Go build
+	// tag - the default build cannot check a proof at all.
+	NymAuth NymAuthVerifier `yaml:"nym_auth,omitempty"`
 	// ZkKeyCache configures the on-disk Vega verifier-key store. Verifier
 	// only: these keys exist to verify a presented proof, and the issuer
 	// never touches one.
@@ -1431,6 +1531,26 @@ func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string
 		WalletAttestationEnabled:   walletAttestationEnabled,
 		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
+}
+
+// TS12Config configures EC TS12 v1.0.1 payment SCA support in the verifier.
+type TS12Config struct {
+	// Enable lets /ui/interaction accept a "payment" object and send a
+	// urn:eudi:sca:payment:1 transaction_data entry with the request. It also
+	// serves the operator test page at /payment. Intended for test and PSP
+	// verifiers: anyone who can reach /ui/interaction can then start a
+	// payment request, so leave it off on a general-purpose verifier.
+	Enable bool `yaml:"enable" default:"false"`
+
+	// SCAVCTValues are the vct values of the SCA attestation the operator test
+	// page requests by default. Optional; the page lets the operator type one.
+	SCAVCTValues []string `yaml:"sca_vct_values,omitempty" json:"sca_vct_values,omitempty"`
+
+	// HashAlgs is the transaction_data_hashes_alg list sent with each payment
+	// request, in order of preference. Default ["sha-256"] (OpenID4VP 1.0
+	// B.3.3.1 requires every implementation to support it; TS12 4.2 makes the
+	// member REQUIRED so it is always sent).
+	HashAlgs []string `yaml:"hash_algs,omitempty" validate:"omitempty,dive,oneof=sha-256 sha-384 sha-512"`
 }
 
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration
