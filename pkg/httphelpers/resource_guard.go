@@ -69,7 +69,11 @@ func authorizeBoundSelectors(c *gin.Context, v any) error {
 		return fmt.Errorf("context key %s holds %T", resourceGuardKey, value)
 	}
 
-	if !guard.allows(c, normalizeResourcePairs(c, boundSelectors(v))) {
+	pairs, err := boundSelectors(v)
+	if err != nil {
+		return err
+	}
+	if !guard.allows(c, normalizeResourcePairs(c, pairs)) {
 		return helpers.NewErrorDetailsWithStatus("insufficient_permissions",
 			"the request selects an authentic_source or scope this caller is not allowed", http.StatusForbidden)
 	}
@@ -78,33 +82,39 @@ func authorizeBoundSelectors(c *gin.Context, v any) error {
 
 // boundSelectors returns one pair for each struct in v that holds a selector
 // field, at any depth of typed fields. Values under an interface type, such as
-// document_data, are client data.
-func boundSelectors(v any) []resourcePair {
+// document_data, are client data. A selector field that holds no string is an
+// error, so a request type the guard cannot read reaches no handler.
+func boundSelectors(v any) ([]resourcePair, error) {
 	var pairs []resourcePair
-	collectSelectors(reflect.ValueOf(v), &pairs)
-	return pairs
+	err := collectSelectors(reflect.ValueOf(v), &pairs)
+	return pairs, err
 }
 
-func collectSelectors(v reflect.Value, pairs *[]resourcePair) {
+func collectSelectors(v reflect.Value, pairs *[]resourcePair) error {
 	switch v.Kind() {
 	case reflect.Pointer:
 		if !v.IsNil() {
-			collectSelectors(v.Elem(), pairs)
+			return collectSelectors(v.Elem(), pairs)
 		}
 	case reflect.Struct:
-		collectStructSelectors(v, pairs)
+		return collectStructSelectors(v, pairs)
 	case reflect.Map:
 		for iter := v.MapRange(); iter.Next(); {
-			collectSelectors(iter.Value(), pairs)
+			if err := collectSelectors(iter.Value(), pairs); err != nil {
+				return err
+			}
 		}
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			collectSelectors(v.Index(i), pairs)
+			if err := collectSelectors(v.Index(i), pairs); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
-func collectStructSelectors(v reflect.Value, pairs *[]resourcePair) {
+func collectStructSelectors(v reflect.Value, pairs *[]resourcePair) error {
 	var pair resourcePair
 	t := v.Type()
 	for i := range t.NumField() {
@@ -113,18 +123,34 @@ func collectStructSelectors(v reflect.Value, pairs *[]resourcePair) {
 			continue
 		}
 		value := v.Field(i)
-		switch {
-		case value.Kind() == reflect.String && isSelectorField(field, "AuthenticSource", "authentic_source"):
-			pair.authenticSource = value.String()
-		case value.Kind() == reflect.String && isSelectorField(field, "Scope", "scope"):
-			pair.scope = value.String()
-		default:
-			collectSelectors(value, pairs)
+		selector := pair.selectorOf(field)
+		if selector == nil {
+			if err := collectSelectors(value, pairs); err != nil {
+				return err
+			}
+			continue
 		}
+		if value.Kind() != reflect.String {
+			return fmt.Errorf("selector field %s.%s is a %s; the SPOCP guard reads a string", t, field.Name, value.Kind())
+		}
+		*selector = value.String()
 	}
 	if pair != (resourcePair{}) {
 		*pairs = append(*pairs, pair)
 	}
+	return nil
+}
+
+// selectorOf returns the member of p that field fills, and nil for a field that
+// holds no selector.
+func (p *resourcePair) selectorOf(field reflect.StructField) *string {
+	switch {
+	case isSelectorField(field, "AuthenticSource", "authentic_source"):
+		return &p.authenticSource
+	case isSelectorField(field, "Scope", "scope"):
+		return &p.scope
+	}
+	return nil
 }
 
 func isSelectorField(field reflect.StructField, goName, jsonName string) bool {
