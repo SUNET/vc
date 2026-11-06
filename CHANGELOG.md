@@ -74,6 +74,7 @@
   these calls now stops the script with the app's name and fly's error. A
   call on an app that `fly apps list` does not show is reported as missing,
   so `launch --service <name>` still continues past apps it did not create.
+  The app and secret checks read listings of any size.
 - **`fly/deploy.sh` keeps the local secrets file in step with Fly**: the
   generated MongoDB URI was written locally after a failed `secrets set`, and
   the OIDC `client_secret` reached Keycloak before a local write that could
@@ -83,7 +84,9 @@
   wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`, `launch` now sets the
   URI from the local secrets file. When the file holds no generated URI,
   `launch` stops and names the two ways out: restore the file, or reset
-  MongoDB's credentials.
+  MongoDB's credentials. An absent wallet-backend gets a "missing" note and
+  `launch` continues; `launch --service wallet-backend` applies this rule
+  once the app exists.
 - **`fly/deploy.sh` registers no duplicate issuer on wallet-backend**: a
   failed issuer listing, an HTTP error or an unparseable body read as "no
   issuers", and the registration POSTed a second issuer. A non-JSON body

@@ -66,15 +66,20 @@ fly_capture() {
     return "$_status"
 }
 
+# Returns 0 when `fly apps list` shows app $1 and 1 when it does not. A failed
+# listing stops the script with $2 and fly's error.
+app_listed() {
+    local _apps _err
+    fly_capture _apps _err apps list --json || die "$2: $_err"
+    grep -q "\"$1\"" <<<"$_apps"
+}
+
 # Returns when Fly app $1 is absent, and stops with fly's error $3 when it
 # exists. $2 names the failed call. `launch --service <name>` provisions apps
 # it did not create, so a failure on an absent app is expected; any other
 # failure would read as "nothing there" and replace live state.
 require_app_absent() {
-    local _apps _err
-    fly_capture _apps _err apps list --json \
-        || die "$2 of $1 failed, and so did listing the apps: $_err"
-    if printf '%s' "$_apps" | grep -q "\"$1\""; then
+    if app_listed "$1" "$2 of $1 failed, and so did listing the apps"; then
         die "$2 of $1 failed: $3"
     fi
 }
@@ -166,6 +171,14 @@ local_mongo_uri() {
     printf '%s\n' "$_uri"
 }
 
+# Sets WALLET_STORAGE_MONGODB_URI to $2 on wallet-backend app $1.
+set_wallet_backend_mongo_uri() {
+    echo "==> Setting Mongo URI for $1"
+    if set_app_secrets "$1" WALLET_STORAGE_MONGODB_URI="$2"; then
+        echo "    Mongo URI set"
+    fi
+}
+
 cmd_launch() {
     require_flyctl
     require_yq
@@ -198,11 +211,11 @@ cmd_launch() {
             echo "  ($app missing; IPs left unallocated)"
             continue
         fi
-        if ! echo "$ips_json" | grep -qE '"Type":\s*"(shared_v4|v4)"'; then
+        if ! grep -qE '"Type":\s*"(shared_v4|v4)"' <<<"$ips_json"; then
             echo "  [ipv4] $app"
             fly ips allocate-v4 --shared --app "$app" 2>/dev/null || echo "    (failed; check manually)"
         fi
-        if ! echo "$ips_json" | grep -q '"Type":\s*"v6"'; then
+        if ! grep -q '"Type":\s*"v6"' <<<"$ips_json"; then
             echo "  [ipv6] $app"
             fly ips allocate-v6 --app "$app" 2>/dev/null || echo "    (failed; check manually)"
         fi
@@ -222,7 +235,7 @@ cmd_launch() {
     # end up with a URI that no longer authenticates). Only generate + set on
     # first launch.
     read_app_secrets "$mongo_app" mongo_secrets
-    if printf '%s' "$mongo_secrets" | grep -q '"MONGO_INITDB_ROOT_PASSWORD"'; then
+    if grep -q '"MONGO_INITDB_ROOT_PASSWORD"' <<<"$mongo_secrets"; then
         echo "==> MongoDB secrets already set for $mongo_app (skipping)"
         mongo_creds_set=1
         mongo_pass=""
@@ -262,7 +275,7 @@ cmd_launch() {
     # env vars later does NOT change what's in the DB — it desyncs apigw's
     # secrets file from Keycloak. Only set on first launch.
     read_app_secrets "$oidc_app" oidc_secrets
-    if printf '%s' "$oidc_secrets" | grep -q '"APIGW_OIDC_CLIENT_SECRET"'; then
+    if grep -q '"APIGW_OIDC_CLIENT_SECRET"' <<<"$oidc_secrets"; then
         echo "==> OIDC secrets already set for $oidc_app (skipping)"
     else
         oidc_first_launch=1
@@ -324,7 +337,7 @@ cmd_launch() {
     wallet_backend_app="$(app_name "wallet-backend")"
     echo "==> Setting AS signing key for $wallet_backend_app"
     read_app_secrets "$wallet_backend_app" wallet_backend_secrets
-    if printf '%s' "$wallet_backend_secrets" | grep -q '"AS_SIGNING_KEY_PEM"'; then
+    if grep -q '"AS_SIGNING_KEY_PEM"' <<<"$wallet_backend_secrets"; then
         echo "    (AS_SIGNING_KEY_PEM already set, leaving in place)"
     else
         as_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout)"
@@ -336,19 +349,24 @@ cmd_launch() {
 
     # A freshly generated URI replaces wallet-backend's. With MongoDB's
     # credentials already set, a missing URI comes back from the local file:
-    # Fly secrets are write-only, so the file is its only copy.
-    if [[ -z "$mongo_uri" && "$mongo_creds_set" -eq 1 ]] \
-        && ! printf '%s' "$wallet_backend_secrets" | grep -q '"WALLET_STORAGE_MONGODB_URI"'; then
+    # Fly secrets are write-only, so the file is its only copy. An absent
+    # wallet-backend waits for `launch --service wallet-backend`, which reaches
+    # this check again. read_app_secrets stores "[]" for an absent app, so only
+    # that listing needs `fly apps list`. An empty $mongo_uri with
+    # $mongo_creds_set at 0 means the MongoDB app is absent.
+    if [[ -n "$mongo_uri" ]]; then
+        set_wallet_backend_mongo_uri "$wallet_backend_app" "$mongo_uri"
+    elif [[ "$mongo_creds_set" -eq 0 ]]; then
+        echo "    ($mongo_app missing; Mongo URI on $wallet_backend_app unchanged)"
+    elif grep -q '"WALLET_STORAGE_MONGODB_URI"' <<<"$wallet_backend_secrets"; then
+        echo "==> Mongo URI on $wallet_backend_app left in place (MongoDB creds unchanged)"
+    elif [[ "$wallet_backend_secrets" == "[]" ]] \
+        && ! app_listed "$wallet_backend_app" "$wallet_backend_app lacks WALLET_STORAGE_MONGODB_URI, and listing the apps failed"; then
+        echo "    ($wallet_backend_app missing; Mongo URI left unset)"
+    else
         mongo_uri="$(local_mongo_uri "$secrets_file" "$mongo_app")" \
             || die "$wallet_backend_app lacks WALLET_STORAGE_MONGODB_URI, and $secrets_file holds no generated URI for $mongo_app. Restore $secrets_file, or reset $mongo_app's credentials: destroy it with its volume and run launch again."
-    fi
-    if [[ -n "$mongo_uri" ]]; then
-        echo "==> Setting Mongo URI for $wallet_backend_app"
-        if set_app_secrets "$wallet_backend_app" WALLET_STORAGE_MONGODB_URI="$mongo_uri"; then
-            echo "    Mongo URI set"
-        fi
-    else
-        echo "==> Mongo URI on $wallet_backend_app left in place (MongoDB creds unchanged)"
+        set_wallet_backend_mongo_uri "$wallet_backend_app" "$mongo_uri"
     fi
 
     # Signing key material shared across apigw/issuer/verifier/registry.
@@ -365,7 +383,7 @@ cmd_launch() {
             svc_app="$(app_name "$svc")"
             echo "==> Setting signing secrets for $svc_app"
             read_app_secrets "$svc_app" svc_secrets
-            if printf '%s' "$svc_secrets" | grep -q '"SIGNING_EC_PRIVATE_KEY"'; then
+            if grep -q '"SIGNING_EC_PRIVATE_KEY"' <<<"$svc_secrets"; then
                 echo "    (SIGNING_EC_PRIVATE_KEY already set, leaving in place)"
             else
                 if set_app_secrets "$svc_app" \
@@ -402,8 +420,8 @@ provision_apigw_saml_sp_keypair() {
     # the cert would otherwise pass this guard and apigw would fail to load
     # the mounted keypair on startup.
     read_app_secrets "$apigw_app" secrets_json
-    if printf '%s' "$secrets_json" | grep -q '"SAML_SP_CERT"' \
-        && printf '%s' "$secrets_json" | grep -q '"SAML_SP_KEY"'; then
+    if grep -q '"SAML_SP_CERT"' <<<"$secrets_json" \
+        && grep -q '"SAML_SP_KEY"' <<<"$secrets_json"; then
         echo "==> SAML SP secrets already set for $apigw_app (skipping)"
         return 0
     fi
@@ -437,7 +455,7 @@ provision_apigw_nym_auth_secrets() {
     local apigw_app secrets_json value
     apigw_app="$(app_name "apigw")"
     read_app_secrets "$apigw_app" secrets_json
-    if printf '%s' "$secrets_json" | grep -q '"CREDENTIAL_ENCRYPTION_KEY"'; then
+    if grep -q '"CREDENTIAL_ENCRYPTION_KEY"' <<<"$secrets_json"; then
         echo "==> CREDENTIAL_ENCRYPTION_KEY already set for $apigw_app (skipping)"
     else
         echo "==> Provisioning CREDENTIAL_ENCRYPTION_KEY for $apigw_app"
@@ -446,7 +464,7 @@ provision_apigw_nym_auth_secrets() {
             echo "    CREDENTIAL_ENCRYPTION_KEY set"
         fi
     fi
-    if printf '%s' "$secrets_json" | grep -q '"NYM_AUTH_SEED"'; then
+    if grep -q '"NYM_AUTH_SEED"' <<<"$secrets_json"; then
         echo "==> NYM_AUTH_SEED already set for $apigw_app (skipping)"
     else
         echo "==> Provisioning NYM_AUTH_SEED for $apigw_app"
