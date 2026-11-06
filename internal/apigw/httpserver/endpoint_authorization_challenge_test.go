@@ -233,8 +233,8 @@ func (a *prepareAPI) PrepareLegacyIssuance(_ context.Context, req *apiv1.LegacyP
 // The earlier release's identity_match, an object of dotted claim names,
 // reaches PrepareLegacyIssuance and is answered with the RFC 9745
 // Deprecation header. The list of claims path pointers reaches
-// PrepareIssuance without it, and a dotted string inside the list is
-// refused.
+// PrepareIssuance without it, and a malformed pointer inside the list is
+// refused with invalid_claims_path, whatever JSON type it has.
 func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 	ctx := t.Context()
 	log, err := logger.New("prepare-forms-test", t.TempDir(), true)
@@ -250,10 +250,12 @@ func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 		status      int
 		legacy      bool
 		deprecation string
+		title       string
 	}{
-		"object of dotted names":    {`{"given_name":{"equals":"Alice"}}`, http.StatusOK, true, "@1793836800"},
-		"list of pointers":          {`[{"path":["given_name"],"equals":"Alice"}]`, http.StatusOK, false, ""},
-		"dotted string in the list": {`[{"path":"given_name","equals":"Alice"}]`, http.StatusBadRequest, false, ""},
+		"object of dotted names":    {`{"given_name":{"equals":"Alice"}}`, http.StatusOK, true, "@1793836800", ""},
+		"list of pointers":          {`[{"path":["given_name"],"equals":"Alice"}]`, http.StatusOK, false, "", ""},
+		"dotted string in the list": {`[{"path":"given_name","equals":"Alice"}]`, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"number in the list":        {`[{"path":7,"equals":"Alice"}]`, http.StatusBadRequest, false, "", "invalid_claims_path"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := &prepareAPI{}
@@ -271,6 +273,15 @@ func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 			assert.Equal(t, tc.deprecation, w.Header().Get("Deprecation"))
 			assert.Equal(t, tc.legacy, api.legacy != nil)
 			assert.Equal(t, tc.status == http.StatusOK, api.seen != nil)
+			if tc.title != "" {
+				var refusal struct {
+					Error struct {
+						Title string `json:"title"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal), "body: %s", w.Body.String())
+				assert.Equal(t, tc.title, refusal.Error.Title, "body: %s", w.Body.String())
+			}
 		})
 	}
 }

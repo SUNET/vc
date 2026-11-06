@@ -372,7 +372,7 @@ func (p *Pointer) UnmarshalJSON(data []byte) error {
 	decoder.UseNumber()
 	var values []any
 	if err := decoder.Decode(&values); err != nil {
-		return fmt.Errorf("%w: a claims path pointer is a JSON array: %w", ErrMalformed, err)
+		return fmt.Errorf("%w: a claims path pointer is a JSON array", ErrMalformed)
 	}
 	pointer, err := fromValues(values)
 	if err != nil {

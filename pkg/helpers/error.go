@@ -135,6 +135,11 @@ func NewErrorFromError(v any) *Error {
 		return pbErr
 	}
 
+	// Before the JSON errors, so a pointer of any JSON type gets this title.
+	if errors.Is(err, claimpath.ErrMalformed) {
+		return &Error{Title: "invalid_claims_path", Err: err.Error(), HTTPStatus: http.StatusBadRequest}
+	}
+
 	// errors.As, not a direct type assertion. A handler that adds context
 	// with %w - "parsing the credential request: <json syntax error>",
 	// which is ordinary Go - used to fall past every branch here and out
@@ -150,9 +155,6 @@ func NewErrorFromError(v any) *Error {
 	}
 	if validatorErr, ok := errors.AsType[validator.ValidationErrors](err); ok {
 		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
-	}
-	if errors.Is(err, claimpath.ErrMalformed) {
-		return &Error{Title: "invalid_claims_path", Err: err.Error(), HTTPStatus: http.StatusBadRequest}
 	}
 
 	if errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, ErrNoDocumentFound) {
