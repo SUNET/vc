@@ -19,7 +19,11 @@ var identityAttributes = map[string]bool{
 // bareAlias reports whether a dotted name of a presented mdoc is a bare
 // element identifier: main stored its claim under that identifier.
 func (s Shape) bareAlias(name string) bool {
-	return s.kind == qualifiedReading && !strings.Contains(name, ".")
+	if s.kind != qualifiedReading {
+		return false
+	}
+	namespace, element := qualified(name)
+	return namespace == isoNamespace && element == name
 }
 
 // renamed is an auth claim main matched under its bare mdoc element

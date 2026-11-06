@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // Pointer is a claims path pointer: a non-empty sequence of keys, null
@@ -89,21 +91,14 @@ func FromKeys(keys []string) (Pointer, error) {
 // IsZero reports whether the pointer is unset.
 func (p Pointer) IsZero() bool { return len(p.components) == 0 }
 
-// Components returns the pointer's components. An unset pointer, and one
-// with an empty key, is an error.
+// Components returns the pointer's components. An unset pointer is an
+// error.
 func (p Pointer) Components() ([]Component, error) {
 	if len(p.components) == 0 {
 		return nil, errors.New("claimpath: the claims path pointer is unset")
 	}
-	for i, c := range p.components {
-		if c.kind == keyKind && c.key == "" {
-			return nil, fmt.Errorf("claimpath: element %d: %w", i, errEmptyKey)
-		}
-	}
 	return p.components, nil
 }
-
-var errEmptyKey = errors.New("a key is a non-empty string")
 
 // KeyNames returns the keys of a pointer made only of keys.
 func (p Pointer) KeyNames() ([]string, bool) {
@@ -293,9 +288,6 @@ func fromValues(values []any) (Pointer, error) {
 func component(value any) (Component, error) {
 	switch v := value.(type) {
 	case string:
-		if v == "" {
-			return Component{}, errEmptyKey
-		}
 		return Key(v), nil
 	case nil:
 		return All(), nil
@@ -415,9 +407,9 @@ func (e *StringError) Error() string {
 }
 
 // ValidationValue is the value go-playground/validator checks for a
-// Pointer: its components, or nil for a pointer that is unset or has an
-// empty key. A validator that registers it with RegisterCustomTypeFunc
-// reads "required" as a valid pointer.
+// Pointer: its components, or nil for an unset pointer. A validator that
+// registers it with RegisterCustomTypeFunc reads "required" as a set
+// pointer.
 func ValidationValue(field reflect.Value) any {
 	p, ok := field.Interface().(Pointer)
 	if !ok {
@@ -428,6 +420,23 @@ func ValidationValue(field reflect.Value) any {
 		return nil
 	}
 	return components
+}
+
+// NonEmptyKeysTag is the validation tag of a pointer whose keys are each a
+// non-empty string.
+const NonEmptyKeysTag = "nonempty_keys"
+
+// RegisterValidation registers ValidationValue and NonEmptyKeysTag with v.
+func RegisterValidation(v *validator.Validate) error {
+	v.RegisterCustomTypeFunc(ValidationValue, Pointer{})
+	return v.RegisterValidation(NonEmptyKeysTag, nonEmptyKeys)
+}
+
+// nonEmptyKeys reports whether a pointer, as ValidationValue gives it, has
+// no empty key.
+func nonEmptyKeys(fl validator.FieldLevel) bool {
+	components, ok := fl.Field().Interface().([]Component)
+	return ok && !slices.ContainsFunc(components, func(c Component) bool { return c.kind == keyKind && c.key == "" })
 }
 
 // Compare orders pointers by their rendering, for a stable order.

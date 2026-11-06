@@ -14,7 +14,7 @@ import (
 // HashCommitmentArgs fulfils the to_wallet hash_commitment entry at Path.
 type HashCommitmentArgs struct {
 	// Path is the claims path pointer of the to_wallet entry it fulfils.
-	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
+	Path claimpath.Pointer `yaml:"path" validate:"required,nonempty_keys" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
 	// Opening produces the opening.
 	Opening OpeningArgs `yaml:"opening" validate:"required"`
 }

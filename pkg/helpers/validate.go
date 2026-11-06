@@ -37,7 +37,9 @@ var spocpDimensionPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 // NewValidator creates a new validator
 func NewValidator() (*validator.Validate, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	validate.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
+	if err := claimpath.RegisterValidation(validate); err != nil {
+		return nil, err
+	}
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		// Prefer yaml tag (used by config structs), fall back to json tag

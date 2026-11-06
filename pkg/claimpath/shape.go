@@ -133,9 +133,6 @@ func (s Shape) LocateOne(p Pointer) (Pointer, error) {
 // declaring namespace in sorted order, and [name] otherwise. Every
 // declaring namespace locates the same key.
 func (s Shape) Key(name string) (Pointer, error) {
-	if name == "" {
-		return Pointer{}, errEmptyKey
-	}
 	switch s.kind {
 	case nestedShape:
 		return Keys(name), nil

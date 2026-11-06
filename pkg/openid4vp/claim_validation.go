@@ -19,7 +19,7 @@ type ClaimValidation struct {
 	Rule string `json:"rule" yaml:"rule" validate:"required,oneof=age_over" doc_example:"\"age_over\""`
 
 	// Path is the claims path pointer of the claim to validate, e.g., ["birthdate"].
-	Path claimpath.Pointer `json:"path" yaml:"path" validate:"required" doc_example:"[\"birthdate\"]"`
+	Path claimpath.Pointer `json:"path" yaml:"path" validate:"required,nonempty_keys" doc_example:"[\"birthdate\"]"`
 
 	// Value is the threshold or expected value for the validation.
 	Value any `json:"value" yaml:"value" validate:"required" doc_example:"18"`

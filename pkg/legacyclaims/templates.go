@@ -400,6 +400,9 @@ func convertNameMappings(mappings []nameMapping, queries []query) conversion {
 // mappedClaim returns the claim the earlier release's mapper read for a
 // name in a presentation of format, or why the keyed form reads another.
 func mappedClaim(format, name string) (claimpath.Pointer, string) {
+	if name == "" {
+		return claimpath.Pointer{}, "the earlier form maps no claim for an empty name; delete the entry"
+	}
 	if openid4vp.IsMdocFormat(format) || openid4vp.IsMdocZkFormat(format) {
 		switch {
 		case strings.Contains(name, "."):
