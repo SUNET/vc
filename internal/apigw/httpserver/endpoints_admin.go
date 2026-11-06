@@ -2,7 +2,6 @@ package httpserver
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -133,10 +132,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 	if auth := session.Get(adminSessionKey); auth == true {
 		subject, _ := session.Get("admin_subject").(string)
 
-		allScopes, scopeTemplates, err := s.scopeClaimTemplates()
-		if err != nil {
-			return nil, err
-		}
+		allScopes, scopeTemplates := s.scopeClaimTemplates()
 
 		// Resolve allowed resources from SPOCP rules.
 		allowedSources := httphelpers.AllowedAuthenticSources(s.spocpEngine, subject)
@@ -225,12 +221,13 @@ func hasIdentityMappingScope(pairs []httphelpers.ResourcePair) bool {
 }
 
 // scopeClaimTemplates returns every credential scope, and the claim
-// template of each scope with a VCTM.
-func (s *Service) scopeClaimTemplates() ([]string, map[string]any, error) {
+// template of each scope with a VCTM. It logs a scope whose template
+// cannot be built, and returns no template for it.
+func (s *Service) scopeClaimTemplates() ([]string, map[string]any) {
 	var scopes []string
 	templates := map[string]any{}
 	if s.cfg.Common == nil {
-		return scopes, templates, nil
+		return scopes, templates
 	}
 	for scope, cm := range s.cfg.Common.CredentialMetadata {
 		scopes = append(scopes, scope)
@@ -239,11 +236,15 @@ func (s *Service) scopeClaimTemplates() ([]string, map[string]any, error) {
 		}
 		template, err := credential.ClaimTemplate(cm.VCTM.Claims)
 		if err != nil {
-			return nil, nil, fmt.Errorf("scope %s: %w", scope, err)
+			s.log.Error(err, "the admin claim template of a scope cannot be built", "scope", scope)
+			continue
 		}
-		templates[scope] = template
+		for _, claim := range template.ObjectAndArray {
+			s.log.Warn("the VCTM declares a claim as an object and as an array; the admin claim template shows it as an object", "scope", scope, "claim", claim.String())
+		}
+		templates[scope] = template.Document
 	}
-	return scopes, templates, nil
+	return scopes, templates
 }
 
 func (s *Service) endpointAdminLogout(ctx context.Context, c *gin.Context) (any, error) {

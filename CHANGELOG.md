@@ -137,6 +137,9 @@
   - `identity_match.claims` of `POST /api/v1/issuance/prepare` is a list of
     `{path, equals}`. A malformed pointer is answered with `400
     invalid_claims_path`.
+  - The admin UI's claim template builds an array for `null` and for an
+    index. A claim a VCTM declares as an object and as an array stays an
+    object, and logs a warning that names it.
 
   [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists the fields.
 
