@@ -2,9 +2,10 @@ package pubsub
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/testsupport"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -12,25 +13,12 @@ import (
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
-// isDockerAvailable reports whether a working Docker daemon is
-// reachable. Mirrors pkg/cache test helpers rather than importing
-// testsupport to keep this package's test deps minimal.
-func isDockerAvailable() bool {
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil // #nosec G204
-}
-
 // startRESPContainer spins up img (Redis or Valkey — same RESP
 // protocol, same port) and returns a connected client plus cleanup.
 // Mirrors pkg/cache/generic_redis_test.go.
 func startRESPContainer(t *testing.T, img string) (redis.UniversalClient, func()) {
 	t.Helper()
-	if !isDockerAvailable() {
+	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
 	}
 	ctx := t.Context()

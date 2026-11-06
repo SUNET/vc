@@ -7,6 +7,7 @@ package testsupport
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -16,6 +17,26 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// ryukReconnectionTimeout is how long Ryuk outlives its last connection.
+// Terminating a test's container closes the only Ryuk connection, and Ryuk
+// exits once it has none for this long. A next test that starts during that
+// exit finds the dying Ryuk and can fail with "wait for reaper: context
+// deadline exceeded". The library default of 10s is shorter than the gap
+// between tests on a loaded machine.
+// See https://github.com/testcontainers/testcontainers-go/issues/1671.
+const ryukReconnectionTimeout = 2 * time.Minute
+
+// init applies ryukReconnectionTimeout unless the operator set either name
+// testcontainers reads for it.
+func init() {
+	if os.Getenv("RYUK_RECONNECTION_TIMEOUT") != "" || os.Getenv("TESTCONTAINERS_RYUK_RECONNECTION_TIMEOUT") != "" {
+		return
+	}
+	if err := os.Setenv("RYUK_RECONNECTION_TIMEOUT", ryukReconnectionTimeout.String()); err != nil {
+		panic(fmt.Errorf("testsupport: set RYUK_RECONNECTION_TIMEOUT: %w", err))
+	}
+}
 
 // IsDockerAvailable reports whether a working Docker daemon is reachable.
 // Portable across platforms (Linux, macOS, Windows).

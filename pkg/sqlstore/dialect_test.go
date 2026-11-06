@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mariadb"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
@@ -31,8 +32,8 @@ func TestJSONTextExtract_KeyWithQuotes_Postgres(t *testing.T) {
 	ctx := t.Context()
 
 	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies())
+	testcontainers.CleanupContainer(t, ctr)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
 
 	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
@@ -66,8 +67,8 @@ func TestJSONTextExtract_KeyWithQuotes_MariaDB(t *testing.T) {
 	ctx := t.Context()
 
 	ctr, err := mariadb.Run(ctx, "mariadb:11")
+	testcontainers.CleanupContainer(t, ctr)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
 
 	connStr, err := ctr.ConnectionString(ctx)
 	require.NoError(t, err)
