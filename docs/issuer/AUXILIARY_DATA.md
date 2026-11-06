@@ -171,9 +171,9 @@ their wallet account and was re-identified.
 
 In the admin UI, **Commitments** finds the commitment for the values an
 operator enters, shows when it was recorded, and resets it with a case
-reference. When a key claim's openings take different numbers of inputs,
-**Identified by** picks the list of identifiers the operator holds. Reset
-needs an operator signed in through `apigw.api_server.api_auth.oidc`.
+reference. When a key claim's openings read different claims, **Identified
+by** picks the identifiers the operator holds. Reset needs an operator signed
+in through `apigw.api_server.api_auth.oidc`.
 Through the API, both calls take the entry and a value per key part:
 
 ```
@@ -182,7 +182,8 @@ POST /api/v1/auxiliary_data/lookup
   "scope": "nym_auth",
   "path": ["eu.europa.ec.eudi.nym_auth.1", "psc"],
   "key": [
-    {"path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"], "inputs": ["SE", "pan-200"]}
+    {"path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"],
+     "inputs": {"issuing_country": "SE", "personal_administrative_number": "pan-200"}}
   ]
 }
 
@@ -191,7 +192,8 @@ POST /api/v1/auxiliary_data/reset
   "scope": "nym_auth",
   "path": ["eu.europa.ec.eudi.nym_auth.1", "psc"],
   "key": [
-    {"path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"], "inputs": ["SE", "pan-200"]}
+    {"path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"],
+     "inputs": {"issuing_country": "SE", "personal_administrative_number": "pan-200"}}
   ],
   "evidence_ref": "case-1234"
 }
@@ -201,7 +203,11 @@ POST /api/v1/auxiliary_data/reset
 takes the `value` the credential carries, as text, and a claim that holds
 bytes takes them in base64. A part that is a
 `to_wallet` entry with an `hkdf` or `hmac` opening also takes the `inputs`
-it derives from, in the configured order. `evidence_ref` references the operator's
+it derives from, each input claim with its value. The call derives with each
+opening that reads exactly those claims, so it finds a record through the
+claims of the opening that derived it. `pid` and `pid_mdoc` above share a
+secret and an input order, so the claims of either find a person's record.
+`evidence_ref` references the operator's
 case record. The reset is stored with it, and one reference resets one
 commitment.
 

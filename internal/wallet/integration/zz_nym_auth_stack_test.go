@@ -353,13 +353,13 @@ func TestStack_NymAuth(t *testing.T) {
 	for _, person := range []struct {
 		name   string
 		claims map[string]string
-		// identifiers are the inputs of config.yaml's ssc opening, as the
-		// bootstrapped PIDs of both formats hold them: issuing_country and
-		// the administrative number.
-		identifiers []string
+		// identifiers are the inputs of the pid scope's ssc opening in
+		// config.yaml, by claim. The pid_mdoc scope's opening derives the
+		// same ssc from the bootstrapped PID, so they find both records.
+		identifiers map[string]string
 	}{
-		{"adult", map[string]string{"given_name": "Helen", "family_name": "Mirren", "birth_date": "1996-01-30"}, []string{"SE", "pan-100"}},
-		{"teen", map[string]string{"given_name": "Alex", "family_name": "Young", "birth_date": "2011-06-15"}, []string{"SE", "pan-200"}},
+		{"adult", map[string]string{"given_name": "Helen", "family_name": "Mirren", "birth_date": "1996-01-30"}, map[string]string{"issuing_country": "SE", "personal_administrative_number": "pan-100"}},
+		{"teen", map[string]string{"given_name": "Alex", "family_name": "Young", "birth_date": "2011-06-15"}, map[string]string{"issuing_country": "SE", "personal_administrative_number": "pan-200"}},
 	} {
 		for _, presented := range []string{"pid", "pid_mdoc"} {
 			t.Run(person.name+"/"+presented, func(t *testing.T) {
@@ -442,7 +442,7 @@ func TestStack_NymAuth(t *testing.T) {
 
 // lookupCommitment asks the admin API when the psc of the person with
 // identifiers was recorded, as the admin UI's Find does.
-func lookupCommitment(t *testing.T, identifiers []string) (int, []byte) {
+func lookupCommitment(t *testing.T, identifiers map[string]string) (int, []byte) {
 	t.Helper()
 	query, err := json.Marshal(map[string]any{
 		"scope": "nym_auth",

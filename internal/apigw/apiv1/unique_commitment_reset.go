@@ -37,11 +37,11 @@ type ResetUniqueCommitmentRequest struct {
 
 // KeyValue is the value of a key part: Value as the credential carries
 // it, or the Inputs a to_wallet part with an hkdf or hmac opening derives
-// from.
+// from, each input claim with its value.
 type KeyValue struct {
-	Path   []string `json:"path" validate:"required,min=1"`
-	Value  *string  `json:"value,omitempty"`
-	Inputs []string `json:"inputs,omitempty"`
+	Path   []string          `json:"path" validate:"required,min=1"`
+	Value  *string           `json:"value,omitempty"`
+	Inputs map[string]string `json:"inputs,omitempty"`
 }
 
 // UniqueCommitmentLookup tells when the commitment of a key value was
@@ -176,8 +176,8 @@ func (c *Client) partTexts(scope string, part model.KeyPart, value KeyValue) ([]
 }
 
 // derivedTexts derives a part's commitment from the identifiers with each
-// hkdf or hmac opening that takes their number.
-func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs []string) ([]string, error) {
+// hkdf or hmac opening that reads exactly their claims.
+func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs map[string]string) ([]string, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	toWallet := entryLike(meta.AuxiliaryDataSupported().ToWallet,
 		openid4vci.AuxiliaryDataEntry{Type: openid4vci.AuxiliaryDataTypeHashCommitment, Path: part.Path})
@@ -190,10 +190,11 @@ func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs []string)
 	}
 	var texts []string
 	for _, opening := range part.Openings {
-		if len(opening.InputClaims()) != len(inputs) {
+		values, read := openingValues(opening.InputClaims(), inputs)
+		if !read {
 			continue
 		}
-		text, err := derivedText(opening, *toWallet, carrier, inputs)
+		text, err := derivedText(opening, *toWallet, carrier, values)
 		if err != nil {
 			return nil, err
 		}
@@ -203,9 +204,28 @@ func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs []string)
 	}
 	if len(texts) == 0 {
 		return nil, helpers.NewErrorDetailsWithStatus("invalid_key",
-			fmt.Sprintf("no hkdf or hmac opening of key part %q takes %d inputs", part.Path, len(inputs)), http.StatusBadRequest)
+			fmt.Sprintf("no hkdf or hmac opening of key part %q reads exactly the claims %q", part.Path, slices.Sorted(maps.Keys(inputs))), http.StatusBadRequest)
 	}
 	return texts, nil
+}
+
+// openingValues returns the values of an opening's input claims, in their
+// order, and whether inputs names exactly those claims.
+func openingValues(claims []string, inputs map[string]string) ([]string, bool) {
+	for claim := range inputs {
+		if !slices.Contains(claims, claim) {
+			return nil, false
+		}
+	}
+	values := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		value, named := inputs[claim]
+		if !named {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
 }
 
 // derivedText is the commitment text an hkdf or hmac opening derives from
@@ -255,10 +275,17 @@ type ResettableKeyPart struct {
 	Path []string `json:"path"`
 	// Label names a part the operator enters as the credential carries it.
 	Label string `json:"label,omitempty"`
-	// Inputs name, in order, the identifiers a part derived with hkdf or
-	// hmac takes instead: one list for each number of inputs its openings
-	// take, which is what derivedTexts tells them apart by.
-	Inputs [][]string `json:"inputs,omitempty"`
+	// Inputs lists the identifiers a part derived with hkdf or hmac takes
+	// instead: one list for each set of claims its openings read, which is
+	// what derivedTexts tells them apart by.
+	Inputs [][]ResettableInput `json:"inputs,omitempty"`
+}
+
+// ResettableInput is an identifier the reset form asks for.
+type ResettableInput struct {
+	// Claim is the input claim the identifier's value is sent under.
+	Claim string `json:"claim"`
+	Label string `json:"label"`
 }
 
 // ResettableEntries lists the unique entries of scopes.
@@ -288,17 +315,30 @@ func resettableKeyPart(meta *model.CredentialMetadata, part model.KeyPart) Reset
 	}
 	labelled := ResettableKeyPart{Path: part.Path}
 	for _, opening := range part.Openings {
-		claims := opening.InputClaims()
-		if slices.ContainsFunc(labelled.Inputs, func(inputs []string) bool { return len(inputs) == len(claims) }) {
-			continue
+		inputs := resettableInputs(opening.InputClaims())
+		if !slices.ContainsFunc(labelled.Inputs, func(offered []ResettableInput) bool { return sameInputs(offered, inputs) }) {
+			labelled.Inputs = append(labelled.Inputs, inputs)
 		}
-		inputs := make([]string, 0, len(claims))
-		for _, input := range claims {
-			inputs = append(inputs, humanize(input))
-		}
-		labelled.Inputs = append(labelled.Inputs, inputs)
 	}
 	return labelled
+}
+
+// resettableInputs lists each claim once, in the order of claims.
+func resettableInputs(claims []string) []ResettableInput {
+	inputs := make([]ResettableInput, 0, len(claims))
+	for _, claim := range claims {
+		input := ResettableInput{Claim: claim, Label: humanize(claim)}
+		if !slices.Contains(inputs, input) {
+			inputs = append(inputs, input)
+		}
+	}
+	return inputs
+}
+
+// sameInputs reports whether two lists, each of distinct inputs, hold the
+// same inputs in any order.
+func sameInputs(a, b []ResettableInput) bool {
+	return len(a) == len(b) && !slices.ContainsFunc(a, func(input ResettableInput) bool { return !slices.Contains(b, input) })
 }
 
 // credentialName is the credential's name as the consent page shows it, or

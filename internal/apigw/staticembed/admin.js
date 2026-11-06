@@ -278,7 +278,7 @@ window.adminApp = function () {
                 scope: entry.scope,
                 path: entry.path,
                 key: entry.key.map((part, k) => part.inputs
-                    ? { path: part.path, inputs: this.hc.values[k] }
+                    ? { path: part.path, inputs: Object.fromEntries(part.inputs[this.hc.inputs[k]].map((input, j) => [input.claim, this.hc.values[k][j]])) }
                     : { path: part.path, value: this.hc.values[k] }),
             };
         },

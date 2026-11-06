@@ -235,12 +235,14 @@ func TestUniqueCommitmentReset(t *testing.T) {
 	reset := func(path []string, key ...KeyValue) error {
 		return c.ResetUniqueCommitment(t.Context(), &ResetUniqueCommitmentRequest{UniqueCommitmentQuery: query(path, key...), EvidenceRef: "case-1"}, "operator")
 	}
-	identifiers := func(values ...string) KeyValue { return KeyValue{Path: ssc, Inputs: values} }
-	q := query(psc, identifiers("SE", "pan-200"))
+	identifiers := func(pan string) KeyValue {
+		return KeyValue{Path: ssc, Inputs: map[string]string{"issuing_country": "SE", "personal_administrative_number": pan}}
+	}
+	q := query(psc, identifiers("pan-200"))
 	found, err := c.LookupUniqueCommitment(t.Context(), &q)
 	require.NoError(t, err, "the subject's identifiers find the record")
 	assert.False(t, found.RecordedAt.IsZero())
-	require.NoError(t, reset(psc, identifiers("SE", "pan-200")))
+	require.NoError(t, reset(psc, identifiers("pan-200")))
 	_, err = c.LookupUniqueCommitment(t.Context(), &q)
 	var gone *helpers.Error
 	require.ErrorAs(t, err, &gone, "the reset removed the record")
@@ -257,9 +259,11 @@ func TestUniqueCommitmentReset(t *testing.T) {
 		err    error
 		status int
 	}{
-		"the entry is unique per the key": {reset(ssc, identifiers("SE", "pan-200")), http.StatusBadRequest},
-		"the inputs fit an hkdf opening":  {reset(psc, identifiers("SE")), http.StatusBadRequest},
-		"a commitment is on record":       {reset(psc, identifiers("SE", "pan-999")), http.StatusNotFound},
+		"the entry is unique per the key": {reset(ssc, identifiers("pan-200")), http.StatusBadRequest},
+		"the inputs fit an hkdf opening": {
+			reset(psc, KeyValue{Path: ssc, Inputs: map[string]string{"issuing_country": "SE"}}), http.StatusBadRequest,
+		},
+		"a commitment is on record": {reset(psc, identifiers("pan-999")), http.StatusNotFound},
 	} {
 		var detailed *helpers.Error
 		require.ErrorAs(t, refusal.err, &detailed, rule)
@@ -267,28 +271,54 @@ func TestUniqueCommitmentReset(t *testing.T) {
 	}
 }
 
-// The key decides which issuances share a record: an empty key makes one
-// commitment for the entry, a composite key one per combination.
-// The reset form offers each number of identifiers the openings take.
-func TestResettableEntriesOfferEachNumberOfInputs(t *testing.T) {
+// The reset form offers each set of identifiers the openings read, and a
+// value reaches an opening under the claim it was entered for.
+func TestUniqueCommitmentFormIdentifiers(t *testing.T) {
 	c, derivations := nymAuthClient(t)
+	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
+	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
 	from := c.cfg.APIGW.DataSources.Presentation.Scopes["nym_auth"].From
-	sameCount := func(inputs ...string) []primitives.Derivation {
+	reading := func(inputs ...string) []primitives.Derivation {
 		hc, hkdf := *derivations[0].HashCommitment, *derivations[0].HashCommitment.Opening.HKDF
 		hkdf.Inputs = inputs
 		hc.Opening = &primitives.OpeningArgs{HKDF: &hkdf}
 		return []primitives.Derivation{{HashCommitment: &hc}, derivations[1]}
 	}
-	from["pid_short"] = model.PresentedCredential{Derivations: sameCount("personal_administrative_number")}
-	from["pid_renamed"] = model.PresentedCredential{Derivations: sameCount("document_number")}
+	swapped := reading("personal_administrative_number", "issuing_country")
+	// Its own secret, as the message of an opening holds the values alone: two
+	// openings of one secret that read a set in two orders share a value.
+	ownSecret := filepath.Join(t.TempDir(), "own_seed.key")
+	require.NoError(t, os.WriteFile(ownSecret, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("o", 32)))), 0o600))
+	swapped[0].HashCommitment.Opening.HKDF.SecretPath = ownSecret
+	from["pid_a_swapped"] = model.PresentedCredential{Derivations: swapped}
+	from["pid_b_renamed"] = model.PresentedCredential{Derivations: reading("issuing_country", "document_number")}
+	from["pid_c_short"] = model.PresentedCredential{Derivations: reading("personal_administrative_number")}
 
 	entries := ResettableEntries(c.cfg, []string{"nym_auth"})
 	require.Len(t, entries, 1)
-	lists := entries[0].Key[0].Inputs
-	require.Len(t, lists, 2, "the two sources with one input share a list")
-	assert.ElementsMatch(t, []int{2, 1}, []int{len(lists[0]), len(lists[1])})
+	number := ResettableInput{Claim: "personal_administrative_number", Label: "Personal administrative number"}
+	country := ResettableInput{Claim: "issuing_country", Label: "Issuing country"}
+	document := ResettableInput{Claim: "document_number", Label: "Document number"}
+	assert.Equal(t, [][]ResettableInput{{country, number}, {country, document}, {number}}, entries[0].Key[0].Inputs,
+		"the sources in Where order, and the two orders of one set share a list")
+
+	commitment := sha256.Sum256([]byte("a wallet's private seed"))
+	entry := []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(commitment[:])}}
+	_, err := issueAuxiliaryData(t, c, "nym_auth", swapped, nymAuthSubject("pan-300"), []byte(`{"birth_date":"2011-06-15"}`), entry)
+	require.NoError(t, err)
+	lookup := func(countryValue, numberValue string) error {
+		inputs := map[string]string{"issuing_country": countryValue, "personal_administrative_number": numberValue}
+		_, err := c.LookupUniqueCommitment(t.Context(), &UniqueCommitmentQuery{Scope: "nym_auth", Path: psc, Key: []KeyValue{{Path: ssc, Inputs: inputs}}})
+		return err
+	}
+	assert.NoError(t, lookup("SE", "pan-300"), "each identifier under its claim finds the record of the swapped source")
+	var absent *helpers.Error
+	require.ErrorAs(t, lookup("pan-300", "SE"), &absent, "the values exchanged name another person")
+	assert.Equal(t, http.StatusNotFound, absent.HTTPStatus)
 }
 
+// The key decides which issuances share a record: an empty key makes one
+// commitment for the entry, a composite key one per combination.
 func TestUniqueCommitmentKey(t *testing.T) {
 	ns := "eu.europa.ec.eudi.nym_auth.1"
 	type issuance struct {
@@ -439,7 +469,7 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(applied.documentData, &doc))
 	assert.Equal(t, want, doc["commitments"], "each commitment is at its claims path, in its entry's encoding")
-	q := UniqueCommitmentQuery{Scope: "example", Path: psc, Key: []KeyValue{{Path: ssc, Inputs: []string{"pan-200"}}}}
+	q := UniqueCommitmentQuery{Scope: "example", Path: psc, Key: []KeyValue{{Path: ssc, Inputs: map[string]string{"personal_administrative_number": "pan-200"}}}}
 	_, err = c.LookupUniqueCommitment(t.Context(), &q)
 	require.NoError(t, err, "the identifiers derive ssc in its entry's encoding")
 
