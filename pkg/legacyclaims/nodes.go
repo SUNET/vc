@@ -40,6 +40,16 @@ func isNull(n ast.Node) bool {
 	return null
 }
 
+// isMappingNode reports whether n is a mapping. goccy/go-yaml parses a
+// block mapping of one entry as that entry.
+func isMappingNode(n ast.Node) bool {
+	switch n.(type) {
+	case *ast.MappingNode, *ast.MappingValueNode:
+		return true
+	}
+	return false
+}
+
 // entries returns the entries of a mapping. A null node has none.
 func entries(n ast.Node) ([]*ast.MappingValueNode, error) {
 	n, err := unwrap(n)

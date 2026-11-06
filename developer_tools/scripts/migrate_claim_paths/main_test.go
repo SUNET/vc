@@ -109,16 +109,20 @@ func TestMigrateKeepsTheMeaningAndTheComments(t *testing.T) {
 	}
 }
 
-// The converter rewrites a file with a YAML alias in place when the
-// rewrite reads as the file does. It leaves the file as written, and names
-// it, when an alias reads a spelling the rewrite would give another
-// meaning: a claim read again as a URL, or an anchor the keyed
-// claim_mappings drops.
-func TestMigrateRewritesAFileWithAliasesWhenItKeepsItsMeaning(t *testing.T) {
+// The converter rewrites a file in place when the rewrite reads as the
+// file does. It leaves the file as written, and names it, when an alias
+// reads a spelling the rewrite would give another meaning: a claim read
+// again as a URL, or an anchor the keyed claim_mappings drops. It leaves
+// claim_mappings as written when the loaded credential query holds no id
+// the keyed form can name: a query that is no mapping, a query without an
+// id, or a query the decoder keeps as written whose id YAML reads as a
+// number.
+func TestMigrateRewritesAFileWhenItKeepsItsMeaning(t *testing.T) {
 	const mapping = "apigw:\n  auth_providers:\n    oidc:\n      attribute_mapping:\n        birthdate:\n          claim: %s\n"
 	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - id: age\n          format: dc+sd-jwt\n%s          claims:\n            - path: [age_over_18]\n    claim_mappings:\n%s"
 	const meta = "x-meta: &meta\n  vct_values: [urn:credential:age:1]\n"
 	const mdoc = "templates:\n  - id: mdl\n    oidc_scopes: [mdl]\n    dcql:\n      credentials:\n        - <<: {format: mso_mdoc}\n          id: mdl\n          meta:\n            doctype_value: org.iso.18013.5.1.mDL\n          claims:\n            - path: [org.iso.18013.5.1, family_name]\n    claim_mappings:\n%s"
+	const query = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - %s\n    claim_mappings:\n      age_over_18: age_over_18\n"
 	tests := []struct {
 		name, file string
 		// want is the file once converted, and empty when the converter
@@ -147,6 +151,18 @@ func TestMigrateRewritesAFileWithAliasesWhenItKeepsItsMeaning(t *testing.T) {
 			name: "a template whose credential query takes its format from a merge key",
 			file: fmt.Sprintf(mdoc, "      family_name: family_name\n"),
 			want: fmt.Sprintf(mdoc, "      mdl:\n        - {path: [org.iso.18013.5.1, family_name], claim: family_name}\n"),
+		},
+		{
+			name: "a template whose credential query is no mapping",
+			file: fmt.Sprintf(query, "x"),
+		},
+		{
+			name: "a template whose credential query has no id",
+			file: fmt.Sprintf(query, "{format: dc+sd-jwt, claims: [{path: [age_over_18]}]}"),
+		},
+		{
+			name: "a template whose credential query the decoder keeps as written has an id YAML reads as a number",
+			file: fmt.Sprintf(query, "{id: 7, format: dc+sd-jwt, claims: [{path: [age_over_18]}]}"),
 		},
 	}
 	for _, tt := range tests {

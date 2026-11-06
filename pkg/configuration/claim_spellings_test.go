@@ -506,6 +506,28 @@ func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
 	}
 }
 
+// A template whose credential query the decoder keeps as written loads,
+// and holds the dcql gopkg.in/yaml.v2 reads from it: a query that is no
+// mapping, claims that are no list, an id that is no scalar, and a
+// multiple that is no boolean.
+func TestCredentialQueriesKeptAsWrittenLoad(t *testing.T) {
+	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - %s\n"
+	for _, query := range []string{
+		"x",
+		"{id: age, format: dc+sd-jwt, claims: {age_over_18: {}}}",
+		"{id: [age], format: dc+sd-jwt, claims: [{path: [age_over_18]}]}",
+		"{id: age, format: dc+sd-jwt, multiple: maybe, claims: [{path: [age_over_18]}]}",
+	} {
+		t.Run(query, func(t *testing.T) {
+			var read PresentationRequestConfig
+			require.NoError(t, yaml.Unmarshal([]byte(fmt.Sprintf(template, query)), &read))
+			got, err := loadTemplateText(t, template, query)
+			require.NoError(t, err)
+			assert.Equal(t, read.Templates[0].DCQLQuery, got.Templates[0].DCQLQuery)
+		})
+	}
+}
+
 // A binding attribute of the earlier release, a dotted name, reads as one
 // key per segment, as the verifier split it. A binding attribute that
 // selects every element of an array is refused.

@@ -67,6 +67,12 @@ type query struct {
 	format string
 	// multiple is set when the query allows several presentations.
 	multiple bool
+	// flaw says why the keyed form cannot map the query's presentations by
+	// these, and is empty when it can: the query has no id, or the loaded
+	// query may hold another id, format or multiple. A query the decoder
+	// keeps as written reads an id and a format only from a string, and
+	// multiple only from a boolean.
+	flaw string
 }
 
 // templateDCQL upgrades the claim paths of a template's dcql, which main
@@ -84,44 +90,88 @@ func (d *Document) templateDCQL(template ast.Node) ([]query, error) {
 	}
 	queries := make([]query, 0, len(list))
 	for _, credential := range list {
-		if err := d.queryClaims(credential); err != nil {
-			return nil, err
-		}
-		id, err := scalarValue(credential, "id")
+		q, err := d.credentialQuery(credential)
 		if err != nil {
 			return nil, err
 		}
-		format, err := scalarValue(credential, "format")
-		if err != nil {
-			return nil, err
-		}
-		multiple, err := scalarValue(credential, "multiple")
-		if err != nil {
-			return nil, err
-		}
-		var allows bool
-		if multiple != "" {
-			if err := yaml.Unmarshal([]byte(multiple), &allows); err != nil {
-				return nil, fmt.Errorf("%s: multiple: %w", credential.GetPath(), err)
-			}
-		}
-		queries = append(queries, query{id: id, format: format, multiple: allows})
+		queries = append(queries, q)
 	}
 	return queries, nil
 }
 
-// queryClaims upgrades the path of each claim of a credential query.
+// credentialQuery upgrades the claim paths of a credential query, and
+// reads the id, format and multiple the keyed form maps its presentations
+// by. A query that is no mapping stays as written: main read no claim path
+// in it.
+func (d *Document) credentialQuery(credential ast.Node) (query, error) {
+	credential, err := unwrap(credential)
+	if err != nil {
+		return query{}, err
+	}
+	if !isMappingNode(credential) {
+		return query{flaw: "the credential query is no mapping"}, nil
+	}
+	if err := d.queryClaims(credential); err != nil {
+		return query{}, err
+	}
+	var values [3]ast.Node
+	for i, key := range []string{"id", "format", "multiple"} {
+		if values[i], err = lastValue(credential, key); err != nil {
+			return query{}, err
+		}
+	}
+	id, idRead, err := scalarAs[string](d, values[0])
+	if err != nil {
+		return query{}, err
+	}
+	format, formatRead, err := scalarAs[string](d, values[1])
+	if err != nil {
+		return query{}, err
+	}
+	multiple, multipleRead, err := scalarAs[bool](d, values[2])
+	if err != nil {
+		return query{}, err
+	}
+	q := query{id: id, format: format, multiple: multiple}
+	switch {
+	case !idRead:
+		q.flaw = "the id of the credential query is no string the converter reads"
+	case id == "":
+		q.flaw = "the credential query has no id"
+	case !formatRead:
+		q.flaw = "the format of the credential query is no string the converter reads"
+	case !multipleRead:
+		q.flaw = "the multiple of the credential query is no boolean the converter reads"
+	}
+	return q, nil
+}
+
+// queryClaims upgrades the path of each claim of a credential query. A
+// claims value that is no list, and a claim that is no mapping, stay as
+// written: main read no claim path in them, and the credential query
+// decodes them as main did.
 func (d *Document) queryClaims(credential ast.Node) error {
 	lists, err := decoded(credential, "claims")
 	if err != nil {
 		return err
 	}
 	for _, claims := range lists {
-		claimList, err := items(claims)
+		claims, err := unwrap(claims)
 		if err != nil {
 			return err
 		}
-		for _, claim := range claimList {
+		sequence, isList := claims.(*ast.SequenceNode)
+		if !isList {
+			continue
+		}
+		for _, claim := range sequence.Values {
+			claim, err := unwrap(claim)
+			if err != nil {
+				return err
+			}
+			if !isMappingNode(claim) {
+				continue
+			}
 			paths, err := decoded(claim, "path")
 			if err != nil {
 				return err
@@ -136,25 +186,49 @@ func (d *Document) queryClaims(credential ast.Node) error {
 	return nil
 }
 
-// scalarValue returns the text of the scalar a struct keeps under key of
-// mapping n, or "" when it is absent or null.
-func scalarValue(n ast.Node, key string) (string, error) {
+// lastValue returns the value of key a struct keeps from mapping n, or nil
+// when n sets none.
+func lastValue(n ast.Node, key string) (ast.Node, error) {
 	values, err := decoded(n, key)
 	if err != nil || len(values) == 0 {
-		return "", err
+		return nil, err
 	}
-	value, err := unwrap(values[len(values)-1])
-	if err != nil || isNull(value) {
-		return "", err
+	return values[len(values)-1], nil
+}
+
+// scalarAs returns the value of type T that gopkg.in/yaml.v2 reads from an
+// untagged flow scalar, and the zero value for nil or null. It reports
+// false for a scalar of another type, a tagged value, a collection and a
+// block scalar.
+func scalarAs[T any](d *Document, value ast.Node) (T, bool, error) {
+	var zero T
+	for {
+		anchor, ok := value.(*ast.AnchorNode)
+		if !ok {
+			break
+		}
+		value = anchor.Value
 	}
-	if literal, ok := value.(*ast.LiteralNode); ok {
-		return literal.Value.Value, nil
+	switch value.(type) {
+	case nil, *ast.NullNode:
+		return zero, true, nil
+	case *ast.AliasNode:
+		_, err := unwrap(value)
+		return zero, false, err
+	case *ast.StringNode, *ast.IntegerNode, *ast.FloatNode, *ast.BoolNode, *ast.InfinityNode, *ast.NanNode:
+	default:
+		return zero, false, nil
 	}
-	text, ok := dottedName(value)
-	if !ok {
-		return "", fmt.Errorf("%s is no scalar", value.GetPath())
+	text, err := d.text(value)
+	if err != nil {
+		return zero, false, err
 	}
-	return text, nil
+	var read any
+	if yaml.Unmarshal([]byte(text), &read) != nil {
+		return zero, false, nil
+	}
+	typed, ok := read.(T)
+	return typed, ok, nil
 }
 
 // nameMapping is one entry of the earlier release's claim_mappings map.
@@ -201,13 +275,8 @@ func (d *Document) claimMappings(template ast.Node, queries []query, convert boo
 // are all scalars: the earlier release's form.
 func (d *Document) nameMappings(n ast.Node) ([]nameMapping, bool, error) {
 	n, err := unwrap(n)
-	if err != nil {
+	if err != nil || !isMappingNode(n) {
 		return nil, false, err
-	}
-	switch n.(type) {
-	case *ast.MappingNode, *ast.MappingValueNode:
-	default:
-		return nil, false, nil
 	}
 	list, err := entries(n)
 	if err != nil {
@@ -303,6 +372,8 @@ func convertNameMappings(mappings []nameMapping, queries []query) conversion {
 		return conversion{text: suggested, note: "the template has no credential query to key the mappings by"}
 	case len(queries) > 1:
 		return conversion{text: suggested, note: fmt.Sprintf("the template requests %d credentials; the keyed form maps each presentation through the entries of its own query, and refuses two values for one OIDC claim", len(queries))}
+	case queries[0].flaw != "":
+		return conversion{text: suggested, note: queries[0].flaw}
 	case queries[0].multiple:
 		return conversion{text: suggested, note: fmt.Sprintf("the query %q allows several presentations; the keyed form refuses two values for one OIDC claim", queries[0].id)}
 	}
@@ -348,10 +419,15 @@ func mappedClaim(format, name string) (claimpath.Pointer, string) {
 // suggestKeyed renders the keyed form that maps each entry in each query,
 // with each name read the way a dotted claim name of a presented
 // credential of the query's format reads. The form leaves out each entry
-// whose name has no claims path pointer, and the note names the first.
+// whose name has no claims path pointer, and the note names the first. It
+// keys the entries of a query with a flaw by <query id>.
 func suggestKeyed(mappings []nameMapping, queries []query) (text, note string) {
 	parts := make([]string, 0, len(queries))
 	for _, q := range queries {
+		key := scalarText(q.id)
+		if q.flaw != "" {
+			key = "<query id>"
+		}
 		reading := Presented(q.format)
 		entries := make([]string, 0, len(mappings))
 		for _, m := range mappings {
@@ -364,7 +440,7 @@ func suggestKeyed(mappings []nameMapping, queries []query) (text, note string) {
 			}
 			entries = append(entries, entry)
 		}
-		parts = append(parts, scalarText(q.id)+": ["+strings.Join(entries, ", ")+"]")
+		parts = append(parts, key+": ["+strings.Join(entries, ", ")+"]")
 	}
 	return "{" + strings.Join(parts, ", ") + "}", note
 }

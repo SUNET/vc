@@ -152,12 +152,13 @@
   **Migration:** after `make build-migrate-claim-paths`,
   `./bin/migrate_claim_paths -schemas /metadata=./metadata config.yaml
   presentation_requests/*.yaml` rewrites configuration and presentation
-  request files in place and keeps their comments. It leaves a
-  `claim_mappings` map as written when the keyed form would map other
-  claims, and prints why. It leaves a file with a YAML alias, merge key or
-  repeated key as written, and prints a line, when an alias stands where it
-  reads claims, or when a rewrite in place would change what the file
-  loads.
+  request files in place and keeps their comments. It converts a
+  `claim_mappings` map to the keyed form under the conditions
+  [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists, and prints why it
+  leaves any other map as written. It leaves a file with a YAML alias,
+  merge key or repeated key as written, and prints a line, when an alias
+  stands where it reads claims, or when a rewrite in place would change
+  what the file loads.
 
 ### Note
 
