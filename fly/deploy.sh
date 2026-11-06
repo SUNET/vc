@@ -45,6 +45,7 @@ FLY_ORG="${FLY_ORG:-sirosfoundation}"
 PROFILE=""
 CONFIRM=""
 TARGET_SERVICE=""
+MONGO_ADMIN_USER="admin"
 
 usage() {
     sed -n '2,/^$/s/^# //p' "$0"
@@ -160,14 +161,23 @@ profile_dir() {
     esac
 }
 
+# Prints the MongoDB URI that authenticates with password $1 on app $2.
+mongo_uri_for() {
+    local _pass="$1" _app="$2"
+    printf '%s\n' "mongodb://${MONGO_ADMIN_USER}:${_pass}@${_app}.internal:27017/?authSource=admin"
+}
+
 # Prints the MongoDB URI that launch generated for app $2, read from secrets
 # file $1. Returns 1 when the file is absent or holds another URI, such as the
 # example placeholder.
 local_mongo_uri() {
-    local _uri
-    [[ -f "$1" ]] || return 1
-    _uri="$(yq -r '.common.mongo.uri // ""' "$1")"
-    [[ "$_uri" =~ ^mongodb://admin:[0-9a-f]{48}@${2}\.internal:27017/\?authSource=admin$ ]] || return 1
+    local _file="$1" _app="$2" _uri _pass
+    [[ -f "$_file" ]] || return 1
+    _uri="$(yq -r '.common.mongo.uri // ""' "$_file")"
+    _pass="${_uri#mongodb://"$MONGO_ADMIN_USER":}"
+    _pass="${_pass%%@*}"
+    [[ "$_pass" =~ ^[0-9a-f]{48}$ ]] || return 1
+    [[ "$_uri" == "$(mongo_uri_for "$_pass" "$_app")" ]] || return 1
     printf '%s\n' "$_uri"
 }
 
@@ -225,9 +235,8 @@ cmd_launch() {
     local secrets_file
     secrets_file="$(secrets_file_path)"
 
-    local mongo_app mongo_pass mongo_user mongo_uri mongo_secrets mongo_creds_set=0
+    local mongo_app mongo_pass mongo_uri mongo_secrets mongo_creds_set=0
     mongo_app="$(app_name "mongodb")"
-    mongo_user="admin"
 
     # Idempotent: if MongoDB already has creds, keep them. Rotating
     # MONGO_INITDB_ROOT_PASSWORD after the data dir is initialised does NOT
@@ -243,7 +252,7 @@ cmd_launch() {
     else
         # hex, not base64: password is embedded in a URI, must be URL-safe.
         mongo_pass="$(openssl rand -hex 24)"
-        mongo_uri="mongodb://${mongo_user}:${mongo_pass}@${mongo_app}.internal:27017/?authSource=admin"
+        mongo_uri="$(mongo_uri_for "$mongo_pass" "$mongo_app")"
 
         if [[ ! -f "$secrets_file" ]]; then
             cp "${ROOT_DIR}/secrets.example.yaml" "$secrets_file"
@@ -256,7 +265,7 @@ cmd_launch() {
 
         echo "==> Setting MongoDB secrets for $mongo_app"
         if set_app_secrets "$mongo_app" \
-            MONGO_INITDB_ROOT_USERNAME="$mongo_user" \
+            MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
             MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
             echo "    MongoDB secrets set"
             printf '%s\n' "$mongo_secrets_content" > "$secrets_file"
