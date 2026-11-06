@@ -18,8 +18,11 @@ import (
 // included, stays as written.
 type Document struct {
 	file string
-	src  []byte
-	// lines holds the byte offset at which each line starts.
+	// written is the file as written, which Bytes splices the edits into.
+	written written
+	// src is the text the parser reads from the file.
+	src []byte
+	// lines holds the byte offset at which each line of src starts.
 	lines []int
 	root  ast.Node
 	// layout is what Resolve reads of the aliases, merge keys and repeated
@@ -33,8 +36,8 @@ type Document struct {
 	rewrites []Rewrite
 }
 
-// edit replaces src[start:end] with text. An edit with start == end
-// inserts text.
+// edit replaces src[start:end] with text, which writes the line break of
+// the file for each LF. An edit with start == end inserts text.
 type edit struct {
 	start, end int
 	text       string
@@ -60,15 +63,20 @@ type Rewrite struct {
 }
 
 // Parse parses the YAML text of file. Like gopkg.in/yaml.v2, it reads the
-// first document of a stream, and a mapping may repeat a key. Comments
-// before the first "---" belong to no document, and a document of comments
-// holds nothing.
+// text in the encoding of its byte order mark, reads the line breaks
+// yaml.v2 reads, and reads the first document of a stream; a mapping may
+// repeat a key. Comments before the first "---" belong to no document,
+// and a document of comments holds nothing.
 func Parse(file string, src []byte) (*Document, error) {
-	parsed, err := parser.ParseBytes(src, parser.ParseComments, parser.AllowDuplicateMapKey())
+	w, text, err := readFile(src)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
-	d := &Document{file: file, src: src, lines: lineStarts(src)}
+	parsed, err := parser.ParseBytes(text, parser.ParseComments, parser.AllowDuplicateMapKey())
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	d := &Document{file: file, written: w, src: text, lines: lineStarts(text)}
 	for _, doc := range parsed.Docs {
 		_, comments := doc.Body.(*ast.CommentGroupNode)
 		if comments && doc.Start == nil {
@@ -120,7 +128,8 @@ func (d *Document) fail(err error) error {
 	return fmt.Errorf("%s: %w", d.file, err)
 }
 
-// lineStarts returns the byte offset of the start of each line of src.
+// lineStarts returns the byte offset of the start of each line of the
+// text the parser reads.
 func lineStarts(src []byte) []int {
 	starts := []int{0}
 	for i, b := range src {
@@ -138,7 +147,7 @@ func (d *Document) Rewrites() []Rewrite {
 	return out
 }
 
-// Bytes returns the text with every edit applied.
+// Bytes returns the file with every edit applied, in its encoding.
 func (d *Document) Bytes() ([]byte, error) {
 	edits := slices.Clone(d.edits)
 	slices.SortStableFunc(edits, func(a, b edit) int {
@@ -149,17 +158,19 @@ func (d *Document) Bytes() ([]byte, error) {
 		return (a.end - a.start) - (b.end - b.start)
 	})
 	var out bytes.Buffer
-	at := 0
+	// end is the end of the last edit in src, and at the offset of the
+	// file's text that out holds up to.
+	end, at := 0, 0
 	for _, e := range edits {
-		if e.start < at {
+		if e.start < end {
 			return nil, fmt.Errorf("%s: two upgrades of the claim spellings overlap at line %d", d.file, d.fileLine(e.start))
 		}
-		out.Write(d.src[at:e.start])
-		out.WriteString(e.text)
-		at = e.end
+		out.Write(d.written.text[at:d.written.offset(e.start)])
+		out.WriteString(strings.ReplaceAll(e.text, "\n", d.written.newline))
+		end, at = e.end, d.written.offset(e.end)
 	}
-	out.Write(d.src[at:])
-	return out.Bytes(), nil
+	out.Write(d.written.text[at:])
+	return d.written.encoding.encode(out.Bytes()), nil
 }
 
 // lineOf returns the line, from 1, of a byte offset.

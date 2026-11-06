@@ -203,7 +203,9 @@ release misreads.
 ### `migrate_claim_paths`
 
 `migrate_claim_paths` rewrites configuration files and presentation request
-files in place. It keeps every comment, and a second run changes nothing:
+files in place. It keeps every comment, the encoding and the line breaks,
+and a second run changes nothing. A line it adds ends with the line break
+that ends most lines of the file:
 
 ```sh
 make build-migrate-claim-paths
