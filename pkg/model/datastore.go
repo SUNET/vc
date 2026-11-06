@@ -3,6 +3,8 @@ package model
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/SUNET/vc/pkg/plainbson"
 )
 
 // CompleteDocument is a generic type for upload
@@ -44,6 +46,18 @@ type CompleteDocument struct {
 	// derives and filters DocumentData, which drops or rewrites them. Tagged
 	// for JSON like PresentedClaims, which is what the cache serialises.
 	OpeningClaims map[string]any `json:"opening_claims,omitempty" bson:"opening_claims,omitempty"`
+}
+
+// UnmarshalBSON decodes the nested objects and arrays of DocumentData and
+// OpeningClaims as map[string]any and []any.
+func (d *CompleteDocument) UnmarshalBSON(data []byte) error {
+	type plain CompleteDocument // no methods, so no recursion
+	var document plain
+	if err := plainbson.Unmarshal(data, &document); err != nil {
+		return err
+	}
+	*d = CompleteDocument(document)
+	return nil
 }
 
 // DocumentList is a generic type for document list

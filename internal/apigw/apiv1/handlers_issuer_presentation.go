@@ -32,10 +32,9 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	// claim that the presented credential already carries (and that no
 	// derivation rewrites) still lands in the issued document. The VCTM
 	// filter below drops anything the target credential does not declare.
-	verified := storedClaims(authCtx.VerifiedClaims)
-	doc := credential.CloneNestedClaims(verified)
+	doc := credential.CloneNestedClaims(authCtx.VerifiedClaims)
 
-	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, verified, now, nil)
+	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, authCtx.VerifiedClaims, now, nil)
 	if err != nil {
 		return nil, err
 	}

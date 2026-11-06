@@ -212,8 +212,8 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	assert.NotContains(t, payload["commitments"], "psc")
 }
 
-// Nested verified claims reload from a Mongo-backed store as bson.D and
-// bson.A, and a dotted opening input must still resolve in them.
+// A dotted opening input resolves in nested verified claims reloaded from a
+// Mongo-backed store.
 func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	stored, err := bson.Marshal(&cache.AuthorizationContext{
 		DataSource:     string(model.DataSourcePresentation),
@@ -223,7 +223,6 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	require.NoError(t, err)
 	var authContext cache.AuthorizationContext
 	require.NoError(t, bson.Unmarshal(stored, &authContext))
-	require.IsType(t, bson.D{}, authContext.VerifiedClaims["subject"], "the premise: the store returns bson.D")
 
 	c := &Client{cfg: &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
 		Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{"pid": {}}}},
@@ -236,7 +235,7 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"subject.pan"}, Bytes: 16}
 	hc := primitives.HashCommitmentArgs{Path: []string{"commitments", "ssc"}, Opening: primitives.OpeningArgs{HKDF: &opening}}
 	_, err = hc.NewOpening(claims)
-	require.NoError(t, err, "subject.pan resolves in the normalised claims")
+	require.NoError(t, err, "subject.pan resolves in the stored claims")
 	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
 }
 
@@ -275,22 +274,6 @@ func TestOIDCDocumentCarriesTheOpeningClaims(t *testing.T) {
 	var back map[string]*model.CompleteDocument
 	require.NoError(t, json.Unmarshal(encoded, &back))
 	assert.Equal(t, doc.OpeningClaims, back["d"].OpeningClaims, "the claims survive the JSON cache")
-}
-
-// A memory store hands every request the same claims, so normalising them
-// must not write into them.
-func TestStoredClaimsLeavesTheCachedClaimsUnchanged(t *testing.T) {
-	nested := map[string]any{"pan": "pan-1"}
-	items := []any{map[string]any{"a": "b"}}
-	cached := map[string]any{"subject": nested, "list": items}
-
-	normalised := storedClaims(cached)
-
-	assert.Equal(t, map[string]any{"subject": map[string]any{"pan": "pan-1"}, "list": []any{map[string]any{"a": "b"}}}, normalised)
-	normalised["subject"].(map[string]any)["pan"] = "changed"
-	normalised["list"].([]any)[0] = "changed"
-	assert.Equal(t, "pan-1", nested["pan"], "the cached object is not shared")
-	assert.IsType(t, map[string]any{}, items[0], "the cached array is not shared")
 }
 
 // A claim opening is the bytes the claim holds, and the credential carries

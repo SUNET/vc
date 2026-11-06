@@ -157,6 +157,74 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	count, err = store.Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
+
+	testDatastoreReturnsPlainValues(t, store)
+}
+
+// testDatastoreReturnsPlainValues holds every read path to the literal saved
+// document: consumers walk nested claims as map[string]any and []any.
+func testDatastoreReturnsPlainValues(t *testing.T, store DatastoreStore) {
+	t.Helper()
+	ctx := t.Context()
+
+	saved := func() map[string]any {
+		return map[string]any{
+			"given_name": "g",
+			"identity": map[string]any{
+				"name":        "n",
+				"nationality": []any{"SE", "FI"},
+				"no_fields":   map[string]any{},
+				"no_elements": []any{},
+				"residence":   map[string]any{"city": "c"},
+			},
+			"addresses": []any{
+				map[string]any{"city": "a", "lines": []any{"l1", "l2"}},
+				[]any{map[string]any{"in": "array in array"}},
+			},
+		}
+	}
+	doc := mkDoc("PLAIN", "pid", "plain-1", []string{"plain-identity"}, saved())
+	require.NoError(t, store.Save(ctx, doc))
+
+	reads := map[string]func() (any, error){
+		"Get": func() (any, error) {
+			got, err := store.Get(ctx, doc.Meta)
+			if err != nil {
+				return nil, err
+			}
+			return got.DocumentData, nil
+		},
+		"GetByKey": func() (any, error) {
+			got, err := store.GetByKey(ctx, "PLAIN", "pid", "plain-1")
+			if err != nil {
+				return nil, err
+			}
+			return got.DocumentData, nil
+		},
+		"GetByIdentity": func() (any, error) {
+			got, err := store.GetByIdentity(ctx, "pid", "plain-identity")
+			if err != nil {
+				return nil, err
+			}
+			require.Contains(t, got, "PLAIN")
+			return got["PLAIN"].DocumentData, nil
+		},
+		"Search": func() (any, error) {
+			got, err := store.Search(ctx, &SearchDocumentsQuery{AuthenticSource: "PLAIN", Scope: "pid"})
+			if err != nil {
+				return nil, err
+			}
+			require.Len(t, got, 1)
+			return got[0].DocumentData, nil
+		},
+	}
+	for name, read := range reads {
+		t.Run(name, func(t *testing.T) {
+			got, err := read()
+			require.NoError(t, err)
+			assert.Equal(t, saved(), got)
+		})
+	}
 }
 
 func TestSQLDatastoreColl_Postgres(t *testing.T) {
