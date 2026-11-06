@@ -46,10 +46,11 @@ type edit struct {
 // Rewrite is one claim spelling of an earlier release the upgrade
 // rewrote, and where it was.
 type Rewrite struct {
-	// File is the file name.
+	// File is the file name, or the URL or vct of a type metadata document.
 	File string
-	// Path is the YAML path of the spelling, such as
-	// $.apigw.data_sources.presentation.scopes.x.from.pid.required_claims.
+	// Path is the YAML or JSON path of the spelling, such as
+	// $.apigw.data_sources.presentation.scopes.x.from.pid.required_claims
+	// or $.claims[3].path[2].
 	Path string
 	// Line is the line of the spelling, from 1.
 	Line int

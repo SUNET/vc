@@ -170,6 +170,17 @@
   converted file stores the verified claim of a bare mdoc element
   identifier under its namespace-qualified name, which the earlier release
   misreads.
+- **Type metadata claim path keys that readers read in two ways**: the
+  consent page and the SVG template read a VCTM claim path key `name[i]`
+  as element i of `name`. The issuer's filter of a credential built from a
+  presentation reads the key `"*"` as `null`. A verifier preset that lists
+  no claims reads the key `"null"` as `null`. Every other reader reads
+  each key as written, as the earlier release did. The apigw and the
+  verifier log a warning per such key, `metadata/vctm_elm.json` included.
+
+  **Migration:** write the pointer every reader should read, such as
+  `["hasClaim", 0]`. `migrate_claim_paths` prints each such key of a type
+  metadata file and leaves the file as written.
 
 ### Note
 

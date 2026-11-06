@@ -132,8 +132,13 @@ func vctmDeclares(vctm *sdjwtvc.VCTM, location claimpath.Pointer) bool {
 }
 
 // pathsOverlap reports whether one path is a prefix of the other. A null
-// component of the VCTM path matches any component.
+// component of the VCTM path matches any component. A VCTM claim without
+// a path component is a prefix of every path, as the earlier release read
+// it.
 func pathsOverlap(declared, location claimpath.Pointer) bool {
+	if declared.Len() == 0 {
+		return true
+	}
 	a, errA := declared.Components()
 	b, errB := location.Components()
 	if errA != nil || errB != nil {

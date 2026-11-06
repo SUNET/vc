@@ -120,7 +120,7 @@ func TestMigrateKeepsTheMeaningAndTheComments(t *testing.T) {
 // id, or a query the decoder keeps as written whose id YAML reads as a
 // number. It leaves a derivation input as written where the earlier
 // release read the whole name as one key before the claim its pointer
-// names.
+// names. It leaves a type metadata file as written and names it.
 func TestMigrateRewritesAFileWhenItKeepsItsMeaning(t *testing.T) {
 	root, err := filepath.Abs("../../..")
 	require.NoError(t, err)
@@ -175,6 +175,10 @@ func TestMigrateRewritesAFileWhenItKeepsItsMeaning(t *testing.T) {
 			name: "a configuration whose derivation reads the whole name as one key first",
 			file: fmt.Sprintf(derivation, "pnr"),
 			want: fmt.Sprintf(derivation, "[pnr]"),
+		},
+		{
+			name: "a type metadata file with a key some readers read as an index",
+			file: `{"vct": "urn:example:1", "claims": [{"path": ["elm", "hasClaim[0]", "title"]}]}` + "\n",
 		},
 	}
 	for _, tt := range tests {

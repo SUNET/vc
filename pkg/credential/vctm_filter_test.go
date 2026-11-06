@@ -73,8 +73,10 @@ func TestFilterAgainstVCTM_EmptyDoc(t *testing.T) {
 	}
 }
 
-func TestFilterAgainstVCTM_WildcardHeadAndUnsetPath(t *testing.T) {
+func TestFilterAgainstVCTM_SkipsEmptyOrWildcardPath(t *testing.T) {
 	vctm := &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
+		{},                                     // defensive: skipped
+		{Path: claimpath.EmptyArray()},         // defensive: skipped
 		{Path: claimpath.New(claimpath.All())}, // wildcard head: skipped
 		{Path: claimpath.Keys("kept")},
 	}}
@@ -88,11 +90,6 @@ func TestFilterAgainstVCTM_WildcardHeadAndUnsetPath(t *testing.T) {
 	}
 	if _, ok := got["dropped"]; ok {
 		t.Fatalf("expected 'dropped' to be filtered: %v", got)
-	}
-
-	vctm.Claims = append(vctm.Claims, sdjwtvc.Claim{})
-	if _, err := FilterAgainstVCTM(doc, vctm); err == nil {
-		t.Fatal("expected a VCTM claim without a path to be refused")
 	}
 }
 

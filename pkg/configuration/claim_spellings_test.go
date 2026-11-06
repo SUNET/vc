@@ -364,6 +364,45 @@ func TestLoadingWarnsOncePerLegacySpelling(t *testing.T) {
 	}
 }
 
+// Loading warns once per type metadata claim path key that some readers
+// read as the earlier release did: name[i], "*" and "null", in the claims
+// and path members encoding/json fills, once for two scopes that load the
+// same file. The expected records are derived by hand from the text.
+func TestLoadingWarnsOncePerVCTMKeyReadTwoWays(t *testing.T) {
+	dir := t.TempDir()
+	vctm := filepath.Join(dir, "vctm.json")
+	require.NoError(t, os.WriteFile(vctm, []byte(`{
+  "vct": "urn:example:1",
+  "claims": [{"path": ["unread[0]"]}],
+  "Claims": [
+    {"path": ["a", "b[2]", "c"]},
+    {"path": ["d", "*"]},
+    {"path": ["e", "null"], "Path": ["e",
+      "f[0]"]},
+    {"path": ["g[-1]", "h[x]", "i[1", "*x", "nul"]}
+  ]
+}
+`), 0o600))
+	config := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(config, []byte("common:\n  credential_metadata:\n    one: {format: dc+sd-jwt, vctm_file_path: "+vctm+"}\n    two: {format: dc+sd-jwt, vctm_file_path: "+vctm+"}\n"), 0o600))
+
+	cfg, err := LoadFile(t.Context(), config, nil)
+	require.NoError(t, err)
+	type record struct {
+		File, Path, Old, New string
+		Line                 int
+	}
+	var got []record
+	for _, r := range cfg.Deprecations {
+		got = append(got, record{File: r.File, Path: r.Path, Old: r.Old, New: r.New, Line: r.Line})
+	}
+	assert.Equal(t, []record{
+		{File: vctm, Path: "$.claims[0].path[1]", Old: `"b[2]"`, New: `"b", 2`, Line: 5},
+		{File: vctm, Path: "$.claims[1].path[1]", Old: `"*"`, New: "null", Line: 6},
+		{File: vctm, Path: "$.claims[2].path[1]", Old: `"f[0]"`, New: `"f", 0`, Line: 8},
+	}, got)
+}
+
 // Decoding reads the document of a stream that gopkg.in/yaml.v2 reads: a
 // file with the earlier spelling decodes equal to yaml.v2's reading of the
 // file with the current spelling.

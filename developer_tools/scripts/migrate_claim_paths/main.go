@@ -19,6 +19,10 @@
 // as /metadata/pid_mdoc.mdoc.json. -schemas maps such a prefix to a local
 // directory: -schemas /metadata=./metadata.
 //
+// A type metadata (VCTM) file stays as written. It prints a line per claim
+// path key some readers read as the earlier release did and the others
+// read as written: a key name[i], the key "*" and the key "null".
+//
 // Usage:
 //
 //	migrate_claim_paths [-schemas PREFIX=DIR]... [-n] FILE...
@@ -56,7 +60,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	if flags.NArg() == 0 {
-		return errors.New("name at least one configuration or presentation request file")
+		return errors.New("name at least one configuration, presentation request or type metadata file")
 	}
 	for _, file := range flags.Args() {
 		if err := migrate(ctx, file, schemas, *dryRun, out); err != nil {
@@ -75,6 +79,9 @@ func migrate(ctx context.Context, file string, schemas prefixes, dryRun bool, ou
 	src, err := os.ReadFile(filepath.Clean(file))
 	if err != nil {
 		return err
+	}
+	if legacyclaims.IsVCTM(src) {
+		return reportVCTM(file, src, out)
 	}
 	upgraded, rewrites, err := upgrade(ctx, file, src, schemas.apply)
 	if errors.Is(err, legacyclaims.ErrInPlace) {
@@ -108,6 +115,22 @@ func migrate(ctx context.Context, file string, schemas prefixes, dryRun bool, ou
 		return nil
 	}
 	return os.WriteFile(file, upgraded, info.Mode().Perm())
+}
+
+// reportVCTM writes a line per claim path key of a type metadata document
+// that the readers read in two ways. Rewriting such a key changes what
+// some reader reads, so the document stays as written.
+func reportVCTM(file string, src []byte, out io.Writer) error {
+	rewrites, err := legacyclaims.VCTMSpellings(file, src)
+	if err != nil {
+		return err
+	}
+	for _, rewrite := range rewrites {
+		if _, err := fmt.Fprintln(out, rewrite); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // spellings counts claim spellings in words.

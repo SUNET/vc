@@ -233,6 +233,9 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
 		}
+		if err := recordVCTMSpellings(cfg); err != nil {
+			return nil, err
+		}
 
 		// Reads each claim of a data source in its credential's schema.
 		if serviceName == "apigw" {

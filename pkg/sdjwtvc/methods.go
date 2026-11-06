@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/claimpath"
@@ -229,7 +230,7 @@ func (c *Client) MakeCredential(hashMethod hash.Hash, data map[string]any, vctm 
 
 	// Process claims recursively
 	for _, claim := range sortedClaims {
-		if claim.SD != "always" {
+		if claim.SD != "always" || claim.Path.Len() == 0 {
 			continue
 		}
 		claimDisclosures, err := c.discloseClaim(data, claim.Path, hashMethod)
@@ -253,54 +254,113 @@ func (c *Client) MakeCredential(hashMethod hash.Hash, data map[string]any, vctm 
 	return data, disclosures, nil
 }
 
-// discloseClaim makes the claims at path selectively disclosable and
-// returns their disclosures. A path that ends in a key discloses that
-// object property (section 4.2.1); one that ends in null or an index
-// discloses the array elements it selects (section 4.2.2). A null or an
-// index before the end selects the objects or arrays in every element
-// they name. A path the data does not carry discloses nothing.
+// discloseClaim makes the claim at path selectively disclosable and
+// returns its disclosures, as the earlier release did. A path that ends in
+// a key discloses that object property (section 4.2.1). One that ends in
+// null discloses each element of the array the component before it
+// selects, and one that ends in an index the element at that index
+// (section 4.2.2). Each component before leads to one object, or to one
+// array before an index: null there is an error. A path the data does not
+// carry discloses nothing.
 func (c *Client) discloseClaim(data map[string]any, path claimpath.Pointer, hashMethod hash.Hash) ([]string, error) {
-	last, ok := path.Last()
-	if !ok {
-		return nil, fmt.Errorf("claim path %s is unset or unresolved", path)
+	components, err := path.Components()
+	if err != nil {
+		return nil, err
 	}
-	containers := []any{data}
-	if parent, ok := path.Parent(); ok {
-		selected, err := parent.Select(data)
-		if errors.Is(err, claimpath.ErrNoClaim) {
-			return nil, nil
+	n := len(components)
+	if name, ok := components[n-1].KeyName(); ok {
+		parent, found, err := disclosureContainer(data, components[:n], func(step claimpath.Component, value any) error {
+			return fmt.Errorf("invalid path: non-object at %s (type: %T, path: %v)", stepName(step), value, formatPathForError(components))
+		})
+		if err != nil || !found {
+			return nil, err
 		}
-		if err != nil {
-			return nil, fmt.Errorf("invalid path %s: %w", path, err)
-		}
-		containers = selected
-	}
-	var disclosures []string
-	for _, container := range containers {
-		disclosed, err := c.discloseIn(container, last, hashMethod)
-		if err != nil {
-			return nil, fmt.Errorf("path %s: %w", path, err)
-		}
-		disclosures = append(disclosures, disclosed...)
-	}
-	return disclosures, nil
-}
-
-// discloseIn discloses what the last path component selects in its
-// container.
-func (c *Client) discloseIn(container any, last claimpath.Component, hashMethod hash.Hash) ([]string, error) {
-	if name, ok := last.KeyName(); ok {
-		object, ok := container.(map[string]any)
+		object, ok := parent.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("invalid path: non-object %T holds claim %q", container, name)
+			return nil, fmt.Errorf("invalid path: non-object %T holds claim %q", parent, name)
 		}
 		return c.discloseProperty(object, name, hashMethod)
 	}
-	array, ok := container.([]any)
-	if !ok {
-		return nil, fmt.Errorf("path with null or an index must point to an array, got %T", container)
+	if n < 2 {
+		return nil, errors.New("array element path must have at least 2 elements")
 	}
-	return discloseElements(array, last, hashMethod)
+	holder, found, err := disclosureContainer(data, components[:n-1], func(step claimpath.Component, _ any) error {
+		return fmt.Errorf("invalid path: non-object at %s", stepName(step))
+	})
+	if err != nil || !found {
+		return nil, err
+	}
+	selector := components[n-2]
+	if selector.IsAll() {
+		return nil, errors.New("array name cannot be nil")
+	}
+	value, found := selector.Child(holder)
+	if !found {
+		return nil, nil
+	}
+	array, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("path with null must point to an array, got %T", value)
+	}
+	return discloseElements(array, components[n-1], hashMethod)
+}
+
+// disclosureContainer follows the components of a path but the last one
+// from data, and returns the value it reaches: the object or array the
+// last component reads. It reports false where the data does not carry
+// them. Null before the last component is an error. Each value on the way
+// is an object, or an array before an index; nonContainer gives the error
+// of any other value and the component that reached it.
+func disclosureContainer(data map[string]any, components []claimpath.Component, nonContainer func(step claimpath.Component, value any) error) (any, bool, error) {
+	var current any = data
+	for i, step := range components[:len(components)-1] {
+		if step.IsAll() {
+			return nil, false, fmt.Errorf("nil path element in middle of path at index %d", i)
+		}
+		next, found := step.Child(current)
+		if !found {
+			return nil, false, nil
+		}
+		if !readableBy(next, components[i+1]) {
+			return nil, false, nonContainer(step, next)
+		}
+		current = next
+	}
+	return current, true, nil
+}
+
+// readableBy reports whether a component reads value: an index reads an
+// array, and a key or null an object, which null then refuses.
+func readableBy(value any, next claimpath.Component) bool {
+	if _, isIndex := next.IndexValue(); isIndex {
+		_, isArray := value.([]any)
+		return isArray
+	}
+	_, isObject := value.(map[string]any)
+	return isObject
+}
+
+// stepName renders a path component for an error: a key as itself, an
+// index as its number.
+func stepName(step claimpath.Component) string {
+	if key, ok := step.KeyName(); ok {
+		return key
+	}
+	return step.String()
+}
+
+// formatPathForError renders a path for an error: its keys, <nil> for
+// null and the number of an index, as [a, <nil>, b].
+func formatPathForError(components []claimpath.Component) string {
+	parts := make([]string, len(components))
+	for i, component := range components {
+		if component.IsAll() {
+			parts[i] = "<nil>"
+			continue
+		}
+		parts[i] = stepName(component)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // discloseElements discloses the array elements null or an index selects.

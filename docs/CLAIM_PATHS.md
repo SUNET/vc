@@ -187,6 +187,28 @@ of `org.iso.18013.5.1` under its bare identifier too.
 answers with the header `Deprecation: @1793836800` (RFC 9745) and logs a
 warning.
 
+### Type metadata claim paths
+
+The `path` of a type metadata (VCTM) claim is a pointer. Some readers read
+three keys of it as the earlier release did:
+
+| Key | Read as | By |
+| --- | --- | --- |
+| `name[i]`, such as `"hasClaim[0]"` | element i of the array `name` | the consent page and the SVG template |
+| `"*"` | `null` | the issuer's filter of a credential built from a presentation |
+| `"null"` | `null` | a verifier preset that lists no claims of the credential |
+
+Every other reader reads the key as written. The apigw and the verifier
+log a warning at load per such key, with the file, the line and the JSON
+path:
+
+```text
+metadata/vctm_elm.json:70: $.claims[2].path[2]: deprecated claim spelling "hasClaim[0]"; migrate_claim_paths leaves it as written: the consent page and the SVG template read a key written name[i] as element i of the array name, and the other readers read the key as written; write "hasClaim", 0 to select the element for every reader
+```
+
+Write the pointer every reader should read, such as `["hasClaim", 0]`, or
+`null` for `"*"`.
+
 ### Upgrading replicas
 
 Replicas of the earlier release and of this release share authorization
@@ -250,3 +272,7 @@ It leaves a file with a YAML alias, merge key or repeated key as written,
 and prints a line, when an alias stands where it reads claims, or when a
 rewrite in place would change what the file loads. Rewrite by hand the
 spellings its warnings at load name.
+
+It leaves a type metadata file as written, and prints a line per key of
+the table under "Type metadata claim paths": a rewrite changes what some
+reader reads.

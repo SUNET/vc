@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/claimpath"
@@ -41,6 +42,7 @@ func (v *VCTM) SRIIntegrity(rawBytes []byte) (string, error) {
 }
 
 // Attributes parse vctm claims and return a map of labels and their paths for each locale.
+// A claim without a path has the empty array.
 func (v *VCTM) Attributes() map[string]map[string]claimpath.Pointer {
 	reply := map[string]map[string]claimpath.Pointer{}
 
@@ -49,11 +51,20 @@ func (v *VCTM) Attributes() map[string]map[string]claimpath.Pointer {
 			if _, ok := reply[d.Locale]; !ok {
 				reply[d.Locale] = map[string]claimpath.Pointer{}
 			}
-			reply[d.Locale][d.Label] = c.Path
+			reply[d.Locale][d.Label] = c.attributePath()
 		}
 	}
 
 	return reply
+}
+
+// attributePath is the path Attributes lists for the claim: its path, and
+// the empty array for a claim without one.
+func (c *Claim) attributePath() claimpath.Pointer {
+	if c.Path.IsZero() {
+		return claimpath.EmptyArray()
+	}
+	return c.Path
 }
 
 // AttributesWithoutObjects parse vctm claims and return a map of labels and their paths for each locale,
@@ -76,7 +87,7 @@ func (v *VCTM) AttributesWithoutObjects() map[string]map[string]claimpath.Pointe
 			if _, ok := reply[d.Locale]; !ok {
 				reply[d.Locale] = map[string]claimpath.Pointer{}
 			}
-			reply[d.Locale][d.Label] = c.Path
+			reply[d.Locale][d.Label] = c.attributePath()
 		}
 	}
 
@@ -281,7 +292,8 @@ func (v *VCTM) SVGValues(data map[string]any) map[string]SVGValue {
 
 // JSONPath returns the JSON path for the claim. A null element selects
 // every element of an array per SD-JWT VC §9.1 and is emitted as the
-// JSONPath wildcard "[*]"; an index is emitted as "[i]".
+// JSONPath wildcard "[*]"; an index is emitted as "[i]". The empty array
+// is "$", and a claim without a path has the empty string.
 func (c *Claim) JSONPath() string {
 	if c == nil {
 		return ""
@@ -318,6 +330,8 @@ func (c *Claim) claimKey() string {
 // walkPath resolves a claim path against nested document data. A null
 // followed by more components resolves the rest in each element of the
 // array and returns the values; a final null selects the array as a whole.
+// A key written name[i] selects element i of the array at name, as the
+// earlier release read it (see BracketIndex).
 // Returns nil for paths the data does not hold and for semantically empty
 // values (empty string, empty slice, empty map) so callers can uniformly
 // skip absent data with a nil check.
@@ -341,13 +355,51 @@ func walkFrom(current any, components []claimpath.Component) any {
 			}
 			return normalizeEmpty(eachElement(current, components[i+1:]))
 		}
-		next, ok := c.Child(current)
+		next, ok := walkStep(current, c)
 		if !ok {
 			return nil
 		}
 		current = next
 	}
 	return normalizeEmpty(current)
+}
+
+// walkStep returns what a key or an index selects in value. A key written
+// name[i] selects element i of the array at name.
+func walkStep(value any, c claimpath.Component) (any, bool) {
+	key, isKey := c.KeyName()
+	if !isKey {
+		return c.Child(value)
+	}
+	name, index, ok := BracketIndex(key)
+	if !ok {
+		return c.Child(value)
+	}
+	object, isObject := value.(map[string]any)
+	if !isObject {
+		return nil, false
+	}
+	array, isArray := object[name].([]any)
+	if !isArray || index >= len(array) {
+		return nil, false
+	}
+	return array[index], true
+}
+
+// BracketIndex splits a key written name[i], such as hasClaim[0], into the
+// name and the index the earlier release read in it. It reports false for
+// any other key. The earlier release read type metadata keys this way when
+// it walked document data for the consent page and the SVG template.
+func BracketIndex(key string) (string, int, bool) {
+	bracket := strings.IndexByte(key, '[')
+	if bracket < 0 || !strings.HasSuffix(key, "]") {
+		return "", 0, false
+	}
+	index, err := strconv.Atoi(key[bracket+1 : len(key)-1])
+	if err != nil || index < 0 {
+		return "", 0, false
+	}
+	return key[:bracket], index, true
 }
 
 // eachElement resolves components in each element of array, keeping the
@@ -388,6 +440,9 @@ func normalizeEmpty(v any) any {
 
 // jsonPathOf builds the JSONPath string of a claim path.
 func jsonPathOf(path claimpath.Pointer) string {
+	if path.IsEmptyArray() {
+		return "$"
+	}
 	components, err := path.Components()
 	if err != nil {
 		return ""

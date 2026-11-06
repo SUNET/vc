@@ -10,7 +10,7 @@ import (
 // MarshalBSONValue stores the pointer as a BSON array of strings, nulls
 // and 64-bit integers.
 func (p Pointer) MarshalBSONValue() (byte, []byte, error) {
-	if _, err := p.Components(); err != nil {
+	if _, err := p.Components(); err != nil && !p.empty {
 		return 0, nil, err
 	}
 	values := p.values()
