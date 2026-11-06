@@ -215,10 +215,9 @@ Each call is logged with the scope, the entry, the operator and the
 outcome, and a reset with its evidence reference. A reset adds a row to
 `unique_commitment_resets` with the operator, the time, the evidence
 reference and the SHA-256 of the commitment, and then removes the
-commitment. A reset that a concurrent reset beat removes its row. A reset
-interrupted between the two steps leaves its row: a retry with the same
-reference completes it, and the row stays when another reset removed the
-commitment first.
+commitment. The row stays: the table holds every approval, including one a
+concurrent reset beat, which answered 404. A retry with the same reference
+completes a reset interrupted between the two steps.
 
 Both are admin API routes. Where `apigw.api_server.api_auth.rules` are
 set, an operator needs a rule such as:

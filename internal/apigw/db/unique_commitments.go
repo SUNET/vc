@@ -29,25 +29,20 @@ type uniqueCommitmentBackend interface {
 	// keepCommitment empties the releasable_by of the row of key that holds
 	// commitment, if there is one.
 	keepCommitment(ctx context.Context, key storedKey, commitment string) error
+	// takeOverCommitment sets the releasable_by of the row of key that holds
+	// commitment to call, if there is one and its releasable_by is not empty.
+	takeOverCommitment(ctx context.Context, key storedKey, commitment, call string) error
 	// releaseCommitment removes the row of key whose releasable_by is call,
 	// if there is one.
 	releaseCommitment(ctx context.Context, key storedKey, call string) error
-	// insertReset reports whether it stored row.
-	insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error)
+	insertReset(ctx context.Context, row uniqueCommitmentResetRow) error
 	// resetPrevious returns the previous commitment hash the reset with
 	// evidenceRef recorded for key.
 	resetPrevious(ctx context.Context, key storedKey, evidenceRef string) (string, error)
 	// deleteCommitment removes the row of key that holds commitment, and
 	// reports whether there was one.
 	deleteCommitment(ctx context.Context, key storedKey, commitment string) (bool, error)
-	// deleteReset removes the reset row of key with evidenceRef, and
-	// returns errResetRowGone when there is none.
-	deleteReset(ctx context.Context, key storedKey, evidenceRef string) error
 }
-
-// errResetRowGone is returned when the reset row a reset stored is gone
-// before the reset removes it.
-var errResetRowGone = errors.New("the approval this reset stored is gone")
 
 // storedKey is a UniqueCommitmentKey as the rows store it: the path
 // JSON-encoded and the key hash base64url.
@@ -71,9 +66,9 @@ type uniqueCommitmentRow struct {
 	KeyHash    string    `bson:"key_hash" db:"key_hash"`
 	Commitment string    `bson:"commitment" db:"commitment"`
 	AcceptedAt time.Time `bson:"accepted_at" db:"accepted_at"`
-	// ReleasableBy names the Accept call that stored the row, which removes
-	// the row when it fails. It is empty once another call accepted the
-	// same commitment: the row then stays until a reset.
+	// ReleasableBy names the unfinished Accept call that last stored or took
+	// over the row, which removes the row when it fails. It is empty once an
+	// Accept succeeded: the row then stays until a reset.
 	ReleasableBy string `bson:"releasable_by" db:"releasable_by"`
 }
 
@@ -117,9 +112,9 @@ const acceptRounds = 4
 var errAcceptRounds = errors.New("the commitment on record changed during every round of the accept")
 
 // accept stores the commitments as releasable by a random call name, and
-// on a failure removes the rows that name may still remove. A failed
-// removal is the error returned, so the caller cannot take it for a
-// conflict.
+// empties that name once it has accepted them all, so a row outlasts its
+// accepts only when one of them succeeds. On a failure it removes the rows
+// that name may still remove.
 func (h *UniqueCommitments) accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error {
 	call := rand.Text()
 	rows := make([]uniqueCommitmentRow, 0, len(commitments))
@@ -133,19 +128,30 @@ func (h *UniqueCommitments) accept(ctx context.Context, commitments []UniqueComm
 	}
 	for i, row := range rows {
 		if err := h.acceptRow(ctx, row, i); err != nil {
-			if released := h.release(ctx, rows[:i+1], call); released != nil {
-				return fmt.Errorf("%w, after: %v", released, err)
-			}
-			return err
+			return h.refuse(ctx, rows[:i+1], call, err)
+		}
+	}
+	for i, row := range rows {
+		if err := h.keepRow(ctx, row, i); err != nil {
+			return h.refuse(ctx, rows, call, err)
 		}
 	}
 	return nil
 }
 
+// refuse removes what a refused accept may still remove, and returns why it
+// was refused. A failed removal is the error returned, so the caller cannot
+// take it for a conflict.
+func (h *UniqueCommitments) refuse(ctx context.Context, rows []uniqueCommitmentRow, call string, reason error) error {
+	if released := h.release(ctx, rows, call); released != nil {
+		return fmt.Errorf("%w, after: %v", released, reason)
+	}
+	return reason
+}
+
 // acceptRow stores row when its key holds no row, and accepts a row that
-// holds the same commitment. A row that another call stored and may
-// still remove is made to stay before it is accepted, so that call's
-// failure leaves what this call accepted.
+// holds the same commitment. An unfinished call's row is taken over, so that
+// call's failure leaves what this call accepted.
 func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentRow, index int) error {
 	for range acceptRounds {
 		if err := h.backend.insertCommitment(ctx, row); err != nil {
@@ -164,8 +170,33 @@ func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentR
 		case stored.ReleasableBy == "" || stored.ReleasableBy == row.ReleasableBy:
 			return nil
 		}
+		if err := h.backend.takeOverCommitment(ctx, row.key(), row.Commitment, row.ReleasableBy); err != nil {
+			return err
+		}
+	}
+	return errAcceptRounds
+}
+
+// keepRow makes an accepted row stay. A row a failed call took over and
+// removed is accepted again.
+func (h *UniqueCommitments) keepRow(ctx context.Context, row uniqueCommitmentRow, index int) error {
+	for range acceptRounds {
 		if err := h.backend.keepCommitment(ctx, row.key(), row.Commitment); err != nil {
 			return err
+		}
+		stored, err := h.backend.record(ctx, row.key())
+		switch {
+		case errors.Is(err, ErrNoDocuments):
+			if err := h.acceptRow(ctx, row, index); err != nil {
+				return err
+			}
+			continue
+		case err != nil:
+			return err
+		case stored.Commitment != row.Commitment:
+			return &UniqueCommitmentConflict{Index: index}
+		case stored.ReleasableBy == "":
+			return nil
 		}
 	}
 	return errAcceptRounds
@@ -213,11 +244,11 @@ func (h *UniqueCommitments) Reset(ctx context.Context, key UniqueCommitmentKey, 
 	return err
 }
 
-// reset records the approval before it removes the commitment. A retry
-// with the same evidence reference completes a reset interrupted between
-// the two, and is refused once the key holds another commitment. When a
-// concurrent reset removed the commitment first, reset removes the
-// approval it stored and returns ErrNoDocuments.
+// reset records the approval before it removes the commitment, and the
+// approval stays. A retry with the same evidence reference completes a reset
+// interrupted between the two, and is refused once the key holds another
+// commitment. When a concurrent reset removed the commitment first, reset
+// returns ErrNoDocuments.
 func (h *UniqueCommitments) reset(ctx context.Context, key UniqueCommitmentKey, approval UniqueCommitmentReset) error {
 	k, err := storedKeyOf(key)
 	if err != nil {
@@ -233,8 +264,7 @@ func (h *UniqueCommitments) reset(ctx context.Context, key UniqueCommitmentKey, 
 	}
 	row := uniqueCommitmentResetRow{Scope: k.Scope, Path: k.Path, KeyHash: k.KeyHash, EvidenceRef: approval.EvidenceRef,
 		PreviousSHA256: previous, ApprovedBy: approval.ApprovedBy, ApprovedAt: approval.At.UTC()}
-	inserted, err := h.backend.insertReset(ctx, row)
-	if err != nil {
+	if err := h.backend.insertReset(ctx, row); err != nil {
 		return err
 	}
 	recorded, err := h.backend.resetPrevious(ctx, k, approval.EvidenceRef)
@@ -245,20 +275,13 @@ func (h *UniqueCommitments) reset(ctx context.Context, key UniqueCommitmentKey, 
 		return ErrResetEvidenceUsed
 	}
 	removed, err := h.backend.deleteCommitment(ctx, k, stored.Commitment)
-	switch {
-	case err != nil:
+	if err != nil {
 		return err
-	case removed:
-		return nil
-	case inserted:
-		// Another reset removed the commitment, and its approval is the one
-		// on record, so this call removes the row it stored. A row it found
-		// in place can be that approval, under the same evidence reference.
-		if err := h.backend.deleteReset(ctx, k, approval.EvidenceRef); err != nil {
-			return err
-		}
 	}
-	return ErrNoDocuments
+	if !removed {
+		return ErrNoDocuments
+	}
+	return nil
 }
 
 // sha256Of is the base64url SHA-256 of the commitment a stored base64url
