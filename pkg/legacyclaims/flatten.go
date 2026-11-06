@@ -119,7 +119,7 @@ func (l *layout) scanEntries(entries []*ast.MappingValueNode, flow bool, anchors
 	for _, mv := range entries {
 		if _, merge := mv.Key.(*ast.MergeKeyNode); merge {
 			m |= holdsKeys
-		} else if name, ok := scalarKey(unwrapKey(mv.Key)); ok {
+		} else if name, ok := scalarKey(annotated(mv.Key)); ok {
 			if names[name] {
 				m |= holdsKeys
 			}
@@ -149,20 +149,6 @@ func entryPosition(s *ast.SequenceNode, i int) *token.Position {
 		return nil
 	}
 	return s.Entries[i].Start.Position
-}
-
-// unwrapKey returns the key an anchor or a tag annotates.
-func unwrapKey(key ast.Node) ast.Node {
-	for {
-		switch v := key.(type) {
-		case *ast.AnchorNode:
-			key = v.Value
-		case *ast.TagNode:
-			key = v.Value
-		default:
-			return key
-		}
-	}
 }
 
 // scalarKey returns the text of a scalar key.
@@ -244,7 +230,7 @@ func (f *flattener) check(n ast.Node, t reflect.Type) error {
 		names := map[string]bool{}
 		for _, mv := range list {
 			_, merge := mv.Key.(*ast.MergeKeyNode)
-			name, scalar := scalarKey(unwrapKey(mv.Key))
+			name, scalar := scalarKey(annotated(mv.Key))
 			if !keepsKeys(t) && (merge || scalar && names[name]) {
 				return f.refuse(mv.Key, "a merge key or a repeated key")
 			}

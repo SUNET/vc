@@ -26,11 +26,17 @@ func (u *configUpgrade) presentedCredential(n ast.Node, presented, document *laz
 	if err != nil {
 		return err
 	}
-	secrets, err := claimOpenings(derivations, presented)
+	required, err := descend(n, "required_claims")
 	if err != nil {
 		return err
 	}
-	required, err := descend(n, "required_claims")
+	if err := refuseUpgradedRefs(derivations, derivationClaims...); err != nil {
+		return err
+	}
+	if err := refuseUpgradedRefs(required, "path"); err != nil {
+		return err
+	}
+	secrets, err := claimOpenings(derivations, presented)
 	if err != nil {
 		return err
 	}
