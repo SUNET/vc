@@ -81,7 +81,8 @@ type Applier interface {
 type Claims interface {
 	// Input returns the claim at an input pointer: in the issued claims
 	// when an earlier derivation of the list writes the pointer or a
-	// prefix of it, in the source claims otherwise.
+	// prefix of it, in the source claims otherwise. A claim the claims
+	// hold in another structure than the pointer selects is absent.
 	Input(p claimpath.Pointer) (any, bool, error)
 	// Issued returns the claim at a pointer into the issued claims.
 	Issued(p claimpath.Pointer) (any, bool, error)
