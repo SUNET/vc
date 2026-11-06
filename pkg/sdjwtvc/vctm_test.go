@@ -6,15 +6,41 @@ import (
 
 	"github.com/SUNET/vc/pkg/claimpath"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestClaimRefusesMissingPath: reading type metadata refuses a claim
-// without a path, next to the same claim with one.
-func TestClaimRefusesMissingPath(t *testing.T) {
-	var claim Claim
-	assert.Error(t, json.Unmarshal([]byte(`{"sd": "always"}`), &claim))
-	assert.NoError(t, json.Unmarshal([]byte(`{"path": ["a"], "sd": "always"}`), &claim))
+// A claim decodes with a missing, a null and an empty path, as the earlier
+// release decoded it, and validation refuses each with the earlier
+// release's tag.
+func TestClaimPathDecodesAsTheEarlierReleaseDecodedIt(t *testing.T) {
+	for _, tt := range []struct {
+		claim string
+		// refusal is the validation tag that refuses the claim, and empty
+		// for a claim that validates.
+		refusal string
+	}{
+		{`{"sd": "always"}`, "required"},
+		{`{"path": null}`, "required"},
+		{`{"path": []}`, "min"},
+		{`{"path": ["a", null]}`, ""},
+	} {
+		t.Run(tt.claim, func(t *testing.T) {
+			var vctm VCTM
+			require.NoError(t, json.Unmarshal([]byte(`{"vct": "urn:x", "claims": [`+tt.claim+`]}`), &vctm))
+			err := vctm.Validate()
+			if tt.refusal == "" {
+				assert.NoError(t, err)
+				return
+			}
+			var invalid validator.ValidationErrors
+			require.ErrorAs(t, err, &invalid)
+			require.Len(t, invalid, 1)
+			assert.Equal(t, tt.refusal, invalid[0].Tag())
+			assert.Equal(t, "VCTM.Claims[0].Path", invalid[0].Namespace())
+		})
+	}
 }
 
 func TestClaimJSONPath(t *testing.T) {

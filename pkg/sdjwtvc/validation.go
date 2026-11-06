@@ -231,11 +231,7 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 		}
 	}
 
-	allowedPaths, err := topLevelClaims(vctm)
-	if err != nil {
-		return err
-	}
-	addUndeclaredClaims(errors, claims, allowedPaths)
+	addUndeclaredClaims(errors, claims, topLevelClaims(vctm))
 
 	if errors.HasErrors() {
 		return errors
@@ -254,19 +250,16 @@ func addUndeclaredClaims(errors *ValidationErrors, claims map[string]any, allowe
 	}
 }
 
-// topLevelClaims returns the keys the VCTM's claim paths start with.
-func topLevelClaims(vctm *VCTM) (map[string]bool, error) {
+// topLevelClaims returns the keys the VCTM's claim paths start with. A
+// claim without a path component names none.
+func topLevelClaims(vctm *VCTM) map[string]bool {
 	keys := make(map[string]bool)
 	for _, claim := range vctm.Claims {
-		components, err := claim.Path.Components()
-		if err != nil {
-			return nil, err
-		}
-		if key, ok := components[0].KeyName(); ok {
+		if key, ok := claim.Path.FirstKey(); ok {
 			keys[key] = true
 		}
 	}
-	return keys, nil
+	return keys
 }
 
 // isIssuerSuppliedClaim reports whether a VCTM claim path refers to a

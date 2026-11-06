@@ -2,7 +2,6 @@ package sdjwtvc
 
 import (
 	"encoding/json"
-	"errors"
 
 	"github.com/SUNET/vc/pkg/claimpath"
 )
@@ -143,8 +142,10 @@ type SVGTemplateProperties struct {
 // Claim represents credential claim metadata per section 9.
 type Claim struct {
 	// Path indicates the claim(s) being addressed per section 9.1
-	// (REQUIRED): a claims path pointer.
-	Path claimpath.Pointer `json:"path" bson:"path" validate:"required"`
+	// (REQUIRED): a claims path pointer. The empty array decodes as
+	// claimpath.EmptyArray, and a missing or null path leaves Path unset,
+	// as the earlier release loaded them; validation refuses both.
+	Path claimpath.Pointer `json:"path" bson:"path" validate:"required,min=1"`
 
 	// Display contains locale-specific display information per section 9.2 (OPTIONAL).
 	Display []ClaimDisplay `json:"display,omitempty" bson:"display,omitempty" validate:"omitempty,dive"`
@@ -160,18 +161,19 @@ type Claim struct {
 	SVGID string `json:"svg_id,omitempty" bson:"svg_id,omitempty"`
 }
 
-// UnmarshalJSON reads a claim, and refuses one without a path: type
-// metadata names each claim it describes by a claims path pointer.
+// UnmarshalJSON reads a claim. Its path decodes as claimpath.Lenient
+// decodes it.
 func (c *Claim) UnmarshalJSON(data []byte) error {
 	type plain Claim
-	var claim plain
+	var claim struct {
+		plain
+		Path claimpath.Lenient `json:"path"`
+	}
 	if err := json.Unmarshal(data, &claim); err != nil {
 		return err
 	}
-	if claim.Path.IsZero() {
-		return errors.New("sdjwtvc: a type metadata claim has no path")
-	}
-	*c = Claim(claim)
+	*c = Claim(claim.plain)
+	c.Path = claim.Path.Pointer
 	return nil
 }
 

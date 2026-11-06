@@ -34,19 +34,20 @@ type Template struct {
 //
 // A claim declared as an object and as an array renders as the earlier
 // release rendered every claim: an object of the keys below it, with null
-// and indices skipped. A claim whose path starts with null or an index is
-// skipped: the document is an object. ClaimTemplate refuses an index
-// above 255.
+// and indices skipped. A claim without a path component, and one whose
+// path starts with null or an index, is skipped: the document is an
+// object. ClaimTemplate refuses an index above 255.
 func ClaimTemplate(claims []sdjwtvc.Claim) (Template, error) {
 	root := &allowNode{}
 	for i := range claims {
+		if _, isKey := claims[i].Path.FirstKey(); !isKey {
+			continue
+		}
 		components, err := claims[i].Path.Components()
 		if err != nil {
 			return Template{}, fmt.Errorf("VCTM claim %s: %w", claims[i].JSONPath(), err)
 		}
-		if _, isKey := components[0].KeyName(); isKey {
-			insertAllowPath(root, components)
-		}
+		insertAllowPath(root, components)
 	}
 	var r templateRenderer
 	document, err := r.object(root, nil)

@@ -18,9 +18,10 @@ import (
 // (e.g. a presented credential's own claims): even if upstream forwards
 // more claims than intended, only VCTM-declared paths reach the issuer.
 //
-// A VCTM claim path that starts with null or an index is skipped: the
-// document is an object. A null in the middle of a path descends into
-// every array element, an index into that element only.
+// A VCTM claim without a path component, and one whose path starts with
+// null or an index, is skipped: the document is an object. A null in the
+// middle of a path descends into every array element, an index into that
+// element only. The key "*" reads as null, as the earlier release read it.
 //
 // An array the VCTM selects only with null keeps the elements with
 // something left, in order. An array the VCTM indexes keeps each element
@@ -49,10 +50,10 @@ func FilterAgainstVCTM(doc map[string]any, vctm *sdjwtvc.VCTM) (map[string]any, 
 	return filtered, nil
 }
 
-// CheckFilterable refuses a VCTM FilterAgainstVCTM cannot filter: a claim
-// without a path, and an array whose declared indices are not 0 to k
-// while the VCTM selects none of its elements with null. Keeping an
-// element at its index keeps every element before it.
+// CheckFilterable refuses a VCTM FilterAgainstVCTM cannot filter: an
+// array whose declared indices are not 0 to k while the VCTM selects none
+// of its elements with null. Keeping an element at its index keeps every
+// element before it.
 func CheckFilterable(vctm *sdjwtvc.VCTM) error {
 	if vctm == nil {
 		return nil
@@ -75,12 +76,12 @@ type allowNode struct {
 func buildAllowTree(vctm *sdjwtvc.VCTM) (*allowNode, error) {
 	root := &allowNode{}
 	for _, c := range vctm.Claims {
-		components, err := c.Path.Components()
+		if _, ok := c.Path.FirstKey(); !ok {
+			continue
+		}
+		components, err := c.Path.Map(starAsNull).Components()
 		if err != nil {
 			return nil, fmt.Errorf("VCTM claim %s: %w", c.JSONPath(), err)
-		}
-		if _, ok := components[0].KeyName(); !ok {
-			continue
 		}
 		insertAllowPath(root, components)
 	}
@@ -88,6 +89,14 @@ func buildAllowTree(vctm *sdjwtvc.VCTM) (*allowNode, error) {
 		return nil, err
 	}
 	return root, nil
+}
+
+// starAsNull reads the key "*" as null.
+func starAsNull(c claimpath.Component) claimpath.Component {
+	if key, ok := c.KeyName(); ok && key == "*" {
+		return claimpath.All()
+	}
+	return c
 }
 
 // checkIndices refuses an array below node, at path, whose declared

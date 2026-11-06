@@ -18,9 +18,14 @@ import (
 )
 
 // Pointer is a claims path pointer: a non-empty sequence of keys, null
-// (every element of an array) and array indices.
+// (every element of an array) and array indices. A Lenient decode also
+// reads the empty array, which the earlier release accepted as the path of
+// a type metadata claim and of an issuer metadata claim; such a pointer
+// selects no claim.
 type Pointer struct {
 	components []Component
+	// empty marks the empty array a Lenient decode read.
+	empty bool
 }
 
 // Component is one element of a Pointer.
@@ -88,13 +93,22 @@ func FromKeys(keys []string) (Pointer, error) {
 	return Keys(keys[0], keys[1:]...), nil
 }
 
-// IsZero reports whether the pointer is unset.
-func (p Pointer) IsZero() bool { return len(p.components) == 0 }
+// EmptyArray returns the pointer of the empty array.
+func EmptyArray() Pointer { return Pointer{empty: true} }
 
-// Components returns the pointer's components. An unset pointer is an
-// error.
+// IsZero reports whether the pointer is unset.
+func (p Pointer) IsZero() bool { return len(p.components) == 0 && !p.empty }
+
+// IsEmptyArray reports whether the pointer is the empty array.
+func (p Pointer) IsEmptyArray() bool { return p.empty }
+
+// Components returns the pointer's components. An unset pointer and the
+// empty array are an error.
 func (p Pointer) Components() ([]Component, error) {
-	if len(p.components) == 0 {
+	switch {
+	case p.empty:
+		return nil, errors.New("claimpath: the claims path pointer is the empty array")
+	case len(p.components) == 0:
 		return nil, errors.New("claimpath: the claims path pointer is unset")
 	}
 	return p.components, nil
@@ -223,6 +237,18 @@ func (p Pointer) Rebase(from, to Pointer) (Pointer, bool) {
 	return to.Append(p.components[len(from.components):]...), true
 }
 
+// Map returns the pointer with each component replaced by f's result.
+func (p Pointer) Map(f func(Component) Component) Pointer {
+	out := Pointer{empty: p.empty}
+	if len(p.components) > 0 {
+		out.components = make([]Component, len(p.components))
+		for i, c := range p.components {
+			out.components[i] = f(c)
+		}
+	}
+	return out
+}
+
 // Append returns p extended with components.
 func (p Pointer) Append(components ...Component) Pointer {
 	return Pointer{components: append(slices.Clone(p.components), components...)}
@@ -327,7 +353,7 @@ func indexOf(n int64) (Component, error) {
 
 // MarshalJSON writes the pointer as its JSON array.
 func (p Pointer) MarshalJSON() ([]byte, error) {
-	if _, err := p.Components(); err != nil {
+	if _, err := p.Components(); err != nil && !p.empty {
 		return nil, err
 	}
 	return json.Marshal(p.values())
@@ -358,7 +384,7 @@ func (p *Pointer) UnmarshalJSON(data []byte) error {
 
 // MarshalYAML writes the pointer as a sequence.
 func (p Pointer) MarshalYAML() (any, error) {
-	if _, err := p.Components(); err != nil {
+	if _, err := p.Components(); err != nil && !p.empty {
 		return nil, err
 	}
 	return p.values(), nil
@@ -387,6 +413,28 @@ func (p *Pointer) UnmarshalYAML(unmarshal func(any) error) error {
 	}
 }
 
+// Lenient decodes a claims path pointer from JSON, and reads the empty
+// array as EmptyArray.
+type Lenient struct {
+	Pointer
+}
+
+// UnmarshalJSON reads a JSON array as Pointer.UnmarshalJSON does, and the
+// empty array as EmptyArray. Null leaves the pointer unset, as it leaves a
+// Go slice nil, so of two members "path" the later one decides.
+func (l *Lenient) UnmarshalJSON(data []byte) error {
+	var values []json.RawMessage
+	if err := json.Unmarshal(data, &values); err == nil && len(values) == 0 {
+		if values == nil {
+			l.Pointer = Pointer{}
+		} else {
+			l.Pointer = EmptyArray()
+		}
+		return nil
+	}
+	return l.Pointer.UnmarshalJSON(data)
+}
+
 // StringError is a claims path pointer written as a string.
 type StringError struct {
 	// Text is the string.
@@ -407,19 +455,19 @@ func (e *StringError) Error() string {
 }
 
 // ValidationValue is the value go-playground/validator checks for a
-// Pointer: its components, or nil for an unset pointer. A validator that
-// registers it with RegisterCustomTypeFunc reads "required" as a set
-// pointer.
+// Pointer: the slice of its components, which is nil for an unset pointer
+// and empty for the empty array. A validator that registers it with
+// RegisterCustomTypeFunc reads "required" as a pointer other than unset,
+// and "min=1" as a pointer with a component.
 func ValidationValue(field reflect.Value) any {
 	p, ok := field.Interface().(Pointer)
 	if !ok {
 		return nil
 	}
-	components, err := p.Components()
-	if err != nil {
-		return nil
+	if p.empty {
+		return []Component{}
 	}
-	return components
+	return p.components
 }
 
 // NonEmptyKeysTag is the validation tag of a pointer whose keys are each a

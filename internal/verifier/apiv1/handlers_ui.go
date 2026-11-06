@@ -1197,7 +1197,8 @@ func presetClaims(scopeCfg *model.VerificationPresetScope, meta *model.Credentia
 
 // vctmLeafClaims returns the requestable VCTM claim paths no other claim
 // path extends. An array-element path (e.g. ["nationalities", null])
-// supersedes its parent (["nationalities"]).
+// supersedes its parent (["nationalities"]). The key "null" of a leaf is
+// null, as the earlier release requested it.
 func vctmLeafClaims(meta *model.CredentialMetadata) []claimpath.Pointer {
 	if meta == nil {
 		return nil
@@ -1216,17 +1217,30 @@ func vctmLeafClaims(meta *model.CredentialMetadata) []claimpath.Pointer {
 	var leaves []claimpath.Pointer
 	for _, p := range all {
 		if !parents[p.String()] {
-			leaves = append(leaves, p)
+			leaves = append(leaves, nullKeysAsNull(p))
 		}
 	}
 	return leaves
 }
 
+// nullKeysAsNull returns p with each key "null" read as null.
+func nullKeysAsNull(p claimpath.Pointer) claimpath.Pointer {
+	return p.Map(func(c claimpath.Component) claimpath.Component {
+		if key, ok := c.KeyName(); ok && key == "null" {
+			return claimpath.All()
+		}
+		return c
+	})
+}
+
 // requestableClaims returns the VCTM claim paths, without the JWT
-// registered claims.
+// registered claims and the claims without a path component.
 func requestableClaims(vctm *sdjwtvc.VCTM) []claimpath.Pointer {
 	var paths []claimpath.Pointer
 	for _, vc := range vctm.Claims {
+		if vc.Path.Len() == 0 {
+			continue
+		}
 		if name, ok := vc.Path.FirstKey(); ok && jwtRegisteredClaim(name) {
 			continue
 		}

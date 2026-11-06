@@ -670,14 +670,6 @@ func TestDiscloseClaim(t *testing.T) {
 			n := d["nationalities"].([]any)
 			return n[0] == "British" && placeholder(n[1])
 		}},
-		{"a property of every element", claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type")), 2, func(d map[string]any) bool {
-			for _, degree := range d["degrees"].([]any) {
-				if _, ok := degree.(map[string]any)["type"]; ok {
-					return false
-				}
-			}
-			return true
-		}},
 	}
 	client := New()
 	for _, tt := range tests {
@@ -690,10 +682,26 @@ func TestDiscloseClaim(t *testing.T) {
 		})
 	}
 
-	t.Run("key in a non-object", func(t *testing.T) {
-		_, err := client.discloseClaim(document(), claimpath.Keys("name", "first"), sha256.New())
-		assert.Error(t, err)
-	})
+	// The earlier release's refusals, with its messages.
+	for _, tt := range []struct {
+		name string
+		path claimpath.Pointer
+		want string
+	}{
+		{"key in a non-object", claimpath.Keys("name", "first"), "invalid path: non-object at name (type: string, path: [name, first])"},
+		{"null before the end", claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type")), "invalid path: non-object at degrees (type: []interface {}, path: [degrees, <nil>, type])"},
+		{"null after an object before the end", claimpath.New(claimpath.Key("address"), claimpath.All(), claimpath.Key("locality")), "nil path element in middle of path at index 1"},
+		{"null alone", claimpath.New(claimpath.All()), "array element path must have at least 2 elements"},
+		{"null after null", claimpath.New(claimpath.Key("address"), claimpath.All(), claimpath.All()), "array name cannot be nil"},
+		{"null after a non-array", claimpath.New(claimpath.Key("name"), claimpath.All()), "path with null must point to an array, got string"},
+		{"null below a non-object", claimpath.New(claimpath.Key("name"), claimpath.Key("first"), claimpath.All()), "invalid path: non-object at name"},
+		{"a disclosure member", claimpath.Keys("_sd"), "claim name cannot be '_sd' or '...'"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.discloseClaim(document(), tt.path, sha256.New())
+			assert.EqualError(t, err, tt.want)
+		})
+	}
 }
 
 // TestAddDigest_Refusals covers the _sd member rules of section 4.2.4.1

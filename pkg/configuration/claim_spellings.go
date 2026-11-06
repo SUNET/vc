@@ -271,6 +271,9 @@ func LoadFile(ctx context.Context, file string, schemaPath func(string) string) 
 			return nil, err
 		}
 	}
+	if err := recordVCTMSpellings(cfg); err != nil {
+		return nil, err
+	}
 	if err := readDataSources(cfg, file, src); err != nil {
 		return nil, err
 	}
@@ -281,4 +284,38 @@ func LoadFile(ctx context.Context, file string, schemaPath func(string) string) 
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// recordVCTMSpellings adds to cfg.Deprecations a record per claim path key
+// of a type metadata document that the readers read in two ways, once per
+// document. The credential schemas must be loaded.
+func recordVCTMSpellings(cfg *model.Cfg) error {
+	recorded := map[string]bool{}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		meta := cfg.Common.CredentialMetadata[scope]
+		raw := meta.GetVCTMRaw()
+		source := vctmSource(meta)
+		if raw == nil || recorded[source] {
+			continue
+		}
+		recorded[source] = true
+		rewrites, err := legacyclaims.VCTMSpellings(source, raw)
+		if err != nil {
+			return fmt.Errorf("the VCTM of scope %q: %w", scope, err)
+		}
+		cfg.Deprecations = append(cfg.Deprecations, rewrites...)
+	}
+	return nil
+}
+
+// vctmSource names the type metadata document of a credential: its file,
+// its URL or its vct, in the order LoadCredentialSchema reads them.
+func vctmSource(meta *model.CredentialMetadata) string {
+	switch {
+	case meta.VCTMFilePath != "":
+		return meta.VCTMFilePath
+	case meta.VCTMUrl != "":
+		return meta.VCTMUrl
+	}
+	return meta.VCT
 }
