@@ -24,6 +24,11 @@ inside a null, a scalar or an array, or an index inside a value other
 than an array. It then skips, as it skips any absent input. The inputs
 of a `hash_commitment` opening read the same way.
 
+Where a key of an output pointer passes through a null, a scalar or an
+array, the derivation replaces that value with an object. An index of an
+output pointer needs an element of an array. `random` refuses an output
+below a null, a scalar or an array.
+
 ## Fields
 
 | Field | Form |

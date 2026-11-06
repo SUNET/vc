@@ -164,7 +164,9 @@ func writeOutput(working *primitives.Working, workingClaims, out map[string]any,
 	if err != nil {
 		return err
 	}
-	generated.record(workingClaims, location, w.Value, isGenerated)
+	if err := generated.record(workingClaims, location, w.Value, isGenerated); err != nil {
+		return err
+	}
 	if err := working.Write(w.Path, cloneValue(w.Value)); err != nil {
 		return err
 	}
@@ -179,7 +181,7 @@ func writeOutput(working *primitives.Working, workingClaims, out map[string]any,
 	if !present {
 		return fmt.Errorf("the write at %s left no claim at %s", location, derived)
 	}
-	return claimpath.Nested().Set(out, derived, cloneValue(value))
+	return claimpath.Nested().SetReplacing(out, derived, cloneValue(value))
 }
 
 // derivedLocation returns the location the derived claims hold a write at
@@ -230,15 +232,28 @@ func (p provenance) of(location claimpath.Pointer) bool {
 
 // record tags the claims a write at location makes: every leaf of value
 // with isGenerated, and every object the write makes with true, since the
-// holder never supplied it. Objects on the way to location that already
-// exist in existing keep their provenance.
-func (p provenance) record(existing map[string]any, location claimpath.Pointer, value any, isGenerated bool) {
+// holder never supplied it. The write makes an object on the way to
+// location where existing holds no claim, and where a key passes through
+// a value other than an object. Objects and arrays on the way that
+// already exist in existing keep their provenance.
+func (p provenance) record(existing map[string]any, location claimpath.Pointer, value any, isGenerated bool) error {
+	components, err := location.Components()
+	if err != nil {
+		return err
+	}
 	for _, ancestor := range location.Ancestors() {
-		if _, present, err := claimpath.Nested().Get(existing, ancestor); err == nil && !present {
+		held, present, err := claimpath.Nested().Get(existing, ancestor)
+		if err != nil && !errors.Is(err, claimpath.ErrMismatch) {
+			return err
+		}
+		_, object := held.(map[string]any)
+		_, keyPasses := components[ancestor.Len()].KeyName()
+		if !present || (!object && keyPasses) {
 			p.set(ancestor, true)
 		}
 	}
 	p.recordLeaves(location, value, isGenerated)
+	return nil
 }
 
 // recordLeaves tags value at location: an object as generated, and each of
@@ -285,10 +300,11 @@ func strictlyUnder(location, parent claimpath.Pointer) bool {
 // MergeDerived merges the output of ApplyDerivationsReplacing into dst. A
 // copy replaces the whole claim at its output location, so a field dst
 // already holds at a location in replaced does not outlive the copied
-// value.
+// value. A location below a value other than an object holds no field;
+// the merge replaces that value.
 func MergeDerived(dst, derived map[string]any, replaced []claimpath.Pointer) error {
 	for _, location := range replaced {
-		if err := claimpath.Nested().Delete(dst, location); err != nil {
+		if err := claimpath.Nested().Delete(dst, location); err != nil && !errors.Is(err, claimpath.ErrMismatch) {
 			return err
 		}
 	}
