@@ -109,6 +109,13 @@
 
 ### Fixed
 
+- **`fly/deploy.sh` stops when listing an app's secrets fails**: the
+  checks for the MongoDB credentials, OIDC secrets, AS signing key, service
+  signing keys and SAML SP keypair read a failed listing as "secret absent",
+  then generated and set new values over the live ones. Every listing now
+  stops the script with the app's name. A listing for an app that `fly apps
+  list` does not show counts as empty, so `launch --service <name>` still
+  continues past apps it did not create.
 - **mdoc integers at the top of their range are refused**: an mdoc element the
   MDDL declares as `int` with the value 2^63 overflowed into a signed credential.
   On amd64 it was issued as -2^63, and a `uint` of 2^64 or more as 2^63. Issuance
