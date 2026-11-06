@@ -502,7 +502,7 @@ func TestACopiedByteStringDerivesTheSameOnBothCacheBackends(t *testing.T) {
 	var reloaded model.CompleteDocument
 	require.NoError(t, json.Unmarshal(stored, &reloaded))
 
-	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: claimpath.Keys("odd"), Output: claimpath.Keys("odd")}}}
+	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("odd")}, Output: claimpath.Keys("odd")}}}
 	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, time.Now(), nestedShapes)
 	require.NoError(t, err, "the memory-backed path must derive")
 	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, time.Now(), nestedShapes)
@@ -557,7 +557,7 @@ func TestACopiedTimestampDerivesTheSameOnBothCacheBackends(t *testing.T) {
 
 	// The derivation is the thing that actually breaks, so it is what
 	// the test runs - on the memory-backed value and the HA one.
-	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: claimpath.Keys("odd"), Output: claimpath.Keys("odd")}}}
+	trim := []primitives.Derivation{{Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("odd")}, Output: claimpath.Keys("odd")}}}
 	fromMemory, err := credential.ApplyDerivations(trim, map[string]any{"odd": copied["odd"]}, when, nestedShapes)
 	require.NoError(t, err, "the memory-backed path must derive")
 	fromMongo, err := credential.ApplyDerivations(trim, reloaded.DocumentData, when, nestedShapes)
@@ -893,7 +893,7 @@ func TestPublishedDocumentsAreTheDecoratedOnes(t *testing.T) {
 			"the provenance must name the presented claim and its proved value")
 
 		conflicting := []primitives.Derivation{{
-			Trim: &primitives.TrimArgs{Input: claimpath.Keys("family_name"), Output: claimpath.Keys("birth_date")},
+			Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("family_name")}, Output: claimpath.Keys("birth_date")},
 		}}
 		derived, err := credential.ApplyDerivationsPinned(conflicting, docData, time.Now(), proved, nestedShapes)
 		require.NoError(t, err)

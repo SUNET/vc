@@ -21,9 +21,10 @@ import (
 // upgrade put before the list's own.
 //
 // A primitive that readsLiterally reads each claim name as one key. Each
-// other primitive reads a name as one key per segment, or as one key when
-// an earlier derivation writes that key: main's lookup tried the whole
-// name first.
+// other primitive reads a name as one key per segment. main's lookup of an
+// input, of random's output and of an opening input tried the whole name
+// as one top-level key first; the upgrade carries such a name beside its
+// pointer (configUpgrade.lookup).
 func (u *configUpgrade) derivations(list ast.Node, source, issued *lazy, written []claimpath.Pointer) error {
 	nodes, err := items(list)
 	if err != nil {
@@ -108,7 +109,7 @@ func (u *configUpgrade) derivation(name string, args ast.Node, source, issued *l
 		return nil, err
 	}
 	if output != nil && !emptyClaim(output.Value) {
-		out, _, err := u.pointer(output.Value, issued.reader(literal))
+		out, err := u.output(name, output.Value, issued, literal)
 		if err != nil {
 			return nil, fmt.Errorf("output: %w", err)
 		}
@@ -133,40 +134,72 @@ func readsLiterally(name string) bool {
 	return false
 }
 
+// output upgrades a derivation's output. random's output is a lookup:
+// main skipped a claim the whole name held.
+func (u *configUpgrade) output(name string, n ast.Node, issued *lazy, literal bool) (claimpath.Pointer, error) {
+	if name == "random" {
+		out, err := u.lookup(n, issued.dotted, func() *lazy { return issued })
+		return out.path, err
+	}
+	out, _, err := u.pointer(n, issued.reader(literal))
+	return out, err
+}
+
 // inputClaim is a derivation's input, and main's dotted name when the
 // input spelled one.
 type inputClaim struct {
 	path   claimpath.Pointer
 	dotted string
-	record int
+	// carried is set when the upgrade carries the dotted name beside the
+	// pointer.
+	carried bool
+	record  int
 }
 
-// input reads a derivation's input: in the literal reading when literal
-// is set, and otherwise in the literal reading of a key an earlier
-// derivation writes, or in the dotted reading.
+// input reads a derivation's input in the issued document when an earlier
+// derivation writes it or a claim above it, and in the source data
+// otherwise: in the literal reading when literal is set, and in the
+// dotted reading otherwise.
 func (u *configUpgrade) input(n ast.Node, source, issued *lazy, written []claimpath.Pointer, literal bool) (inputClaim, error) {
-	readings := []bool{true}
-	if !literal {
-		readings = append(readings, false)
-	}
+	space := source
 	read := func(name string) (claimpath.Pointer, error) {
 		if len(written) > 0 {
 			if _, err := issued.read(); err != nil {
 				return claimpath.Pointer{}, err
 			}
-			for _, reading := range readings {
-				if p, err := issued.reader(reading)(name); err == nil && writtenBefore(written, p) {
-					return p, nil
-				}
+			if p, err := issued.reader(literal)(name); err == nil && writtenBefore(written, p) {
+				space = issued
+				return p, nil
 			}
 		}
 		return source.reader(literal)(name)
 	}
-	path, name, err := u.pointer(n, read)
-	if err != nil || name == "" {
-		return inputClaim{path: path}, err
+	return u.lookup(n, read, func() *lazy { return space })
+}
+
+// lookup upgrades a claim main looked up as one top-level key, the whole
+// dotted name, before it read the claim read reads the name as. space
+// returns the shape that holds the claims of the pointer read returned.
+// Where that pointer locates the same key, the name becomes the pointer;
+// otherwise the upgrade carries the name (Document.carry).
+func (u *configUpgrade) lookup(n ast.Node, read reader, space func() *lazy) (inputClaim, error) {
+	c, err := readClaim(n, read)
+	if err != nil || c.name == "" {
+		return inputClaim{path: c.path}, err
 	}
-	return inputClaim{path: path, dotted: name, record: len(u.rewrites) - 1}, nil
+	carried, err := space().carries(c.name, c.path)
+	if err != nil {
+		return inputClaim{}, fmt.Errorf("%s: %w", c.node.GetPath(), err)
+	}
+	if carried {
+		err = u.carry(c, u.convert)
+	} else {
+		err = u.replaceScalar(c.node, c.path)
+	}
+	if err != nil {
+		return inputClaim{}, err
+	}
+	return inputClaim{path: c.path, dotted: c.name, carried: carried, record: len(u.rewrites) - 1}, nil
 }
 
 // writtenBefore reports whether one of written is p or a claim above it.
@@ -196,7 +229,8 @@ func emptyString(n ast.Node) bool {
 // input's claim. main wrote it at the input's name in the issued
 // document, which read reads. The upgrade writes the output when that
 // reads as another pointer than the input, or when the output is the
-// empty string.
+// empty string. The converter writes none where it leaves the input as
+// written.
 func (u *configUpgrade) inPlace(args ast.Node, input, output *ast.MappingValueNode, in inputClaim, read reader) ([]claimpath.Pointer, error) {
 	if in.dotted == "" {
 		return []claimpath.Pointer{in.path}, nil
@@ -205,7 +239,7 @@ func (u *configUpgrade) inPlace(args ast.Node, input, output *ast.MappingValueNo
 	if err != nil {
 		return nil, fmt.Errorf("output: %w", err)
 	}
-	if out.Equal(in.path) && (output == nil || !emptyString(output.Value)) {
+	if (out.Equal(in.path) && (output == nil || !emptyString(output.Value))) || (u.convert && in.carried) {
 		return []claimpath.Pointer{out}, nil
 	}
 	text, err := pointerText(out)
@@ -293,8 +327,10 @@ func ageOutputs(args ast.Node, issued *lazy) ([]claimpath.Pointer, error) {
 	return out, nil
 }
 
-// openingInputs reads the claims an opening reads in the source data.
+// openingInputs reads the claims an opening reads in the source data,
+// each a lookup.
 func (u *configUpgrade) openingInputs(args ast.Node, source *lazy) error {
+	space := func() *lazy { return source }
 	for _, generator := range []string{"hkdf", "hmac"} {
 		inputs, err := descend(args, "opening", generator, "inputs")
 		if err != nil {
@@ -305,7 +341,7 @@ func (u *configUpgrade) openingInputs(args ast.Node, source *lazy) error {
 			return err
 		}
 		for _, item := range list {
-			if _, _, err := u.pointer(item, source.dotted); err != nil {
+			if _, err := u.lookup(item, source.dotted, space); err != nil {
 				return err
 			}
 		}
@@ -314,6 +350,6 @@ func (u *configUpgrade) openingInputs(args ast.Node, source *lazy) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = u.pointer(input, source.dotted)
+	_, err = u.lookup(input, source.dotted, space)
 	return err
 }

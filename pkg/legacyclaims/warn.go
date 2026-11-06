@@ -11,7 +11,7 @@ import (
 // location, the old spelling and the new one.
 func (r Rewrite) String() string {
 	if r.Note != "" {
-		return fmt.Sprintf("%s:%d: %s: deprecated claim spelling %s; migrate_claim_paths leaves it as written: %s; the keyed form reads %s", r.File, r.Line, r.Path, r.Old, r.Note, r.New)
+		return fmt.Sprintf("%s:%d: %s: deprecated claim spelling %s; migrate_claim_paths leaves it as written: %s", r.File, r.Line, r.Path, r.Old, r.Note)
 	}
 	return fmt.Sprintf("%s:%d: %s: deprecated claim spelling %s; write %s, or run migrate_claim_paths", r.File, r.Line, r.Path, r.Old, r.New)
 }

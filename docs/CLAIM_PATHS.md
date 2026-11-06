@@ -150,9 +150,14 @@ A dotted name reads as the role that holds it read it:
 | A claim of a presented credential: auth scope `auth_claims`, the keys of `identity_attributes`, `document_claims` and `required_claims`, a derivation input of a presentation source, `identity_match` | one key per dot-separated segment | `[namespace, element]`, split at the last dot; a name without a dot, or whose last dot is its first or last character, is an element of `org.iso.18013.5.1` |
 | A claim of the issued document: the values of `document_claims`, the keys of `defaults`, derivation outputs, the derivation inputs of the other sources, an external API `attribute_mapping` | one key per segment | one key per segment; a first segment the MDDL declares as an element gains its namespace, the first in sorted order |
 | A derivation input that an earlier derivation of the list writes, or a claim beneath one | a claim of the issued document | a claim of the issued document |
-| The `input` of `age_over_thresholds`, `yyyymmdd_to_iso` and `swamid_highest_assurance_level`, the `output` of the latter two, and the input of another derivation when an earlier derivation of the list writes the whole name as one key | one key: the whole name | in a presented credential, as above; in document data, one key, which gains its namespace when the MDDL declares it as an element |
+| The `input` of `age_over_thresholds`, `yyyymmdd_to_iso` and `swamid_highest_assurance_level`, and the `output` of the latter two | one key: the whole name | in a presented credential, as above; in document data, one key, which gains its namespace when the MDDL declares it as an element |
 | An auth provider's `attribute_mapping` | one key per segment | |
 | A verifier `binding_attributes` path | one key per segment | one key per segment |
+
+The `input` of `copy`, `lowercase`, `uppercase`, `trim`, `country_alpha2`
+and `country_alpha3`, the `output` of `random` and the inputs of a
+`hash_commitment` opening read the whole name as one top-level key first.
+Where the claims hold no such key, they read the claim the table gives.
 
 Where a name reads as one key per segment, an empty segment is an empty
 key: `address..country` reads as `[address, "", country]`, and `name.` as
@@ -198,6 +203,11 @@ map to the keyed form when the keyed form maps the same claims:
 
 It leaves any other map as written and prints why. Such a map keeps loading
 with its warning.
+
+It leaves a name of a role that reads the whole name first as written, and
+prints why, where the table gives another claim than the top-level key of
+the whole name. Such a name keeps loading with its warning. Write its
+pointer by hand where the claims never hold that key.
 
 It leaves a file with a YAML alias, merge key or repeated key as written,
 and prints a line, when an alias stands where it reads claims, or when a

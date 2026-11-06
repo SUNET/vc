@@ -24,8 +24,9 @@ import (
 
 // The upgrade reads each dotted claim name in the shape of the role that
 // holds it, as the earlier release read it at run time, and the checks at
-// load accept the files the earlier release loaded. The expected pointers
-// are written by hand.
+// load accept the files the earlier release loaded. A role that looked the
+// whole name up as one top-level key first carries the name beside the
+// pointer. The expected pointers and names are written by hand.
 func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	const nymAuth = "eu.europa.ec.eudi.nym_auth.1"
 	presentation := func(from, claims string) string {
@@ -34,17 +35,17 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	derivations := func(list string) string {
 		return presentation("pid", "          derivations:\n"+list)
 	}
-	requiredClaim := func(ds model.DataSources) claimpath.Pointer {
+	requiredClaim := func(ds model.DataSources) claimpath.Ref {
 		for _, accepted := range ds.Presentation.Scopes["nym_auth"].From {
-			return accepted.RequiredClaims[0].Path
+			return claimpath.Ref{Path: accepted.RequiredClaims[0].Path}
 		}
-		return claimpath.Pointer{}
+		return claimpath.Ref{}
 	}
-	copyOf := func(i int, output bool) func(model.DataSources) claimpath.Pointer {
-		return func(ds model.DataSources) claimpath.Pointer {
+	copyOf := func(i int, output bool) func(model.DataSources) claimpath.Ref {
+		return func(ds model.DataSources) claimpath.Ref {
 			c := ds.Presentation.Scopes["nym_auth"].From["pid"].Derivations[i].Copy
 			if output {
-				return c.Output
+				return claimpath.Ref{Path: c.Output}
 			}
 			return c.Input
 		}
@@ -53,8 +54,10 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	tests := []struct {
 		name            string
 		dotted, pointer string
-		claim           func(model.DataSources) claimpath.Pointer
+		claim           func(model.DataSources) claimpath.Ref
 		want            claimpath.Pointer
+		// carried is the name the upgrade carries beside the pointer.
+		carried string
 	}{
 		{
 			name:    "a claim of a presented JSON-based credential",
@@ -81,15 +84,19 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 			name:    "a claim of a JSON-based document",
 			dotted:  "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        address.country: SE\n",
 			pointer: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        - {path: [address, country], value: SE}\n",
-			claim:   func(ds model.DataSources) claimpath.Pointer { return ds.Assertion.Scopes["ehic"].Defaults[0].Path },
-			want:    claimpath.Keys("address", "country"),
+			claim: func(ds model.DataSources) claimpath.Ref {
+				return claimpath.Ref{Path: ds.Assertion.Scopes["ehic"].Defaults[0].Path}
+			},
+			want: claimpath.Keys("address", "country"),
 		},
 		{
 			name:    "defaults of which one holds the other",
 			dotted:  "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        address: {country: NO}\n        address.country: SE\n",
 			pointer: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      defaults:\n        - {path: [address], value: {country: NO}}\n        - {path: [address, country], value: SE}\n",
-			claim:   func(ds model.DataSources) claimpath.Pointer { return ds.Assertion.Scopes["ehic"].Defaults[1].Path },
-			want:    claimpath.Keys("address", "country"),
+			claim: func(ds model.DataSources) claimpath.Ref {
+				return claimpath.Ref{Path: ds.Assertion.Scopes["ehic"].Defaults[1].Path}
+			},
+			want: claimpath.Keys("address", "country"),
 		},
 		{
 			name:    "an element an mdoc document's MDDL declares",
@@ -108,15 +115,16 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 		{
 			name:    "a derivation input an earlier derivation writes",
 			dotted:  derivations("            - copy: {input: birthdate, output: a.b}\n            - copy: {input: a.b, output: birth_date}\n"),
-			pointer: derivations("            - copy: {input: [birthdate], output: [a, b]}\n            - copy: {input: [a, b], output: [" + nymAuth + ", birth_date]}\n"),
+			pointer: derivations("            - copy: {input: [birthdate], output: [a, b]}\n            - copy: {input: {dotted: a.b, path: [a, b]}, output: [" + nymAuth + ", birth_date]}\n"),
 			claim:   copyOf(1, false),
 			want:    claimpath.Keys("a", "b"),
+			carried: "a.b",
 		},
 		{
 			name:    "the input of a primitive that read the whole name as one key",
 			dotted:  derivations("            - yyyymmdd_to_iso: {input: address.birthdate}\n"),
 			pointer: derivations("            - yyyymmdd_to_iso: {input: [address.birthdate]}\n"),
-			claim: func(ds model.DataSources) claimpath.Pointer {
+			claim: func(ds model.DataSources) claimpath.Ref {
 				return ds.Presentation.Scopes["nym_auth"].From["pid"].Derivations[0].YYYYMMDDToISO.Input
 			},
 			want: claimpath.Keys("address.birthdate"),
@@ -124,9 +132,10 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 		{
 			name:    "a key a primitive wrote as the whole name, read by a later derivation",
 			dotted:  derivations("            - swamid_highest_assurance_level: {input: assurance_level, output: a.b}\n            - copy: {input: a.b, output: birth_date}\n"),
-			pointer: derivations("            - swamid_highest_assurance_level: {input: [assurance_level], output: [a.b]}\n            - copy: {input: [a.b], output: [" + nymAuth + ", birth_date]}\n"),
+			pointer: derivations("            - swamid_highest_assurance_level: {input: [assurance_level], output: [a.b]}\n            - copy: {input: {dotted: a.b, path: [a, b]}, output: [" + nymAuth + ", birth_date]}\n"),
 			claim:   copyOf(1, false),
-			want:    claimpath.Keys("a.b"),
+			want:    claimpath.Keys("a", "b"),
+			carried: "a.b",
 		},
 	}
 	for _, tt := range tests {
@@ -137,7 +146,10 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 				require.NoError(t, err, form)
 				cfg.APIGW = &model.APIGW{DataSources: sources}
 				require.NoError(t, cfg.CheckClaimPaths(), form)
-				assert.Equal(t, tt.want, tt.claim(sources), form)
+				claim := tt.claim(sources)
+				assert.Equal(t, tt.want, claim.Path, form)
+				carried, _ := claim.Dotted()
+				assert.Equal(t, tt.carried, carried, form)
 			}
 		})
 	}

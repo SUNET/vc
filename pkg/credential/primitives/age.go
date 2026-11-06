@@ -21,7 +21,7 @@ import (
 // year, i.e. year(now) - year(birthdate) >= N).
 type AgeOverThresholdsArgs struct {
 	// Input is the birthdate claim (value must be ISO YYYY-MM-DD).
-	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
 
 	// Thresholds are the ages (in years) to expose. Each N produces
 	// age_over_N and over_N_this_year (booleans). Every entry must be

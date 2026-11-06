@@ -197,14 +197,14 @@ func derivedLocation(location claimpath.Pointer) (claimpath.Pointer, error) {
 
 // inputOf returns the claim a derivation reads, and its location in the
 // working claims.
-func inputOf(working *primitives.Working, d primitives.Derivation) (claimpath.Pointer, claimpath.Pointer, error) {
+func inputOf(working *primitives.Working, d primitives.Derivation) (claimpath.Ref, claimpath.Pointer, error) {
 	input, ok := d.Input()
 	if !ok {
-		return claimpath.Pointer{}, claimpath.Pointer{}, nil
+		return claimpath.Ref{}, claimpath.Pointer{}, nil
 	}
-	location, err := working.InputShape(input).Locate(input)
+	location, err := working.InputLocation(input)
 	if err != nil {
-		return claimpath.Pointer{}, claimpath.Pointer{}, err
+		return claimpath.Ref{}, claimpath.Pointer{}, err
 	}
 	return input, location, nil
 }

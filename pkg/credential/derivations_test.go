@@ -15,7 +15,7 @@ func TestApplyDerivations_AgeOverThresholds(t *testing.T) {
 
 	list := []primitives.Derivation{{
 		AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
-			Input:      claimpath.Keys("birthdate"),
+			Input:      claimpath.Ref{Path: claimpath.Keys("birthdate")},
 			Thresholds: []int{13, 18, 65},
 		},
 	}}
@@ -48,7 +48,7 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 		{
 			name: "lowercase in place",
 			list: []primitives.Derivation{{
-				Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("email")},
+				Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}},
 			}},
 			wantKey: "email",
 			wantVal: "user@example.com",
@@ -56,7 +56,7 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 		{
 			name: "uppercase with output alias",
 			list: []primitives.Derivation{{
-				Uppercase: &primitives.UppercaseArgs{Input: claimpath.Keys("country_scalar"), Output: claimpath.Keys("CC_UPPER")},
+				Uppercase: &primitives.UppercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("country_scalar")}, Output: claimpath.Keys("CC_UPPER")},
 			}},
 			wantKey: "CC_UPPER",
 			wantVal: "SWEDEN",
@@ -64,7 +64,7 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 		{
 			name: "country_alpha2 elementwise on []string",
 			list: []primitives.Derivation{{
-				CountryAlpha2: &primitives.CountryAlpha2Args{Input: claimpath.Keys("countries_list")},
+				CountryAlpha2: &primitives.CountryAlpha2Args{Input: claimpath.Ref{Path: claimpath.Keys("countries_list")}},
 			}},
 			wantKey: "countries_list",
 			wantVal: []string{"SE", "NO"},
@@ -72,7 +72,7 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 		{
 			name: "trim",
 			list: []primitives.Derivation{{
-				Trim: &primitives.TrimArgs{Input: claimpath.Keys("email"), Output: claimpath.Keys("email_trimmed")},
+				Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}, Output: claimpath.Keys("email_trimmed")},
 			}},
 			wantKey: "email_trimmed",
 			wantVal: "USER@example.com",
@@ -106,7 +106,7 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 func TestApplyDerivations_YYYYMMDDToISO(t *testing.T) {
 	claims := map[string]any{"dob": "19960130"}
 	list := []primitives.Derivation{{
-		YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: claimpath.Keys("dob"), Output: claimpath.Keys("birthdate")},
+		YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: claimpath.Ref{Path: claimpath.Keys("dob")}, Output: claimpath.Keys("birthdate")},
 	}}
 	got, err := ApplyDerivations(list, claims, time.Time{}, nestedShapes)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestApplyDerivations_SWAMIDHighestAssuranceLevel(t *testing.T) {
 	}
 	list := []primitives.Derivation{{
 		SWAMIDHighestAssuranceLevel: &primitives.SWAMIDHighestAssuranceLevelArgs{
-			Input:  claimpath.Keys("raw_assurance"),
+			Input:  claimpath.Ref{Path: claimpath.Keys("raw_assurance")},
 			Output: claimpath.Keys("assurance_level"),
 		},
 	}}
@@ -151,7 +151,7 @@ func TestApplyDerivations_Errors(t *testing.T) {
 			name: "missing input claim",
 			list: []primitives.Derivation{{
 				AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
-					Input:      claimpath.Keys("missing"),
+					Input:      claimpath.Ref{Path: claimpath.Keys("missing")},
 					Thresholds: []int{18},
 				},
 			}},
@@ -163,14 +163,14 @@ func TestApplyDerivations_Errors(t *testing.T) {
 		{
 			name: "more than one primitive set",
 			list: []primitives.Derivation{{
-				Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("birthdate")},
-				Uppercase: &primitives.UppercaseArgs{Input: claimpath.Keys("birthdate")},
+				Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}},
+				Uppercase: &primitives.UppercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}},
 			}},
 		},
 		{
 			name: "yyyymmdd invalid",
 			list: []primitives.Derivation{{
-				YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: claimpath.Keys("birthdate")},
+				YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}},
 			}},
 		},
 	}
@@ -184,7 +184,7 @@ func TestApplyDerivations_Errors(t *testing.T) {
 }
 
 func TestApplyDerivations_MissingInputClaimIsNoOp(t *testing.T) {
-	list := []primitives.Derivation{{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("absent")}}}
+	list := []primitives.Derivation{{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("absent")}}}}
 	got, err := ApplyDerivations(list, map[string]any{}, time.Time{}, nestedShapes)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -206,10 +206,10 @@ func TestApplyDerivations_MissingInputClaimIsNoOp(t *testing.T) {
 func TestPinnedClaimsStayAuthoritativeBetweenDerivationSteps(t *testing.T) {
 	list := []primitives.Derivation{
 		{YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{
-			Input: claimpath.Keys("stored_birth_date"), Output: claimpath.Keys("birth_date"),
+			Input: claimpath.Ref{Path: claimpath.Keys("stored_birth_date")}, Output: claimpath.Keys("birth_date"),
 		}},
 		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
-			Input: claimpath.Keys("birth_date"), Thresholds: []int{18},
+			Input: claimpath.Ref{Path: claimpath.Keys("birth_date")}, Thresholds: []int{18},
 		}},
 	}
 	claims := map[string]any{
@@ -258,7 +258,7 @@ func TestPinnedClaimsStayAuthoritativeBetweenDerivationSteps(t *testing.T) {
 // never touches it, and a test using one passes either way.
 func TestObjectValuedPinSurvivesTheChain(t *testing.T) {
 	list := []primitives.Derivation{
-		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("address", "country")}},
+		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("address", "country")}}},
 	}
 	pin := map[string]any{"address": map[string]any{"country": "DK"}}
 	claims := map[string]any{
@@ -295,8 +295,8 @@ func TestObjectValuedPinSurvivesTheChain(t *testing.T) {
 func TestApplyDerivations_InvalidInputFromEarlierDerivationIsNotHolderFault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("birthdate"), Thresholds: []int{18}}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("age_over_18"), Thresholds: []int{18}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("age_over_18")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{"birthdate": "1996-01-30"}, now, nestedShapes)
@@ -313,8 +313,8 @@ func TestApplyDerivations_InvalidInputFromEarlierDerivationIsNotHolderFault(t *t
 func TestApplyDerivations_InvalidHolderInputAfterEarlierDerivationIsHolderFault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("email")}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("birthdate"), Thresholds: []int{18}}},
+		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{"email": "A@B.se", "birthdate": "2099-01-01"}, now, nestedShapes)
@@ -328,8 +328,8 @@ func TestApplyDerivations_InvalidHolderInputAfterEarlierDerivationIsHolderFault(
 func TestApplyDerivations_InvalidHolderInputThroughNormalisationIsHolderFault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: claimpath.Keys("birthdate_raw"), Output: claimpath.Keys("birthdate")}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("birthdate"), Thresholds: []int{18}}},
+		{YYYYMMDDToISO: &primitives.YYYYMMDDToISOArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate_raw")}, Output: claimpath.Keys("birthdate")}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{"birthdate_raw": "20990101"}, now, nestedShapes)
@@ -342,9 +342,9 @@ func TestApplyDerivations_InvalidHolderInputThroughNormalisationIsHolderFault(t 
 func TestApplyDerivations_ReformattedGeneratedInputIsNotHolderFault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{Random: &primitives.RandomArgs{Output: claimpath.Keys("token"), Format: "uuid"}},
-		{Trim: &primitives.TrimArgs{Input: claimpath.Keys("token"), Output: claimpath.Keys("birthdate")}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("birthdate"), Thresholds: []int{18}}},
+		{Random: &primitives.RandomArgs{Output: claimpath.Ref{Path: claimpath.Keys("token")}, Format: "uuid"}},
+		{Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("token")}, Output: claimpath.Keys("birthdate")}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{}, now, nestedShapes)
@@ -361,8 +361,8 @@ func TestApplyDerivations_ReformattedGeneratedInputIsNotHolderFault(t *testing.T
 func TestApplyDerivations_GeneratedNestedContainerIsNotHolderFault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{Random: &primitives.RandomArgs{Output: claimpath.Keys("identity", "birthdate")}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("identity"), Thresholds: []int{18}}},
+		{Random: &primitives.RandomArgs{Output: claimpath.Ref{Path: claimpath.Keys("identity", "birthdate")}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{}, now, nestedShapes)
@@ -378,8 +378,8 @@ func TestApplyDerivations_GeneratedNestedContainerIsNotHolderFault(t *testing.T)
 func TestApplyDerivations_HolderContainerKeepsProvenance(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{Random: &primitives.RandomArgs{Output: claimpath.Keys("identity", "document_id")}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("identity"), Thresholds: []int{18}}},
+		{Random: &primitives.RandomArgs{Output: claimpath.Ref{Path: claimpath.Keys("identity", "document_id")}}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{"identity": map[string]any{"name": "x"}}, now, nestedShapes)
@@ -394,8 +394,8 @@ func TestApplyDerivations_HolderContainerKeepsProvenance(t *testing.T) {
 func TestApplyDerivations_ContainerCreatedByReformatIsNotHolderFault(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	list := []primitives.Derivation{
-		{Trim: &primitives.TrimArgs{Input: claimpath.Keys("birthdate_raw"), Output: claimpath.Keys("identity", "birthdate")}},
-		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Keys("identity"), Thresholds: []int{18}}},
+		{Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate_raw")}, Output: claimpath.Keys("identity", "birthdate")}},
+		{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity")}, Thresholds: []int{18}}},
 	}
 
 	_, err := ApplyDerivations(list, map[string]any{"birthdate_raw": "1990-01-01"}, now, nestedShapes)

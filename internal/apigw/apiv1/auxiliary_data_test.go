@@ -40,7 +40,7 @@ func TestAuxiliaryData(t *testing.T) {
 
 	ssc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc")
 	psc := claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "psc")
-	inputs := []claimpath.Pointer{claimpath.Keys("issuing_country"), claimpath.Keys("personal_administrative_number")}
+	inputs := []claimpath.Ref{{Path: claimpath.Keys("issuing_country")}, {Path: claimpath.Keys("personal_administrative_number")}}
 	c := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
@@ -168,7 +168,7 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 	}}}}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 		Path:    ssc,
-		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 16}},
+		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16}},
 	}}}
 	walletPSC := sha256.Sum256([]byte("the wallet's private seed"))
 	fromWallet := []openid4vci.AuxiliaryDataEntry{{
@@ -245,7 +245,7 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	secret := []byte(strings.Repeat("s", 32))
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
-	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("subject", "pan")}, Bytes: 16}
+	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("subject", "pan")}}, Bytes: 16}
 	hc := primitives.HashCommitmentArgs{Path: claimpath.Keys("commitments", "ssc"), Opening: primitives.OpeningArgs{HKDF: &opening}}
 	_, err = hc.NewOpening(source.claims, source.shape)
 	require.NoError(t, err, `["subject","pan"] reaches into the normalised claims`)
@@ -318,7 +318,7 @@ func TestAuxiliaryDataClaimOpening(t *testing.T) {
 	}}}}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 		Path:    ssc,
-		Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Keys("nym_auth_opening")}},
+		Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}}},
 	}}}
 	const claim = "AAECAwQFBgcICQoLDA0ODw"
 

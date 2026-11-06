@@ -61,7 +61,7 @@ func decodeDataSources(file string, src []byte, cfg *model.Cfg) (model.DataSourc
 	if err != nil {
 		return model.DataSources{}, nil, err
 	}
-	if err := legacyclaims.UpgradeDataSources(doc, credentialShapes{cfg: cfg}); err != nil {
+	if err := legacyclaims.UpgradeDataSources(doc, credentialShapes{cfg: cfg}, false); err != nil {
 		return model.DataSources{}, nil, err
 	}
 	text, err := doc.Bytes()
@@ -109,20 +109,22 @@ func (s credentialShapes) Document(scope string) (legacyclaims.Shape, error) {
 }
 
 // UpgradeFile rewrites the claim spellings of earlier releases in the text
-// of a configuration file, keeping every comment. It loads the schema of a
+// of a configuration file, keeping every comment. It leaves as written a
+// dotted name a role looked up as one top-level key first, where its
+// pointer reads another key, and records why. It loads the schema of a
 // credential whose document shape a data source claim needs; schemaPath
 // maps the schema file path of the credential metadata to the file to
 // read, and nil reads each path as written. The rewrite of a file with a
 // YAML alias, merge key or repeated key must decode as the file does and
-// hold no earlier spelling; otherwise UpgradeFile refuses the file with
-// legacyclaims.ErrInPlace.
+// hold no earlier spelling it upgrades; otherwise UpgradeFile refuses the
+// file with legacyclaims.ErrInPlace.
 func UpgradeFile(ctx context.Context, file string, src []byte, schemaPath func(string) string) ([]byte, []legacyclaims.Rewrite, error) {
 	doc, err := legacyclaims.Parse(file, src)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !doc.Flattens() {
-		return upgradeConfig(ctx, file, src, doc, schemaPath)
+		return upgradeConfig(ctx, file, src, doc, schemaPath, true)
 	}
 	want, err := decodeConfig(ctx, file, src, schemaPath)
 	if err != nil {
@@ -131,27 +133,34 @@ func UpgradeFile(ctx context.Context, file string, src []byte, schemaPath func(s
 	want.Deprecations = nil
 	// A rewrite in place that fails, or whose text decodes otherwise, met
 	// a spelling an alias, a merge key or a repeated key reads.
-	text, rewrites, err := upgradeConfig(ctx, file, src, doc, schemaPath)
+	text, rewrites, err := upgradeConfig(ctx, file, src, doc, schemaPath, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", file, legacyclaims.ErrInPlace)
 	}
 	got, err := decodeConfig(ctx, file, text, schemaPath)
-	if err != nil || len(got.Deprecations) > 0 || !reflect.DeepEqual(want, got) {
+	if err != nil || slices.ContainsFunc(got.Deprecations, upgradable) {
+		return nil, nil, fmt.Errorf("%s: %w", file, legacyclaims.ErrInPlace)
+	}
+	got.Deprecations = nil
+	if !reflect.DeepEqual(want, got) {
 		return nil, nil, fmt.Errorf("%s: %w", file, legacyclaims.ErrInPlace)
 	}
 	return text, rewrites, nil
 }
 
+// upgradable reports whether migrate_claim_paths rewrites a spelling.
+func upgradable(r legacyclaims.Rewrite) bool { return r.Note == "" }
+
 // upgradeConfig upgrades the claim spellings of doc, which holds the text
 // of the configuration file src or the text gopkg.in/yaml.v2 decodes from
-// it.
-func upgradeConfig(ctx context.Context, file string, src []byte, doc *legacyclaims.Document, schemaPath func(string) string) ([]byte, []legacyclaims.Rewrite, error) {
+// it. convert leaves as written each spelling migrate_claim_paths leaves.
+func upgradeConfig(ctx context.Context, file string, src []byte, doc *legacyclaims.Document, schemaPath func(string) string, convert bool) ([]byte, []legacyclaims.Rewrite, error) {
 	cfg := &model.Cfg{}
 	if _, err := decodeShared(file, src, cfg); err != nil {
 		return nil, nil, err
 	}
 	shapes := credentialShapes{cfg: cfg, load: schemaLoader(ctx, cfg, schemaPath)}
-	if err := legacyclaims.UpgradeConfig(doc, shapes); err != nil {
+	if err := legacyclaims.UpgradeConfig(doc, shapes, convert); err != nil {
 		return nil, nil, err
 	}
 	text, err := doc.Bytes()
@@ -219,7 +228,7 @@ func decodeConfig(ctx context.Context, file string, src []byte, schemaPath func(
 	if err != nil {
 		return nil, err
 	}
-	text, rewrites, err := upgradeConfig(ctx, file, src, doc, schemaPath)
+	text, rewrites, err := upgradeConfig(ctx, file, src, doc, schemaPath, false)
 	if err != nil {
 		return nil, err
 	}

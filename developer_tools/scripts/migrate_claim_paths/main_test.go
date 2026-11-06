@@ -116,13 +116,18 @@ func TestMigrateKeepsTheMeaningAndTheComments(t *testing.T) {
 // claim_mappings as written when the loaded credential query holds no id
 // the keyed form can name: a query that is no mapping, a query without an
 // id, or a query the decoder keeps as written whose id YAML reads as a
-// number.
+// number. It leaves a derivation input as written where the earlier
+// release read the whole name as one key before the claim its pointer
+// names.
 func TestMigrateRewritesAFileWhenItKeepsItsMeaning(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	require.NoError(t, err)
 	const mapping = "apigw:\n  auth_providers:\n    oidc:\n      attribute_mapping:\n        birthdate:\n          claim: %s\n"
 	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - id: age\n          format: dc+sd-jwt\n%s          claims:\n            - path: [age_over_18]\n    claim_mappings:\n%s"
 	const meta = "x-meta: &meta\n  vct_values: [urn:credential:age:1]\n"
 	const mdoc = "templates:\n  - id: mdl\n    oidc_scopes: [mdl]\n    dcql:\n      credentials:\n        - <<: {format: mso_mdoc}\n          id: mdl\n          meta:\n            doctype_value: org.iso.18013.5.1.mDL\n          claims:\n            - path: [org.iso.18013.5.1, family_name]\n    claim_mappings:\n%s"
 	const query = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - %s\n    claim_mappings:\n      age_over_18: age_over_18\n"
+	const derivation = "common:\n  credential_metadata:\n    pid:\n      format: dc+sd-jwt\n      vctm_file_path: /metadata/vctm_pid.json\napigw:\n  data_sources:\n    assertion:\n      scopes:\n        pid:\n          auth_provider: oidc\n          derivations:\n            - copy: {input: identity.pnr, output: %s}\n"
 	tests := []struct {
 		name, file string
 		// want is the file once converted, and empty when the converter
@@ -164,13 +169,18 @@ func TestMigrateRewritesAFileWhenItKeepsItsMeaning(t *testing.T) {
 			name: "a template whose credential query the decoder keeps as written has an id YAML reads as a number",
 			file: fmt.Sprintf(query, "{id: 7, format: dc+sd-jwt, claims: [{path: [age_over_18]}]}"),
 		},
+		{
+			name: "a configuration whose derivation reads the whole name as one key first",
+			file: fmt.Sprintf(derivation, "pnr"),
+			want: fmt.Sprintf(derivation, "[pnr]"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "file.yaml")
 			require.NoError(t, os.WriteFile(path, []byte(tt.file), 0o600))
 			var report bytes.Buffer
-			require.NoError(t, run(t.Context(), []string{path}, &report))
+			require.NoError(t, run(t.Context(), []string{"-schemas", "/metadata=" + filepath.Join(root, "metadata"), path}, &report))
 			got, err := os.ReadFile(path)
 			require.NoError(t, err)
 			want := tt.want

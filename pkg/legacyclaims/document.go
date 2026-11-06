@@ -183,6 +183,13 @@ func (d *Document) insert(offset int, text string) {
 
 // record notes an upgraded spelling at node.
 func (d *Document) record(node ast.Node, old, new string) error {
+	return d.recordKept(node, old, new, "")
+}
+
+// recordKept notes a spelling at node with the note that says why
+// migrate_claim_paths leaves it as written; an empty note records an
+// upgraded spelling.
+func (d *Document) recordKept(node ast.Node, old, new, note string) error {
 	line, err := d.lineAt(node.GetToken().Position)
 	if err != nil {
 		return err
@@ -193,6 +200,7 @@ func (d *Document) record(node ast.Node, old, new string) error {
 		Line: line,
 		Old:  old,
 		New:  new,
+		Note: note,
 	})
 	return nil
 }

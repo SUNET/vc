@@ -33,17 +33,40 @@ func NewWorking(claims map[string]any, shapes Shapes) *Working {
 // index on a non-array, select no claim, so the derivation skips it.
 // OpenID4VP 1.0 section 7.1 has a Wallet that processes a query refuse
 // such a pointer; a derivation reads the issuer's own source data.
-func (w *Working) Input(p claimpath.Pointer) (any, bool, error) {
-	value, present, err := w.InputShape(p).Get(w.claims, p)
+func (w *Working) Input(r claimpath.Ref) (any, bool, error) {
+	if value, ok := r.Literal(w.claims); ok {
+		return value, true, nil
+	}
+	value, present, err := w.InputShape(r.Path).Get(w.claims, r.Path)
 	if errors.Is(err, claimpath.ErrMismatch) {
 		return nil, false, nil
 	}
 	return value, present, err
 }
 
-// Issued implements Claims.
-func (w *Working) Issued(p claimpath.Pointer) (any, bool, error) {
-	return w.shapes.Issued.Get(w.claims, p)
+// InputLocation returns where Input reads r in the claims: the top-level
+// key of its dotted name when the claims hold it, and the location of its
+// pointer otherwise.
+func (w *Working) InputLocation(r claimpath.Ref) (claimpath.Pointer, error) {
+	if dotted, ok := r.Dotted(); ok {
+		if _, held := r.Literal(w.claims); held {
+			return claimpath.Keys(dotted), nil
+		}
+	}
+	return w.InputShape(r.Path).Locate(r.Path)
+}
+
+// Issued implements Claims. The pointer's structure is checked before the
+// top-level key of a dotted name is read.
+func (w *Working) Issued(r claimpath.Ref) (any, bool, error) {
+	value, present, err := w.shapes.Issued.Get(w.claims, r.Path)
+	if err != nil {
+		return nil, false, err
+	}
+	if literal, ok := r.Literal(w.claims); ok {
+		return literal, true, nil
+	}
+	return value, present, nil
 }
 
 // Named implements Claims.
@@ -115,15 +138,15 @@ func checkArgs(a Applier, shapes Shapes, written []claimpath.Pointer) error {
 			return fmt.Errorf("output: %w", err)
 		}
 	}
-	input, ok := pointerField(a, "Input")
+	input, ok := inputOf(a)
 	if !ok {
 		return nil
 	}
 	space := shapes.Source
-	if writtenBefore(written, *input) {
+	if writtenBefore(written, input.Path) {
 		space = shapes.Issued
 	}
-	if _, err := space.LocateOne(*input); err != nil {
+	if _, err := space.LocateOne(input.Path); err != nil {
 		return fmt.Errorf("input: %w", err)
 	}
 	return nil

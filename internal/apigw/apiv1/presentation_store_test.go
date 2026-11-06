@@ -41,7 +41,7 @@ func TestVerifiedMDocClaimsIssueAfterTheMongoStore(t *testing.T) {
 		"pid_mdoc": {Format: openid4vp.FormatMsoMdoc},
 	}}}}
 	pScope := model.PresentationScope{From: map[string]model.PresentedCredential{"pid_mdoc": {
-		Derivations: []primitives.Derivation{{Copy: &primitives.CopyArgs{Input: birthDate, Output: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}}},
+		Derivations: []primitives.Derivation{{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: birthDate}, Output: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}}},
 	}}}
 	doc, err := c.buildPresentationDocument("nym_auth", pScope, &stored, time.Now())
 	require.NoError(t, err)

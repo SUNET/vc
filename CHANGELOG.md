@@ -155,7 +155,9 @@
   request files in place and keeps their comments. It converts a
   `claim_mappings` map to the keyed form under the conditions
   [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists, and prints why it
-  leaves any other map as written. It leaves a file with a YAML alias,
+  leaves any other map as written. It leaves a dotted derivation name as
+  written, and prints why, where the earlier release read the whole name
+  as one top-level key first. It leaves a file with a YAML alias,
   merge key or repeated key as written, and prints a line, when an alias
   stands where it reads claims, or when a rewrite in place would change
   what the file loads.

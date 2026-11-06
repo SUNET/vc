@@ -23,7 +23,7 @@ func ageDerivingScope() model.PresentationScope {
 				RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}},
 				Derivations: []primitives.Derivation{{
 					AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
-						Input: claimpath.Keys("birthdate"), Thresholds: []int{18},
+						Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18},
 					},
 				}},
 			},
@@ -88,7 +88,7 @@ func TestFinalisePresentationVerification_AMisconfiguredDerivationIsAServerFault
 	authCtx := seedAuthCtx(t, c, "sess-misconfigured")
 
 	pScope := ageDerivingScope()
-	pScope.From["eduid"].Derivations[0].AgeOverThresholds.Input = claimpath.Keys("not_a_claim_this_scope_requires")
+	pScope.From["eduid"].Derivations[0].AgeOverThresholds.Input = claimpath.Ref{Path: claimpath.Keys("not_a_claim_this_scope_requires")}
 
 	err := c.finalisePresentationVerification(
 		t.Context(), authCtx, "eduid_age", pScope, "eduid", presentedWithBirthdate("1990-10-14"))

@@ -23,7 +23,7 @@ func YYYYMMDDToISO(s string) (string, error) {
 // Impossible calendar dates surface as a hard error.
 type YYYYMMDDToISOArgs struct {
 	// Input is the source claim (must be a non-empty YYYYMMDD string).
-	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
 
 	// Output is the target claim. Defaults to Input.
 	Output claimpath.Pointer `yaml:"output,omitempty" doc_example:"[\"birthdate\"]"`
@@ -43,5 +43,5 @@ func (a *YYYYMMDDToISOArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Write{{Path: inPlace(a.Input, a.Output), Value: iso}}, nil
+	return []Write{{Path: inPlace(a.Input.Path, a.Output), Value: iso}}, nil
 }

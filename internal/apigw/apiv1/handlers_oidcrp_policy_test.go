@@ -332,7 +332,7 @@ func TestOIDCRPCallbackPolicyIgnoresDerivedClaims(t *testing.T) {
 				},
 				// Manufactures exactly the claim the policy gates on.
 				Derivations: []primitives.Derivation{{
-					Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("loa_hint"), Output: claimpath.Keys("acr")},
+					Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("loa_hint")}, Output: claimpath.Keys("acr")},
 				}},
 			},
 		}},

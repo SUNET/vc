@@ -144,7 +144,7 @@ func TestFinalisePresentationVerification_Success(t *testing.T) {
 			}}},
 			Derivations: []primitives.Derivation{
 				{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
-					Input: claimpath.Keys("birthdate"), Thresholds: []int{18},
+					Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18},
 				}},
 			},
 		}},

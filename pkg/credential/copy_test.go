@@ -15,9 +15,9 @@ import (
 // claim's object and changed the copy.
 func TestApplyDerivations_CopyLeavesItsSourceUnchanged(t *testing.T) {
 	out, err := ApplyDerivations([]primitives.Derivation{
-		{Copy: &primitives.CopyArgs{Input: claimpath.Keys("identity"), Output: claimpath.Keys("alias")}},
-		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("alias", "name")}},
-		{Copy: &primitives.CopyArgs{Input: claimpath.Keys("identity", "name"), Output: claimpath.Keys("seen")}},
+		{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity")}, Output: claimpath.Keys("alias")}},
+		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("alias", "name")}}},
+		{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity", "name")}, Output: claimpath.Keys("seen")}},
 	}, map[string]any{"identity": map[string]any{"name": "ALICE"}}, time.Now(), nestedShapes)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"name": "alice"}, out["alias"])
@@ -28,8 +28,8 @@ func TestApplyDerivations_CopyLeavesItsSourceUnchanged(t *testing.T) {
 // in the document the output is merged into.
 func TestCopyReplacesAnExistingObject(t *testing.T) {
 	list := []primitives.Derivation{
-		{Copy: &primitives.CopyArgs{Input: claimpath.Keys("identity"), Output: claimpath.Keys("alias")}},
-		{Copy: &primitives.CopyArgs{Input: claimpath.Keys("identity", "name"), Output: claimpath.Keys("nested", "alias_name")}},
+		{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity")}, Output: claimpath.Keys("alias")}},
+		{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity", "name")}, Output: claimpath.Keys("nested", "alias_name")}},
 	}
 	claims := map[string]any{
 		"identity": map[string]any{"name": "ALICE"},
@@ -51,10 +51,10 @@ func TestCopyReplacesAnExistingObject(t *testing.T) {
 // so reading it wrongly is a configuration fault, not the holder's input.
 func TestACopiedObjectKeepsTheProvenanceOfItsFields(t *testing.T) {
 	age := func(in claimpath.Pointer) primitives.Derivation {
-		return primitives.Derivation{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: in, Thresholds: []int{18}}}
+		return primitives.Derivation{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{Input: claimpath.Ref{Path: in}, Thresholds: []int{18}}}
 	}
 	copyClaim := func(in, out claimpath.Pointer) primitives.Derivation {
-		return primitives.Derivation{Copy: &primitives.CopyArgs{Input: in, Output: out}}
+		return primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: in}, Output: out}}
 	}
 	claims := map[string]any{"dob": "1990-01-15", "identity": map[string]any{"name": "x", "birthdate": "1990-01-15"}}
 	ageOver18, birthdate := claimpath.Keys("age_over_18"), claimpath.Keys("identity", "birthdate")
@@ -79,8 +79,8 @@ func TestACopiedObjectKeepsTheProvenanceOfItsFields(t *testing.T) {
 // when a later step writes under its output path.
 func TestASkippedCopyClearsNothing(t *testing.T) {
 	list := []primitives.Derivation{
-		{Copy: &primitives.CopyArgs{Input: claimpath.Keys("missing"), Output: claimpath.Keys("identity")}},
-		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("identity", "name")}},
+		{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("missing")}, Output: claimpath.Keys("identity")}},
+		{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("identity", "name")}}},
 	}
 	claims := map[string]any{"identity": map[string]any{"name": "ALICE", "country": "SE"}}
 
@@ -106,11 +106,11 @@ func TestApplyDerivations_WriteIntoAnArrayElement(t *testing.T) {
 		want       map[string]any
 	}{
 		"a copy": {
-			derivation: primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Keys("birthdate"), Output: first("name")}},
+			derivation: primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Output: first("name")}},
 			want:       map[string]any{"name": "1996-01-30", "kind": "A"},
 		},
 		"in place": {
-			derivation: primitives.Derivation{Lowercase: &primitives.LowercaseArgs{Input: first("kind")}},
+			derivation: primitives.Derivation{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: first("kind")}}},
 			want:       map[string]any{"name": "first", "kind": "a"},
 		},
 	} {

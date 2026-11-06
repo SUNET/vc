@@ -62,6 +62,21 @@ func (l *lazy) reader(literal bool) reader {
 	return l.dotted
 }
 
+// carries reports whether a role that looked a dotted name up as one
+// top-level key first reads it otherwise as p: p locates another key of
+// the claims.
+func (l *lazy) carries(name string, p claimpath.Pointer) (bool, error) {
+	shape, err := l.read()
+	if err != nil {
+		return false, err
+	}
+	location, err := shape.document.Locate(p)
+	if err != nil {
+		return false, err
+	}
+	return !location.Equal(claimpath.Keys(name)), nil
+}
+
 func (l *lazy) topLevel(name string) (claimpath.Pointer, error) {
 	shape, err := l.read()
 	if err != nil {
@@ -72,11 +87,11 @@ func (l *lazy) topLevel(name string) (claimpath.Pointer, error) {
 
 // UpgradeConfig rewrites the claim spellings of earlier releases in a
 // service configuration: UpgradeShared, then UpgradeDataSources.
-func UpgradeConfig(d *Document, shapes Shapes) error {
+func UpgradeConfig(d *Document, shapes Shapes, convert bool) error {
 	if err := UpgradeShared(d); err != nil {
 		return err
 	}
-	return UpgradeDataSources(d, shapes)
+	return UpgradeDataSources(d, shapes, convert)
 }
 
 // UpgradeShared rewrites the claim spellings outside apigw.data_sources,
@@ -97,20 +112,25 @@ func UpgradeShared(d *Document) error {
 
 // UpgradeDataSources rewrites the claim spellings of apigw.data_sources,
 // each read in the shape of the credential that holds it.
-func UpgradeDataSources(d *Document, shapes Shapes) error {
+//
+// A role that looked a dotted name up as one top-level key first keeps
+// that lookup. Without convert, the name becomes the mapping {dotted:
+// <name>, path: <pointer>}, which reads that key before the pointer. With
+// convert, the name stays as written, and its record says why.
+func UpgradeDataSources(d *Document, shapes Shapes, convert bool) error {
 	if d.root == nil {
 		return nil
 	}
-	return d.fail(d.upgradeDataSources(shapes))
+	return d.fail(d.upgradeDataSources(shapes, convert))
 }
 
 // upgradeDataSources is UpgradeDataSources for a document with a root.
-func (d *Document) upgradeDataSources(shapes Shapes) error {
+func (d *Document) upgradeDataSources(shapes Shapes, convert bool) error {
 	dataSources, err := descend(d.root, "apigw", "data_sources")
 	if err != nil || isNull(dataSources) {
 		return err
 	}
-	u := &configUpgrade{Document: d, shapes: shapes}
+	u := &configUpgrade{Document: d, shapes: shapes, convert: convert}
 	for _, section := range []struct {
 		key     string
 		upgrade func(scope string, n ast.Node) error
@@ -131,6 +151,9 @@ func (d *Document) upgradeDataSources(shapes Shapes) error {
 type configUpgrade struct {
 	*Document
 	shapes Shapes
+	// convert leaves as written each dotted name a role looked up as one
+	// top-level key first, where its pointer reads another key.
+	convert bool
 }
 
 func (u *configUpgrade) presented(scope string) *lazy {
