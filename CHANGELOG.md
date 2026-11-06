@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- **Seed-commitment settings stop startup**: every service refuses a configuration holding `apigw.seeds` or `common.credential_metadata.<scope>.commitments`, and a secrets file holding `apigw.seeds`. The error names each setting found. These settings were removed when the `hash_commitment` derivation replaced them; a configuration still holding them started and issued its credentials without the commitments.
+
+  **Migration:** delete these settings and configure each commitment as a `hash_commitment` derivation with a matching `auxiliary_data` entry, as [docs/issuer/AUXILIARY_DATA.md](docs/issuer/AUXILIARY_DATA.md) describes. Move a seed secret from the secrets file to a file the `hkdf` opening names. The derivation label changed, so every subject gets a new opening and a new commitment.
+
 - **Unresolvable auth scopes now fail at startup**: every scope listed in an `auth_scopes` entry must name a configured `credential_metadata` scope. A scope that names none previously started fine and produced a DCQL query no wallet could satisfy, failing only after the user had already been sent to their wallet; it is now rejected at config load, so a deployment carrying one will stop starting.
 
   **Migration:** if APIGW fails to start with `apigw.data_sources.datastore.scopes: ... name no scope in common.credential_metadata`, either add the missing `common.credential_metadata` entry or drop the scope from `auth_scopes`. The error lists every offending `<scope>.auth_scopes.<auth_scope>` pair.
