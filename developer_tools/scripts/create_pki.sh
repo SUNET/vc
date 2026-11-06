@@ -28,10 +28,11 @@ fi
 # Grants the container user read access to key $1. A key left without the
 # grant is removed, so the next run generates it again.
 grant_container_read() {
+    granted_key="$1"
     [ "$grant_acl" -eq 1 ] || return 0
-    if ! setfacl -m "u:${CONTAINER_UID}:r" "$1"; then
-        rm -f "$1"
-        echo "granting uid ${CONTAINER_UID} read access to $1 failed; removed it" >&2
+    if ! setfacl -m "u:${CONTAINER_UID}:r" "$granted_key"; then
+        rm -f "$granted_key"
+        echo "granting uid ${CONTAINER_UID} read access to $granted_key failed; removed it" >&2
         exit 1
     fi
 }

@@ -70,9 +70,9 @@ fly_capture() {
 # Returns 0 when `fly apps list` shows app $1 and 1 when it does not. A failed
 # listing stops the script with $2 and fly's error.
 app_listed() {
-    local _apps _err
-    fly_capture _apps _err apps list --json || die "$2: $_err"
-    grep -q "\"$1\"" <<<"$_apps"
+    local _app="$1" _context="$2" _apps _err
+    fly_capture _apps _err apps list --json || die "$_context: $_err"
+    grep -q "\"$_app\"" <<<"$_apps"
 }
 
 # Returns when Fly app $1 is absent, and stops with fly's error $3 when it
@@ -80,21 +80,22 @@ app_listed() {
 # it did not create, so a failure on an absent app is expected; any other
 # failure would read as "nothing there" and replace live state.
 require_app_absent() {
-    if app_listed "$1" "$2 of $1 failed, and so did listing the apps"; then
-        die "$2 of $1 failed: $3"
+    local _app="$1" _call="$2" _call_err="$3"
+    if app_listed "$_app" "$_call of $_app failed, and so did listing the apps"; then
+        die "$_call of $_app failed: $_call_err"
     fi
 }
 
 # Stores the secrets of Fly app $1, as JSON, in the variable named $2. An
 # absent app stores "[]".
 read_app_secrets() {
-    local _json _err
-    if fly_capture _json _err secrets list --app "$1" --json; then
-        printf -v "$2" '%s' "$_json"
+    local _app="$1" _secrets_var="$2" _json _err
+    if fly_capture _json _err secrets list --app "$_app" --json; then
+        printf -v "$_secrets_var" '%s' "$_json"
         return 0
     fi
-    require_app_absent "$1" "listing the secrets" "$_err"
-    printf -v "$2" '%s' '[]'
+    require_app_absent "$_app" "listing the secrets" "$_err"
+    printf -v "$_secrets_var" '%s' '[]'
 }
 
 # Sets the secrets $2.. on Fly app $1. Returns 1 after an "app missing" note
@@ -197,8 +198,9 @@ local_mongo_uri() {
 
 # Sets WALLET_STORAGE_MONGODB_URI to $2 on wallet-backend app $1.
 set_wallet_backend_mongo_uri() {
-    echo "==> Setting Mongo URI for $1"
-    if set_app_secrets "$1" WALLET_STORAGE_MONGODB_URI="$2"; then
+    local _app="$1" _uri="$2"
+    echo "==> Setting Mongo URI for $_app"
+    if set_app_secrets "$_app" WALLET_STORAGE_MONGODB_URI="$_uri"; then
         echo "    Mongo URI set"
     fi
 }
@@ -648,8 +650,9 @@ register_apigw_issuer_on_wallet_backend() {
 # Stops the `fly proxy` with pid $1. A proxy that already exited leaves
 # nothing to stop.
 stop_proxy() {
-    kill "$1" 2>/dev/null || true
-    wait "$1" 2>/dev/null || true
+    local _pid="$1"
+    kill "$_pid" 2>/dev/null || true
+    wait "$_pid" 2>/dev/null || true
 }
 
 cmd_deploy() {
