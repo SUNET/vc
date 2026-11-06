@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 // startRedisContainer spins up a throwaway Redis via testcontainers and
@@ -18,7 +16,7 @@ import (
 // Mirrors startMongoContainer's shape for this package's other backends.
 func startRedisContainer(t *testing.T) (redis.UniversalClient, func()) {
 	t.Helper()
-	return startRedisCompatibleContainer(t, "redis:7")
+	return testsupport.StartRESPContainer(t, "redis:7")
 }
 
 // startValkeyContainer spins up a throwaway Valkey (the open-source Redis
@@ -31,48 +29,7 @@ func startRedisContainer(t *testing.T) (redis.UniversalClient, func()) {
 // a protocol divergence.
 func startValkeyContainer(t *testing.T) (redis.UniversalClient, func()) {
 	t.Helper()
-	return startRedisCompatibleContainer(t, "valkey/valkey:8")
-}
-
-// startRedisCompatibleContainer spins up img (any RESP-protocol server
-// exposing the standard Redis port 6379) via testcontainers and returns a
-// connected redis.UniversalClient plus a cleanup function.
-func startRedisCompatibleContainer(t *testing.T, img string) (redis.UniversalClient, func()) {
-	t.Helper()
-	if !isDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-	ctx := t.Context()
-
-	container, err := tcredis.Run(ctx, img, testsupport.WithStartDeadline())
-	if err != nil {
-		t.Fatalf("start %s container: %v", img, err)
-	}
-
-	connStr, err := container.ConnectionString(ctx)
-	if err != nil {
-		_ = container.Terminate(context.Background())
-		t.Fatalf("%s connection string: %v", img, err)
-	}
-
-	opts, err := redis.ParseURL(connStr)
-	if err != nil {
-		_ = container.Terminate(context.Background())
-		t.Fatalf("parse %s url: %v", img, err)
-	}
-	client := redis.NewClient(opts)
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
-		_ = container.Terminate(context.Background())
-		t.Fatalf("ping %s: %v", img, err)
-	}
-
-	cleanup := func() {
-		_ = client.Close()
-		_ = container.Terminate(context.Background())
-	}
-	return client, cleanup
+	return testsupport.StartRESPContainer(t, "valkey/valkey:8")
 }
 
 // Redis compile-time checks

@@ -1,5 +1,5 @@
 // Package sqltest provides shared Postgres/MariaDB testcontainer helpers,
-// pre-migrated and ready to use, for repository-level SQL store tests, plus
+// pre-migrated or unmigrated, for repository-level SQL store tests, plus
 // NewServiceForTest (service.go) - the shared "build cfg, call a db
 // package's New(), register Close on cleanup" harness every db.Service's
 // SQL contract test uses.
@@ -11,7 +11,6 @@
 package sqltest
 
 import (
-	"context"
 	"strconv"
 	"testing"
 
@@ -27,169 +26,134 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// containerHostPort resolves ctr's host and mapped port for portSpec (e.g.
-// "5432/tcp") as a (host, int port) pair, terminating ctr and failing the
-// test on any error - shared by every StartXxx/XxxConfig helper below, all
-// of which otherwise repeated this exact host/port/strconv.Atoi sequence.
-//
-// Terminate always uses context.Background(), not ctx: ctx is t.Context(),
-// which the testing package can cancel mid-call (e.g. on a test timeout),
-// and Terminate should reliably clean up the container regardless of why
-// this function is failing - matching every other cleanup path in this
-// package.
-func containerHostPort(t *testing.T, ctr testcontainers.Container, ctx context.Context, portSpec, label string) (string, int) {
+// runPostgres starts a throwaway postgres:16 container with the module's basic
+// wait strategies and terminates it when the test ends, failing the test on a
+// terminate error. It skips the test when Docker is not available and fails it
+// when the start fails. Every Postgres helper here starts through it.
+func runPostgres(t *testing.T) *postgres.PostgresContainer {
 	t.Helper()
+	if !testsupport.IsDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+	ctr, err := postgres.Run(t.Context(), "postgres:16", postgres.BasicWaitStrategies())
+	testcontainers.CleanupContainer(t, ctr)
+	if err != nil {
+		t.Fatalf("start postgres container: %v", err)
+	}
+	return ctr
+}
+
+// runMariaDB starts a throwaway mariadb:11 container with the module's wait
+// strategy and terminates it when the test ends, failing the test on a
+// terminate error. It skips the test when Docker is not available and fails it
+// when the start fails. Every MariaDB helper here starts through it.
+func runMariaDB(t *testing.T) *mariadb.MariaDBContainer {
+	t.Helper()
+	if !testsupport.IsDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+	ctr, err := mariadb.Run(t.Context(), "mariadb:11")
+	testcontainers.CleanupContainer(t, ctr)
+	if err != nil {
+		t.Fatalf("start mariadb container: %v", err)
+	}
+	return ctr
+}
+
+// containerHostPort returns ctr's host and the host port mapped to portSpec
+// (e.g. "5432/tcp"), failing the test on any error.
+func containerHostPort(t *testing.T, ctr testcontainers.Container, portSpec, label string) (string, int) {
+	t.Helper()
+	ctx := t.Context()
 	host, err := ctr.Host(ctx)
 	if err != nil {
-		_ = ctr.Terminate(context.Background())
 		t.Fatalf("%s host: %v", label, err)
 	}
 	port, err := ctr.MappedPort(ctx, portSpec)
 	if err != nil {
-		_ = ctr.Terminate(context.Background())
 		t.Fatalf("%s mapped port: %v", label, err)
 	}
 	portNum, err := strconv.Atoi(port.Port())
 	if err != nil {
-		_ = ctr.Terminate(context.Background())
 		t.Fatalf("%s port: %v", label, err)
 	}
 	return host, portNum
 }
 
-// StartPostgres spins up a throwaway, fully-migrated Postgres container and
-// returns a connected *sqlx.DB, its Dialect, and a cleanup function. Skips
-// the calling test if Docker is not available.
-//
-// The returned cleanup closure always terminates the container via
-// context.Background(), not the ctx used for setup: ctx is t.Context(),
-// which the testing package cancels once the test is done, and the whole
-// point of Terminate is to run reliably during teardown - a caller that
-// registers cleanup via t.Cleanup (rather than a bare defer) could
-// otherwise have it run against an already-canceled context and silently
-// fail to terminate, leaking the container.
-func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
+// openDB returns a pinged pool on connStr and closes it when the test ends,
+// before the container's termination. It fails the test on any error.
+func openDB(t *testing.T, dialect sqlstore.Dialect, connStr string) *sqlx.DB {
 	t.Helper()
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-	ctx := t.Context()
-
-	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies(), testsupport.WithStartDeadline())
+	db, err := sqlx.Open(dialect.DriverName(), connStr)
 	if err != nil {
-		t.Fatalf("start postgres container: %v", err)
+		t.Fatalf("open %s: %v", dialect.Name(), err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatalf("ping %s: %v", dialect.Name(), err)
+	}
+	return db
+}
 
-	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
+// OpenPostgres starts a container as runPostgres does and returns a connected,
+// unmigrated *sqlx.DB. The pool closes and the container terminates when the
+// test ends.
+func OpenPostgres(t *testing.T) *sqlx.DB {
+	t.Helper()
+	ctr := runPostgres(t)
+	connStr, err := ctr.ConnectionString(t.Context(), "sslmode=disable")
 	if err != nil {
-		_ = ctr.Terminate(context.Background())
 		t.Fatalf("postgres connection string: %v", err)
 	}
-
-	db, err := sqlx.Open(sqlstore.PostgresDialect.DriverName(), connStr)
-	if err != nil {
-		_ = ctr.Terminate(context.Background())
-		t.Fatalf("open postgres: %v", err)
-	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(context.Background())
-		t.Fatalf("ping postgres: %v", err)
-	}
-
-	if err := sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect, nil); err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(context.Background())
-		t.Fatalf("migrate postgres: %v", err)
-	}
-
-	cleanup := func() {
-		_ = db.Close()
-		_ = ctr.Terminate(context.Background())
-	}
-	return db, sqlstore.PostgresDialect, cleanup
+	return openDB(t, sqlstore.PostgresDialect, connStr)
 }
 
-// StartMariaDB spins up a throwaway, fully-migrated MariaDB container and
-// returns a connected *sqlx.DB, its Dialect, and a cleanup function. Skips
-// the calling test if Docker is not available.
-func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
+// OpenMariaDB starts a container as runMariaDB does and returns a connected,
+// unmigrated *sqlx.DB plus the config sqlstore.ApplySchema needs to migrate it.
+// The pool closes and the container terminates when the test ends.
+//
+// The pool has parseTime=true and lacks multiStatements: ApplySchema opens its
+// own migration connection with that enabled (see MariaDBConfig.MigrationDSN).
+func OpenMariaDB(t *testing.T) (*sqlx.DB, *sqlstore.SQL) {
 	t.Helper()
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-	ctx := t.Context()
-
-	ctr, err := mariadb.Run(ctx, "mariadb:11", testsupport.WithStartDeadline())
+	ctr := runMariaDB(t)
+	connStr, err := ctr.ConnectionString(t.Context(), "parseTime=true")
 	if err != nil {
-		t.Fatalf("start mariadb container: %v", err)
-	}
-
-	// Deliberately NOT multiStatements=true here: ApplySchema now opens its
-	// own dedicated migration connection with that enabled (see
-	// MariaDBConfig.MigrationDSN) rather than needing it on the
-	// application's own pool.
-	connStr, err := ctr.ConnectionString(ctx, "parseTime=true")
-	if err != nil {
-		_ = ctr.Terminate(context.Background())
 		t.Fatalf("mariadb connection string: %v", err)
 	}
-
-	db, err := sqlx.Open(sqlstore.MariaDBDialect.DriverName(), connStr)
-	if err != nil {
-		_ = ctr.Terminate(context.Background())
-		t.Fatalf("open mariadb: %v", err)
-	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(context.Background())
-		t.Fatalf("ping mariadb: %v", err)
-	}
-
-	host, portNum := containerHostPort(t, ctr, ctx, "3306/tcp", "mariadb")
-	cfg := &sqlstore.SQL{
-		Backend: "mariadb",
-		MariaDB: &sqlstore.MariaDBConfig{
-			Host:     host,
-			Port:     portNum,
-			User:     "test",
-			Password: "test",
-			Database: "test",
-		},
-	}
-
-	if err := sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect, cfg); err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(context.Background())
-		t.Fatalf("migrate mariadb: %v", err)
-	}
-
-	cleanup := func() {
-		_ = db.Close()
-		_ = ctr.Terminate(context.Background())
-	}
-	return db, sqlstore.MariaDBDialect, cleanup
+	db := openDB(t, sqlstore.MariaDBDialect, connStr)
+	return db, &sqlstore.SQL{Backend: "mariadb", MariaDB: mariaDBConfig(t, ctr)}
 }
 
-// PostgresConfig spins up a throwaway, unmigrated Postgres container and
-// returns a *sqlstore.PostgresConfig pointing at it (for exercising the real
-// sqlstore.Connect/db.New code path, as opposed to StartPostgres's
-// already-opened *sqlx.DB) and a cleanup function.
-func PostgresConfig(t *testing.T) (*sqlstore.PostgresConfig, func()) {
+// StartPostgres returns a connected, fully-migrated *sqlx.DB and its Dialect,
+// on a container started as OpenPostgres does.
+func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect) {
 	t.Helper()
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
+	db := OpenPostgres(t)
+	if err := sqlstore.ApplySchema(t.Context(), db, sqlstore.PostgresDialect, nil); err != nil {
+		t.Fatalf("migrate postgres: %v", err)
 	}
-	ctx := t.Context()
+	return db, sqlstore.PostgresDialect
+}
 
-	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies(), testsupport.WithStartDeadline())
-	if err != nil {
-		t.Fatalf("start postgres container: %v", err)
+// StartMariaDB returns a connected, fully-migrated *sqlx.DB and its Dialect,
+// on a container started as OpenMariaDB does.
+func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect) {
+	t.Helper()
+	db, cfg := OpenMariaDB(t)
+	if err := sqlstore.ApplySchema(t.Context(), db, sqlstore.MariaDBDialect, cfg); err != nil {
+		t.Fatalf("migrate mariadb: %v", err)
 	}
+	return db, sqlstore.MariaDBDialect
+}
 
-	host, portNum := containerHostPort(t, ctr, ctx, "5432/tcp", "postgres")
-
-	cfg := &sqlstore.PostgresConfig{
+// PostgresConfig starts a container as runPostgres does and returns a
+// *sqlstore.PostgresConfig pointing at it, unmigrated, for exercising the real
+// sqlstore.Connect/db.New code path. The container terminates when the test ends.
+func PostgresConfig(t *testing.T) *sqlstore.PostgresConfig {
+	t.Helper()
+	host, portNum := containerHostPort(t, runPostgres(t), "5432/tcp", "postgres")
+	return &sqlstore.PostgresConfig{
 		Host:         host,
 		Port:         portNum,
 		User:         "postgres",
@@ -199,28 +163,21 @@ func PostgresConfig(t *testing.T) (*sqlstore.PostgresConfig, func()) {
 		MaxOpenConns: 5,
 		MaxIdleConns: 2,
 	}
-	return cfg, func() { _ = ctr.Terminate(context.Background()) }
 }
 
-// MariaDBConfig spins up a throwaway, unmigrated MariaDB container and
-// returns a *sqlstore.MariaDBConfig pointing at it (for exercising the real
-// sqlstore.Connect/db.New code path, as opposed to StartMariaDB's
-// already-opened *sqlx.DB) and a cleanup function.
-func MariaDBConfig(t *testing.T) (*sqlstore.MariaDBConfig, func()) {
+// MariaDBConfig starts a container as runMariaDB does and returns a
+// *sqlstore.MariaDBConfig pointing at it, unmigrated, for exercising the real
+// sqlstore.Connect/db.New code path. The container terminates when the test ends.
+func MariaDBConfig(t *testing.T) *sqlstore.MariaDBConfig {
 	t.Helper()
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-	ctx := t.Context()
+	return mariaDBConfig(t, runMariaDB(t))
+}
 
-	ctr, err := mariadb.Run(ctx, "mariadb:11", testsupport.WithStartDeadline())
-	if err != nil {
-		t.Fatalf("start mariadb container: %v", err)
-	}
-
-	host, portNum := containerHostPort(t, ctr, ctx, "3306/tcp", "mariadb")
-
-	cfg := &sqlstore.MariaDBConfig{
+// mariaDBConfig returns the *sqlstore.MariaDBConfig for ctr's module defaults.
+func mariaDBConfig(t *testing.T, ctr *mariadb.MariaDBContainer) *sqlstore.MariaDBConfig {
+	t.Helper()
+	host, portNum := containerHostPort(t, ctr, "3306/tcp", "mariadb")
+	return &sqlstore.MariaDBConfig{
 		Host:         host,
 		Port:         portNum,
 		User:         "test",
@@ -229,5 +186,4 @@ func MariaDBConfig(t *testing.T) (*sqlstore.MariaDBConfig, func()) {
 		MaxOpenConns: 5,
 		MaxIdleConns: 2,
 	}
-	return cfg, func() { _ = ctr.Terminate(context.Background()) }
 }
