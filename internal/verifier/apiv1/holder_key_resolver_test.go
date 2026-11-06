@@ -20,6 +20,19 @@ func (s *trustStub) ResolveKey(_ context.Context, vm string) (crypto.PublicKey, 
 	return nil, errors.New("resolution denied: no registry returned positive match")
 }
 
+// relationshipStub is a trust resolver that reports verification relationships.
+type relationshipStub struct {
+	trustStub
+	key           crypto.PublicKey
+	relationships []string
+}
+
+func (s *relationshipStub) ResolveKeyFor(_ context.Context, vm, relationship string) (crypto.PublicKey, error) {
+	s.calls = append(s.calls, vm)
+	s.relationships = append(s.relationships, relationship)
+	return s.key, nil
+}
+
 // TestHolderKeyResolver: a holder's did:key is read from the identifier and
 // never sent to the trust service; any other method still goes there.
 func TestHolderKeyResolver(t *testing.T) {
@@ -40,5 +53,20 @@ func TestHolderKeyResolver(t *testing.T) {
 
 	_, err = r.ResolveKey(t.Context(), "did:web:example.com#key-1")
 	require.Error(t, err)
-	assert.Equal(t, []string{"did:web:example.com#key-1"}, stub.calls, "other methods keep going to the trust service")
+	assert.Empty(t, stub.calls, "a resolver that cannot report relationships is not asked for a holder key")
+	assert.Contains(t, err.Error(), "verification relationships")
+}
+
+// TestHolderKeyResolverAsksForAuthentication: any other method goes to the trust
+// resolver as an authentication method, so a key the DID document lists without that
+// authorization is not a holder's.
+func TestHolderKeyResolverAsksForAuthentication(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	stub := &relationshipStub{key: pub}
+
+	got, err := newHolderKeyResolver(stub).ResolveKey(t.Context(), "did:web:example.com#key-1")
+	require.NoError(t, err)
+	assert.Equal(t, pub, got)
+	assert.Equal(t, []string{"authentication"}, stub.relationships)
 }

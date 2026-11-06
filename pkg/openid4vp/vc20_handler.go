@@ -867,10 +867,23 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 	// the presentation's own "holder" member, which the presenter writes. A
 	// presenter who signs with one key and names another as holder is refused.
 	signer := didOf(vm)
-	if claimed, _ := vpMap["holder"].(string); claimed != "" && didOf(claimed) != signer {
+	if claimed := holderIDOf(vpMap["holder"]); claimed != "" && didOf(claimed) != signer {
 		return "", fmt.Errorf("presentation names holder %q but is signed by %q", claimed, signer)
 	}
 	return signer, nil
+}
+
+// holderIDOf is the identifier a presentation's holder member names: the string itself,
+// or the "id" of the object form.
+func holderIDOf(holder any) string {
+	switch h := holder.(type) {
+	case string:
+		return h
+	case map[string]any:
+		id, _ := h["id"].(string)
+		return id
+	}
+	return ""
 }
 
 // didOf is a verification method or DID URL without its fragment.

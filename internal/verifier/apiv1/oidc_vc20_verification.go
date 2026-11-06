@@ -415,7 +415,9 @@ func (c *Client) oidcScopeFor(session *cache.AuthorizationContext, queryID strin
 // did:key or did:jwk holds its key in the identifier, so it is read from there:
 // the question for a holder is whether this key signed the exchange, which the
 // signature settles, and no trust registry lists a holder. Every other method
-// goes to the trust-backed resolver, as before. The issuer's key never comes
+// goes to the trust-backed resolver, which has to confirm that the DID document
+// authorizes the method for authentication and names the DID as its controller;
+// a resolver that cannot confirm that is refused. The issuer's key never comes
 // through here: it is always the trust resolver's.
 type holderKeyResolver struct {
 	local    openid4vp.VC20KeyResolver
@@ -433,5 +435,9 @@ func (r *holderKeyResolver) ResolveKey(ctx context.Context, verificationMethod s
 	if strings.HasPrefix(verificationMethod, "did:key:") || strings.HasPrefix(verificationMethod, "did:jwk:") {
 		return r.local.ResolveKey(ctx, verificationMethod)
 	}
-	return r.fallback.ResolveKey(ctx, verificationMethod)
+	resolver, ok := r.fallback.(trust.RelationshipKeyResolver)
+	if !ok {
+		return nil, fmt.Errorf("cannot confirm that %s may authenticate: the trust resolver does not report verification relationships", verificationMethod)
+	}
+	return resolver.ResolveKeyFor(ctx, verificationMethod, trust.RelationshipAuthentication)
 }

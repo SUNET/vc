@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
+	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,6 +80,70 @@ func TestPresentationProofReturnsTheSigner(t *testing.T) {
 		var m map[string]any
 		require.NoError(t, json.Unmarshal(vp, &m))
 		return vp, m
+	}
+	h := &VC20Handler{
+		keyResolver:          denyingResolver{},
+		holderKeyResolver:    fixedResolver{&holderKey.PublicKey},
+		requireHolderBinding: true,
+		expectedChallenge:    "nonce",
+		expectedDomain:       "verifier",
+	}
+
+	t.Run("signed by the holder it names", func(t *testing.T) {
+		vp, m := build(signer)
+		got, err := h.verifyPresentationProof(t.Context(), vp, m)
+		require.NoError(t, err)
+		assert.Equal(t, signer, got)
+	})
+
+	t.Run("names another holder than the signer", func(t *testing.T) {
+		vp, m := build("did:key:z6MkBob")
+		_, err := h.verifyPresentationProof(t.Context(), vp, m)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "names holder")
+	})
+}
+
+func TestHolderIDOf(t *testing.T) {
+	assert.Equal(t, "did:key:z6MkAlice", holderIDOf("did:key:z6MkAlice"))
+	assert.Equal(t, "did:key:z6MkAlice", holderIDOf(map[string]any{"id": "did:key:z6MkAlice", "name": "Alice"}))
+	assert.Empty(t, holderIDOf(map[string]any{"name": "Alice"}))
+	assert.Empty(t, holderIDOf(map[string]any{"id": 7}))
+	assert.Empty(t, holderIDOf(nil))
+}
+
+// TestPresentationWithObjectHolder: a holder written as {"id": ...} is held to the signer
+// the same as the string form.
+func TestPresentationWithObjectHolder(t *testing.T) {
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	const signer = "did:key:z6MkAlice"
+
+	build := func(holderID string) ([]byte, map[string]any) {
+		var embedded any
+		require.NoError(t, json.Unmarshal(signedTestCredential(t, issuerKey), &embedded))
+		raw, err := json.Marshal(map[string]any{
+			"@context":             "https://www.w3.org/ns/credentials/v2",
+			"id":                   "urn:uuid:object-holder",
+			"type":                 "VerifiablePresentation",
+			"holder":               map[string]any{"id": holderID},
+			"verifiableCredential": []any{embedded},
+		})
+		require.NoError(t, err)
+		vp, err := credential.NewRDFCredentialFromJSON(raw, nil)
+		require.NoError(t, err)
+		signed, err := ecdsaSuite.NewSuite().Sign(t.Context(), vp, holderKey, &ecdsaSuite.SignOptions{
+			VerificationMethod: signer + "#key-1", ProofPurpose: "authentication",
+			Challenge: "nonce", Domain: "verifier", Created: time.Now().UTC(),
+		})
+		require.NoError(t, err)
+		out, err := signed.ToCompactJSON()
+		require.NoError(t, err)
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(out, &m))
+		return out, m
 	}
 	h := &VC20Handler{
 		keyResolver:          denyingResolver{},

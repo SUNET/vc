@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -960,5 +961,78 @@ func TestExtractKeyFromMetadata_PublicKeyMultibase(t *testing.T) {
 
 	if _, err := extractKeyFromMetadata(meta, did+"#absent"); err == nil {
 		t.Fatal("a verification method that is not in the document must not resolve")
+	}
+}
+
+func didDocument(did string, vms []any, rest map[string]any) map[string]any {
+	doc := map[string]any{"id": did, "verificationMethod": vms}
+	for k, v := range rest {
+		doc[k] = v
+	}
+	return doc
+}
+
+// TestExtractKeyForRelationship: a method is the DID's to authenticate as only when the
+// document lists it under the relationship and names the DID as its controller.
+func TestExtractKeyForRelationship(t *testing.T) {
+	const did = "did:web:holder.example"
+	const vmID = did + "#key-1"
+	method := func(controller string) map[string]any {
+		return map[string]any{"id": vmID, "type": "Multikey", "controller": controller, "publicKeyMultibase": "zDnaeuGVUZ13VTEkfg6jB79b2gMLSiXBrAF7kGSP3Dnffm4it"}
+	}
+
+	for name, tc := range map[string]struct {
+		doc     map[string]any
+		vm      string
+		wantErr string
+	}{
+		"authorized by reference": {
+			doc: didDocument(did, []any{method(did)}, map[string]any{"authentication": []any{vmID}}),
+			vm:  vmID,
+		},
+		"authorized by relative reference": {
+			doc: didDocument(did, []any{method(did)}, map[string]any{"authentication": []any{"#key-1"}}),
+			vm:  vmID,
+		},
+		"authorized by embedding": {
+			doc: didDocument(did, nil, map[string]any{"authentication": []any{method(did)}}),
+			vm:  vmID,
+		},
+		"listed but not authorized for authentication": {
+			doc:     didDocument(did, []any{method(did)}, map[string]any{"assertionMethod": []any{vmID}}),
+			vm:      vmID,
+			wantErr: "not authorized for authentication",
+		},
+		"authorized but controlled by another DID": {
+			doc:     didDocument(did, []any{method("did:web:other.example")}, map[string]any{"authentication": []any{vmID}}),
+			vm:      vmID,
+			wantErr: "controlled by",
+		},
+		"authorized but absent from the document": {
+			doc:     didDocument(did, nil, map[string]any{"authentication": []any{vmID}}),
+			vm:      vmID,
+			wantErr: "not found",
+		},
+		"a document for another DID": {
+			doc:     didDocument("did:web:other.example", []any{method(did)}, map[string]any{"authentication": []any{vmID}}),
+			vm:      vmID,
+			wantErr: "DID document is for",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			k, err := extractKeyForRelationship(tc.doc, tc.vm, "authentication")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := k.(*ecdsa.PublicKey); !ok {
+				t.Fatalf("got %T, want *ecdsa.PublicKey", k)
+			}
+		})
 	}
 }

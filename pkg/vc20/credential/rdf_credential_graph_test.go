@@ -120,3 +120,83 @@ func TestCredentialGraphsHoldTheirOwnDescriptions(t *testing.T) {
 		t.Errorf("the presentation's own description of its holder belongs to the default graph, found %d:\n%s", holderNameInDefaultGraph, nquads)
 	}
 }
+
+func namedGraphCount(t *testing.T, doc string) int {
+	t.Helper()
+	cred, err := NewRDFCredentialFromJSON([]byte(doc), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
+		t.Fatal(err)
+	}
+	return len(cred.dataset.Graphs) - 1
+}
+
+// TestNormalizeFollowsTheActiveContext: the credential term is found by what it means, not
+// by how the document spells it.
+func TestNormalizeFollowsTheActiveContext(t *testing.T) {
+	const embedded = `{"@context":"https://www.w3.org/ns/credentials/v2","type":"VerifiableCredential","issuer":"did:example:i","credentialSubject":{"id":"did:example:s"}}`
+	plain := `{"@context":"https://www.w3.org/ns/credentials/v2","type":"VerifiablePresentation","verifiableCredential":` + embedded + `}`
+	aliased := `{"@context":["https://www.w3.org/ns/credentials/v2",{"vcs":{"@id":"https://www.w3.org/2018/credentials#verifiableCredential","@type":"@id","@container":"@graph","@context":null}}],"type":"VerifiablePresentation","vcs":` + embedded + `}`
+
+	if got := namedGraphCount(t, plain); got != 1 {
+		t.Fatalf("plain term: want 1 named graph, got %d", got)
+	}
+	if got := namedGraphCount(t, aliased); got != 1 {
+		t.Errorf("aliased term: want 1 named graph, got %d", got)
+	}
+}
+
+// TestNormalizeLeavesJSONLiteralsAlone: a JSON literal that happens to hold a
+// verifiableCredential property is signed data, not a credential.
+func TestNormalizeLeavesJSONLiteralsAlone(t *testing.T) {
+	doc := `{"@context":"https://www.w3.org/ns/credentials/v2","type":"VerifiableCredential","issuer":"did:example:i",
+	"credentialSubject":{"id":"did:example:s"},
+	"credentialSchema":{"id":"https://example.org/schema","type":"JsonSchema","jsonSchema":{"properties":{"verifiableCredential":{"type":"object","id":"urn:x"}}}}}`
+	cred, err := NewRDFCredentialFromJSON([]byte(doc), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := cred.NQuads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := cred.NQuads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Errorf("a JSON literal was rewritten:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// TestNormalizeLeavesAppliedContainersAlone: the VC v1 context makes json-gold put the
+// credential in its graph itself, so wrapping it again would change the dataset.
+func TestNormalizeLeavesAppliedContainersAlone(t *testing.T) {
+	doc := `{"@context":"https://www.w3.org/2018/credentials/v1","type":"VerifiablePresentation","verifiableCredential":{"@context":"https://www.w3.org/2018/credentials/v1","type":"VerifiableCredential","issuer":"did:example:i","credentialSubject":{"id":"did:example:s"}}}`
+	cred, err := NewRDFCredentialFromJSON([]byte(doc), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := cred.NQuads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := cred.NQuads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Errorf("a v1 presentation changed:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if got := len(cred.dataset.Graphs) - 1; got != 1 {
+		t.Errorf("want 1 named graph, got %d", got)
+	}
+}
