@@ -2,6 +2,8 @@ package db
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -100,6 +102,88 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 	conflictAt(t, accept(UniqueCommitment{key, first}), 0, "a refused reset leaves the commitment on record")
 	assert.NoError(t, store.Reset(ctx, key, UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "Case-1", At: now}),
 		"evidence references that differ in case are distinct")
+
+	// Of two accepts that share a fresh row, the second runs while the first
+	// stores its other commitment. The row outlasts them when either succeeds.
+	held := keyOf("a held person")
+	require.NoError(t, accept(UniqueCommitment{held, second}))
+	for i, tc := range []struct{ firstFails, secondFails, stays bool }{
+		{firstFails: true, secondFails: true},
+		{firstFails: true, stays: true},
+		{secondFails: true, stays: true},
+	} {
+		shared := keyOf(fmt.Sprintf("a person two accepts share %d", i))
+		other := func(call string, fails bool) UniqueCommitment {
+			if fails {
+				return UniqueCommitment{held, first}
+			}
+			return UniqueCommitment{keyOf(fmt.Sprintf("a person of the %s call %d", call, i)), first}
+		}
+		outcome := func(t *testing.T, fails bool, err error) {
+			t.Helper()
+			if fails {
+				conflictAt(t, err, 1, "the other commitment conflicts")
+				return
+			}
+			assert.NoError(t, err)
+		}
+		firstOther := other("first", tc.firstFails)
+		during := func() {
+			outcome(t, tc.secondFails, store.Accept(ctx, []UniqueCommitment{{shared, first}, other("second", tc.secondFails)}, now))
+		}
+		outcome(t, tc.firstFails, interleaved(t, store, firstOther.Key, during).Accept(ctx, []UniqueCommitment{{shared, first}, firstOther}, now))
+		_, err = store.Find(ctx, shared)
+		if tc.stays {
+			assert.NoError(t, err, "the row stays when an accept succeeded: %+v", tc)
+		} else {
+			assert.ErrorIs(t, err, ErrNoDocuments, "two refused accepts leave nothing")
+		}
+	}
+
+	// A reset that lost to a reset under the same evidence reference leaves
+	// the approval that reset relies on.
+	contested := keyOf("a contested person")
+	require.NoError(t, accept(UniqueCommitment{contested, first}))
+	sameRef := UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "case-contested", At: now}
+	during := func() { assert.NoError(t, store.Reset(ctx, contested, sameRef), "the reset that runs first succeeds") }
+	assert.ErrorIs(t, interleaved(t, store, contested, during).Reset(ctx, contested, sameRef), ErrNoDocuments, "the other found the commitment gone")
+	k, err := storedKeyOf(contested)
+	require.NoError(t, err)
+	_, err = store.backend.resetPrevious(ctx, k, sameRef.EvidenceRef)
+	assert.NoError(t, err, "the approval of the reset that succeeded stays")
+}
+
+// interleavedBackend runs during once, before the first insert or delete of
+// a commitment on key.
+type interleavedBackend struct {
+	uniqueCommitmentBackend
+	key    storedKey
+	during func()
+}
+
+func (b *interleavedBackend) interleave(key storedKey) {
+	if during := b.during; during != nil && key == b.key {
+		b.during = nil
+		during()
+	}
+}
+
+func (b *interleavedBackend) insertCommitment(ctx context.Context, row uniqueCommitmentRow) error {
+	b.interleave(row.key())
+	return b.uniqueCommitmentBackend.insertCommitment(ctx, row)
+}
+
+func (b *interleavedBackend) deleteCommitment(ctx context.Context, key storedKey, commitment string) (bool, error) {
+	b.interleave(key)
+	return b.uniqueCommitmentBackend.deleteCommitment(ctx, key, commitment)
+}
+
+// interleaved is store with during run at the first write to key.
+func interleaved(t *testing.T, store *UniqueCommitments, key UniqueCommitmentKey, during func()) *UniqueCommitments {
+	t.Helper()
+	k, err := storedKeyOf(key)
+	require.NoError(t, err)
+	return &UniqueCommitments{Service: store.Service, backend: &interleavedBackend{uniqueCommitmentBackend: store.backend, key: k, during: during}}
 }
 
 func TestUniqueCommitmentColl_Mongo(t *testing.T) {

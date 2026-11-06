@@ -62,18 +62,24 @@ func (m *mongoUniqueCommitments) keepCommitment(ctx context.Context, key storedK
 	return err
 }
 
+func (m *mongoUniqueCommitments) takeOverCommitment(ctx context.Context, key storedKey, commitment, call string) error {
+	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "commitment": commitment, "releasable_by": bson.M{"$ne": ""}}
+	_, err := m.records.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"releasable_by": call}})
+	return err
+}
+
 func (m *mongoUniqueCommitments) releaseCommitment(ctx context.Context, key storedKey, call string) error {
 	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "releasable_by": call}
 	_, err := m.records.DeleteOne(ctx, filter)
 	return err
 }
 
-func (m *mongoUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error) {
+func (m *mongoUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) error {
 	_, err := m.resets.InsertOne(ctx, row)
 	if mongo.IsDuplicateKeyError(err) {
-		return false, nil
+		return nil
 	}
-	return err == nil, err
+	return err
 }
 
 func (m *mongoUniqueCommitments) resetPrevious(ctx context.Context, key storedKey, evidenceRef string) (string, error) {
@@ -92,16 +98,4 @@ func (m *mongoUniqueCommitments) deleteCommitment(ctx context.Context, key store
 		return false, err
 	}
 	return result.DeletedCount > 0, nil
-}
-
-func (m *mongoUniqueCommitments) deleteReset(ctx context.Context, key storedKey, evidenceRef string) error {
-	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "evidence_ref": evidenceRef}
-	result, err := m.resets.DeleteOne(ctx, filter)
-	if err != nil {
-		return err
-	}
-	if result.DeletedCount == 0 {
-		return errResetRowGone
-	}
-	return nil
 }

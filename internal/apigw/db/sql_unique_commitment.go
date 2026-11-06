@@ -46,17 +46,23 @@ func (s *sqlUniqueCommitments) keepCommitment(ctx context.Context, key storedKey
 	return err
 }
 
+func (s *sqlUniqueCommitments) takeOverCommitment(ctx context.Context, key storedKey, commitment, call string) error {
+	query := s.dialect.Rebind(`UPDATE unique_commitments SET releasable_by = ? WHERE scope = ? AND path = ? AND key_hash = ? AND commitment = ? AND releasable_by <> ''`)
+	_, err := s.db.ExecContext(ctx, query, call, key.Scope, key.Path, key.KeyHash, commitment)
+	return err
+}
+
 func (s *sqlUniqueCommitments) releaseCommitment(ctx context.Context, key storedKey, call string) error {
 	query := s.dialect.Rebind(`DELETE FROM unique_commitments WHERE scope = ? AND path = ? AND key_hash = ? AND releasable_by = ?`)
 	_, err := s.db.ExecContext(ctx, query, key.Scope, key.Path, key.KeyHash, call)
 	return err
 }
 
-func (s *sqlUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) (bool, error) {
+func (s *sqlUniqueCommitments) insertReset(ctx context.Context, row uniqueCommitmentResetRow) error {
 	query := s.dialect.Rebind(`INSERT INTO unique_commitment_resets (scope, path, key_hash, evidence_ref, previous_commitment_sha256, approved_by, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?) ` +
 		s.dialect.UpsertClause([]string{"scope", "path", "key_hash", "evidence_ref"}, nil))
-	n, err := affectedRows(s.db.ExecContext(ctx, query, row.Scope, row.Path, row.KeyHash, row.EvidenceRef, row.PreviousSHA256, row.ApprovedBy, row.ApprovedAt))
-	return n > 0, err
+	_, err := s.db.ExecContext(ctx, query, row.Scope, row.Path, row.KeyHash, row.EvidenceRef, row.PreviousSHA256, row.ApprovedBy, row.ApprovedAt)
+	return err
 }
 
 func (s *sqlUniqueCommitments) resetPrevious(ctx context.Context, key storedKey, evidenceRef string) (string, error) {
@@ -72,20 +78,7 @@ func (s *sqlUniqueCommitments) deleteCommitment(ctx context.Context, key storedK
 	return n > 0, err
 }
 
-func (s *sqlUniqueCommitments) deleteReset(ctx context.Context, key storedKey, evidenceRef string) error {
-	query := s.dialect.Rebind(`DELETE FROM unique_commitment_resets WHERE scope = ? AND path = ? AND key_hash = ? AND evidence_ref = ?`)
-	n, err := affectedRows(s.db.ExecContext(ctx, query, key.Scope, key.Path, key.KeyHash, evidenceRef))
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return errResetRowGone
-	}
-	return nil
-}
-
-// affectedRows returns the rows a statement changed. A MariaDB upsert that
-// finds its row counts 0: the connection leaves CLIENT_FOUND_ROWS off.
+// affectedRows returns the rows a statement changed.
 func affectedRows(result sql.Result, err error) (int64, error) {
 	if err != nil {
 		return 0, err
