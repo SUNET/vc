@@ -48,7 +48,7 @@ func normalizeResourcePairs(c *gin.Context, pairs []resourcePair) []resourcePair
 	if strings.Contains(c.FullPath(), "/identity/mapping") {
 		for i := range pairs {
 			if pairs[i].authenticSource != "" && pairs[i].scope == "" {
-				pairs[i].scope = "identity_mapping"
+				pairs[i].scope = IdentityMappingScope
 			}
 		}
 	}

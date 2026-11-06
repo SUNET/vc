@@ -1281,8 +1281,9 @@ func checkPreAuthOfferExposure(cfg *model.Cfg, serviceName string) error {
 	// admin_subject "anonymous" to anybody who asks, and SessionOrAPIAuth
 	// accepts a session INSTEAD of falling through to the Bearer
 	// middleware. So a deployment with jwks enabled and the admin UI on
-	// still exposes minting to an anonymous caller, and the JWKS
-	// configuration says nothing about it.
+	// still exposes minting to an anonymous caller, unless SPOCP rules
+	// exist and none accepts that subject. The JWKS configuration says
+	// nothing about it.
 	if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
 		return fmt.Errorf(
 			"apigw.data_sources.datastore.scopes sets allow_preauth_offer on login-gated %s "+
@@ -1364,7 +1365,8 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 		// SessionOrAPIAuth accepts a session INSTEAD of falling through
 		// to the Bearer middleware. So a deployment with jwks enabled and
 		// the admin UI on still exposes preparation to an anonymous
-		// caller, and the JWKS configuration says nothing about it.
+		// caller, unless SPOCP rules exist and none accepts that subject.
+		// The JWKS configuration says nothing about it.
 		if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
 			return errors.New(
 				"apigw.delivery.interactive_authorization.enable is true with apigw.admin_ui_enable " +

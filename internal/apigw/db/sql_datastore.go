@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sqlstore"
 
@@ -440,39 +440,57 @@ type sqlWhere struct {
 	args       []any
 }
 
-// selectWithinAllowed adds the condition on column: the selected value when
-// there is one, otherwise the allowed list when it is not empty. It returns
-// false when the selected value lies outside a non-empty allowed list, which
+// selected adds the equality condition of a selected value.
+func (w *sqlWhere) selected(dialect sqlstore.Dialect, column, value string) {
+	if value != "" {
+		w.conditions = append(w.conditions, dialect.ExactEquals(column))
+		w.args = append(w.args, value)
+	}
+}
+
+// withinReach adds the pair condition of reach. It returns false when reach
 // matches no document.
-func (w *sqlWhere) selectWithinAllowed(column, selected string, allowed []string) bool {
-	if selected != "" {
-		if len(allowed) > 0 && !slices.Contains(allowed, selected) {
-			return false
-		}
-		w.conditions = append(w.conditions, column+" = ?")
-		w.args = append(w.args, selected)
+func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach httphelpers.ResourceReach, sourceColumn, scopeColumn string) bool {
+	if reach.Everything() {
 		return true
 	}
-	if len(allowed) > 0 {
-		for _, value := range allowed {
+	pairs := reach.Pairs()
+	if len(pairs) == 0 {
+		return false
+	}
+	anyPair := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		var clause []string
+		if value, exact := pair.AuthenticSource.Exact(); exact {
+			clause = append(clause, dialect.ExactEquals(sourceColumn))
 			w.args = append(w.args, value)
 		}
-		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(allowed)), ", ")
-		w.conditions = append(w.conditions, fmt.Sprintf("%s IN (%s)", column, placeholders))
+		if value, exact := pair.Scope.Exact(); exact {
+			clause = append(clause, dialect.ExactEquals(scopeColumn))
+			w.args = append(w.args, value)
+		}
+		anyPair = append(anyPair, "("+strings.Join(clause, " AND ")+")")
 	}
+	w.conditions = append(w.conditions, "("+strings.Join(anyPair, " OR ")+")")
 	return true
 }
 
+// datastoreWhere adds the conditions of the selected values and the reach.
+func (c *SQLDatastoreColl) datastoreWhere(where *sqlWhere, source, scope string, reach httphelpers.ResourceReach) bool {
+	where.selected(c.dialect, "d.authentic_source", source)
+	where.selected(c.dialect, "d.scope", scope)
+	return where.withinReach(c.dialect, reach, "d.authentic_source", "d.scope")
+}
+
 // List returns matching document metadata, filtered by identity mapping and
-// optionally authentic_source/scope, within the allowed lists.
+// optionally authentic_source/scope, within the reach.
 func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error) {
 	if err := helpers.Check(ctx, c.Service.cfg, query, c.Service.log); err != nil {
 		return nil, err
 	}
 
 	where := sqlWhere{conditions: []string{"m.identity_mapping_id = ?"}, args: []any{query.IdentityMappingID}}
-	if !where.selectWithinAllowed("d.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
-		!where.selectWithinAllowed("d.scope", query.Scope, query.AllowedScopes) {
+	if !c.datastoreWhere(&where, query.AuthenticSource, query.Scope, query.Reach) {
 		return []*model.DocumentList{}, nil
 	}
 
@@ -605,8 +623,7 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 	defer span.End()
 
 	where := sqlWhere{}
-	if !where.selectWithinAllowed("d.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
-		!where.selectWithinAllowed("d.scope", query.Scope, query.AllowedScopes) {
+	if !c.datastoreWhere(&where, query.AuthenticSource, query.Scope, query.Reach) {
 		return []*model.CompleteDocument{}, nil
 	}
 	conditions, args := where.conditions, where.args

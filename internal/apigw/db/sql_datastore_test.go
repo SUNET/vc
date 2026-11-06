@@ -1,9 +1,11 @@
 package db
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 
@@ -73,7 +75,7 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	assert.Equal(t, "doc-1", byIdentity["SUNET"].Meta.DocumentID)
 
 	// List
-	listed, err := store.List(ctx, &ListQuery{IdentityMappingID: "identity-2"})
+	listed, err := store.List(ctx, &ListQuery{IdentityMappingID: "identity-2", Reach: httphelpers.ReachEverything()})
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 	assert.Equal(t, "doc-1", listed[0].Meta.DocumentID)
@@ -100,20 +102,15 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	assert.Equal(t, []string{"OTHER", "SUNET"}, sources)
 
 	// Search by free text across document_data.
-	results, err := store.Search(ctx, &SearchDocumentsQuery{Search: "Karlsson"})
+	results, err := store.Search(ctx, &SearchDocumentsQuery{Search: "Karlsson", Reach: httphelpers.ReachEverything()})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "doc-2", results[0].Meta.DocumentID)
 
 	// Search by authentic_source filter.
-	results, err = store.Search(ctx, &SearchDocumentsQuery{AuthenticSource: "OTHER"})
+	results, err = store.Search(ctx, &SearchDocumentsQuery{AuthenticSource: "OTHER", Reach: httphelpers.ReachEverything()})
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
-
-	// Search respecting AllowedAuthenticSources restriction.
-	results, err = store.Search(ctx, &SearchDocumentsQuery{AuthenticSource: "SUNET", AllowedAuthenticSources: []string{"OTHER"}})
-	require.NoError(t, err)
-	assert.Empty(t, results)
 
 	// Replace
 	replaced := mkDoc("SUNET", "pid", "doc-1", []string{"identity-9"}, map[string]any{"family_name": "Replaced"})
@@ -158,73 +155,108 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 
-	testDatastoreAllowedListsContract(t, store)
+	testDatastoreReachContract(t, store)
 }
 
-// testDatastoreAllowedListsContract states, for one stored fixture, which
-// documents an authorization restriction leaves visible through List and Search.
-func testDatastoreAllowedListsContract(t *testing.T, store DatastoreStore) {
+// testDatastoreReachContract holds the guarantee of the pair filter on one store:
+// a document comes back only when the engine allows its source and scope. The
+// fixture separates a value from its case and trailing-space variants, which a
+// MariaDB collation folds together in a plain "=".
+func testDatastoreReachContract(t *testing.T, store DatastoreStore) {
 	t.Helper()
 	ctx := t.Context()
 
-	const identity = "allowed-lists-identity"
-	require.NoError(t, store.SaveMany(ctx, []*model.CompleteDocument{
-		mkDoc("A", "pid", "A-pid", []string{identity}, map[string]any{"family_name": "x"}),
-		mkDoc("A", "ehic", "A-ehic", []string{identity}, map[string]any{"family_name": "x"}),
-		mkDoc("B", "pid", "B-pid", []string{identity}, map[string]any{"family_name": "x"}),
-	}))
+	const identity = "reach-identity"
+	stored := []*model.CompleteDocument{
+		mkDoc("A", "pid", "reach-1", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("A", "ehic", "reach-2", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("B", "pid", "reach-3", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("B", "ehic", "reach-4", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("a", "pid", "reach-5", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("A ", "pid", "reach-6", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("A", "PID", "reach-7", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("eu-1", "pid", "reach-8", []string{identity}, map[string]any{"family_name": "x"}),
+	}
+	require.NoError(t, store.SaveMany(ctx, stored))
 
-	all := []string{"A-pid", "A-ehic", "B-pid"}
+	rule := func(source, scope string) string {
+		return "(vc (service apigw)(method POST)(path /p)(subject alice)(authentic_source " + source + ")(scope " + scope + "))"
+	}
 	for _, row := range []struct {
-		name           string
-		source, scope  string
-		allowedSources []string
-		allowedScopes  []string
-		visible        []string
+		name          string
+		rules         []string
+		source, scope string
+		// leftOut: a form outside the filter, so the result is a subset.
+		leftOut bool
 	}{
-		{name: "nil lists", visible: all},
-		{name: "empty lists", allowedSources: []string{}, allowedScopes: []string{}, visible: all},
-		{name: "one source", allowedSources: []string{"A"}, visible: []string{"A-pid", "A-ehic"}},
-		{name: "one scope", allowedScopes: []string{"pid"}, visible: []string{"A-pid", "B-pid"}},
-		{name: "source and scope", allowedSources: []string{"A"}, allowedScopes: []string{"pid"}, visible: []string{"A-pid"}},
-		{name: "lists apply independently", allowedSources: []string{"A", "B"}, allowedScopes: []string{"ehic"}, visible: []string{"A-ehic"}},
-		{name: "selected source inside", source: "A", allowedSources: []string{"A"}, visible: []string{"A-pid", "A-ehic"}},
-		{name: "selected source outside", source: "B", allowedSources: []string{"A"}, visible: nil},
-		{name: "selected scope inside", scope: "pid", allowedScopes: []string{"pid"}, allowedSources: []string{"B"}, visible: []string{"B-pid"}},
-		{name: "selected scope outside", scope: "ehic", allowedScopes: []string{"pid"}, visible: nil},
-		{name: "selection without lists", source: "B", visible: []string{"B-pid"}},
+		{name: "no rule", rules: []string{"(vc (service apigw)(method POST)(path /p)(subject bob)(authentic_source *)(scope *))"}},
+		{name: "one pair", rules: []string{rule("A", "pid")}},
+		{name: "disjoint pairs", rules: []string{rule("A", "pid"), rule("B", "ehic")}},
+		{name: "set", rules: []string{rule("(* set A B)", "(* set pid)")}},
+		{name: "wildcard source", rules: []string{rule("*", "pid")}},
+		{name: "wildcard scope", rules: []string{rule("A", "*")}},
+		{name: "everything", rules: []string{rule("*", "*")}},
+		{name: "lower case value", rules: []string{rule("a", "pid")}},
+		{name: "named pair within disjoint pairs", rules: []string{rule("A", "pid"), rule("B", "ehic")}, source: "A", scope: "pid"},
+		{name: "named source within disjoint pairs", rules: []string{rule("A", "pid"), rule("B", "ehic")}, source: "A"},
+		{name: "named lower case source", rules: []string{rule("*", "*")}, source: "a"},
+		{name: "named scope with wildcard source", rules: []string{rule("*", "pid")}, scope: "pid"},
+		{name: "prefix source", rules: []string{rule("eu*", "pid")}, leftOut: true},
+		{name: "prefix source, named", rules: []string{rule("eu*", "pid")}, source: "eu-1", scope: "pid"},
+		{name: "suffix scope, named", rules: []string{rule("A", "(* suffix id)")}, source: "A", scope: "pid"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			listed, err := store.List(ctx, &ListQuery{
-				IdentityMappingID:       identity,
-				AuthenticSource:         row.source,
-				Scope:                   row.scope,
-				AllowedAuthenticSources: row.allowedSources,
-				AllowedScopes:           row.allowedScopes,
-			})
+			engine, err := httphelpers.BuildSPOCPEngine(model.APIAuth{Rules: row.rules})
+			require.NoError(t, err)
+			reach, err := httphelpers.ResolveResourceReach(engine, "apigw", "POST", "/p", "alice")
+			require.NoError(t, err)
+			reach = reach.Selecting(row.source, row.scope)
+
+			want := []string{}
+			for _, doc := range stored {
+				if (row.source == "" || row.source == doc.Meta.AuthenticSource) && (row.scope == "" || row.scope == doc.Meta.Scope) &&
+					engine.QueryElement(httphelpers.BuildSPOCPQuery("apigw", "POST", "/p", "alice", doc.Meta.AuthenticSource, doc.Meta.Scope)) {
+					want = append(want, doc.Meta.DocumentID)
+				}
+			}
+			compare := func(from string, received []string) {
+				if row.leftOut {
+					assert.Subset(t, want, received, "documents received from %s", from)
+					return
+				}
+				assert.ElementsMatch(t, want, received, "documents received from %s", from)
+			}
+
+			listed, err := store.List(ctx, &ListQuery{IdentityMappingID: identity, AuthenticSource: row.source, Scope: row.scope, Reach: reach})
 			require.NoError(t, err)
 			listedIDs := make([]string, 0, len(listed))
 			for _, doc := range listed {
 				listedIDs = append(listedIDs, doc.Meta.DocumentID)
 			}
-			assert.ElementsMatch(t, row.visible, listedIDs, "documents received from List")
+			compare("List", listedIDs)
 
-			found, err := store.Search(ctx, &SearchDocumentsQuery{
-				Search:                  identity,
-				AuthenticSource:         row.source,
-				Scope:                   row.scope,
-				Limit:                   10,
-				AllowedAuthenticSources: row.allowedSources,
-				AllowedScopes:           row.allowedScopes,
-			})
-			require.NoError(t, err)
-			foundIDs := make([]string, 0, len(found))
-			for _, doc := range found {
-				foundIDs = append(foundIDs, doc.Meta.DocumentID)
+			// The search term has a condition of its own beside the pair condition.
+			for _, term := range []string{"", identity} {
+				found, err := store.Search(ctx, &SearchDocumentsQuery{Search: term, AuthenticSource: row.source, Scope: row.scope, Limit: 200, Reach: reach})
+				require.NoError(t, err)
+				foundIDs := make([]string, 0, len(found))
+				for _, doc := range found {
+					if strings.HasPrefix(doc.Meta.DocumentID, "reach-") {
+						foundIDs = append(foundIDs, doc.Meta.DocumentID)
+					}
+				}
+				compare("Search", foundIDs)
 			}
-			assert.ElementsMatch(t, row.visible, foundIDs, "documents received from Search")
 		})
 	}
+
+	// The zero value matches no document.
+	listed, err := store.List(ctx, &ListQuery{IdentityMappingID: identity})
+	require.NoError(t, err)
+	assert.Empty(t, listed)
+	found, err := store.Search(ctx, &SearchDocumentsQuery{Search: identity})
+	require.NoError(t, err)
+	assert.Empty(t, found)
 }
 
 func TestSQLDatastoreColl_Postgres(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
 
@@ -158,10 +159,12 @@ func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (an
 		return nil, err
 	}
 
-	// A request may name no selector, so the middleware has no pair to check
-	// and the store applies these lists.
-	request.AllowedAuthenticSources = c.GetStringSlice("spocp_allowed_authentic_sources")
-	request.AllowedScopes = c.GetStringSlice("spocp_allowed_scopes")
+	reach, err := httphelpers.SelectedResourceReach(c, request.AuthenticSource, request.Scope)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	request.Reach = reach
 
 	reply, err := s.apiv1.DatastoreList(ctx, request)
 	if err != nil {
@@ -181,17 +184,12 @@ func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
-	// Apply SPOCP-derived authentic_source and scope filters for DB queries.
-	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
-		if sources, ok := allowed.([]string); ok {
-			request.AllowedAuthenticSources = sources
-		}
+	reach, err := httphelpers.SelectedResourceReach(c, request.AuthenticSource, request.Scope)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
-	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
-		if scopes, ok := allowed.([]string); ok {
-			request.AllowedScopes = scopes
-		}
-	}
+	request.Reach = reach
 
 	s.log.Info("datastore search",
 		"search", request.Search, "authentic_source", request.AuthenticSource)

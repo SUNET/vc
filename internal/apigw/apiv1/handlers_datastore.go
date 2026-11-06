@@ -10,6 +10,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/vcclient"
@@ -309,10 +310,8 @@ type DatastoreListRequest struct {
 	ValidFrom         int64  `json:"valid_from"`
 	ValidTo           int64  `json:"valid_to"`
 
-	// AllowedAuthenticSources and AllowedScopes come from the SPOCP context.
-	// Every binder ignores them.
-	AllowedAuthenticSources []string `json:"-" form:"-" header:"-"`
-	AllowedScopes           []string `json:"-" form:"-" header:"-"`
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach httphelpers.ResourceReach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreListReply is the reply for a list of documents
@@ -334,13 +333,12 @@ type DatastoreListReply struct {
 //	@Router			/api/v1/datastore/list [post]
 func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
 	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
-		AuthenticSource:         req.AuthenticSource,
-		IdentityMappingID:       req.IdentityMappingID,
-		Scope:                   req.Scope,
-		ValidFrom:               req.ValidFrom,
-		ValidTo:                 req.ValidTo,
-		AllowedAuthenticSources: req.AllowedAuthenticSources,
-		AllowedScopes:           req.AllowedScopes,
+		AuthenticSource:   req.AuthenticSource,
+		IdentityMappingID: req.IdentityMappingID,
+		Scope:             req.Scope,
+		ValidFrom:         req.ValidFrom,
+		ValidTo:           req.ValidTo,
+		Reach:             req.Reach,
 	})
 	if err != nil {
 		return nil, err
@@ -431,6 +429,8 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		AuthenticSource:   req.AuthenticSource,
 		Scope:             req.Scope,
 		IdentityMappingID: personID,
+		// The SPOCP guard answered the selectors this request names.
+		Reach: httphelpers.ReachEverything(),
 	})
 	if err != nil {
 		return nil, err
@@ -500,12 +500,13 @@ func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadReque
 
 // DatastoreSearchRequest is the request for searching documents
 type DatastoreSearchRequest struct {
-	Search                  string   `json:"search" form:"search"`
-	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
-	Scope                   string   `json:"scope" form:"scope"`
-	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-" header:"-"`
-	AllowedScopes           []string `json:"-" form:"-" header:"-"`
+	Search          string `json:"search" form:"search"`
+	AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	Scope           string `json:"scope" form:"scope"`
+	Limit           int64  `json:"limit" form:"limit"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach httphelpers.ResourceReach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreSearchReply is the reply for searching documents
@@ -533,12 +534,11 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 		limit = 50
 	}
 	docs, err := c.datastoreStore.Search(ctx, &db.SearchDocumentsQuery{
-		Search:                  req.Search,
-		AuthenticSource:         req.AuthenticSource,
-		Scope:                   req.Scope,
-		Limit:                   limit,
-		AllowedAuthenticSources: req.AllowedAuthenticSources,
-		AllowedScopes:           req.AllowedScopes,
+		Search:          req.Search,
+		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
+		Limit:           limit,
+		Reach:           req.Reach,
 	})
 	if err != nil {
 		return nil, err

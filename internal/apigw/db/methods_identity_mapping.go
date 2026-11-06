@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"regexp"
-	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -240,10 +240,13 @@ func (c *IdentityMappingsColl) DeleteMapping(ctx context.Context, query *DeleteM
 
 // SearchMappingsQuery is the query for searching identity mappings
 type SearchMappingsQuery struct {
-	Search                  string   `json:"search"`
-	AuthenticSource         string   `json:"authentic_source"`
-	Limit                   int64    `json:"limit"`
-	AllowedAuthenticSources []string `json:"-"`
+	Search          string `json:"search"`
+	AuthenticSource string `json:"authentic_source"`
+	Limit           int64  `json:"limit"`
+
+	// Reach bounds the result by the sources it pairs with
+	// httphelpers.IdentityMappingScope. Its zero value matches no mapping.
+	Reach httphelpers.ResourceReach `json:"-"`
 }
 
 // SearchMappings returns identity mappings matching a text search or filters, with a limit
@@ -252,13 +255,19 @@ func (c *IdentityMappingsColl) SearchMappings(ctx context.Context, query *Search
 	defer span.End()
 
 	filter := bson.M{}
+	sourceCondition := bson.M{}
 	if query.AuthenticSource != "" {
-		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
+		sourceCondition["$eq"] = query.AuthenticSource
+	}
+	sources, everySource := query.Reach.SourcesForScope(httphelpers.IdentityMappingScope)
+	if !everySource {
+		if len(sources) == 0 {
 			return []*model.IdentityMapping{}, nil
 		}
-		filter["authentic_source"] = bson.M{"$eq": query.AuthenticSource}
-	} else if len(query.AllowedAuthenticSources) > 0 {
-		filter["authentic_source"] = bson.M{"$in": query.AllowedAuthenticSources}
+		sourceCondition["$in"] = sources
+	}
+	if len(sourceCondition) > 0 {
+		filter["authentic_source"] = sourceCondition
 	}
 	if query.Search != "" {
 		searchRegex := bson.M{"$regex": regexp.QuoteMeta(query.Search), "$options": "i"}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -234,22 +235,36 @@ func (c *DatastoreColl) GetByIdentity(ctx context.Context, scope, identityMappin
 	return docs, nil
 }
 
-// selectWithinAllowed adds the condition on field: the selected value when
-// there is one, otherwise the allowed list when it is not empty. It returns
-// false when the selected value lies outside a non-empty allowed list, which
-// matches no document.
-func selectWithinAllowed(filter bson.M, field, selected string, allowed []string) bool {
-	if selected != "" {
-		if len(allowed) > 0 && !slices.Contains(allowed, selected) {
-			return false
+// datastoreFilter holds the equality condition of each selected value and the
+// pair condition of reach. It returns false when reach matches no document.
+func datastoreFilter(source, scope string, reach httphelpers.ResourceReach) (bson.M, bool) {
+	filter := bson.M{}
+	if source != "" {
+		filter["meta.authentic_source"] = bson.M{"$eq": source}
+	}
+	if scope != "" {
+		filter["meta.scope"] = bson.M{"$eq": scope}
+	}
+	if reach.Everything() {
+		return filter, true
+	}
+	pairs := reach.Pairs()
+	if len(pairs) == 0 {
+		return nil, false
+	}
+	anyPair := make(bson.A, 0, len(pairs))
+	for _, pair := range pairs {
+		clause := bson.M{}
+		if value, exact := pair.AuthenticSource.Exact(); exact {
+			clause["meta.authentic_source"] = bson.M{"$eq": value}
 		}
-		filter[field] = bson.M{"$eq": selected}
-		return true
+		if value, exact := pair.Scope.Exact(); exact {
+			clause["meta.scope"] = bson.M{"$eq": value}
+		}
+		anyPair = append(anyPair, clause)
 	}
-	if len(allowed) > 0 {
-		filter[field] = bson.M{"$in": allowed}
-	}
-	return true
+	filter["$and"] = bson.A{bson.M{"$or": anyPair}}
+	return filter, true
 }
 
 // ListQuery is the query to get document list
@@ -260,10 +275,8 @@ type ListQuery struct {
 	ValidFrom         int64  `json:"valid_from" bson:"valid_from"`
 	ValidTo           int64  `json:"valid_to" bson:"valid_to"`
 
-	// AllowedAuthenticSources and AllowedScopes restrict the result as in
-	// SearchDocumentsQuery. Nil or empty leaves that dimension unrestricted.
-	AllowedAuthenticSources []string `json:"-" bson:"-"`
-	AllowedScopes           []string `json:"-" bson:"-"`
+	// Reach bounds the result. Its zero value matches no document.
+	Reach httphelpers.ResourceReach `json:"-" bson:"-"`
 }
 
 // List return matching documents if any, or error
@@ -272,10 +285,8 @@ func (c *DatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.Do
 		return nil, err
 	}
 
-	filter := bson.M{}
-
-	if !selectWithinAllowed(filter, "meta.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
-		!selectWithinAllowed(filter, "meta.scope", query.Scope, query.AllowedScopes) {
+	filter, matchable := datastoreFilter(query.AuthenticSource, query.Scope, query.Reach)
+	if !matchable {
 		return []*model.DocumentList{}, nil
 	}
 
@@ -365,12 +376,13 @@ func (c *DatastoreColl) DeleteByKey(ctx context.Context, authenticSource, scope,
 
 // SearchDocumentsQuery is the query for searching documents
 type SearchDocumentsQuery struct {
-	Search                  string   `json:"search"`
-	AuthenticSource         string   `json:"authentic_source"`
-	Scope                   string   `json:"scope"`
-	Limit                   int64    `json:"limit"`
-	AllowedAuthenticSources []string `json:"-"`
-	AllowedScopes           []string `json:"-"`
+	Search          string `json:"search"`
+	AuthenticSource string `json:"authentic_source"`
+	Scope           string `json:"scope"`
+	Limit           int64  `json:"limit"`
+
+	// Reach bounds the result. Its zero value matches no document.
+	Reach httphelpers.ResourceReach `json:"-"`
 }
 
 // Search returns documents matching a text search or filters, with a limit
@@ -378,9 +390,8 @@ func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery)
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:searchDocuments")
 	defer span.End()
 
-	filter := bson.M{}
-	if !selectWithinAllowed(filter, "meta.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
-		!selectWithinAllowed(filter, "meta.scope", query.Scope, query.AllowedScopes) {
+	filter, matchable := datastoreFilter(query.AuthenticSource, query.Scope, query.Reach)
+	if !matchable {
 		return []*model.CompleteDocument{}, nil
 	}
 	if query.Search != "" {
