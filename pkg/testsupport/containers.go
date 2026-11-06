@@ -6,6 +6,7 @@ package testsupport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"testing"
@@ -29,6 +30,38 @@ func IsDockerAvailable() bool {
 	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil // #nosec G204
 }
 
+// containerStartDeadline covers a container start on a heavily loaded machine.
+const containerStartDeadline = 3 * time.Minute
+
+// WithStartDeadline raises every deadline of the wait strategy already on the
+// request. Pass it after the option that sets the strategy. It returns an error
+// when the request holds no strategy or a strategy type it cannot raise.
+//
+// wait.ForLog and wait.ForListeningPort each apply their own 60-second default
+// inside an enclosing deadline, so each leaf is set.
+func WithStartDeadline() testcontainers.CustomizeRequestOption {
+	return func(req *testcontainers.GenericContainerRequest) error {
+		if req.WaitingFor == nil {
+			return errors.New("testsupport.WithStartDeadline: no wait strategy on the request; pass it after the strategy")
+		}
+		return wait.Walk(&req.WaitingFor, raiseStartDeadline)
+	}
+}
+
+func raiseStartDeadline(node wait.Strategy) error {
+	switch s := node.(type) {
+	case *wait.MultiStrategy:
+		s.WithDeadline(containerStartDeadline)
+	case *wait.LogStrategy:
+		s.WithStartupTimeout(containerStartDeadline)
+	case *wait.HostPortStrategy:
+		s.WithStartupTimeout(containerStartDeadline)
+	default:
+		return fmt.Errorf("testsupport.WithStartDeadline: unsupported wait strategy %T", node)
+	}
+	return nil
+}
+
 // StartMongoContainer spins up a throwaway MongoDB via testcontainers and
 // returns its connection URI, a connected *mongo.Client, and a cleanup
 // function. Skips the calling test if Docker is not available.
@@ -39,27 +72,24 @@ func StartMongoContainer(t *testing.T) (uri string, client *mongo.Client, cleanu
 		t.Skip("Skipping test: Docker is not available")
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	ctx := t.Context()
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		Image:        "mongo:7",
 		ExposedPorts: []string{"27017/tcp"},
-		WaitingFor:   wait.ForLog("Waiting for connections"),
+		WaitingFor:   wait.ForLog("Waiting for connections").WithStartupTimeout(containerStartDeadline),
 		Started:      true,
 	})
 	if err != nil {
-		cancel()
 		t.Fatalf("start mongo container: %v", err)
 	}
 
 	port, err := container.MappedPort(ctx, "27017")
 	if err != nil {
-		cancel()
 		t.Fatalf("mapped port: %v", err)
 	}
 	host, err := container.Host(ctx)
 	if err != nil {
-		cancel()
 		t.Fatalf("container host: %v", err)
 	}
 
@@ -68,20 +98,15 @@ func StartMongoContainer(t *testing.T) (uri string, client *mongo.Client, cleanu
 
 	client, err = mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
-		cancel()
 		t.Fatalf("mongo connect: %v", err)
 	}
 
 	cleanup = func() {
-		// Use a fresh context for teardown: ctx's 120s setup deadline may
-		// already have elapsed by the time cleanup runs (e.g. a slow test
-		// body), which would otherwise make Disconnect/Terminate fail
-		// immediately and leak the container.
+		// t.Context() is cancelled before t.Cleanup functions run.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 		client.Disconnect(cleanupCtx)   // #nosec G104
 		container.Terminate(cleanupCtx) // #nosec G104
-		cancel()
 	}
 
 	return uri, client, cleanup

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -43,7 +44,7 @@ func startRedisCompatibleContainer(t *testing.T, img string) (redis.UniversalCli
 	}
 	ctx := t.Context()
 
-	container, err := tcredis.Run(ctx, img)
+	container, err := tcredis.Run(ctx, img, testsupport.WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start %s container: %v", img, err)
 	}

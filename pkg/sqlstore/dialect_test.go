@@ -30,7 +30,7 @@ func TestJSONTextExtract_KeyWithQuotes_Postgres(t *testing.T) {
 	}
 	ctx := t.Context()
 
-	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies())
+	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies(), testsupport.WithStartDeadline())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
 
@@ -65,7 +65,7 @@ func TestJSONTextExtract_KeyWithQuotes_MariaDB(t *testing.T) {
 	}
 	ctx := t.Context()
 
-	ctr, err := mariadb.Run(ctx, "mariadb:11")
+	ctr, err := mariadb.Run(ctx, "mariadb:11", testsupport.WithStartDeadline())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
 

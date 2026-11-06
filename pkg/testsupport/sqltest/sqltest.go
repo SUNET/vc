@@ -75,7 +75,7 @@ func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 	}
 	ctx := t.Context()
 
-	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies())
+	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies(), testsupport.WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start postgres container: %v", err)
 	}
@@ -120,7 +120,7 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 	}
 	ctx := t.Context()
 
-	ctr, err := mariadb.Run(ctx, "mariadb:11")
+	ctr, err := mariadb.Run(ctx, "mariadb:11", testsupport.WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start mariadb container: %v", err)
 	}
@@ -182,7 +182,7 @@ func PostgresConfig(t *testing.T) (*sqlstore.PostgresConfig, func()) {
 	}
 	ctx := t.Context()
 
-	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies())
+	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies(), testsupport.WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start postgres container: %v", err)
 	}
@@ -213,7 +213,7 @@ func MariaDBConfig(t *testing.T) (*sqlstore.MariaDBConfig, func()) {
 	}
 	ctx := t.Context()
 
-	ctr, err := mariadb.Run(ctx, "mariadb:11")
+	ctr, err := mariadb.Run(ctx, "mariadb:11", testsupport.WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start mariadb container: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,8 +14,7 @@ import (
 )
 
 // isDockerAvailable reports whether a working Docker daemon is
-// reachable. Mirrors pkg/cache test helpers rather than importing
-// testsupport to keep this package's test deps minimal.
+// reachable. Mirrors pkg/cache test helpers.
 func isDockerAvailable() bool {
 	dockerPath, err := exec.LookPath("docker")
 	if err != nil {
@@ -35,7 +35,7 @@ func startRESPContainer(t *testing.T, img string) (redis.UniversalClient, func()
 	}
 	ctx := t.Context()
 
-	container, err := tcredis.Run(ctx, img)
+	container, err := tcredis.Run(ctx, img, testsupport.WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start %s container: %v", img, err)
 	}
