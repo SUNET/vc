@@ -37,6 +37,10 @@ and as an array, such as `[achievements, null]` beside
 endpoint logs a warning that names it. A scope whose VCTM indexes an array
 past 255 gets no template, and the status endpoint logs an error.
 
+The SD-JWT issuer makes selectively disclosable what the path of an
+`sd: always` type metadata claim selects: `[degrees, null, date_awarded]`
+discloses `date_awarded` in every element of `degrees`.
+
 ## Fields
 
 | Field | Form |
