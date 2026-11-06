@@ -13,9 +13,9 @@ mkdir -p "${PKI_DIR}"
 # keys through the ./developer_tools/pki bind mount.
 CONTAINER_UID=65532
 
-# Private keys are written owner-only. On Linux a bind mount keeps host
-# ownership and modes, so the container user needs an ACL entry to read them.
-# Docker Desktop on macOS serves bind mounts with the host user's access.
+# On Linux a bind mount keeps host ownership and modes, so the container user
+# needs an ACL entry to read its keys. Docker Desktop on macOS serves bind
+# mounts with the host user's access.
 grant_acl=0
 if [ "$(uname -s)" = Linux ]; then
     if ! command -v setfacl >/dev/null 2>&1; then
@@ -25,18 +25,74 @@ if [ "$(uname -s)" = Linux ]; then
     grant_acl=1
 fi
 
-# Sets the access ACL of key $1 to owner read/write and container user read. It
-# replaces the whole ACL, so an entry inherited from a default ACL on the
-# directory stays off the key. A key left without the grant is removed, so the
-# next run generates it again.
+# The `[ ! -f key ]` guards take any file for a key, so the key file being
+# generated is removed when the script ends before it is complete.
+generating_key=
+remove_unfinished_key() {
+    [ -n "$generating_key" ] || return 0
+    rm -f "$generating_key"
+    echo "removed $generating_key: its generation did not finish" >&2
+}
+trap remove_unfinished_key EXIT
+trap 'exit 1' HUP INT TERM
+
+# Creates empty key file $1 with owner-only access. A default ACL on the
+# directory overrides the umask, so an inherited entry is stripped here, before
+# any key material exists. `install` creates the file with mode 600, and that
+# mode masks an inherited entry from the first moment. The generators write into
+# this file and keep its permissions.
+create_key_file() {
+    generating_key="$1"
+    if ! install -m 600 /dev/null "$generating_key" ||
+        { [ "$grant_acl" -eq 1 ] && ! setfacl -b "$generating_key"; } ||
+        ! chmod 600 "$generating_key"; then
+        echo "creating $generating_key with owner-only access failed" >&2
+        exit 1
+    fi
+}
+
+# Sets the access ACL of key file $1 to owner read/write and container user read.
 grant_container_read() {
     granted_key="$1"
     [ "$grant_acl" -eq 1 ] || return 0
     if ! setfacl --set "u::rw-,g::---,o::---,u:${CONTAINER_UID}:r--,m::r--" "$granted_key"; then
-        rm -f "$granted_key"
-        echo "granting uid ${CONTAINER_UID} read access to $granted_key failed; removed it" >&2
+        echo "granting uid ${CONTAINER_UID} read access to $granted_key failed" >&2
         exit 1
     fi
+}
+
+# Runs command $2.. to write key file $1, readable by the owner alone. Call it
+# outside any condition: `set -e` must end the script when the command fails.
+generate_key() {
+    owner_key="$1"
+    shift
+    create_key_file "$owner_key"
+    "$@"
+    generating_key=
+}
+
+# Runs command $2.. to write key file $1, readable by the owner and the container
+# user. Call it outside any condition, as generate_key.
+generate_container_key() {
+    container_key="$1"
+    shift
+    create_key_file "$container_key"
+    grant_container_read "$container_key"
+    "$@"
+    generating_key=
+}
+
+# Writes a P-256 private key in PKCS8 to file $1. It passes through a pipe, so no
+# intermediate key reaches the disk.
+write_p256_pkcs8() {
+    pkcs8_file="$1"
+    openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "$pkcs8_file"
+}
+
+# Writes $seed to file $1.
+write_seed() {
+    seed_file="$1"
+    printf '%s\n' "${seed}" > "$seed_file"
 }
 
 # Service TLS certificates
@@ -72,7 +128,7 @@ EOF
 if [ ! -f "${PKI_DIR}/rootCA.key" ]; then
     echo Creating Root CA
 
-    (umask 077; openssl genrsa -out "${PKI_DIR}/rootCA.key" 2048)
+    generate_key "${PKI_DIR}/rootCA.key" openssl genrsa -out "${PKI_DIR}/rootCA.key" 2048
     openssl req -x509 -new -nodes -key "${PKI_DIR}/rootCA.key" -sha256 -days 3650 -out "${PKI_DIR}/rootCA.crt" -config ca.conf \
         -addext "basicConstraints=critical,CA:TRUE" \
         -addext "keyUsage=critical,keyCertSign,cRLSign"
@@ -123,8 +179,7 @@ EOF
 	ext_generated=1
     fi
 
-    (umask 077; openssl req -new -sha256 -nodes -out ${service_name}.csr -newkey rsa:2048 -keyout "${PKI_DIR}/tls_${service_name}.key" -config ${service_name}.conf)
-    grant_container_read "${PKI_DIR}/tls_${service_name}.key"
+    generate_container_key "${PKI_DIR}/tls_${service_name}.key" openssl req -new -sha256 -nodes -out ${service_name}.csr -newkey rsa:2048 -keyout "${PKI_DIR}/tls_${service_name}.key" -config ${service_name}.conf
     openssl x509 -req -in ${service_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/tls_${service_name}.crt" -days 730 -sha256 -extfile ${service_name}.ext
 
     # Create combined PEM file (cert + CA chain, no private key)
@@ -148,7 +203,7 @@ generate_signing_keys() {
         echo "Generating RSA signing key pair with certificate..."
         
         # Generate RSA private key
-        (umask 077; openssl genrsa -out "${PKI_DIR}/signing_rsa_private.pem" 2048)
+        generate_key "${PKI_DIR}/signing_rsa_private.pem" openssl genrsa -out "${PKI_DIR}/signing_rsa_private.pem" 2048
         openssl rsa -in "${PKI_DIR}/signing_rsa_private.pem" -pubout -out "${PKI_DIR}/signing_rsa_public.pem"
         
         # Create CSR config
@@ -195,12 +250,8 @@ EOF
         echo "Generating EC signing key pair (P-256) with certificate..."
         
         # Generate EC private key in PKCS8 format
-        (umask 077
-         openssl ecparam -name prime256v1 -genkey -noout -out signing_ec_private_raw.pem
-         openssl pkcs8 -topk8 -nocrypt -in signing_ec_private_raw.pem -out "${PKI_DIR}/signing_ec_private.pem")
-        grant_container_read "${PKI_DIR}/signing_ec_private.pem"
+        generate_container_key "${PKI_DIR}/signing_ec_private.pem" write_p256_pkcs8 "${PKI_DIR}/signing_ec_private.pem"
         openssl ec -in "${PKI_DIR}/signing_ec_private.pem" -pubout -out "${PKI_DIR}/signing_ec_public.pem"
-        rm signing_ec_private_raw.pem
         
         # Create CSR config
         cat > signing_ec.conf <<EOF
@@ -244,8 +295,7 @@ EOF
     # EC key-agreement key (P-256) for Credential Request and Response encryption
     if [ ! -f "${PKI_DIR}/credential_encryption.pem" ]; then
         echo "Generating credential encryption key (P-256)..."
-        (umask 077; openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${PKI_DIR}/credential_encryption.pem")
-        grant_container_read "${PKI_DIR}/credential_encryption.pem"
+        generate_container_key "${PKI_DIR}/credential_encryption.pem" write_p256_pkcs8 "${PKI_DIR}/credential_encryption.pem"
     fi
 
     # Secret of the nym_auth ssc hkdf opening
@@ -256,8 +306,7 @@ EOF
             echo "Generating the nym_auth ssc opening secret failed" >&2
             exit 1
         fi
-        (umask 077; printf '%s\n' "${seed}" > "${PKI_DIR}/nym_auth_seed.key")
-        grant_container_read "${PKI_DIR}/nym_auth_seed.key"
+        generate_container_key "${PKI_DIR}/nym_auth_seed.key" write_seed "${PKI_DIR}/nym_auth_seed.key"
     fi
 }
 
@@ -301,7 +350,7 @@ extendedKeyUsage = clientAuth
 EOF
 
         # Generate key, CSR and sign with rootCA
-        (umask 077; openssl genrsa -out "${PKI_DIR}/client_cert_${client_name}.key" 2048)
+        generate_key "${PKI_DIR}/client_cert_${client_name}.key" openssl genrsa -out "${PKI_DIR}/client_cert_${client_name}.key" 2048
         openssl req -new -key "${PKI_DIR}/client_cert_${client_name}.key" -out ${client_name}.csr -config ${client_name}.conf
         openssl x509 -req -in ${client_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/client_cert_${client_name}.crt" -days 730 -sha256 -extfile ${client_name}.ext
         
