@@ -35,7 +35,9 @@ index i an array of i+1 elements. A claim the VCTM declares as an object
 and as an array, such as `[achievements, null]` beside
 `[achievements, count]`, is an object of the keys below it, and the status
 endpoint logs a warning that names it. A scope whose VCTM indexes an array
-past 255 gets no template, and the status endpoint logs an error.
+past 255 gets no template, and the status endpoint logs an error. The
+document form keeps a member whose name holds brackets, such as `hasClaim[0]`
+in `vctm_elm.json`, as that member: its key in the form is `hasClaim\[0\]`.
 
 The SD-JWT issuer makes selectively disclosable what the path of an
 `sd: always` type metadata claim selects: `[degrees, null, date_awarded]`

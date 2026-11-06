@@ -2,7 +2,9 @@
 //
 // The form edits a document as key-value pairs. A key names one claim: an
 // object member adds ".name" and an array element adds "[i]", so
-// {"degrees": [{"type": "BSc"}]} is the pair "degrees[0].type" = "BSc".
+// {"degrees": [{"type": "BSc"}]} is the pair "degrees[0].type" = "BSc". A
+// backslash keeps the next character of a name literal, so the member
+// "hasClaim[0]" of a type metadata file is the key "hasClaim\[0\]".
 
 /**
  * Flattens a document into key-value pairs. A non-empty array adds one
@@ -14,7 +16,8 @@
 export function flattenObject(obj, prefix) {
     const entries = [];
     for (const [k, v] of Object.entries(obj)) {
-        flattenValue(entries, prefix ? prefix + "." + k : k, v);
+        const name = k.replace(/[\\[\]]/g, "\\$&");
+        flattenValue(entries, prefix ? prefix + "." + name : name, v);
     }
     return entries;
 }
@@ -61,16 +64,27 @@ export function unflattenEntries(entries) {
 }
 
 /**
- * Splits a key segment such as "m[1][0]" into "m", 1 and 0.
+ * Splits a key segment such as "m[1][0]" into "m", 1 and 0. Only indices
+ * that end the segment and that no backslash keeps literal are indices.
  * @param {string} segment
  * @returns {(string|number)[]}
  */
 function splitIndices(segment) {
-    const match = /^(.+?)((?:\[\d+\])+)$/.exec(segment);
+    const match = /^((?:\\.|[^\\])+?)((?:\[\d+\])+)$/s.exec(segment);
     if (!match) {
-        return [segment];
+        return [segmentName(segment)];
     }
-    return [match[1], ...match[2].slice(1, -1).split("][").map(Number)];
+    return [segmentName(match[1]), ...match[2].slice(1, -1).split("][").map(Number)];
+}
+
+/**
+ * The text of a key segment without the backslashes that keep its
+ * characters literal.
+ * @param {string} segment
+ * @returns {string}
+ */
+export function segmentName(segment) {
+    return segment.replace(/\\(.)/gs, "$1");
 }
 
 /**
