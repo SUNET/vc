@@ -1,7 +1,6 @@
 package pubsub
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -10,56 +9,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
-// startRESPContainer spins up img (Redis or Valkey — same RESP
-// protocol, same port) and returns a connected client plus cleanup.
-// Mirrors pkg/cache/generic_redis_test.go.
-func startRESPContainer(t *testing.T, img string) (redis.UniversalClient, func()) {
-	t.Helper()
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-	ctx := t.Context()
-
-	container, err := tcredis.Run(ctx, img)
-	if err != nil {
-		t.Fatalf("start %s container: %v", img, err)
-	}
-
-	connStr, err := container.ConnectionString(ctx)
-	if err != nil {
-		_ = container.Terminate(context.Background())
-		t.Fatalf("%s connection string: %v", img, err)
-	}
-
-	opts, err := redis.ParseURL(connStr)
-	if err != nil {
-		_ = container.Terminate(context.Background())
-		t.Fatalf("parse %s url: %v", img, err)
-	}
-	client := redis.NewClient(opts)
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
-		_ = container.Terminate(context.Background())
-		t.Fatalf("ping %s: %v", img, err)
-	}
-
-	cleanup := func() {
-		_ = client.Close()
-		_ = container.Terminate(context.Background())
-	}
-	return client, cleanup
-}
-
 func startRedisContainer(t *testing.T) (redis.UniversalClient, func()) {
-	return startRESPContainer(t, "redis:7")
+	return testsupport.StartRESPContainer(t, "redis:7")
 }
 
 func startValkeyContainer(t *testing.T) (redis.UniversalClient, func()) {
-	return startRESPContainer(t, "valkey/valkey:8")
+	return testsupport.StartRESPContainer(t, "valkey/valkey:8")
 }
 
 // runRESPContractTests exercises the PubSub contract against a RESP

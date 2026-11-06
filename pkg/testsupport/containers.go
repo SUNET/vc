@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
+	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -106,4 +108,47 @@ func StartMongoContainer(t *testing.T) (uri string, client *mongo.Client, cleanu
 	}
 
 	return uri, client, cleanup
+}
+
+// StartRESPContainer starts img, any RESP server on the standard Redis port
+// 6379 such as Redis or Valkey, through the testcontainers Redis module. It
+// returns a connected client and a cleanup function that closes the client and
+// terminates the container. It skips the calling test if Docker is not available
+// and fails it on a setup error, terminating a running container first.
+func StartRESPContainer(t *testing.T, img string) (redis.UniversalClient, func()) {
+	t.Helper()
+	if !IsDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+	ctx := t.Context()
+
+	container, err := tcredis.Run(ctx, img)
+	if err != nil {
+		t.Fatalf("start %s container: %v", img, err)
+	}
+
+	connStr, err := container.ConnectionString(ctx)
+	if err != nil {
+		_ = container.Terminate(context.Background())
+		t.Fatalf("%s connection string: %v", img, err)
+	}
+
+	opts, err := redis.ParseURL(connStr)
+	if err != nil {
+		_ = container.Terminate(context.Background())
+		t.Fatalf("parse %s url: %v", img, err)
+	}
+	client := redis.NewClient(opts)
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		_ = container.Terminate(context.Background())
+		t.Fatalf("ping %s: %v", img, err)
+	}
+
+	cleanup := func() {
+		_ = client.Close()
+		_ = container.Terminate(context.Background())
+	}
+	return client, cleanup
 }

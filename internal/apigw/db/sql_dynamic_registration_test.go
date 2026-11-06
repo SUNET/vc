@@ -124,15 +124,13 @@ func testRegistrationLookupAndPruning(t *testing.T, store DynamicRegistrationSto
 }
 
 func TestSQLDynamicRegistrationColl_Postgres(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartPostgres(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartPostgres(t)
 
 	testDynamicRegistrationStoreContract(t, NewSQLDynamicRegistrationColl(newTestService(t), sqlDB, dialect))
 }
 
 func TestSQLDynamicRegistrationColl_MariaDB(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartMariaDB(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartMariaDB(t)
 
 	testDynamicRegistrationStoreContract(t, NewSQLDynamicRegistrationColl(newTestService(t), sqlDB, dialect))
 }
