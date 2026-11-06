@@ -54,6 +54,27 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
         run: make test-pkcs11
 
+  gofmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Check gofmt
+        run: |
+          unformatted=$(git ls-files -z -- '*.go' ':!vendor/**' ':!third_party/**' | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Run 'gofmt -w' on these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
   config-docs:
     runs-on: ubuntu-latest
     steps:
