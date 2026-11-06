@@ -72,5 +72,6 @@ secrets.yaml
 !/secrets.example.yaml
 
 # A candidate fly/deploy.sh kept after a failed send or rename holds live
-# secrets. It sits beside the file a symlink resolves to.
-secrets*.yaml.*
+# secrets. It sits beside the file a symlink resolves to, whatever that file's
+# name: <target>.candidate.<purpose>.<random>.
+*.candidate.*.??????
