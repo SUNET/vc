@@ -19,6 +19,7 @@ make test                    # Run all tests
 make test-SERVICE            # Test specific service
 make test-bbsnative          # Test pkg/bbs native cgo path (requires bbs-native-lib)
 make test-pkcs11             # Test with pkcs11 build tag (requires test-env)
+make test-apigw-integration  # Test internal/apigw integration and httpserver with integration build tag (mocks only)
 make test-zknative           # Test with zknative build tag (requires zk-native-lib zk-native-lib-vega)
 
 # Docker
