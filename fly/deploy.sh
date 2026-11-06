@@ -155,6 +155,17 @@ profile_dir() {
     esac
 }
 
+# Prints the MongoDB URI that launch generated for app $2, read from secrets
+# file $1. Returns 1 when the file is absent or holds another URI, such as the
+# example placeholder.
+local_mongo_uri() {
+    local _uri
+    [[ -f "$1" ]] || return 1
+    _uri="$(yq -r '.common.mongo.uri // ""' "$1")"
+    [[ "$_uri" =~ ^mongodb://admin:[0-9a-f]{48}@${2}\.internal:27017/\?authSource=admin$ ]] || return 1
+    printf '%s\n' "$_uri"
+}
+
 cmd_launch() {
     require_flyctl
     require_yq
@@ -201,7 +212,7 @@ cmd_launch() {
     local secrets_file
     secrets_file="$(secrets_file_path)"
 
-    local mongo_app mongo_pass mongo_user mongo_uri mongo_secrets
+    local mongo_app mongo_pass mongo_user mongo_uri mongo_secrets mongo_creds_set=0
     mongo_app="$(app_name "mongodb")"
     mongo_user="admin"
 
@@ -213,6 +224,7 @@ cmd_launch() {
     read_app_secrets "$mongo_app" mongo_secrets
     if printf '%s' "$mongo_secrets" | grep -q '"MONGO_INITDB_ROOT_PASSWORD"'; then
         echo "==> MongoDB secrets already set for $mongo_app (skipping)"
+        mongo_creds_set=1
         mongo_pass=""
         mongo_uri=""
     else
@@ -322,7 +334,14 @@ cmd_launch() {
         fi
     fi
 
-    # Idempotent: only push the URI if we generated a fresh one above.
+    # A freshly generated URI replaces wallet-backend's. With MongoDB's
+    # credentials already set, a missing URI comes back from the local file:
+    # Fly secrets are write-only, so the file is its only copy.
+    if [[ -z "$mongo_uri" && "$mongo_creds_set" -eq 1 ]] \
+        && ! printf '%s' "$wallet_backend_secrets" | grep -q '"WALLET_STORAGE_MONGODB_URI"'; then
+        mongo_uri="$(local_mongo_uri "$secrets_file" "$mongo_app")" \
+            || die "$wallet_backend_app lacks WALLET_STORAGE_MONGODB_URI, and $secrets_file holds no generated URI for $mongo_app. Restore $secrets_file, or reset $mongo_app's credentials: destroy it with its volume and run launch again."
+    fi
     if [[ -n "$mongo_uri" ]]; then
         echo "==> Setting Mongo URI for $wallet_backend_app"
         if set_app_secrets "$wallet_backend_app" WALLET_STORAGE_MONGODB_URI="$mongo_uri"; then
@@ -510,18 +529,41 @@ register_apigw_issuer_on_wallet_backend() {
     done
     if [[ -z "$ready" ]]; then
         echo "    (wallet-backend admin API did not become ready; skipping issuer registration)"
-        kill "$proxy_pid" 2>/dev/null
-        wait "$proxy_pid" 2>/dev/null || true
+        stop_proxy "$proxy_pid"
         return 0
     fi
     body_file="/tmp/issuer_reg_body.$$"
     local payload='{"credential_issuer_identifier":"'"$apigw_url"'","client_id":"fly-wallet","visible":true}'
 
-    local list existing_id method path code
-    list="$(curl -sS -H "Authorization: Bearer $admin_token" \
-        http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null || echo '{}')"
-    existing_id="$(printf '%s' "$list" | jq -r --arg url "$apigw_url" \
-        '.issuers[]? | select(.credential_issuer_identifier == $url) | .id' 2>/dev/null | head -n 1)"
+    # The PUT-or-POST choice needs the current issuer list. Without a readable
+    # list, a POST would register a duplicate issuer.
+    local list_code existing_id method path code
+    if ! list_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+        -H "Authorization: Bearer $admin_token" \
+        http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null)"; then
+        echo "    (listing the issuers failed; skipping issuer registration)"
+        stop_proxy "$proxy_pid"
+        rm -f "$body_file"
+        return 0
+    fi
+    if [[ "$list_code" != 2?? ]]; then
+        echo "    (listing the issuers answered HTTP $list_code; skipping issuer registration)"
+        stop_proxy "$proxy_pid"
+        rm -f "$body_file"
+        return 0
+    fi
+    # `input` fails on an empty body, and the type check on any JSON other
+    # than an object.
+    if ! existing_id="$(jq -n -r --arg url "$apigw_url" '
+        input
+        | if type == "object" then . else error("not an object") end
+        | first(.issuers[]? | select(.credential_issuer_identifier == $url) | .id) // ""' \
+        "$body_file" 2>/dev/null)"; then
+        echo "    (the issuer list is not a JSON object; skipping issuer registration)"
+        stop_proxy "$proxy_pid"
+        rm -f "$body_file"
+        return 0
+    fi
 
     if [[ -n "$existing_id" ]]; then
         method="PUT"
@@ -554,9 +596,15 @@ register_apigw_issuer_on_wallet_backend() {
         *)   echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
     esac
 
-    kill "$proxy_pid" 2>/dev/null
-    wait "$proxy_pid" 2>/dev/null || true
+    stop_proxy "$proxy_pid"
     rm -f "$body_file"
+}
+
+# Stops the `fly proxy` with pid $1. A proxy that already exited leaves
+# nothing to stop.
+stop_proxy() {
+    kill "$1" 2>/dev/null || true
+    wait "$1" 2>/dev/null || true
 }
 
 cmd_deploy() {

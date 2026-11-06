@@ -79,7 +79,17 @@
   the OIDC `client_secret` reached Keycloak before a local write that could
   still fail. Both local writes are now prepared before the set and happen
   only after it succeeds. A missing or read-only secrets file stops the OIDC
-  step before Fly receives anything.
+  step before Fly receives anything. When MongoDB's credentials exist and
+  wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`, `launch` now sets the
+  URI from the local secrets file. When the file holds no generated URI,
+  `launch` stops and names the two ways out: restore the file, or reset
+  MongoDB's credentials.
+- **`fly/deploy.sh` registers no duplicate issuer on wallet-backend**: a
+  failed issuer listing, an HTTP error or an unparseable body read as "no
+  issuers", and the registration POSTed a second issuer. A non-JSON body
+  ended the deploy with no message. Each case now skips the registration
+  with a message. A `fly proxy` that had already exited ended the deploy
+  after the registration; it now counts as stopped.
 - **`create_pki.sh` writes private keys owner-only**: each private key and
   the nym_auth seed are created under umask 077. LibreSSL's `openssl`, the
   one macOS ships, honours the umask, so under the usual umask 022 the keys
