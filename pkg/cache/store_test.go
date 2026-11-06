@@ -71,6 +71,17 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Equal(t, "contract-session-1", result.SessionID)
 	})
 
+	t.Run("IssuanceIDRoundTrip", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:  "contract-issuance-id-1",
+			IssuanceID: "contract-issuance-id",
+		}))
+
+		result, err := store.GetByID(ctx, "contract-issuance-id-1")
+		require.NoError(t, err)
+		assert.Equal(t, "contract-issuance-id", result.IssuanceID)
+	})
+
 	t.Run("GetSnapshotIsolatesTheCallerAndGetDoesNot", func(t *testing.T) {
 		require.NoError(t, store.Save(ctx, &AuthorizationContext{
 			SessionID: "contract-snapshot-1",

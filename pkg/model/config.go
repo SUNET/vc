@@ -1740,7 +1740,7 @@ type IssuerMetadata struct {
 	AuthorizationServers []string `yaml:"authorization_servers" validate:"omitempty"`
 	// DeferredCredentialEndpoint is the deferred credential endpoint
 	DeferredCredentialEndpoint string `yaml:"deferred_credential_endpoint" validate:"omitempty"`
-	// NotificationEndpoint is the notification endpoint
+	// NotificationEndpoint is the notification endpoint; defaults to <public_url>/notification
 	NotificationEndpoint string `yaml:"notification_endpoint" validate:"omitempty"`
 	// CryptographicBindingMethodsSupported lists the supported binding methods
 	CryptographicBindingMethodsSupported []string `yaml:"cryptographic_binding_methods_supported" validate:"omitempty"`
@@ -3795,6 +3795,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		return nil, fmt.Errorf("failed to construct nonce endpoint URL: %w", err)
 	}
 
+	notificationEndpoint := cfg.NotificationEndpoint
+	if notificationEndpoint == "" {
+		if notificationEndpoint, err = url.JoinPath(publicURL, "/notification"); err != nil {
+			return nil, fmt.Errorf("failed to construct notification endpoint URL: %w", err)
+		}
+	}
+
 	// Both encryption objects come from keys that have actually been loaded,
 	// so the metadata cannot advertise something the Credential Endpoint will
 	// refuse. nil when no key is configured, which omits both objects.
@@ -3809,7 +3816,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		NonceEndpoint:                        nonceEndpoint,
 		AuthorizationServers:                 cfg.AuthorizationServers,
 		DeferredCredentialEndpoint:           cfg.DeferredCredentialEndpoint,
-		NotificationEndpoint:                 cfg.NotificationEndpoint,
+		NotificationEndpoint:                 notificationEndpoint,
 		CryptographicBindingMethodsSupported: cfg.CryptographicBindingMethodsSupported,
 		CredentialSigningAlgValuesSupported:  cfg.CredentialSigningAlgValuesSupported,
 		ProofSigningAlgValuesSupported:       cfg.ProofSigningAlgValuesSupported,
