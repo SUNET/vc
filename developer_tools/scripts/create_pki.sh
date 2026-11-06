@@ -9,6 +9,33 @@ PKI_DIR="${SCRIPT_DIR}/../pki"
 # Create pki directory if it doesn't exist
 mkdir -p "${PKI_DIR}"
 
+# The dev stack's services run as the distroless nonroot user and read their
+# keys through the ./developer_tools/pki bind mount.
+CONTAINER_UID=65532
+
+# Private keys are written owner-only. On Linux a bind mount keeps host
+# ownership and modes, so the container user needs an ACL entry to read them.
+# Docker Desktop on macOS serves bind mounts with the host user's access.
+grant_acl=0
+if [ "$(uname -s)" = Linux ]; then
+    if ! command -v setfacl >/dev/null 2>&1; then
+        echo "setfacl not found: install the acl package; the dev stack reads its keys as uid ${CONTAINER_UID}" >&2
+        exit 1
+    fi
+    grant_acl=1
+fi
+
+# Grants the container user read access to key $1. A key left without the
+# grant is removed, so the next run generates it again.
+grant_container_read() {
+    [ "$grant_acl" -eq 1 ] || return 0
+    if ! setfacl -m "u:${CONTAINER_UID}:r" "$1"; then
+        rm -f "$1"
+        echo "granting uid ${CONTAINER_UID} read access to $1 failed; removed it" >&2
+        exit 1
+    fi
+}
+
 # Service TLS certificates
 service_names="apigw verifier registry issuer vc"
 
@@ -42,7 +69,7 @@ EOF
 if [ ! -f "${PKI_DIR}/rootCA.key" ]; then
     echo Creating Root CA
 
-    openssl genrsa -out "${PKI_DIR}/rootCA.key" 2048
+    (umask 077; openssl genrsa -out "${PKI_DIR}/rootCA.key" 2048)
     openssl req -x509 -new -nodes -key "${PKI_DIR}/rootCA.key" -sha256 -days 3650 -out "${PKI_DIR}/rootCA.crt" -config ca.conf \
         -addext "basicConstraints=critical,CA:TRUE" \
         -addext "keyUsage=critical,keyCertSign,cRLSign"
@@ -93,7 +120,8 @@ EOF
 	ext_generated=1
     fi
 
-    openssl req -new -sha256 -nodes -out ${service_name}.csr -newkey rsa:2048 -keyout "${PKI_DIR}/tls_${service_name}.key" -config ${service_name}.conf
+    (umask 077; openssl req -new -sha256 -nodes -out ${service_name}.csr -newkey rsa:2048 -keyout "${PKI_DIR}/tls_${service_name}.key" -config ${service_name}.conf)
+    grant_container_read "${PKI_DIR}/tls_${service_name}.key"
     openssl x509 -req -in ${service_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/tls_${service_name}.crt" -days 730 -sha256 -extfile ${service_name}.ext
 
     # Create combined PEM file (cert + CA chain, no private key)
@@ -117,7 +145,7 @@ generate_signing_keys() {
         echo "Generating RSA signing key pair with certificate..."
         
         # Generate RSA private key
-        openssl genrsa -out "${PKI_DIR}/signing_rsa_private.pem" 2048
+        (umask 077; openssl genrsa -out "${PKI_DIR}/signing_rsa_private.pem" 2048)
         openssl rsa -in "${PKI_DIR}/signing_rsa_private.pem" -pubout -out "${PKI_DIR}/signing_rsa_public.pem"
         
         # Create CSR config
@@ -164,8 +192,10 @@ EOF
         echo "Generating EC signing key pair (P-256) with certificate..."
         
         # Generate EC private key in PKCS8 format
-        openssl ecparam -name prime256v1 -genkey -noout -out signing_ec_private_raw.pem
-        openssl pkcs8 -topk8 -nocrypt -in signing_ec_private_raw.pem -out "${PKI_DIR}/signing_ec_private.pem"
+        (umask 077
+         openssl ecparam -name prime256v1 -genkey -noout -out signing_ec_private_raw.pem
+         openssl pkcs8 -topk8 -nocrypt -in signing_ec_private_raw.pem -out "${PKI_DIR}/signing_ec_private.pem")
+        grant_container_read "${PKI_DIR}/signing_ec_private.pem"
         openssl ec -in "${PKI_DIR}/signing_ec_private.pem" -pubout -out "${PKI_DIR}/signing_ec_public.pem"
         rm signing_ec_private_raw.pem
         
@@ -211,10 +241,11 @@ EOF
     # EC key-agreement key (P-256) for Credential Request and Response encryption
     if [ ! -f "${PKI_DIR}/credential_encryption.pem" ]; then
         echo "Generating credential encryption key (P-256)..."
-        openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${PKI_DIR}/credential_encryption.pem"
+        (umask 077; openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${PKI_DIR}/credential_encryption.pem")
+        grant_container_read "${PKI_DIR}/credential_encryption.pem"
     fi
 
-    # Secret of the nym_auth ssc hkdf opening, readable by its owner only
+    # Secret of the nym_auth ssc hkdf opening
     if [ ! -f "${PKI_DIR}/nym_auth_seed.key" ]; then
         echo "Generating the nym_auth ssc opening secret..."
         seed=$(openssl rand 32 | basenc --base64url | tr -d '=')
@@ -223,6 +254,7 @@ EOF
             exit 1
         fi
         (umask 077; printf '%s\n' "${seed}" > "${PKI_DIR}/nym_auth_seed.key")
+        grant_container_read "${PKI_DIR}/nym_auth_seed.key"
     fi
 }
 
@@ -266,7 +298,7 @@ extendedKeyUsage = clientAuth
 EOF
 
         # Generate key, CSR and sign with rootCA
-        openssl genrsa -out "${PKI_DIR}/client_cert_${client_name}.key" 2048
+        (umask 077; openssl genrsa -out "${PKI_DIR}/client_cert_${client_name}.key" 2048)
         openssl req -new -key "${PKI_DIR}/client_cert_${client_name}.key" -out ${client_name}.csr -config ${client_name}.conf
         openssl x509 -req -in ${client_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/client_cert_${client_name}.crt" -days 730 -sha256 -extfile ${client_name}.ext
         

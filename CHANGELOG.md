@@ -80,6 +80,16 @@
   still fail. Both local writes are now prepared before the set and happen
   only after it succeeds. A missing or read-only secrets file stops the OIDC
   step before Fly receives anything.
+- **`create_pki.sh` writes private keys owner-only**: each private key and
+  the nym_auth seed are created under umask 077. LibreSSL's `openssl`, the
+  one macOS ships, honours the umask, so under the usual umask 022 the keys
+  were world-readable.
+- **The Linux dev stack can read its keys**: OpenSSL 1.1 and later write
+  private keys 0600, and the script wrote the nym_auth seed 0600, so the
+  containers (uid 65532) could not read the keys they mount. On Linux the
+  script now grants uid 65532 read access through an ACL entry, and stops
+  when `setfacl` is missing or fails. Keys generated earlier keep their
+  modes; `make pki-clean pki` regenerates them.
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only
