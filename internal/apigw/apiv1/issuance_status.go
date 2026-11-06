@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -67,13 +68,14 @@ func newIssuanceID() (string, error) {
 	return crypto.GenerateSecureToken(32, 0)
 }
 
-// createIssuanceStatus stores the first record for an issuance.
-func (c *Client) createIssuanceStatus(ctx context.Context, issuanceID, scope, authenticSource string, deadline int64) {
+// createIssuanceStatus stores the first record for an issuance. A failure
+// means the issuance_id would answer 404, so callers must not hand it out.
+func (c *Client) createIssuanceStatus(ctx context.Context, issuanceID, scope, authenticSource string, deadline int64) error {
 	if issuanceID == "" || c.cacheService == nil || c.cacheService.IssuanceStatus == nil {
-		return
+		return nil
 	}
 	now := time.Now().Unix()
-	c.cacheService.IssuanceStatus.Set(ctx, issuanceID, &cache.IssuanceStatusRecord{
+	created, err := c.cacheService.IssuanceStatus.SetNX(ctx, issuanceID, &cache.IssuanceStatusRecord{
 		IssuanceID:      issuanceID,
 		Scope:           scope,
 		AuthenticSource: authenticSource,
@@ -82,32 +84,71 @@ func (c *Client) createIssuanceStatus(ctx context.Context, issuanceID, scope, au
 		UpdatedAt:       now,
 		Deadline:        deadline,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to store issuance status: %w", err)
+	}
+	if !created {
+		return errors.New("issuance status already exists")
+	}
+	return nil
 }
 
-// recordIssuanceStatus moves an issuance forward. It does nothing for an
+// updateIssuanceStatus moves an issuance forward. It does nothing for an
 // empty id, an unknown id, or a state that does not outrank the stored one.
-// A non-zero deadline replaces the stored one.
-func (c *Client) recordIssuanceStatus(ctx context.Context, issuanceID, status, description string, deadline int64) {
+// A non-zero deadline replaces the stored one. The rank check and the write
+// are one atomic step in the cache, so concurrent events cannot overwrite
+// each other's outcome.
+func (c *Client) updateIssuanceStatus(ctx context.Context, issuanceID, status, description string, deadline int64) error {
 	if issuanceID == "" || c.cacheService == nil || c.cacheService.IssuanceStatus == nil {
-		return
+		return nil
 	}
-	record, ok := c.cacheService.IssuanceStatus.Get(ctx, issuanceID)
-	if !ok || record == nil {
-		return
+	_, err := c.cacheService.IssuanceStatus.Update(ctx, issuanceID,
+		func(record *cache.IssuanceStatusRecord) (*cache.IssuanceStatusRecord, time.Duration, bool) {
+			if record == nil || issuanceStatusRank[status] <= issuanceStatusRank[record.Status] {
+				return nil, 0, false
+			}
+			// A copy: the memory cache hands out the stored pointer.
+			updated := *record
+			updated.Status = status
+			updated.UpdatedAt = time.Now().Unix()
+			updated.EventDescription = truncateEventDescription(description)
+			if deadline > 0 {
+				updated.Deadline = deadline
+			}
+			return &updated, 0, true
+		})
+	if errors.Is(err, pkgcache.ErrNoDocuments) {
+		return nil
 	}
-	if issuanceStatusRank[status] <= issuanceStatusRank[record.Status] {
-		return
-	}
+	return err
+}
 
-	// A copy: the memory cache hands out the stored pointer.
-	updated := *record
-	updated.Status = status
-	updated.UpdatedAt = time.Now().Unix()
-	updated.EventDescription = truncateEventDescription(description)
-	if deadline > 0 {
-		updated.Deadline = deadline
+// recordIssuanceStatus is updateIssuanceStatus for callers that must not fail
+// because tracking did: the failure is logged.
+func (c *Client) recordIssuanceStatus(ctx context.Context, issuanceID, status, description string, deadline int64) {
+	if err := c.updateIssuanceStatus(ctx, issuanceID, status, description, deadline); err != nil {
+		c.log.Error(err, "failed to record issuance status", "status", status)
 	}
-	c.cacheService.IssuanceStatus.Set(ctx, issuanceID, &updated)
+}
+
+// extendIssuanceDeadline moves the deadline of an in-progress issuance later,
+// whatever state it is in. It never shortens the deadline.
+func (c *Client) extendIssuanceDeadline(ctx context.Context, issuanceID string, deadline int64) {
+	if issuanceID == "" || deadline <= 0 || c.cacheService == nil || c.cacheService.IssuanceStatus == nil {
+		return
+	}
+	_, err := c.cacheService.IssuanceStatus.Update(ctx, issuanceID,
+		func(record *cache.IssuanceStatusRecord) (*cache.IssuanceStatusRecord, time.Duration, bool) {
+			if record == nil || deadline <= record.Deadline {
+				return nil, 0, false
+			}
+			updated := *record
+			updated.Deadline = deadline
+			return &updated, 0, true
+		})
+	if err != nil && !errors.Is(err, pkgcache.ErrNoDocuments) {
+		c.log.Error(err, "failed to extend issuance deadline")
+	}
 }
 
 func truncateEventDescription(s string) string {
@@ -129,7 +170,13 @@ func (c *Client) newNotificationID(ctx context.Context, issuanceID string) (stri
 	if err != nil {
 		return "", err
 	}
-	c.cacheService.NotificationBinding.Set(ctx, id, issuanceID)
+	bound, err := c.cacheService.NotificationBinding.SetNX(ctx, id, issuanceID)
+	if err != nil {
+		return "", err
+	}
+	if !bound {
+		return "", errors.New("notification_id already bound")
+	}
 	return id, nil
 }
 

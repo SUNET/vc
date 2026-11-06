@@ -55,6 +55,14 @@ type Cache[V any] interface {
 	// SetWithTTL stores a value with a custom TTL, overriding the default.
 	SetWithTTL(ctx context.Context, key string, value V, ttl time.Duration)
 
+	// Update atomically read-modify-writes the value under key, across
+	// replicas where the backend is shared. fn receives the current value and
+	// returns the replacement, the lifetime the replacement gets from now
+	// (<= 0 keeps the remaining lifetime) and whether to write at all.
+	// Returns whether a write happened, and ErrNoDocuments when key is absent.
+	// fn may run more than once and must not have side effects.
+	Update(ctx context.Context, key string, fn func(current V) (next V, ttl time.Duration, write bool)) (bool, error)
+
 	// Delete removes a value by key.
 	Delete(ctx context.Context, key string)
 

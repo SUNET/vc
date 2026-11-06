@@ -603,6 +603,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
 			"interactive authorization could not be completed", 500, err)
 	}
+	c.extendIssuanceDeadline(ctx, authCtx.IssuanceID, codeExpiresAt)
 
 	c.log.Info("CHALLENGE: authorization complete", "session_id", authCtx.SessionID, "scopes", authCtx.Scopes)
 

@@ -254,7 +254,9 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, err
 	}
-	c.createIssuanceStatus(ctx, issuanceID, req.Scope, source.AuthenticSource, authCtx.ExpiresAt)
+	if err := c.createIssuanceStatus(ctx, issuanceID, req.Scope, source.AuthenticSource, authCtx.ExpiresAt); err != nil {
+		return nil, err
+	}
 
 	offer, err := openid4vci.NewCredentialOffer(
 		c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Scope, openid4vci.GrantTypeAuthorizationCode)

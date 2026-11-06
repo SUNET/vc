@@ -1,9 +1,11 @@
 package apiv1
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,8 +25,8 @@ func newStatusTestClient(t *testing.T) *Client {
 	return &Client{
 		log: log,
 		cacheService: &cache.Service{
-			IssuanceStatus:      cache.NewTestMemoryCache[*cache.IssuanceStatusRecord](time.Hour),
-			NotificationBinding: cache.NewTestMemoryCache[string](time.Hour),
+			IssuanceStatus:      cache.NewTestFixedLifetimeMemoryCache[*cache.IssuanceStatusRecord](time.Hour),
+			NotificationBinding: cache.NewTestFixedLifetimeMemoryCache[string](time.Hour),
 		},
 	}
 }
@@ -182,4 +184,110 @@ func TestVCINotification_UnknownIDIsRefused(t *testing.T) {
 	var verr *openid4vci.Error
 	require.True(t, errors.As(err, &verr))
 	assert.Equal(t, openid4vci.InvalidNotificationID, verr.Err)
+}
+
+// failingCache fails the operations whose error the status code must surface.
+type failingCache[V any] struct {
+	cache.Cache[V]
+	err error
+}
+
+func (f failingCache[V]) GetErr(context.Context, string) (V, error) {
+	var zero V
+	return zero, f.err
+}
+
+func (f failingCache[V]) SetNX(context.Context, string, V) (bool, error) { return false, f.err }
+
+func (f failingCache[V]) Update(context.Context, string, func(V) (V, time.Duration, bool)) (bool, error) {
+	return false, f.err
+}
+
+func TestIssuanceStatus_CreateReportsPersistenceFailure(t *testing.T) {
+	c := newStatusTestClient(t)
+	c.cacheService.IssuanceStatus = failingCache[*cache.IssuanceStatusRecord]{err: errors.New("mongo down")}
+
+	err := c.createIssuanceStatus(t.Context(), "id-1", "pid", "SUNET", 0)
+	require.Error(t, err)
+}
+
+func TestIssuanceStatus_NotificationIDReportsPersistenceFailure(t *testing.T) {
+	c := newStatusTestClient(t)
+	c.cacheService.NotificationBinding = failingCache[string]{err: errors.New("mongo down")}
+
+	id, err := c.newNotificationID(t.Context(), "id-1")
+	require.Error(t, err)
+	assert.Empty(t, id)
+}
+
+func TestVCINotification_BackendOutageIsNotInvalidID(t *testing.T) {
+	c := newStatusTestClient(t)
+	c.cacheService.NotificationBinding = failingCache[string]{err: errors.New("mongo down")}
+
+	err := c.VCINotification(t.Context(), &openid4vci.NotificationRequest{
+		NotificationID: "any",
+		Event:          "credential_accepted",
+	})
+
+	require.Error(t, err)
+	var verr *openid4vci.Error
+	assert.False(t, errors.As(err, &verr), "an outage must not look like invalid_notification_id")
+}
+
+func TestVCINotification_StatusWriteFailureIsReturned(t *testing.T) {
+	c := newStatusTestClient(t)
+	ctx := t.Context()
+	c.createIssuanceStatus(ctx, "id-1", "pid", "SUNET", 0)
+	c.recordIssuanceStatus(ctx, "id-1", IssuanceStatusCredentialIssued, "", 0)
+	notificationID, err := c.newNotificationID(ctx, "id-1")
+	require.NoError(t, err)
+
+	c.cacheService.IssuanceStatus = failingCache[*cache.IssuanceStatusRecord]{err: errors.New("mongo down")}
+
+	err = c.VCINotification(ctx, &openid4vci.NotificationRequest{
+		NotificationID: notificationID,
+		Event:          "credential_accepted",
+	})
+	require.Error(t, err, "a notification that was not recorded must not be acknowledged")
+}
+
+func TestIssuanceStatus_ConcurrentOutcomesKeepOneFinalState(t *testing.T) {
+	c := newStatusTestClient(t)
+	ctx := t.Context()
+	c.createIssuanceStatus(ctx, "id-1", "pid", "SUNET", 0)
+
+	var wg sync.WaitGroup
+	for _, s := range []string{
+		IssuanceStatusCredentialIssued, IssuanceStatusAccepted,
+		IssuanceStatusCredentialIssued, IssuanceStatusTokenIssued,
+		IssuanceStatusCredentialIssued, IssuanceStatusAccepted,
+	} {
+		wg.Go(func() { c.recordIssuanceStatus(ctx, "id-1", s, "", 0) })
+	}
+	wg.Wait()
+
+	reply, err := c.IssuanceStatus(ctx, statusReq("id-1"))
+	require.NoError(t, err)
+	assert.Equal(t, IssuanceStatusAccepted, reply.Status, "a delayed lower-ranked write must not overwrite accepted")
+}
+
+func TestIssuanceStatus_ExtendDeadlineWhenCodeLifetimeStarts(t *testing.T) {
+	c := newStatusTestClient(t)
+	ctx := t.Context()
+	short := time.Now().Add(time.Minute).Unix()
+	long := time.Now().Add(10 * time.Minute).Unix()
+	c.createIssuanceStatus(ctx, "id-1", "pid", "SUNET", short)
+	c.recordIssuanceStatus(ctx, "id-1", IssuanceStatusAuthorizationStarted, "", short)
+	c.recordIssuanceStatus(ctx, "id-1", IssuanceStatusTokenIssued, "", 0)
+
+	c.extendIssuanceDeadline(ctx, "id-1", long)
+	record, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+	assert.Equal(t, long, record.Deadline, "extends even though the state does not advance")
+	assert.Equal(t, IssuanceStatusTokenIssued, record.Status)
+
+	c.extendIssuanceDeadline(ctx, "id-1", short)
+	record, err = c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+	assert.Equal(t, long, record.Deadline, "never shortens")
 }

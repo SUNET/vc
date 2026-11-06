@@ -674,7 +674,9 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
 	}
-	c.createIssuanceStatus(ctx, issuanceID, req.Scope, req.AuthenticSource, authCtx.ExpiresAt)
+	if err := c.createIssuanceStatus(ctx, issuanceID, req.Scope, req.AuthenticSource, authCtx.ExpiresAt); err != nil {
+		return nil, err
+	}
 
 	// Store the document data so the credential endpoint can issue the
 	// credential when the wallet redeems the offer.

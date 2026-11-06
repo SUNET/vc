@@ -16,6 +16,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -1146,16 +1147,24 @@ func (c *Client) VCINotification(ctx context.Context, req *openid4vci.Notificati
 	if c.cacheService == nil || c.cacheService.NotificationBinding == nil {
 		return nil
 	}
-	issuanceID, ok := c.cacheService.NotificationBinding.Get(ctx, req.NotificationID)
-	if !ok {
+	issuanceID, err := c.cacheService.NotificationBinding.GetErr(ctx, req.NotificationID)
+	switch {
+	case errors.Is(err, pkgcache.ErrNoDocuments):
 		return &openid4vci.Error{Err: openid4vci.InvalidNotificationID}
+	case err != nil:
+		// Not a 2xx, so the wallet can retry.
+		c.log.Error(err, "failed to read notification binding")
+		return err
 	}
 
 	status := IssuanceStatusRejected
 	if req.Event == "credential_accepted" {
 		status = IssuanceStatusAccepted
 	}
-	c.recordIssuanceStatus(ctx, issuanceID, status, req.EventDescription, 0)
+	if err := c.updateIssuanceStatus(ctx, issuanceID, status, req.EventDescription, 0); err != nil {
+		c.log.Error(err, "failed to record notification")
+		return err
+	}
 	return nil
 }
 

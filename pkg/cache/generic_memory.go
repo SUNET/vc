@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -12,12 +13,28 @@ import (
 type MemoryCache[V any] struct {
 	cache *ttlcache.Cache[string, V]
 	ttl   time.Duration
+
+	// updateMu serialises Update calls with each other.
+	updateMu sync.Mutex
 }
 
 // NewMemoryCache creates a new in-memory generic cache with the given default TTL.
 func NewMemoryCache[V any](ttl time.Duration) *MemoryCache[V] {
 	c := ttlcache.New(
 		ttlcache.WithTTL[string, V](ttl),
+	)
+
+	go c.Start()
+
+	return &MemoryCache[V]{cache: c, ttl: ttl}
+}
+
+// NewFixedLifetimeMemoryCache is NewMemoryCache without touch-on-hit: reads
+// never extend an entry's life, so it expires ttl after it was written.
+func NewFixedLifetimeMemoryCache[V any](ttl time.Duration) *MemoryCache[V] {
+	c := ttlcache.New(
+		ttlcache.WithTTL[string, V](ttl),
+		ttlcache.WithDisableTouchOnHit[string, V](),
 	)
 
 	go c.Start()
@@ -82,6 +99,27 @@ func (m *MemoryCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, 
 // SetWithTTL stores a value with a custom TTL.
 func (m *MemoryCache[V]) SetWithTTL(_ context.Context, key string, value V, ttl time.Duration) {
 	m.cache.Set(key, value, ttl)
+}
+
+// Update atomically read-modify-writes a value; see Cache.Update.
+// It is atomic against other Update calls, not against plain Set.
+func (m *MemoryCache[V]) Update(_ context.Context, key string, fn func(V) (V, time.Duration, bool)) (bool, error) {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+
+	item := m.cache.Get(key, ttlcache.WithDisableTouchOnHit[string, V]())
+	if item == nil {
+		return false, ErrNoDocuments
+	}
+	next, ttl, write := fn(item.Value())
+	if !write {
+		return false, nil
+	}
+	if ttl <= 0 {
+		ttl = ttlcache.PreviousOrDefaultTTL
+	}
+	m.cache.Set(key, next, ttl)
+	return true, nil
 }
 
 // Delete removes a value by key.

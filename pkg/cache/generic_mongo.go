@@ -205,6 +205,51 @@ func (m *MongoCache[V]) SetWithTTL(ctx context.Context, key string, value V, ttl
 	m.upsertAt(ctx, key, value, createdAt)
 }
 
+// maxUpdateAttempts bounds the optimistic retry loop of Update.
+const maxUpdateAttempts = 5
+
+// Update atomically read-modify-writes a value; see Cache.Update.
+// The write only matches the document that was read, so a concurrent writer
+// on any replica forces a re-read instead of being overwritten.
+func (m *MongoCache[V]) Update(ctx context.Context, key string, fn func(V) (V, time.Duration, bool)) (bool, error) {
+	for range maxUpdateAttempts {
+		var entry mongoCacheEntry
+		if err := m.coll.FindOne(ctx, bson.M{"_id": key}).Decode(&entry); err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return false, ErrNoDocuments
+			}
+			return false, fmt.Errorf("mongo cache update (cache=%s): %w", m.collection, err)
+		}
+		current, ok := m.decodeEntry(&entry, "update", key)
+		if !ok {
+			return false, fmt.Errorf("mongo cache update: decode failed (cache=%s)", m.collection)
+		}
+
+		next, ttl, write := fn(current)
+		if !write {
+			return false, nil
+		}
+
+		createdAt := entry.CreatedAt
+		if ttl > 0 {
+			createdAt = time.Now().Add(-(m.ttl - ttl))
+		}
+		updated, err := m.marshalEntry(key, next, createdAt)
+		if err != nil {
+			return false, fmt.Errorf("mongo cache update marshal failed (cache=%s): %w", m.collection, err)
+		}
+
+		res, err := m.coll.ReplaceOne(ctx, bson.M{"_id": key, "json_value": entry.JSONValue}, updated)
+		if err != nil {
+			return false, fmt.Errorf("mongo cache update failed (cache=%s): %w", m.collection, err)
+		}
+		if res.MatchedCount == 1 {
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("mongo cache update: too much contention (cache=%s)", m.collection)
+}
+
 // Delete removes a value by key.
 func (m *MongoCache[V]) Delete(ctx context.Context, key string) {
 	if _, err := m.coll.DeleteOne(ctx, bson.M{"_id": key}); err != nil {

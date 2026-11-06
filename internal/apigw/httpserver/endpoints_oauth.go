@@ -789,8 +789,10 @@ func (s *Service) endpointIssuanceStatus(ctx context.Context, c *gin.Context) (a
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIssuanceStatus")
 	defer span.End()
 
+	// Query only: Binding.Request would also read a JSON body, letting a
+	// caller authorize one source/scope in the query and look up another.
 	request := &apiv1.IssuanceStatusRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+	if err := c.ShouldBindQuery(request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
