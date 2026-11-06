@@ -699,7 +699,7 @@ func (f *flattener) copyBlock(n ast.Node, first *token.Token, col int) (bool, er
 		return false, nil
 	}
 	f.out.newline(col+2, line)
-	f.out.write(strings.TrimRight(string(f.d.src[start:f.d.lineEnd(line)]), "\r"), line)
+	f.out.write(string(f.d.src[start:f.d.lineEnd(line)]), line)
 	for i, text := range rest {
 		f.out.write("\n"+text, line+1+i)
 	}
@@ -734,7 +734,7 @@ func (f *flattener) copyInline(n ast.Node, col int) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	f.out.write(" "+strings.TrimRight(string(f.d.src[start:f.d.lineEnd(line)]), "\r"), line)
+	f.out.write(" "+string(f.d.src[start:f.d.lineEnd(line)]), line)
 	for i, text := range rest {
 		f.out.write("\n"+text, line+1+i)
 	}
@@ -763,7 +763,7 @@ func (f *flattener) lastLine(n ast.Node) int {
 func (f *flattener) moved(first, last, shift, floor int) ([]string, bool) {
 	lines := make([]string, 0, max(last-first+1, 0))
 	for line := first; line <= last; line++ {
-		text := strings.TrimRight(string(f.d.src[f.d.lineStart(line):f.d.lineEnd(line)]), "\r")
+		text := string(f.d.src[f.d.lineStart(line):f.d.lineEnd(line)])
 		content := strings.TrimLeft(text, " ")
 		indentation := len(text) - len(content) + shift
 		blank := strings.TrimSpace(content) == ""

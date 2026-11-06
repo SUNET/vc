@@ -1,6 +1,8 @@
 package configuration
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io/fs"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/legacyclaims"
@@ -323,6 +326,113 @@ func TestDecodeReadsTheDocumentYAMLv2Reads(t *testing.T) {
 			assert.Equal(t, want, got)
 		})
 	}
+}
+
+// gopkg.in/yaml.v2 reads one document from a file with any of its line
+// breaks (CRLF, CR, LF, NEL, LS and PS), after a UTF-8 byte order mark,
+// and in UTF-16 after a UTF-16 byte order mark. A file of the earlier
+// release loads and warns in each such form as its LF UTF-8 text does, and
+// migrate_claim_paths writes the form of its input. The alias of
+// aliased.yaml makes the upgrade read the text yaml.v2 decodes.
+func TestEachLineBreakAndEncodingLoadsAsLF(t *testing.T) {
+	root := repoRoot(t)
+	forms := map[string]func([]byte) []byte{
+		"CR":   lineBreaks("\r"),
+		"CRLF": lineBreaks("\r\n"),
+		"NEL":  lineBreaks("\xc2\x85"),
+		"LS":   lineBreaks("\xe2\x80\xa8"),
+		"PS":   lineBreaks("\xe2\x80\xa9"),
+		"CRLF on each line that holds a comment": func(text []byte) []byte {
+			lines := strings.SplitAfter(string(text), "\n")
+			for i, line := range lines {
+				if strings.Contains(line, "#") {
+					lines[i] = strings.Replace(line, "\n", "\r\n", 1)
+				}
+			}
+			return []byte(strings.Join(lines, ""))
+		},
+		"a UTF-8 byte order mark and CRLF": func(text []byte) []byte { return append([]byte("\xef\xbb\xbf"), lineBreaks("\r\n")(text)...) },
+		"UTF-16LE and CR":                  func(text []byte) []byte { return utf16Text(binary.LittleEndian, lineBreaks("\r")(text)) },
+		"UTF-16BE":                         func(text []byte) []byte { return utf16Text(binary.BigEndian, text) },
+	}
+	const aliased = "# The provider is an alias.\nx-provider: &provider oidc\ncommon:\n  credential_metadata:\n    pid:\n      format: dc+sd-jwt\n      vctm_file_path: /metadata/vctm_pid.json\napigw:\n  data_sources:\n    assertion:\n      scopes:\n        pid:\n          auth_provider: *provider # the provider\n          defaults:\n            address.country: SE # legacy\n          derivations:\n            - copy: {input: given_name, output: name} # legacy\n"
+	loadConfig := func(path string) (any, error) {
+		cfg, err := LoadFile(t.Context(), path, metadataIn(root))
+		if err != nil {
+			return nil, err
+		}
+		for i := range cfg.Deprecations {
+			cfg.Deprecations[i].File = ""
+		}
+		return cfg, nil
+	}
+	convertConfig := func(path string, src []byte) ([]byte, error) {
+		text, _, err := UpgradeFile(t.Context(), path, src, metadataIn(root))
+		return text, err
+	}
+	loadTemplates := func(path string) (any, error) {
+		file, err := loadTemplateFile(path)
+		for i := range file.deprecations {
+			file.deprecations[i].File = ""
+		}
+		return file, err
+	}
+	convertTemplates := func(path string, src []byte) ([]byte, error) {
+		text, _, err := UpgradeTemplateFile(path, src)
+		return text, err
+	}
+	readFixture := func(name string) []byte {
+		src, err := os.ReadFile(filepath.Join("testdata", name))
+		require.NoError(t, err)
+		return src
+	}
+	files := []struct {
+		name    string
+		text    []byte
+		load    func(path string) (any, error)
+		convert func(path string, src []byte) ([]byte, error)
+	}{
+		{"legacy_spellings.yaml", readFixture("legacy_spellings.yaml"), loadConfig, convertConfig},
+		{"legacy_spellings_template.yaml", readFixture("legacy_spellings_template.yaml"), loadTemplates, convertTemplates},
+		{"aliased.yaml", []byte(aliased), loadConfig, convertConfig},
+	}
+	for _, file := range files {
+		lf := filepath.Join(t.TempDir(), file.name)
+		require.NoError(t, os.WriteFile(lf, file.text, 0o600))
+		want, err := file.load(lf)
+		require.NoError(t, err)
+		converted, err := file.convert(lf, file.text)
+		require.NoError(t, err)
+		require.NotEqual(t, file.text, converted)
+		for name, form := range forms {
+			t.Run(file.name+"/"+name, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), file.name)
+				src := form(file.text)
+				require.NoError(t, os.WriteFile(path, src, 0o600))
+				got, err := file.load(path)
+				require.NoError(t, err)
+				assert.Equal(t, want, got)
+				text, err := file.convert(path, src)
+				require.NoError(t, err)
+				assert.Equal(t, string(form(converted)), string(text))
+			})
+		}
+	}
+}
+
+// lineBreaks returns a function that writes each LF of a text as
+// lineBreak.
+func lineBreaks(lineBreak string) func([]byte) []byte {
+	return func(text []byte) []byte { return bytes.ReplaceAll(text, []byte("\n"), []byte(lineBreak)) }
+}
+
+// utf16Text writes a UTF-8 text in UTF-16 after its byte order mark.
+func utf16Text(order binary.AppendByteOrder, text []byte) []byte {
+	out := order.AppendUint16(nil, 0xfeff)
+	for _, unit := range utf16.Encode([]rune(string(text))) {
+		out = order.AppendUint16(out, unit)
+	}
+	return out
 }
 
 // earlierScope holds the fields of a data source scope the way the earlier

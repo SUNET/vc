@@ -155,7 +155,8 @@
   **Migration:** after `make build-migrate-claim-paths`,
   `./bin/migrate_claim_paths -schemas /metadata=./metadata config.yaml
   presentation_requests/*.yaml` rewrites configuration and presentation
-  request files in place and keeps their comments. It converts a
+  request files in place and keeps their comments, encoding and line
+  breaks. It converts a
   `claim_mappings` map to the keyed form under the conditions
   [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists, and prints why it
   leaves any other map as written. It leaves a dotted derivation name as

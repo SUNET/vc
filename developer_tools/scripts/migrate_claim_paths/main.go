@@ -5,9 +5,10 @@
 // claim_mappings map becomes the keyed form under the conditions
 // docs/CLAIM_PATHS.md lists.
 //
-// It keeps every comment. It prints a line per claim_mappings it leaves
-// as written, with the reason, and a line per file it rewrites. A second
-// run changes nothing.
+// It keeps every comment, the encoding and the line breaks. A line it adds
+// ends with the line break that ends most lines of the file. It prints a
+// line per claim_mappings it leaves as written, with the reason, and a
+// line per file it rewrites. A second run changes nothing.
 //
 // It leaves a file with a YAML alias, merge key or repeated key as written,
 // and prints a line, when an alias stands where it reads claims, or when a
