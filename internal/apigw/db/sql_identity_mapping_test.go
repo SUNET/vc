@@ -169,6 +169,52 @@ func testIdentityMappingStoreContract(t *testing.T, store IdentityMappingStore) 
 		Attributes:      map[string]string{"family_name": "Nobody"},
 	})
 	assert.ErrorIs(t, err, helpers.ErrNoIdentityFound)
+
+	testIdentityMappingExactIdentifiers(t, store)
+}
+
+// testIdentityMappingExactIdentifiers requires a variant spelling of a key column
+// or an attribute value to name another identity on every backend, and search to
+// fold case only.
+func testIdentityMappingExactIdentifiers(t *testing.T, store IdentityMappingStore) {
+	t.Helper()
+	ctx := t.Context()
+
+	const exact = "Exact"
+	attributes := map[string]string{"family_name": "Owner", "given_name": exact}
+	require.NoError(t, store.CreateMapping(ctx, &model.IdentityMapping{AuthenticSource: exact, AuthenticSourcePersonID: exact, Attributes: attributes}))
+
+	for _, v := range exactVariants {
+		_, err := store.ResolveMapping(ctx, &ResolveMappingQuery{AuthenticSource: v, Attributes: attributes})
+		assert.ErrorIsf(t, err, helpers.ErrNoIdentityFound, "ResolveMapping source %q", v)
+		_, err = store.ResolveMapping(ctx, &ResolveMappingQuery{AuthenticSource: exact, Attributes: map[string]string{"given_name": v}})
+		assert.ErrorIsf(t, err, helpers.ErrNoIdentityFound, "ResolveMapping attribute %q", v)
+
+		for _, key := range [][2]string{{v, exact}, {exact, v}} {
+			source, person := key[0], key[1]
+			assert.ErrorIsf(t, store.UpdateMapping(ctx, &model.IdentityMapping{
+				AuthenticSource: source, AuthenticSourcePersonID: person, Attributes: map[string]string{"family_name": "Intruder"},
+			}), helpers.ErrNoIdentityFound, "UpdateMapping %q", key)
+			assert.ErrorIsf(t, store.DeleteMapping(ctx, &DeleteMappingQuery{AuthenticSource: source, AuthenticSourcePersonID: person}),
+				helpers.ErrNoIdentityFound, "DeleteMapping %q", key)
+
+			require.NoErrorf(t, store.CreateMapping(ctx, &model.IdentityMapping{
+				AuthenticSource: source, AuthenticSourcePersonID: person, Attributes: map[string]string{"family_name": "Beside"},
+			}), "CreateMapping %q", key)
+			require.NoErrorf(t, store.DeleteMapping(ctx, &DeleteMappingQuery{AuthenticSource: source, AuthenticSourcePersonID: person}), "delete %q", key)
+		}
+	}
+
+	person, err := store.ResolveMapping(ctx, &ResolveMappingQuery{AuthenticSource: exact, Attributes: attributes})
+	require.NoError(t, err)
+	assert.Equal(t, exact, person)
+
+	// "owner" reaches a JSON field and "exact" a key column.
+	for term, want := range map[string]int{"OWNER": 1, "owner": 1, "EXACT": 1, "exact": 1, "Ówner": 0, "Exáct": 0, "Owner ": 0} {
+		results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: term})
+		require.NoError(t, err)
+		assert.Lenf(t, results, want, "SearchMappings %q", term)
+	}
 }
 
 func TestSQLIdentityMappingsColl_Postgres(t *testing.T) {

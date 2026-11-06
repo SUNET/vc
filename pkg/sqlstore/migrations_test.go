@@ -8,6 +8,7 @@ import (
 	"github.com/SUNET/vc/pkg/testsupport"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/mariadb"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -104,5 +105,28 @@ func TestApplySchema_MariaDB(t *testing.T) {
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
 		require.NoErrorf(t, err, "table %q should exist after migration", table)
+	}
+
+	requireExactStringColumns(t, db)
+}
+
+// requireExactStringColumns requires the NO PAD binary collation on every
+// string column of every table except the migration tool's own. A column off it
+// compares under another rule than Postgres, MongoDB and the SPOCP engine, so a
+// variant spelling of an identifier can reach another subject's row. A migration
+// adding a table must name the collation.
+func requireExactStringColumns(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+	var columns []struct {
+		Table     string `db:"TABLE_NAME"`
+		Column    string `db:"COLUMN_NAME"`
+		Collation string `db:"COLLATION_NAME"`
+	}
+	require.NoError(t, db.SelectContext(t.Context(), &columns,
+		`SELECT TABLE_NAME, COLUMN_NAME, COLLATION_NAME FROM information_schema.COLUMNS
+		 WHERE TABLE_SCHEMA = DATABASE() AND COLLATION_NAME IS NOT NULL AND TABLE_NAME <> 'schema_migrations'`))
+	require.NotEmpty(t, columns, "the schema has string columns")
+	for _, c := range columns {
+		assert.Equalf(t, "utf8mb4_nopad_bin", c.Collation, "collation of %s.%s", c.Table, c.Column)
 	}
 }
