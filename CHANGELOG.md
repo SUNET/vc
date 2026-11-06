@@ -109,6 +109,13 @@
 
 ### Fixed
 
+- **A JSON request body the client got wrong answers 400**: wrong-typed,
+  truncated or malformed JSON, failed validation and values a decoder refuses
+  answer 400 on every endpoint that binds a JSON body, whichever words the
+  error text holds. Truncated or whitespace-only bodies carry the title
+  `json_syntax_error`. Values refused by a decoder, such as a malformed time,
+  carry the new title `json_value_error`. Both titles replace
+  `internal_server_error`.
 - **mdoc integers at the top of their range are refused**: an mdoc element the
   MDDL declares as `int` with the value 2^63 overflowed into a signed credential.
   On amd64 it was issued as -2^63, and a `uint` of 2^64 or more as 2^63. Issuance
