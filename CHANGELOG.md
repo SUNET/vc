@@ -65,6 +65,11 @@
 
 ### Fixed
 
+- **Bulk uploads refuse null entries**: a null value under `documents` in
+  `POST /api/v1/datastore/bulk` or under `mappings` in
+  `POST /api/v1/identity/mapping/bulk` made the handler panic, and the request
+  ended with a 500. Such a request answers 400.
+
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

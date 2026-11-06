@@ -83,7 +83,7 @@ func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadReques
 
 // DatastoreBulkUploadRequest is the request for bulk uploading documents
 type DatastoreBulkUploadRequest struct {
-	Documents map[string]*vcclient.UploadRequest `json:"documents" validate:"required,min=1,dive"`
+	Documents map[string]*vcclient.UploadRequest `json:"documents" validate:"required,min=1,dive,required"`
 }
 
 // DatastoreBulkUploadReply is the reply for a bulk document upload
