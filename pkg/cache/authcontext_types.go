@@ -288,7 +288,9 @@ type AuthorizationContext struct {
 // Validate checks the AuthorizationContext against its struct validation tags.
 func (a *AuthorizationContext) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())
-	v.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
+	if err := claimpath.RegisterValidation(v); err != nil {
+		return err
+	}
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name, _, _ := strings.Cut(fld.Tag.Get("json"), ",")
 		if name == "-" {

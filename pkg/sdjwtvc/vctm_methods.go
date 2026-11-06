@@ -15,7 +15,9 @@ import (
 // Validate checks the VCTM struct against its validation tags.
 func (v *VCTM) Validate() error {
 	validate := validator.New()
-	validate.RegisterCustomTypeFunc(claimpath.ValidationValue, claimpath.Pointer{})
+	if err := claimpath.RegisterValidation(validate); err != nil {
+		return err
+	}
 	return validate.Struct(v)
 }
 

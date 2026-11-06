@@ -41,8 +41,8 @@ func Nested() Shape {
 }
 
 // MDocQualified reads a dotted name of a presented mdoc as [namespace,
-// element], split at its last dot. A name without a dot is an element of
-// org.iso.18013.5.1.
+// element], split at its last dot. A name whose last dot is its first or
+// last character, or that has no dot, is an element of org.iso.18013.5.1.
 func MDocQualified() Shape {
 	return Shape{kind: qualifiedReading, document: claimpath.MDocQualified()}
 }
@@ -55,22 +55,17 @@ func DocumentData(document claimpath.Shape) Shape {
 	return Shape{kind: documentReading, document: document}
 }
 
-// Dotted reads a dotted claim name as a claims path pointer.
+// Dotted reads a dotted claim name as a claims path pointer. Each dot
+// separates two keys, so an empty segment is an empty key.
 func (s Shape) Dotted(name string) (claimpath.Pointer, error) {
-	segments, err := split(name)
-	if err != nil {
-		return claimpath.Pointer{}, err
-	}
 	if s.kind == qualifiedReading {
-		if len(segments) == 1 {
-			return claimpath.Keys(isoNamespace, name), nil
-		}
-		i := strings.LastIndex(name, ".")
-		return claimpath.Keys(name[:i], name[i+1:]), nil
+		namespace, element := qualified(name)
+		return claimpath.Keys(namespace, element), nil
 	}
 	if s.kind == 0 {
 		return claimpath.Pointer{}, errors.New("the shape is unset")
 	}
+	segments := strings.Split(name, ".")
 	first, err := s.document.Key(segments[0])
 	if err != nil {
 		return claimpath.Pointer{}, fmt.Errorf("%q: %w", name, err)
@@ -79,6 +74,15 @@ func (s Shape) Dotted(name string) (claimpath.Pointer, error) {
 		first = first.Append(claimpath.Key(segment))
 	}
 	return first, nil
+}
+
+// qualified returns the namespace and element identifier of main's dotted
+// name of a presented mdoc claim.
+func qualified(name string) (namespace, element string) {
+	if i := strings.LastIndex(name, "."); i > 0 && i < len(name)-1 {
+		return name[:i], name[i+1:]
+	}
+	return isoNamespace, name
 }
 
 // Literal reads a claim name as one key, the whole name: main's
@@ -104,15 +108,4 @@ func (s Shape) TopLevel(name string) (claimpath.Pointer, error) {
 		return claimpath.Pointer{}, errors.New("the shape is unset")
 	}
 	return s.document.Key(name)
-}
-
-// split returns the segments of a dotted name, each non-empty.
-func split(name string) ([]string, error) {
-	segments := strings.Split(name, ".")
-	for _, segment := range segments {
-		if segment == "" {
-			return nil, fmt.Errorf("the dotted claim name %q has an empty segment", name)
-		}
-	}
-	return segments, nil
 }

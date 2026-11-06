@@ -28,6 +28,9 @@ func (d *Document) pointer(n ast.Node, read reader) (claimpath.Pointer, string, 
 		p, err := pointerOf(n)
 		return p, "", err
 	}
+	if name == "" {
+		return claimpath.Pointer{}, "", fmt.Errorf("%s: the claim name is empty", n.GetPath())
+	}
 	p, err := read(name)
 	if err != nil {
 		return claimpath.Pointer{}, "", fmt.Errorf("%s: %w", n.GetPath(), err)

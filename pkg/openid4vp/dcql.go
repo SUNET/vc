@@ -1202,6 +1202,9 @@ type ClaimQuery struct {
 // MarshalJSON implements custom JSON marshaling for ClaimQuery.
 // A non-nil Values slice is validated against OpenID4VP §6.3; use nil to omit.
 func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
+	if err := validateClaimPath(cq.Path); err != nil {
+		return nil, err
+	}
 	if cq.Values != nil {
 		if err := validateClaimValues(cq.Values, true); err != nil {
 			return nil, err
@@ -1225,8 +1228,8 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw.Path.IsZero() {
-		return errors.New("claim path must not be empty")
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
 	}
 	var values []any
 	if len(raw.Values) > 0 {
@@ -1258,6 +1261,9 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 // through this method, so without it yaml.Marshal would emit an empty mapping
 // and drop id/path/values.
 func (cq ClaimQuery) MarshalYAML() (any, error) {
+	if err := validateClaimPath(cq.Path); err != nil {
+		return nil, err
+	}
 	if cq.Values != nil {
 		if err := validateClaimValues(cq.Values, true); err != nil {
 			return nil, err
@@ -1279,8 +1285,8 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
-	if raw.Path.IsZero() {
-		return errors.New("claim path must not be empty")
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
 	}
 	// Second pass into a generic map so we can distinguish an absent "values"
 	// key from an explicit YAML null — yaml.v2 unmarshals both into the same
@@ -1307,6 +1313,20 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	cq.ID = raw.ID
 	cq.Path = raw.Path
 	cq.Values = values
+	return nil
+}
+
+// validateClaimPath refuses an unset path and an empty key.
+func validateClaimPath(path claimpath.Pointer) error {
+	components, err := path.Components()
+	if err != nil {
+		return errors.New("claim path must not be empty")
+	}
+	for i, c := range components {
+		if key, ok := c.KeyName(); ok && key == "" {
+			return fmt.Errorf("claim path element at index %d must not be empty", i)
+		}
+	}
 	return nil
 }
 
