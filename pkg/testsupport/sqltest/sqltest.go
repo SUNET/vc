@@ -27,15 +27,16 @@ import (
 )
 
 // runPostgres starts a throwaway postgres:16 container with the module's basic
-// wait strategies and terminates it when the test ends, failing the test on a
-// terminate error. It skips the test when Docker is not available and fails it
-// when the start fails. Every Postgres helper here starts through it.
+// wait strategies under testsupport.WithStartDeadline and terminates it when
+// the test ends, failing the test on a terminate error. It skips the test when
+// Docker is not available and fails it when the start fails. Every Postgres
+// helper here starts through it.
 func runPostgres(t *testing.T) *postgres.PostgresContainer {
 	t.Helper()
 	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
 	}
-	ctr, err := postgres.Run(t.Context(), "postgres:16", postgres.BasicWaitStrategies())
+	ctr, err := postgres.Run(t.Context(), "postgres:16", postgres.BasicWaitStrategies(), testsupport.WithStartDeadline())
 	testcontainers.CleanupContainer(t, ctr)
 	if err != nil {
 		t.Fatalf("start postgres container: %v", err)
@@ -44,15 +45,16 @@ func runPostgres(t *testing.T) *postgres.PostgresContainer {
 }
 
 // runMariaDB starts a throwaway mariadb:11 container with the module's wait
-// strategy and terminates it when the test ends, failing the test on a
-// terminate error. It skips the test when Docker is not available and fails it
-// when the start fails. Every MariaDB helper here starts through it.
+// strategy under testsupport.WithStartDeadline and terminates it when the test
+// ends, failing the test on a terminate error. It skips the test when Docker is
+// not available and fails it when the start fails. Every MariaDB helper here
+// starts through it.
 func runMariaDB(t *testing.T) *mariadb.MariaDBContainer {
 	t.Helper()
 	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
 	}
-	ctr, err := mariadb.Run(t.Context(), "mariadb:11")
+	ctr, err := mariadb.Run(t.Context(), "mariadb:11", testsupport.WithStartDeadline())
 	testcontainers.CleanupContainer(t, ctr)
 	if err != nil {
 		t.Fatalf("start mariadb container: %v", err)

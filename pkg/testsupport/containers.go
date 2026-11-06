@@ -136,10 +136,11 @@ func StartMongoContainer(t *testing.T) (uri string, client *mongo.Client, cleanu
 }
 
 // StartRESPContainer starts img, any RESP server on the standard Redis port
-// 6379 such as Redis or Valkey, through the testcontainers Redis module. It
-// returns a connected client and a cleanup function that closes the client and
-// terminates the container. It skips the calling test if Docker is not available
-// and fails it on a setup error, terminating a running container first.
+// 6379 such as Redis or Valkey, through the testcontainers Redis module under
+// WithStartDeadline. It returns a connected client and a cleanup function that
+// closes the client and terminates the container. It skips the calling test if
+// Docker is not available and fails it on a setup error, terminating a running
+// container first.
 func StartRESPContainer(t *testing.T, img string) (redis.UniversalClient, func()) {
 	t.Helper()
 	if !IsDockerAvailable() {
@@ -147,7 +148,7 @@ func StartRESPContainer(t *testing.T, img string) (redis.UniversalClient, func()
 	}
 	ctx := t.Context()
 
-	container, err := tcredis.Run(ctx, img)
+	container, err := tcredis.Run(ctx, img, WithStartDeadline())
 	if err != nil {
 		t.Fatalf("start %s container: %v", img, err)
 	}
