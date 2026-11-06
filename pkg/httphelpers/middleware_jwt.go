@@ -592,18 +592,15 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 			allowedScopes := AllowedScopes(engine, sub)
 			c.Set("spocp_allowed_scopes", allowedScopes)
 
+			guard := resourceGuard{engine: engine, service: service, subject: sub, log: log}
+			c.Set(resourceGuardKey, guard)
 			pairs := extractResourcePairs(c)
 			if len(pairs) == 0 {
 				pairs = []resourcePair{{}}
 			}
-			for _, p := range pairs {
-				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub, p.authenticSource, p.scope)
-				if !engine.QueryElement(query) {
-					log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(),
-						"authentic_source", p.authenticSource, "scope", p.scope, "req_id", c.GetString("req_id"))
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-					return
-				}
+			if !guard.allows(c, pairs) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+				return
 			}
 		}
 
@@ -668,18 +665,15 @@ func (m *middlewareHandler) JWKSAuthWithProvider(_ context.Context, service stri
 			allowedScopes := AllowedScopes(engine, sub)
 			c.Set("spocp_allowed_scopes", allowedScopes)
 
+			guard := resourceGuard{engine: engine, service: service, subject: sub, log: log}
+			c.Set(resourceGuardKey, guard)
 			pairs := extractResourcePairs(c)
 			if len(pairs) == 0 {
 				pairs = []resourcePair{{}}
 			}
-			for _, p := range pairs {
-				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub, p.authenticSource, p.scope)
-				if !engine.QueryElement(query) {
-					log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(),
-						"authentic_source", p.authenticSource, "scope", p.scope, "req_id", c.GetString("req_id"))
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-					return
-				}
+			if !guard.allows(c, pairs) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+				return
 			}
 		}
 
