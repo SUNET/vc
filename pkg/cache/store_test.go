@@ -592,6 +592,49 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		_, err := store.ClaimAuthSession(ctx, "")
 		assert.Error(t, err)
 	})
+
+	// Issuance walks verified claims as map[string]any and []any.
+	t.Run("ReadsReturnPlainValues", func(t *testing.T) {
+		claims := func() map[string]any {
+			return map[string]any{
+				"identity":  map[string]any{"name": "n", "nationality": []any{"SE"}},
+				"addresses": []any{map[string]any{"city": "c"}, []any{"nested"}},
+			}
+		}
+		submission := func() any {
+			return map[string]any{"descriptor_map": []any{map[string]any{"id": "d"}}}
+		}
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:              "plain-values",
+			Code:                   "plain-values-code",
+			RequestURI:             "https://example.com/plain-values",
+			VerifiedClaims:         claims(),
+			PresentationSubmission: submission(),
+		}))
+
+		reads := map[string]func() (*AuthorizationContext, error){
+			"Get": func() (*AuthorizationContext, error) {
+				return store.Get(ctx, &AuthorizationContext{RequestURI: "https://example.com/plain-values"})
+			},
+			"GetSnapshot": func() (*AuthorizationContext, error) {
+				return store.GetSnapshot(ctx, &AuthorizationContext{RequestURI: "https://example.com/plain-values"})
+			},
+			"GetByID": func() (*AuthorizationContext, error) {
+				return store.GetByID(ctx, "plain-values")
+			},
+			"GetByAuthorizationCode": func() (*AuthorizationContext, error) {
+				return store.GetByAuthorizationCode(ctx, "plain-values-code")
+			},
+		}
+		for name, read := range reads {
+			t.Run(name, func(t *testing.T) {
+				got, err := read()
+				require.NoError(t, err)
+				assert.Equal(t, claims(), got.VerifiedClaims)
+				assert.Equal(t, submission(), got.PresentationSubmission)
+			})
+		}
+	})
 }
 
 // Get returns the cached pointer and then releases the lock, so a caller

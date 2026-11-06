@@ -65,6 +65,12 @@
 
 ### Fixed
 
+- **Mongo-backed documents keep their nested claims through derivations**: a
+  stored document and an authorization context's verified claims read back
+  from MongoDB with nested objects as `map[string]any` and arrays as `[]any`.
+  A derivation reading a dotted path found the value, and one writing a dotted
+  path kept the object's other fields.
+
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only
