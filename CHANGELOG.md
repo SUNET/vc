@@ -65,6 +65,12 @@
 
 ### Fixed
 
+- **SPOCP resource rules hold for the selector a handler receives**: the
+  authorization middleware and `Binding.Request` could read different
+  `authentic_source` or `scope` values from one `/api/v1` request. Every
+  selector `Binding.Request` binds now passes the same SPOCP check, and a denied
+  one answers 403 with the title `insufficient_permissions`.
+
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

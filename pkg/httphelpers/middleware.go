@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -240,15 +239,11 @@ func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.Hand
 			// the request carries explicit resource pairs. Search/list endpoints
 			// without resource params rely on DB-level filtering via the allowed
 			// lists above.
-			pairs := extractResourcePairs(c)
-			for _, p := range pairs {
-				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), subject, p.authenticSource, p.scope)
-				if !engine.QueryElement(query) {
-					log.Info("spocp_denied", "subject", subject, "service", service, "method", c.Request.Method, "path", c.FullPath(),
-						"authentic_source", p.authenticSource, "scope", p.scope)
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-					return
-				}
+			guard := resourceGuard{engine: engine, service: service, subject: subject, log: log}
+			c.Set(resourceGuardKey, guard)
+			if !guard.allows(c, extractResourcePairs(c)) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+				return
 			}
 		}
 
@@ -284,17 +279,7 @@ func extractResourcePairs(c *gin.Context) []resourcePair {
 		}
 	}
 
-	// Inject synthetic scope for identity mapping endpoints — these have
-	// authentic_source but no scope in the document model.
-	if strings.Contains(c.FullPath(), "/identity/mapping") {
-		for i := range pairs {
-			if pairs[i].authenticSource != "" && pairs[i].scope == "" {
-				pairs[i].scope = "identity_mapping"
-			}
-		}
-	}
-
-	return deduplicatePairs(pairs)
+	return normalizeResourcePairs(c, pairs)
 }
 
 // extractBodyResourcePairs parses a JSON body and returns all
