@@ -65,6 +65,13 @@
 
 ### Fixed
 
+- **A JSON request body the client got wrong answers 400**: wrong-typed,
+  truncated or malformed JSON, failed validation and values a decoder refuses
+  answer 400 on every endpoint that binds a JSON body, whichever words the
+  error text holds. Truncated or whitespace-only bodies carry the title
+  `json_syntax_error`. Values refused by a decoder, such as a malformed time,
+  carry the new title `json_value_error`. Both titles replace
+  `internal_server_error`.
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

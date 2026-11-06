@@ -24,7 +24,7 @@ func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (a
 	}
 
 	var req apiv1.OIDCRPInitiateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := s.httpHelpers.Binding.JSONBody(ctx, c, &req); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
