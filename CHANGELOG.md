@@ -65,6 +65,13 @@
 
 ### Fixed
 
+- **`fly/deploy.sh` stops when listing an app's secrets fails**: the
+  checks for the MongoDB credentials, OIDC secrets, AS signing key, service
+  signing keys and SAML SP keypair read a failed listing as "secret absent",
+  then generated and set new values over the live ones. Every listing now
+  stops the script with the app's name. A listing for an app that `fly apps
+  list` does not show counts as empty, so `launch --service <name>` still
+  continues past apps it did not create.
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

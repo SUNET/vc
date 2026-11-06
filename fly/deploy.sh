@@ -53,6 +53,25 @@ usage() {
 
 die() { echo "Error: $*" >&2; exit 1; }
 
+# Stores the secrets of Fly app $1, as JSON, in the variable named $2. An
+# absent app stores "[]": `launch --service <name>` provisions apps it did not
+# create, and their `secrets set` calls then fail with "app missing?". Every
+# other listing failure stops the script: provisioning after a failed listing
+# replaces live secrets.
+read_app_secrets() {
+    local _app="$1" _json _apps
+    if _json="$(fly secrets list --app "$_app" --json 2>/dev/null)"; then
+        printf -v "$2" '%s' "$_json"
+        return 0
+    fi
+    _apps="$(fly apps list --json 2>/dev/null)" \
+        || die "listing the secrets of $_app failed, and so did listing the apps; provisioning would replace existing secrets"
+    if printf '%s' "$_apps" | grep -q "\"$_app\""; then
+        die "listing the secrets of $_app failed; provisioning would replace existing secrets"
+    fi
+    printf -v "$2" '%s' '[]'
+}
+
 require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
 }
@@ -146,7 +165,7 @@ cmd_launch() {
     local secrets_file
     secrets_file="$(secrets_file_path)"
 
-    local mongo_app mongo_pass mongo_user mongo_uri
+    local mongo_app mongo_pass mongo_user mongo_uri mongo_secrets
     mongo_app="$(app_name "mongodb")"
     mongo_user="admin"
 
@@ -155,7 +174,8 @@ cmd_launch() {
     # change the on-disk user — it desyncs the whole stack (apigw/wallet-backend
     # end up with a URI that no longer authenticates). Only generate + set on
     # first launch.
-    if fly secrets list --app "$mongo_app" --json 2>/dev/null | grep -q '"MONGO_INITDB_ROOT_PASSWORD"'; then
+    read_app_secrets "$mongo_app" mongo_secrets
+    if printf '%s' "$mongo_secrets" | grep -q '"MONGO_INITDB_ROOT_PASSWORD"'; then
         echo "==> MongoDB secrets already set for $mongo_app (skipping)"
         mongo_pass=""
         mongo_uri=""
@@ -178,7 +198,7 @@ cmd_launch() {
         echo "    Updated $secrets_file with MongoDB URI"
     fi
 
-    local oidc_app apigw_client_secret demo_user_password oidc_first_launch
+    local oidc_app apigw_client_secret demo_user_password oidc_first_launch oidc_secrets
     oidc_app="$(app_name "oidc")"
     oidc_first_launch=0
 
@@ -186,7 +206,8 @@ cmd_launch() {
     # the client_secret + user password hashes in its H2 DB. Rotating these
     # env vars later does NOT change what's in the DB — it desyncs apigw's
     # secrets file from Keycloak. Only set on first launch.
-    if fly secrets list --app "$oidc_app" --json 2>/dev/null | grep -q '"APIGW_OIDC_CLIENT_SECRET"'; then
+    read_app_secrets "$oidc_app" oidc_secrets
+    if printf '%s' "$oidc_secrets" | grep -q '"APIGW_OIDC_CLIENT_SECRET"'; then
         echo "==> OIDC secrets already set for $oidc_app (skipping)"
     else
         oidc_first_launch=1
@@ -240,10 +261,11 @@ cmd_launch() {
         echo "          the realm, or 'fly apps destroy $oidc_app' and re-launch."
     fi
 
-    local wallet_backend_app as_key_pem as_key_b64
+    local wallet_backend_app as_key_pem as_key_b64 wallet_backend_secrets
     wallet_backend_app="$(app_name "wallet-backend")"
     echo "==> Setting AS signing key for $wallet_backend_app"
-    if fly secrets list --app "$wallet_backend_app" --json 2>/dev/null | grep -q '"AS_SIGNING_KEY_PEM"'; then
+    read_app_secrets "$wallet_backend_app" wallet_backend_secrets
+    if printf '%s' "$wallet_backend_secrets" | grep -q '"AS_SIGNING_KEY_PEM"'; then
         echo "    (AS_SIGNING_KEY_PEM already set, leaving in place)"
     else
         as_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout)"
@@ -273,10 +295,11 @@ cmd_launch() {
         signing_key_b64="$(base64 < "${pki_dir}/signing_ec_private.pem" | tr -d '\n')"
         signing_chain_b64="$(base64 < "${pki_dir}/signing_ec_chain.pem" | tr -d '\n')"
         for svc in apigw issuer verifier registry; do
-            local svc_app
+            local svc_app svc_secrets
             svc_app="$(app_name "$svc")"
             echo "==> Setting signing secrets for $svc_app"
-            if fly secrets list --app "$svc_app" --json 2>/dev/null | grep -q '"SIGNING_EC_PRIVATE_KEY"'; then
+            read_app_secrets "$svc_app" svc_secrets
+            if printf '%s' "$svc_secrets" | grep -q '"SIGNING_EC_PRIVATE_KEY"'; then
                 echo "    (SIGNING_EC_PRIVATE_KEY already set, leaving in place)"
             else
                 fly secrets set --app "$svc_app" \
@@ -311,7 +334,7 @@ provision_apigw_saml_sp_keypair() {
     # Skip only when BOTH secrets exist. A partial rotation that leaves only
     # the cert would otherwise pass this guard and apigw would fail to load
     # the mounted keypair on startup.
-    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null || echo '[]')"
+    read_app_secrets "$apigw_app" secrets_json
     if printf '%s' "$secrets_json" | grep -q '"SAML_SP_CERT"' \
         && printf '%s' "$secrets_json" | grep -q '"SAML_SP_KEY"'; then
         echo "==> SAML SP secrets already set for $apigw_app (skipping)"
@@ -346,8 +369,7 @@ provision_apigw_saml_sp_keypair() {
 provision_apigw_nym_auth_secrets() {
     local apigw_app secrets_json value
     apigw_app="$(app_name "apigw")"
-    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null)" \
-        || die "listing the secrets of $apigw_app failed; provisioning would replace an existing NYM_AUTH_SEED"
+    read_app_secrets "$apigw_app" secrets_json
     if printf '%s' "$secrets_json" | grep -q '"CREDENTIAL_ENCRYPTION_KEY"'; then
         echo "==> CREDENTIAL_ENCRYPTION_KEY already set for $apigw_app (skipping)"
     else
