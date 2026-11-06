@@ -162,13 +162,14 @@ type Claim struct {
 }
 
 // UnmarshalJSON reads a claim. Its path decodes as claimpath.Lenient
-// decodes it.
+// decodes it. A member the JSON leaves out keeps its value, as
+// encoding/json keeps it in a struct.
 func (c *Claim) UnmarshalJSON(data []byte) error {
 	type plain Claim
-	var claim struct {
+	claim := struct {
 		plain
 		Path claimpath.Lenient `json:"path"`
-	}
+	}{plain: plain(*c), Path: claimpath.Lenient{Pointer: c.Path}}
 	if err := json.Unmarshal(data, &claim); err != nil {
 		return err
 	}
