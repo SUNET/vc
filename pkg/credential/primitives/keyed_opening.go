@@ -41,6 +41,8 @@ type HMACOpeningArgs = KeyedOpeningArgs[hmacSHA256]
 // ValueOpener is an hkdf or hmac opening: a function of the secret and the
 // values of its input claims.
 type ValueOpener interface {
+	// InputClaims are the input claims, in their configured order.
+	InputClaims() []string
 	// OpenValues derives the opening from the values of the input claims,
 	// in their configured order.
 	OpenValues(values []string) ([]byte, error)
@@ -97,6 +99,9 @@ func (a *KeyedOpeningArgs[F]) name() string {
 }
 
 func (a *KeyedOpeningArgs[F]) inputs() []string { return a.Inputs }
+
+// InputClaims implements ValueOpener.
+func (a *KeyedOpeningArgs[F]) InputClaims() []string { return a.Inputs }
 
 func (a *KeyedOpeningArgs[F]) validate() error {
 	_, err := a.key()

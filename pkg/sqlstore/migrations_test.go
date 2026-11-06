@@ -29,6 +29,8 @@ var allTables = []string{
 	"token_status_list_metadata",
 	"credential_subjects",
 	"cache_entries",
+	"unique_commitments",
+	"unique_commitment_resets",
 }
 
 func TestApplySchema_Postgres(t *testing.T) {

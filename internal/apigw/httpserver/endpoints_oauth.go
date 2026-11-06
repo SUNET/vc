@@ -784,16 +784,32 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 // isAnonymousAdminSession reports whether the request is authenticated by
 // an admin session granted anonymously by /ui/login.
 func isAnonymousAdminSession(c *gin.Context) bool {
+	subject, ok := adminSessionSubject(c)
+	return ok && subject == anonymousAdminSubject
+}
+
+// adminSessionSubject returns the subject of the request's admin session.
+func adminSessionSubject(c *gin.Context) (string, bool) {
 	v, ok := c.Get(sessions.DefaultKey)
 	if !ok {
-		return false
+		return "", false
 	}
 	session, ok := v.(sessions.Session)
 	if !ok || session.Get(adminSessionKey) != true {
-		return false
+		return "", false
 	}
 	subject, _ := session.Get("admin_subject").(string)
-	return subject == anonymousAdminSubject
+	return subject, true
+}
+
+// operatorOf returns the authenticated operator of an admin API request:
+// the admin session's subject, or the API token's.
+func operatorOf(c *gin.Context) (string, bool) {
+	if subject, ok := adminSessionSubject(c); ok {
+		return subject, subject != "" && subject != anonymousAdminSubject
+	}
+	subject := c.GetString("jwt_subject")
+	return subject, subject != ""
 }
 
 // requireCanonicalJSONBody refuses any request body that the authorization

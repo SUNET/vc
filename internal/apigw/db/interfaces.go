@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -77,10 +79,74 @@ type DynamicRegistrationStore interface {
 	PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error
 }
 
+// UniqueCommitmentStore holds one commitment per key value for each unique
+// hash_commitment entry of Credential Auxiliary Data (section 6.4, step 5).
+// The database arbitrates between replicas: the first commitment stored for a
+// key is the one every replica reads back.
+type UniqueCommitmentStore interface {
+	// Accept stores each commitment for its key when the key holds none. It
+	// returns nil when every key holds its commitment, which stays until a
+	// reset. It returns a *UniqueCommitmentConflict when a key holds another
+	// commitment. On an error it removes the commitments this call stored,
+	// and leaves those that other calls stored; when that removal fails, the
+	// error returned is the removal's.
+	Accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error
+	// Find returns the record key holds, or ErrNoDocuments.
+	Find(ctx context.Context, key UniqueCommitmentKey) (UniqueCommitmentRecord, error)
+	// Reset records the operator approval and removes the commitment key
+	// holds. ErrNoDocuments when key holds none, or when a concurrent reset
+	// removed it first; ErrResetEvidenceUsed when the approval's evidence
+	// reference already reset another commitment.
+	Reset(ctx context.Context, key UniqueCommitmentKey, approval UniqueCommitmentReset) error
+}
+
+// UniqueCommitmentKey names the commitment of one key value for one entry.
+type UniqueCommitmentKey struct {
+	Scope string
+	// Path is the claims path of the entry.
+	Path []string
+	// KeyHash is the hash of the key values.
+	KeyHash []byte
+}
+
+// UniqueCommitment is a commitment for the key value it is unique to.
+type UniqueCommitment struct {
+	Key        UniqueCommitmentKey
+	Commitment []byte
+}
+
+// UniqueCommitmentConflict refuses an Accept: the key of its commitments'
+// element Index holds another commitment.
+type UniqueCommitmentConflict struct {
+	Index int
+}
+
+func (e *UniqueCommitmentConflict) Error() string {
+	return fmt.Sprintf("the key of commitment %d holds another commitment", e.Index)
+}
+
+// UniqueCommitmentRecord is what the store holds for a key.
+type UniqueCommitmentRecord struct {
+	// AcceptedAt is when the commitment was recorded.
+	AcceptedAt time.Time
+}
+
+// UniqueCommitmentReset is the operator approval behind a reset.
+type UniqueCommitmentReset struct {
+	ApprovedBy  string
+	EvidenceRef string
+	At          time.Time
+}
+
+// ErrResetEvidenceUsed is returned when an evidence reference already reset
+// an earlier commitment of the same key.
+var ErrResetEvidenceUsed = errors.New("this reference already reset an earlier commitment")
+
 // Ensure concrete types implement the interfaces
 var (
 	_ CredentialOfferStore     = (*CredentialOfferColl)(nil)
 	_ DatastoreStore           = (*DatastoreColl)(nil)
 	_ IdentityMappingStore     = (*IdentityMappingsColl)(nil)
 	_ DynamicRegistrationStore = (*DynamicRegistrationColl)(nil)
+	_ UniqueCommitmentStore    = (*UniqueCommitments)(nil)
 )

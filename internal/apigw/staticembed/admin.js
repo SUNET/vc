@@ -2,6 +2,14 @@
 import Alpine from '/static/alpinejs.esm.min.js';
 
 window.adminApp = function () {
+    /** The message of a failed API response: {"error": {"title", "details"}} or {"error": "..."}. */
+    async function errorMessage(resp) {
+        const body = await resp.json().catch(() => ({}));
+        const err = body.error;
+        if (err && typeof err === 'object') return err.details || err.title || resp.statusText;
+        return err || body.detail || resp.statusText;
+    }
+
     /** Flatten a nested object into dot-notation key-value pairs */
     function flattenObject(obj, prefix) {
         const entries = [];
@@ -54,15 +62,21 @@ window.adminApp = function () {
     return {
         authenticated: false,
         unrestricted: false,
+        hasOperator: false,
         subject: '',
         scopes: [],
         scopeTemplates: {},
         preauthScopes: [],
         allowedAuthenticSources: [],
         hasIdentityMapping: false,
+        uniqueCommitmentEntries: [],
         csrfToken: '',
         view: 'datastore',
         sidebarOpen: false,
+
+        // Commitment lookup and reset. generation counts the lookups and the
+        // edits of the form.
+        hc: { entry: 0, inputs: [], values: [], evidence: '', busy: false, found: null, message: null, generation: 0 },
 
         // Datastore state
         ds: {
@@ -184,7 +198,10 @@ window.adminApp = function () {
                     this.preauthScopes = data.preauth_scopes || [];
                     this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
                     this.hasIdentityMapping = data.has_identity_mapping || false;
+                    this.uniqueCommitmentEntries = data.unique_commitment_entries || [];
+                    this.clearCommitmentForm();
                     this.unrestricted = data.unrestricted || false;
+                    this.hasOperator = data.has_operator || false;
                     this.csrfToken = data.csrf_token || '';
                     this.searchDocuments();
                 }
@@ -213,6 +230,110 @@ window.adminApp = function () {
             this.importState.mapResult = null;
             if (v === 'datastore') this.searchDocuments();
             if (v === 'identity') this.searchMappings();
+            if (v === 'commitments') this.clearCommitmentForm();
+        },
+
+        /** Empty the commitment form for the selected entry: a list per part derived from identifiers, a string per other part. */
+        clearCommitmentForm() {
+            const entry = this.uniqueCommitmentEntries[this.hc.entry];
+            this.hc.inputs = entry ? entry.key.map(() => 0) : [];
+            this.hc.values = entry ? entry.key.map(part => part.inputs ? part.inputs[0].map(() => '') : '') : [];
+            this.hc.evidence = '';
+            this.hc.found = null;
+            this.hc.message = null;
+            this.hc.generation++;
+        },
+
+        /** Another list of identifiers was selected for key part k, so its values start empty. */
+        commitmentInputsSelected(k) {
+            const part = this.uniqueCommitmentEntries[this.hc.entry].key[k];
+            this.hc.values[k] = part.inputs[this.hc.inputs[k]].map(() => '');
+            this.commitmentEdited();
+        },
+
+        /** The values changed, so what was found no longer applies. */
+        commitmentEdited() {
+            this.hc.found = null;
+            this.hc.message = null;
+            this.hc.generation++;
+        },
+
+        /** Trim the entered values, so the browser refuses a blank one as missing. */
+        async commitmentFormValid(form) {
+            this.hc.values = this.hc.values.map(v => Array.isArray(v) ? v.map(s => s.trim()) : v.trim());
+            this.hc.evidence = this.hc.evidence.trim();
+            await this.$nextTick();
+            return form.reportValidity();
+        },
+
+        nothingRecorded() {
+            this.hc.found = null;
+            this.hc.message = { kind: 'none', text: 'No commitment recorded.' };
+        },
+
+        /** The entry and key values the lookup and the reset name. */
+        commitmentQuery() {
+            const entry = this.uniqueCommitmentEntries[this.hc.entry];
+            return {
+                scope: entry.scope,
+                path: entry.path,
+                key: entry.key.map((part, k) => part.inputs
+                    ? { path: part.path, inputs: Object.fromEntries(part.inputs[this.hc.inputs[k]].map((input, j) => [input.claim, this.hc.values[k][j]])) }
+                    : { path: part.path, value: this.hc.values[k] }),
+            };
+        },
+
+        /** POST body to path. A failure shows while current() holds. */
+        async commitmentCall(path, body, current = () => true) {
+            this.hc.busy = true;
+            this.hc.message = null;
+            try {
+                return await this.apiFetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+            } catch (e) {
+                if (current()) this.hc.message = { kind: 'error', text: e.message };
+                return null;
+            } finally {
+                this.hc.busy = false;
+            }
+        },
+
+        /** Look up the commitment on record for the entered values. The reply applies while the form holds the values it was sent for. */
+        async findCommitment(form) {
+            if (!await this.commitmentFormValid(form)) return;
+            const generation = ++this.hc.generation;
+            const current = () => generation === this.hc.generation;
+            this.hc.found = null;
+            const resp = await this.commitmentCall('/api/v1/auxiliary_data/lookup', this.commitmentQuery(), current);
+            if (!resp || !current()) return;
+            if (resp.ok) {
+                const body = await resp.json();
+                if (current()) this.hc.found = { recordedAt: new Date(body.recorded_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) };
+            } else if (resp.status === 404) {
+                this.nothingRecorded();
+            } else {
+                const text = await errorMessage(resp);
+                if (current()) this.hc.message = { kind: 'error', text };
+            }
+        },
+
+        /** Reset the commitment the lookup found. */
+        async resetCommitment(form) {
+            if (!await this.commitmentFormValid(form)) return;
+            const resp = await this.commitmentCall('/api/v1/auxiliary_data/reset',
+                { ...this.commitmentQuery(), evidence_ref: this.hc.evidence });
+            if (!resp) return;
+            if (resp.ok) {
+                this.clearCommitmentForm();
+                this.hc.message = { kind: 'done', text: 'Commitment reset.' };
+            } else if (resp.status === 404) {
+                this.nothingRecorded();
+            } else {
+                this.hc.message = { kind: 'error', text: await errorMessage(resp) };
+            }
         },
 
         treeView(entries) { return buildTreeView(entries); },
@@ -325,8 +446,7 @@ window.adminApp = function () {
                 credentials: 'same-origin'
             });
             if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || err.detail || resp.statusText);
+                throw new Error(await errorMessage(resp));
             }
             const result = await resp.json().catch(() => ({}));
             return result.count || 0;
@@ -595,8 +715,7 @@ window.adminApp = function () {
                 credentials: 'same-origin'
             });
             if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || err.detail || resp.statusText);
+                throw new Error(await errorMessage(resp));
             }
             const result = await resp.json().catch(() => ({}));
             return result.count || 0;
