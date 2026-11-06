@@ -111,9 +111,9 @@ set_app_secrets() {
     return 1
 }
 
-# The next content of the secrets file, named <target>.<random> beside the file a
-# symlink resolves to. Fly secrets are write-only and a failed write can destroy
-# the file, so a new value reaches the file by rename.
+# The next content of the secrets file, named <target>.candidate.<purpose>.<random>
+# beside the file a symlink resolves to. Fly secrets are write-only and a failed
+# write can destroy the file, so a new value reaches the file by rename.
 secrets_candidate=""
 # How to settle the candidate once Fly may hold a value only the candidate records.
 secrets_candidate_note=""
@@ -134,19 +134,19 @@ settle_secrets_candidate() {
 }
 trap settle_secrets_candidate EXIT
 
-# Creates the candidate for secrets file $1. Returns 1 when the directory refuses
-# it.
+# Creates the candidate for secrets file $1. Its purpose $2 is the Fly app it
+# provisions, or reconcile. Returns 1 when the directory refuses it.
 open_secrets_candidate() {
-    local _file="$1" _target
+    local _file="$1" _purpose="$2" _target
     _target="$(readlink -f "$_file")" || die "resolving $_file failed"
-    secrets_candidate="$(mktemp "$_target.XXXXXX" 2>/dev/null)"
+    secrets_candidate="$(mktemp "$_target.candidate.$_purpose.XXXXXX" 2>/dev/null)"
 }
 
 # Writes $1 to the candidate, with the mode of the file it replaces. A failure
 # stops the script.
 write_secrets_candidate() {
     local _content="$1"
-    if ! cp -p "${secrets_candidate%.*}" "$secrets_candidate" ||
+    if ! cp -p "${secrets_candidate%.candidate.*}" "$secrets_candidate" ||
         ! printf '%s\n' "$_content" > "$secrets_candidate"; then
         die "writing $secrets_candidate failed"
     fi
@@ -154,20 +154,40 @@ write_secrets_candidate() {
 
 # Renames the candidate over the file it replaces. A failure stops the script.
 record_secrets_candidate() {
-    mv -f "$secrets_candidate" "${secrets_candidate%.*}" \
-        || die "replacing ${secrets_candidate%.*} failed"
+    mv -f "$secrets_candidate" "${secrets_candidate%.candidate.*}" \
+        || die "replacing ${secrets_candidate%.candidate.*} failed"
     secrets_candidate=""
     secrets_candidate_note=""
 }
 
-# Sends secrets $4.. to Fly app $1, with the candidate recording $3. A failed or
+# Prints how to settle candidate $1, which holds $4 for Fly app $2. $3 is the secret
+# that `fly secrets list` shows once Fly holds the candidate's value.
+candidate_settling_note() {
+    local _candidate="$1" _app="$2" _listed="$3" _holds="$4"
+    echo "$_candidate holds $_holds. If fly secrets list --app $_app shows $_listed, move this file over ${_candidate%.candidate.*}. Otherwise delete it."
+}
+
+# Stops when a candidate of Fly app $2 waits beside secrets file $1. A candidate
+# replaces the whole file, and Fly's digest is keyed, so the secret's name is the only
+# sign of what Fly holds. Until the operator settles the candidate, the file may not
+# change and Fly may not receive another value. $3 and $4 are as in
+# candidate_settling_note. A path that does not resolve has no candidate beside it.
+require_settled_candidate() {
+    local _file="$1" _app="$2" _listed="$3" _holds="$4" _target _waiting
+    _target="$(readlink -f "$_file")" || return 0
+    for _waiting in "$_target.candidate.$_app".*; do
+        [[ ! -e "$_waiting" ]] || die "$(candidate_settling_note "$_waiting" "$_app" "$_listed" "$_holds")"
+    done
+}
+
+# Sends secrets $4.. to Fly app $1, with the candidate holding $3. A failed or
 # interrupted send can still reach Fly, so from here the candidate stays until the
 # rename. $2 is the secret that `fly secrets list` shows once Fly holds the values.
 # Returns 1 with the candidate removed when the app is absent.
 send_recorded_secrets() {
     local _app="$1" _listed="$2" _holds="$3"
     shift 3
-    secrets_candidate_note="$secrets_candidate holds $_holds. If fly secrets list --app $_app shows $_listed, move this file over ${secrets_candidate%.*}. Otherwise delete it."
+    secrets_candidate_note="$(candidate_settling_note "$secrets_candidate" "$_app" "$_listed" "$_holds")"
     set_app_secrets "$_app" "$@" || {
         remove_secrets_candidate
         return 1
@@ -181,7 +201,7 @@ send_recorded_secrets() {
 secrets_file_can_record() {
     local _file="$1" _app="$2" _secret="$3" _problem="is missing or read-only"
     if [[ -f "$_file" && -w "$_file" ]]; then
-        open_secrets_candidate "$_file" && return 0
+        open_secrets_candidate "$_file" "$_app" && return 0
         _problem="sits in a directory that refuses a temp file"
     fi
     if app_listed "$_app" "$_file $_problem, and listing the apps failed"; then
@@ -275,6 +295,16 @@ cmd_launch() {
     require_flyctl
     require_yq
     require_profile_vars
+
+    local secrets_file mongo_app oidc_app
+    secrets_file="$(secrets_file_path)"
+    mongo_app="$(app_name "mongodb")"
+    oidc_app="$(app_name "oidc")"
+    local mongo_candidate_holds="the MongoDB URI for $mongo_app"
+    local oidc_candidate_holds="the OIDC client_secret for $oidc_app"
+    require_settled_candidate "$secrets_file" "$mongo_app" MONGO_INITDB_ROOT_PASSWORD "$mongo_candidate_holds"
+    require_settled_candidate "$secrets_file" "$oidc_app" APIGW_OIDC_CLIENT_SECRET "$oidc_candidate_holds"
+
     echo "==> Launching Fly apps (prefix=${ENV_PREFIX}, tag=${VC_IMAGE_TAG}, region=${REGION})"
     echo ""
     for service in "${SERVICES[@]}"; do
@@ -314,11 +344,7 @@ cmd_launch() {
     done
     echo ""
 
-    local secrets_file
-    secrets_file="$(secrets_file_path)"
-
-    local mongo_app mongo_pass mongo_uri="" mongo_secrets mongo_creds_set=0
-    mongo_app="$(app_name "mongodb")"
+    local mongo_pass mongo_uri="" mongo_secrets mongo_creds_set=0
 
     # Idempotent: if MongoDB already has creds, keep them. Rotating
     # MONGO_INITDB_ROOT_PASSWORD after the data dir is initialised does NOT
@@ -346,7 +372,7 @@ cmd_launch() {
             write_secrets_candidate "$mongo_secrets_content"
 
             if send_recorded_secrets "$mongo_app" MONGO_INITDB_ROOT_PASSWORD \
-                "the MongoDB URI sent to $mongo_app" \
+                "$mongo_candidate_holds" \
                 MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
                 MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
                 record_secrets_candidate
@@ -357,8 +383,7 @@ cmd_launch() {
         fi
     fi
 
-    local oidc_app apigw_client_secret demo_user_password oidc_first_launch oidc_secrets
-    oidc_app="$(app_name "oidc")"
+    local apigw_client_secret demo_user_password oidc_first_launch oidc_secrets
     oidc_first_launch=0
 
     # Idempotent: Keycloak's realm import runs once on first boot and stores
@@ -387,7 +412,7 @@ cmd_launch() {
             write_secrets_candidate "$oidc_secrets_content"
 
             if send_recorded_secrets "$oidc_app" APIGW_OIDC_CLIENT_SECRET \
-                "the OIDC client_secret sent to $oidc_app, and the demo user password sent with it is $demo_user_password" \
+                "$oidc_candidate_holds. The demo user password sent with it is $demo_user_password" \
                 APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
                 DEMO_USER_PASSWORD="$demo_user_password"; then
                 record_secrets_candidate
@@ -409,7 +434,7 @@ cmd_launch() {
         if [[ -n "$existing_client_secret" && "$existing_client_secret" != "null" ]]; then
             if [[ ! -w "$secrets_file" ]]; then
                 echo "    ($secrets_file is read-only; apigw.api_server.api_auth.oidc.client_secret left as is)"
-            elif ! open_secrets_candidate "$secrets_file"; then
+            elif ! open_secrets_candidate "$secrets_file" reconcile; then
                 echo "    ($secrets_file sits in a directory that refuses a temp file; apigw.api_server.api_auth.oidc.client_secret left as is)"
             else
                 local reconciled_secrets_content
