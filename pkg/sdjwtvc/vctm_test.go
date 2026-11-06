@@ -756,3 +756,71 @@ func TestIsChildOfDisplayableParent(t *testing.T) {
 		})
 	}
 }
+
+// The consent page and the SVG template read a key written name[i] as
+// element i of the array name, and read "*" and "null" as keys. The expected
+// values are the earlier release's output.
+func TestConsentReadsAKeyAsTheEarlierReleaseRead(t *testing.T) {
+	for _, tt := range []struct{ name, path, document, consent, svg string }{
+		{
+			name:     "an index inside a path",
+			path:     `["elm", "hasClaim[1]", "title"]`,
+			document: `{"elm":{"hasClaim":[{"title":"first"},{"title":"second"}]}}`,
+			consent:  `{"elm.hasClaim[1].title":{"label":"L","value":"second"}}`,
+			svg:      `{"s":{"label":"L","value":"second"}}`,
+		},
+		{
+			name:     "an index at the end",
+			path:     `["names[0]"]`,
+			document: `{"names":["first","second"]}`,
+			consent:  `{"names[0]":{"label":"L","value":"first"}}`,
+			svg:      `{"s":{"label":"L","value":"first"}}`,
+		},
+		{name: "an index past the end", path: `["names[2]"]`, document: `{"names":["first","second"]}`, consent: `{}`, svg: `null`},
+		{name: "an index of an object", path: `["names[0]"]`, document: `{"names":{"0":"first"}}`, consent: `{}`, svg: `null`},
+		{
+			name:     "an index beside the key as written",
+			path:     `["names[0]"]`,
+			document: `{"names[0]":"literal","names":["first"]}`,
+			consent:  `{"names[0]":{"label":"L","value":"first"}}`,
+			svg:      `{"s":{"label":"L","value":"first"}}`,
+		},
+		{
+			name:     "a negative index, which is a key",
+			path:     `["names[-1]"]`,
+			document: `{"names[-1]":"literal","names":["first"]}`,
+			consent:  `{"names[-1]":{"label":"L","value":"literal"}}`,
+			svg:      `{"s":{"label":"L","value":"literal"}}`,
+		},
+		{
+			name:     "the key * of an object",
+			path:     `["a", "*", "b"]`,
+			document: `{"a":{"*":{"b":"literal"}}}`,
+			consent:  `{"a.*.b":{"label":"L","value":"literal"}}`,
+			svg:      `{"s":{"label":"L","value":"literal"}}`,
+		},
+		{name: "the key * over an array", path: `["a", "*", "b"]`, document: `{"a":[{"b":"first","c":"dropped"},{"b":"second"}],"other":"dropped","*":"dropped"}`, consent: `{}`, svg: `null`},
+		{
+			name:     "the key null of an object",
+			path:     `["a", "null", "b"]`,
+			document: `{"a":{"null":{"b":"literal"}}}`,
+			consent:  `{"a.null.b":{"label":"L","value":"literal"}}`,
+			svg:      `{"s":{"label":"L","value":"literal"}}`,
+		},
+		{name: "the key null over an array", path: `["a", "null", "b"]`, document: `{"a":[{"b":"first"},{"b":"second"}]}`, consent: `{}`, svg: `null`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var vctm VCTM
+			require.NoError(t, json.Unmarshal([]byte(`{"vct":"urn:x","claims":[{"path":`+tt.path+`,"display":[{"locale":"en-US","label":"L"}],"svg_id":"s"}]}`), &vctm))
+			var document map[string]any
+			require.NoError(t, json.Unmarshal([]byte(tt.document), &document))
+
+			consent, err := json.Marshal(vctm.Presentation(document))
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.consent, string(consent))
+			svg, err := json.Marshal(vctm.SVGValues(document))
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.svg, string(svg))
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -245,6 +246,39 @@ func TestFilterAgainstVCTM_NullOnlyArrays(t *testing.T) {
 			if !reflect.DeepEqual(tc.want, got) {
 				t.Fatalf("want %v, got %v", tc.want, got)
 			}
+		})
+	}
+}
+
+// The issuer's filter reads the key "*" as every element of an array, and
+// every other key as written. The expected values are the earlier release's
+// output.
+func TestFilterAgainstVCTM_ReadsAKeyAsTheEarlierReleaseRead(t *testing.T) {
+	for _, tt := range []struct{ name, claims, document, want string }{
+		{
+			name:     "* inside a path",
+			claims:   `[{"path":["a","*","b"]}]`,
+			document: `{"a":[{"b":"first","c":"dropped"},{"b":"second"}],"other":"dropped","*":"dropped"}`,
+			want:     `{"a":[{"b":"first"},{"b":"second"}]}`,
+		},
+		{name: "* at the end", claims: `[{"path":["a","*"]}]`, document: `{"a":["first","second"],"other":"dropped"}`, want: `{"a":["first","second"]}`},
+		{name: "* first", claims: `[{"path":["*"]},{"path":["kept"]}]`, document: `{"kept":"kept","*":"dropped","other":"dropped"}`, want: `{"kept":"kept"}`},
+		{name: "* over an object", claims: `[{"path":["a","*","b"]}]`, document: `{"a":{"*":{"b":"literal"},"b":"dropped"}}`, want: `{}`},
+		{name: "an index, which is a key", claims: `[{"path":["names[0]"]}]`, document: `{"names[0]":"literal","names":["first"]}`, want: `{"names[0]":"literal"}`},
+		{name: "the key null of an object", claims: `[{"path":["a","null","b"]}]`, document: `{"a":{"null":{"b":"literal"}}}`, want: `{"a":{"null":{"b":"literal"}}}`},
+		{name: "the key null over an array", claims: `[{"path":["a","null","b"]}]`, document: `{"a":[{"b":"first"},{"b":"second"}]}`, want: `{}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var vctm sdjwtvc.VCTM
+			require.NoError(t, json.Unmarshal([]byte(`{"vct":"urn:x","claims":`+tt.claims+`}`), &vctm))
+			var document map[string]any
+			require.NoError(t, json.Unmarshal([]byte(tt.document), &document))
+
+			filtered, err := FilterAgainstVCTM(document, &vctm)
+			require.NoError(t, err)
+			got, err := json.Marshal(filtered)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(got))
 		})
 	}
 }
