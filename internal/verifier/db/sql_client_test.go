@@ -88,15 +88,13 @@ func testClientStoreContract(t *testing.T, store ClientStore) {
 }
 
 func TestSQLClientColl_Postgres(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartPostgres(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartPostgres(t)
 
 	testClientStoreContract(t, NewSQLClientColl(newTestService(t), sqlDB, dialect))
 }
 
 func TestSQLClientColl_MariaDB(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartMariaDB(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartMariaDB(t)
 
 	testClientStoreContract(t, NewSQLClientColl(newTestService(t), sqlDB, dialect))
 }
