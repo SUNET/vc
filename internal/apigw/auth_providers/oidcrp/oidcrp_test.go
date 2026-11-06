@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -83,19 +84,19 @@ func TestSessionExpiration(t *testing.T) {
 func TestAttributeMapper(t *testing.T) {
 	mapping := model.AttributeMapping{
 		"given_name": {
-			Claim:    "identity.given_name",
+			Claim:    claimpath.Keys("identity", "given_name"),
 			Required: true,
 		},
 		"family_name": {
-			Claim:    "identity.family_name",
+			Claim:    claimpath.Keys("identity", "family_name"),
 			Required: true,
 		},
 		"email": {
-			Claim:    "identity.email",
+			Claim:    claimpath.Keys("identity", "email"),
 			Required: false,
 		},
 		"country": {
-			Claim:    "identity.country",
+			Claim:    claimpath.Keys("identity", "country"),
 			Required: false,
 			Default:  "SE",
 		},
@@ -145,7 +146,7 @@ func TestAttributeMapper(t *testing.T) {
 func TestAttributeMapperMissingRequired(t *testing.T) {
 	mapping := model.AttributeMapping{
 		"given_name": {
-			Claim:    "identity.given_name",
+			Claim:    claimpath.Keys("identity", "given_name"),
 			Required: true,
 		},
 	}
@@ -171,9 +172,9 @@ func TestServiceInitialization(t *testing.T) {
 // BenchmarkAttributeMapper_Apply benchmarks attribute mapping
 func BenchmarkAttributeMapper_Apply(b *testing.B) {
 	mapping := model.AttributeMapping{
-		"given_name":  {Claim: "identity.given_name", Required: true},
-		"family_name": {Claim: "identity.family_name", Required: true},
-		"email":       {Claim: "identity.email", Required: true},
+		"given_name":  {Claim: claimpath.Keys("identity", "given_name"), Required: true},
+		"family_name": {Claim: claimpath.Keys("identity", "family_name"), Required: true},
+		"email":       {Claim: claimpath.Keys("identity", "email"), Required: true},
 	}
 
 	mapper := NewAttributeMapper(mapping)

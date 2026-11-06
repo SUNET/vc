@@ -5,6 +5,8 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -113,7 +115,7 @@ func TestNymAuthProfileRejectsEachViolation(t *testing.T) {
 			name: "claims alongside req",
 			query: func() CredentialQuery {
 				q := nymQuery(ReqItem{FnID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2000-01-01"}})
-				q.Claims = []ClaimQuery{{Path: StringPath("ssc")}}
+				q.Claims = []ClaimQuery{{Path: claimpath.Keys("ssc")}}
 				return q
 			}(),
 			want: "discloses nothing",

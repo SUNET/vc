@@ -124,6 +124,83 @@
   credential-offer store has an expiry mechanism to bound growth with.
 - `GET /offers/:scope` is rate limited, configurable via the new
   `apigw.rate_limit.credential_offer_requests_per_minute` (default 20).
+- **Claims path pointers**: every field that names a claim of a credential
+  takes a claims path pointer (OpenID4VP 1.0 section 7), such as
+  `[address, locality]`, `[nationalities, null]`, `[nationalities, 0]`, or
+  `[eu.europa.ec.eudi.pid.1, birth_date]` for an mdoc element.
+  - `required_claims` is a list of `{path, values}`, `defaults` a list of
+    `{path, value}`, `identity_attributes` a list of `{path, attribute}`
+    and `document_claims` a list of `{from, to}`.
+  - A presentation request template's `claim_mappings` is `"*"`, or a map
+    from DCQL credential query id to `{path, claim}` entries that maps each
+    presentation through the entries of the query it answers.
+  - `identity_match.claims` of `POST /api/v1/issuance/prepare` is a list of
+    `{path, equals}`. A malformed pointer is answered with `400
+    invalid_claims_path`.
+  - The admin UI's claim template builds an array for `null` and for an
+    index. A claim a VCTM declares as an object and as an array stays an
+    object, and logs a warning that names it. The document form keeps a
+    member named `hasClaim[0]`, as in `vctm_elm.json`, as that member.
+  - The SD-JWT issuer accepts a `null` before the end of an `sd: always`
+    path, such as `[degrees, null, date_awarded]`, and discloses the
+    property in every element. Earlier releases stopped the issuance at
+    such a path.
+
+  [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists the fields.
+
+### Deprecated
+
+- **The claim spellings of earlier releases**: dotted claim names, the maps
+  keyed by them and the `claim_mappings` map of claim names load with their
+  meaning. Each logs a warning that names the file, the line and the
+  replacement. `POST /api/v1/issuance/prepare` with an
+  `identity_match.claims` object answers with `Deprecation: @1793836800`
+  (RFC 9745). A later release refuses them.
+
+  **Migration:** after `make build-migrate-claim-paths`,
+  `./bin/migrate_claim_paths -schemas /metadata=./metadata config.yaml
+  presentation_requests/*.yaml` rewrites configuration and presentation
+  request files in place and keeps their comments, encoding and line
+  breaks. It converts a
+  `claim_mappings` map to the keyed form under the conditions
+  [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists, and prints why it
+  leaves any other map as written. It leaves a `required_claims` or
+  `document_claims` map out of name order as written, and prints why: the
+  earlier release read its entries in name order. It leaves a dotted
+  derivation name as written, and prints why, where the earlier release
+  read the whole name as one top-level key first. It leaves a file with a YAML alias,
+  merge key or repeated key as written, and prints a line, when an alias
+  stands where it reads claims, or when a rewrite in place would change
+  what the file loads. Run it once every replica runs this release: a
+  converted file stores the verified claim of a bare mdoc element
+  identifier under its namespace-qualified name, which the earlier release
+  misreads.
+- **Type metadata claim path keys that readers read in two ways**: the
+  consent page and the SVG template read a VCTM claim path key `name[i]`
+  as element i of `name`. The issuer's filter of a credential built from a
+  presentation reads the key `"*"` as `null`. A verifier preset that lists
+  no claims reads the key `"null"` as `null`. Every other reader reads
+  each key as written, as the earlier release did. The apigw and the
+  verifier log a warning per such key, `metadata/vctm_elm.json` included.
+
+  **Migration:** write the pointer every reader should read, such as
+  `["hasClaim", 0]`. `migrate_claim_paths` prints each such key of a type
+  metadata file and leaves the file as written.
+- **Empty claim paths**: `path: []` in `auxiliary_data`, a preset, a
+  `hash_commitment` or `attributes` loads and logs a warning. The services
+  that refused it in the earlier release refuse it: the apigw and the
+  verifier for `auxiliary_data`, the verifier for a preset, the apigw for a
+  `hash_commitment`. The issuer signs an issuer metadata claim description
+  with an empty, null or absent `path` and logs a warning.
+
+  **Migration:** write the pointer of a claim, or remove the entry.
+  `migrate_claim_paths` prints each such path and leaves it as written.
+- **Presentation request files that fail to decode as a list of templates**:
+  such a file loads as one template from its top-level keys, and the
+  verifier logs a warning with the error.
+
+  **Migration:** correct the list. `migrate_claim_paths` prints the error
+  and leaves the file as written.
 
 ### Note
 

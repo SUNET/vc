@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // ValidationError represents a validation error with details
@@ -96,36 +98,20 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 
 	errors := &ValidationErrors{}
 
-	// Check mandatory claims are present
 	for _, claim := range vctm.Claims {
-		if claim.Mandatory {
-			if skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path) {
-				continue
-			}
-			claimPath := claim.Path
-			if !claimExists(claims, claimPath) {
-				errors.AddError(
-					claim.JSONPath(),
-					"mandatory claim is missing",
-				)
-			}
+		if !claim.Mandatory || (skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path)) {
+			continue
+		}
+		if _, exists := claimValue(claims, claim.Path); !exists {
+			errors.AddError(claim.JSONPath(), "mandatory claim is missing")
 		}
 	}
 
-	// Validate claim structure and types
 	for _, claim := range vctm.Claims {
-		if len(claim.Path) == 0 {
-			continue
-		}
-
-		// Get the value at the path
-		value, exists := getClaimValue(claims, claim.Path)
+		value, exists := claimValue(claims, claim.Path)
 		if !exists {
-			// Already handled by mandatory check
 			continue
 		}
-
-		// Validate based on claim path structure
 		if err := validateClaimValue(claim, value); err != nil {
 			errors.AddError(claim.JSONPath(), err.Error())
 		}
@@ -138,62 +124,56 @@ func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) 
 	return nil
 }
 
-// claimExists checks if a claim exists at the given path
-func claimExists(claims map[string]any, path []*string) bool {
-	_, exists := getClaimValue(claims, path)
-	return exists
-}
-
-// getClaimValue retrieves the value at the given path
-func getClaimValue(claims map[string]any, path []*string) (any, bool) {
-	if len(path) == 0 {
+// claimValue returns the value path reaches in claims. A path that cannot
+// be processed reaches none.
+func claimValue(claims map[string]any, path claimpath.Pointer) (any, bool) {
+	components, err := path.Components()
+	if err != nil {
 		return nil, false
 	}
-
-	return lookupPath(claims, path)
+	return lookupClaim(claims, components)
 }
 
-// lookupPath walks path from current. A null element selects every array
-// element; the remaining path must then resolve in each of them, and the
-// per-element values are returned as a slice.
-func lookupPath(current any, path []*string) (any, bool) {
-	for i, pathElement := range path {
-		if pathElement == nil {
-			arr, ok := current.([]any)
-			if !ok {
+// lookupClaim walks components from current. A null selects every element
+// of an array: the rest of the path must reach a value other than null in
+// each element, and the value is the list of those values. The value of a
+// path that ends in null is the array.
+func lookupClaim(current any, components []claimpath.Component) (any, bool) {
+	for i, c := range components {
+		if key, ok := c.KeyName(); ok {
+			object, isObject := current.(map[string]any)
+			value, present := object[key]
+			if !isObject || !present {
 				return nil, false
 			}
-			if i == len(path)-1 {
-				return arr, true
-			}
-			values := make([]any, 0, len(arr))
-			for _, item := range arr {
-				v, ok := lookupPath(item, path[i+1:])
-				// A null leaf would hide inside the slice from validateClaimValue's nil check.
-				if !ok || v == nil {
-					return nil, false
-				}
-				values = append(values, v)
-			}
-			return values, true
-		}
-
-		key := *pathElement
-
-		// Try as object
-		if obj, ok := current.(map[string]any); ok {
-			val, exists := obj[key]
-			if !exists {
-				return nil, false
-			}
-			current = val
+			current = value
 			continue
 		}
-
-		// Not an object, can't navigate further
-		return nil, false
+		array, ok := current.([]any)
+		if !ok {
+			return nil, false
+		}
+		if index, ok := c.IndexValue(); ok {
+			if index >= uint(len(array)) {
+				return nil, false
+			}
+			current = array[index]
+			continue
+		}
+		if i == len(components)-1 {
+			return array, true
+		}
+		values := make([]any, 0, len(array))
+		for _, element := range array {
+			// A null leaf would hide inside the list from validateClaimValue's nil check.
+			value, ok := lookupClaim(element, components[i+1:])
+			if !ok || value == nil {
+				return nil, false
+			}
+			values = append(values, value)
+		}
+		return values, true
 	}
-
 	return current, true
 }
 
@@ -251,34 +231,35 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 		}
 	}
 
-	// Build a map of allowed claim paths
-	allowedPaths := make(map[string]bool)
-	for _, claim := range vctm.Claims {
-		if len(claim.Path) > 0 {
-			// Add the top-level key
-			if claim.Path[0] != nil {
-				allowedPaths[*claim.Path[0]] = true
-			}
-		}
-	}
-
-	// Check all top-level claims in document
-	for key := range claims {
-		// Skip standard JWT claims
-		if isStandardClaim(key) {
-			continue
-		}
-
-		if !allowedPaths[key] {
-			errors.AddError(key, "claim not defined in VCTM")
-		}
-	}
+	addUndeclaredClaims(errors, claims, topLevelClaims(vctm))
 
 	if errors.HasErrors() {
 		return errors
 	}
 
 	return nil
+}
+
+// addUndeclaredClaims reports each top-level claim of the document that is
+// neither allowed nor a standard JWT claim.
+func addUndeclaredClaims(errors *ValidationErrors, claims map[string]any, allowed map[string]bool) {
+	for key := range claims {
+		if !isStandardClaim(key) && !allowed[key] {
+			errors.AddError(key, "claim not defined in VCTM")
+		}
+	}
+}
+
+// topLevelClaims returns the keys the VCTM's claim paths start with. A
+// claim without a path component names none.
+func topLevelClaims(vctm *VCTM) map[string]bool {
+	keys := make(map[string]bool)
+	for _, claim := range vctm.Claims {
+		if key, ok := claim.Path.FirstKey(); ok {
+			keys[key] = true
+		}
+	}
+	return keys
 }
 
 // isIssuerSuppliedClaim reports whether a VCTM claim path refers to a
@@ -289,11 +270,12 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 // This exemption is only applied in document-data paths (ValidateDocument,
 // ValidateClaimPaths) — ValidateClaims validates strictly, since a fully
 // assembled credential must carry these envelope claims.
-func isIssuerSuppliedClaim(path []*string) bool {
-	if len(path) != 1 || path[0] == nil {
+func isIssuerSuppliedClaim(path claimpath.Pointer) bool {
+	keys, ok := path.KeyNames()
+	if !ok || len(keys) != 1 {
 		return false
 	}
-	switch *path[0] {
+	switch keys[0] {
 	case "iss", "nbf", "exp", "cnf", "vct", "status", "iat":
 		return true
 	}

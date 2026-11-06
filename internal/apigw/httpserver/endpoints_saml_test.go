@@ -26,6 +26,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/auth_providers/samlsp"
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -186,10 +187,10 @@ func setupSAMLACSTestEnv(t *testing.T, scope, authenticSource string) *samlACSTe
 		SessionDuration:       3600,
 		AllowUnsignedMetadata: true,
 		AttributeMapping: model.AttributeMapping{
-			"urn:oid:2.5.4.42":                  {Claim: "given_name", Required: true},
-			"urn:oid:2.5.4.4":                   {Claim: "family_name", Required: true},
-			"urn:oid:1.3.6.1.5.5.7.9.1":         {Claim: "birth_date", Required: true},
-			"urn:oid:0.9.2342.19200300.100.1.1": {Claim: "authentic_source_person_id"},
+			"urn:oid:2.5.4.42":                  {Claim: claimpath.Keys("given_name"), Required: true},
+			"urn:oid:2.5.4.4":                   {Claim: claimpath.Keys("family_name"), Required: true},
+			"urn:oid:1.3.6.1.5.5.7.9.1":         {Claim: claimpath.Keys("birth_date"), Required: true},
+			"urn:oid:0.9.2342.19200300.100.1.1": {Claim: claimpath.Keys("authentic_source_person_id")},
 		},
 	}
 

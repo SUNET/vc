@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
 )
 
@@ -141,63 +142,55 @@ const defaultLocale = "en-US"
 // sdjwtvc.VCTM.Attributes() so callers (e.g. the verifier UI) can treat mdoc
 // and sd-jwt credential types uniformly. Claims with no declared Display are
 // bucketed under defaultLocale using their raw element ID as the label.
-func (s *MDDLSchema) Attributes() map[string]map[string][]*string {
-	reply := map[string]map[string][]*string{}
-
+func (s *MDDLSchema) Attributes() map[string]map[string]claimpath.Pointer {
+	reply := map[string]map[string]claimpath.Pointer{}
 	for namespace, elements := range s.Claims {
-		ns := namespace
 		for elementID, meta := range elements {
-			id := elementID
-			path := []*string{&ns, &id}
-
-			if len(meta.Display) == 0 {
-				if reply[defaultLocale] == nil {
-					reply[defaultLocale] = map[string][]*string{}
-				}
-				reply[defaultLocale][elementID] = path
-				continue
-			}
-
-			for _, d := range meta.Display {
-				if reply[d.Locale] == nil {
-					reply[d.Locale] = map[string][]*string{}
-				}
-				reply[d.Locale][d.Name] = path
-			}
+			addElementLabels(reply, claimpath.Keys(namespace, elementID), elementID, meta)
 		}
 	}
-
 	return reply
+}
+
+// addElementLabels adds an element's path under each label its display
+// gives it, or under its element ID in defaultLocale.
+func addElementLabels(reply map[string]map[string]claimpath.Pointer, path claimpath.Pointer, elementID string, meta ClaimMetadata) {
+	if len(meta.Display) == 0 {
+		addLabel(reply, defaultLocale, elementID, path)
+		return
+	}
+	for _, d := range meta.Display {
+		addLabel(reply, d.Locale, d.Name, path)
+	}
+}
+
+func addLabel(reply map[string]map[string]claimpath.Pointer, locale, label string, path claimpath.Pointer) {
+	if reply[locale] == nil {
+		reply[locale] = map[string]claimpath.Pointer{}
+	}
+	reply[locale][label] = path
 }
 
 // Presentation resolves MDDL claims against document data and returns a flat
 // map suitable for the consent preview UI, mirroring VCTM.Presentation's
 // {label, value} shape. Document data (e.g. from the datastore) is flat -
-// keyed by element ID directly, not nested under the mdoc namespace - so
-// only the element ID (the path's second segment, per Attributes()) is used
-// for lookup.
+// keyed by element ID directly, and claimpath.MDocElements locates each
+// element in it.
 func (s *MDDLSchema) Presentation(data map[string]any) map[string]any {
 	if data == nil || len(s.Claims) == 0 {
 		return nil
 	}
 
-	attributes := s.Attributes()
-	labels := attributes[defaultLocale]
-	if labels == nil {
-		for _, m := range attributes {
-			labels = m
-			break
-		}
-	}
-
+	elements := claimpath.MDocElements(s.Claims)
 	result := map[string]any{}
-	for label, path := range labels {
-		if len(path) < 2 || path[1] == nil {
+	for label, path := range s.presentationLabels() {
+		_, elementID, err := path.MDoc()
+		if err != nil {
 			continue
 		}
-		elementID := *path[1]
-		value, ok := data[elementID]
-		if !ok {
+		value, present, err := elements.Get(data, path)
+		if err != nil || !present {
+			// An element the document data does not hold is not shown.
 			continue
 		}
 		result[elementID] = map[string]any{
@@ -207,6 +200,19 @@ func (s *MDDLSchema) Presentation(data map[string]any) map[string]any {
 	}
 
 	return result
+}
+
+// presentationLabels returns the element paths by label in defaultLocale,
+// or in another locale when defaultLocale has none.
+func (s *MDDLSchema) presentationLabels() map[string]claimpath.Pointer {
+	attributes := s.Attributes()
+	if labels := attributes[defaultLocale]; labels != nil {
+		return labels
+	}
+	for _, labels := range attributes {
+		return labels
+	}
+	return nil
 }
 
 // SVGValues resolves claims that have an svg_id against flat document data

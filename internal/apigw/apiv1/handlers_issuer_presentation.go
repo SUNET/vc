@@ -35,20 +35,21 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	verified := storedClaims(authCtx.VerifiedClaims)
 	doc := credential.CloneNestedClaims(verified)
 
-	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, verified, now, nil)
+	shapes, err := c.cfg.DerivationShapes(model.SourceScope{Source: model.DataSourcePresentation, Scope: scope, Presented: authCtx.PresentedScope})
 	if err != nil {
 		return nil, err
 	}
-	credential.MergeDerived(doc, derived, replaced)
+	derived, replaced, err := credential.ApplyDerivationsReplacing(accepted.Derivations, verified, now, nil, shapes)
+	if err != nil {
+		return nil, err
+	}
+	if err := credential.MergeDerived(doc, derived, replaced); err != nil {
+		return nil, err
+	}
 
-	defaults, err := pScope.ResolveDefaults(now)
-	if err != nil {
-		return nil, err
-	}
-	// Presentation Defaults are documented as claim paths (dot-notation), so
-	// use MergeDefaults to place e.g. "identity.country" under the nested
-	// identity object rather than as a literal top-level key.
-	if err := credential.MergeDefaults(doc, defaults); err != nil {
+	// A default is a claim of the issued document: ["identity", "country"]
+	// goes under the nested identity object.
+	if err := pScope.MergeDefaults(doc, now, shapes.Issued); err != nil {
 		return nil, err
 	}
 
@@ -70,7 +71,7 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 		// Refuse issuance rather than emit an unfiltered document.
 		return nil, fmt.Errorf("presentation scope %q has no VCTM to filter against; refusing to issue an unfiltered document", scope)
 	}
-	return credential.FilterAgainstVCTM(doc, vctm), nil
+	return credential.FilterAgainstVCTM(doc, vctm)
 }
 
 // filterAgainstMDDL keeps the elements the MDDL declares, keyed by element

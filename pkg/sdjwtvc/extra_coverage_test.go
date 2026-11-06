@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 )
 
@@ -105,7 +106,7 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&level1, &level2, &level3, &finalClaim},
+					Path: claimpath.Keys(level1, level2, level3, finalClaim),
 					SD:   "always",
 				},
 			},
@@ -145,11 +146,11 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&address, &street},
+					Path: claimpath.Keys(address, street),
 					SD:   "always",
 				},
 			},
@@ -206,11 +207,11 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&age},
+					Path: claimpath.Keys(age),
 					SD:   "never", // Should not be disclosed
 				},
 			},
@@ -241,8 +242,11 @@ func TestMakeCredential_ComplexPaths(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{}, // Empty path
+					Path: claimpath.EmptyArray(),
 					SD:   "always",
+				},
+				{
+					SD: "always",
 				},
 			},
 		}

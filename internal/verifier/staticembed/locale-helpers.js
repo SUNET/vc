@@ -13,8 +13,8 @@ export const DEFAULT_LOCALE = "en-US";
  * English variant is preferred next, then the first locale by name so the
  * choice is deterministic.
  *
- * @param {Record<string, Record<string, (string|null)[]>> | undefined} attributes
- * @returns {Record<string, (string|null)[]>}
+ * @param {Record<string, Record<string, (string|number|null)[]>> | undefined} attributes
+ * @returns {Record<string, (string|number|null)[]>}
  */
 export function claimsForLocale(attributes) {
     if (!attributes) return {};

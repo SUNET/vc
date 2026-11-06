@@ -16,15 +16,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
-
-	"gopkg.in/yaml.v2"
 )
 
 // Exit codes. A mismatch is its own code, so a loop over candidate
@@ -36,7 +35,7 @@ const (
 )
 
 func main() {
-	code, err := run(context.Background(), os.Args[1:], os.Stdout)
+	code, err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "opening_recover:", err)
 	}
@@ -48,18 +47,20 @@ type invocation struct {
 	configPath  string
 	scope       string
 	source      string
-	path        []string
+	path        claimpath.Pointer
 	inputs      []string
 	expect      []byte
 	showOpening bool
 }
 
-func run(ctx context.Context, args []string, out io.Writer) (int, error) {
+// run reproduces the opening the arguments name. It writes the result to
+// out, and a line per deprecated claim spelling of the config to warn.
+func run(ctx context.Context, args []string, out, warn io.Writer) (int, error) {
 	inv, err := parseInvocation(args)
 	if err != nil {
 		return exitError, err
 	}
-	cfg, err := loadConfig(inv.configPath)
+	cfg, err := loadConfig(ctx, inv.configPath, warn)
 	if err != nil {
 		return exitError, err
 	}
@@ -136,8 +137,8 @@ func parseInvocation(args []string) (*invocation, error) {
 		return nil, errors.New("-input is required, once per hkdf or hmac input in the configured order")
 	}
 	if pathJSON != "" {
-		if err := json.Unmarshal([]byte(pathJSON), &inv.path); err != nil || len(inv.path) == 0 {
-			return nil, fmt.Errorf("-path %q is no JSON array of strings", pathJSON)
+		if err := json.Unmarshal([]byte(pathJSON), &inv.path); err != nil || inv.path.IsZero() {
+			return nil, fmt.Errorf("-path %q is no claims path pointer", pathJSON)
 		}
 	}
 	if !flagGiven(flags, "expect") {
@@ -157,15 +158,17 @@ func flagGiven(flags *flag.FlagSet, name string) bool {
 	return given
 }
 
-// loadConfig parses the config file as the issuer does.
-func loadConfig(path string) (*model.Cfg, error) {
-	raw, err := os.ReadFile(filepath.Clean(path))
+// loadConfig parses the config file as the issuer does, and writes a line
+// to warn for each claim spelling of an earlier release it upgraded.
+func loadConfig(ctx context.Context, path string, warn io.Writer) (*model.Cfg, error) {
+	cfg, err := configuration.DecodeFile(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	cfg := &model.Cfg{}
-	if err := yaml.Unmarshal(raw, cfg); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	for _, rewrite := range cfg.Deprecations {
+		if _, err := fmt.Fprintln(warn, rewrite); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
@@ -194,7 +197,7 @@ type underivedOpening struct {
 // findEntry returns the to_wallet entry of scope at path, or its one
 // to_wallet entry when path is empty. A non-empty source limits it to that
 // source scope.
-func findEntry(cfg *model.Cfg, scope, source string, path []string) (*entry, error) {
+func findEntry(cfg *model.Cfg, scope, source string, path claimpath.Pointer) (*entry, error) {
 	if cfg.Common == nil || cfg.APIGW == nil {
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data: the config needs common and apigw sections", scope)
 	}
@@ -203,15 +206,15 @@ func findEntry(cfg *model.Cfg, scope, source string, path []string) (*entry, err
 		return nil, fmt.Errorf("scope %q configures no auxiliary_data", scope)
 	}
 	toWallet := meta.AuxiliaryData.ToWallet
-	if path == nil {
+	if path.IsZero() {
 		if len(toWallet) != 1 {
 			return nil, fmt.Errorf("scope %q has %d to_wallet entries; name one with -path", scope, len(toWallet))
 		}
 		path = toWallet[0].Path
 	}
-	i := slices.IndexFunc(toWallet, func(e openid4vci.AuxiliaryDataEntry) bool { return slices.Equal(e.Path, path) })
+	i := slices.IndexFunc(toWallet, func(e openid4vci.AuxiliaryDataEntry) bool { return e.Path.Equal(path) })
 	if i < 0 {
-		return nil, fmt.Errorf("scope %q has no to_wallet entry %q", scope, path)
+		return nil, fmt.Errorf("scope %q has no to_wallet entry %s", scope, path)
 	}
 	e := &entry{alg: toWallet[i].Alg}
 	if err := e.collectOpenings(cfg.APIGW.DataSources, scope, source, path); err != nil {
@@ -224,7 +227,7 @@ func findEntry(cfg *model.Cfg, scope, source string, path []string) (*entry, err
 // for path, each one validated, into those it reproduces and those with
 // nothing to derive. An entry with no keyed opening is refused. A
 // non-empty source skips every other source scope.
-func (e *entry) collectOpenings(sources model.DataSources, scope, source string, path []string) error {
+func (e *entry) collectOpenings(sources model.DataSources, scope, source string, path claimpath.Pointer) error {
 	for _, src := range sources.SourceScopes() {
 		hc := primitives.HashCommitmentFor(src.Derivations, path)
 		if src.Scope != scope || hc == nil || (source != "" && src.Where() != source) {
@@ -241,7 +244,7 @@ func (e *entry) collectOpenings(sources model.DataSources, scope, source string,
 	}
 	if len(e.keyed) == 0 {
 		if source != "" && len(e.underived) == 0 {
-			return fmt.Errorf("-source %q is no source scope of %q that derives %q", source, scope, path)
+			return fmt.Errorf("-source %q is no source scope of %q that derives %s", source, scope, path)
 		}
 		return e.nothingToReproduce(scope, path)
 	}
@@ -249,15 +252,15 @@ func (e *entry) collectOpenings(sources model.DataSources, scope, source string,
 }
 
 // nothingToReproduce explains an entry without a keyed opening.
-func (e *entry) nothingToReproduce(scope string, path []string) error {
+func (e *entry) nothingToReproduce(scope string, path claimpath.Pointer) error {
 	if len(e.underived) == 0 {
-		return fmt.Errorf("no source scope of %q derives %q", scope, path)
+		return fmt.Errorf("no source scope of %q derives %s", scope, path)
 	}
 	reasons := make([]string, len(e.underived))
 	for i, u := range e.underived {
 		reasons[i] = u.where + ": " + u.reason
 	}
-	return fmt.Errorf("nothing to derive for %q: %s", path, strings.Join(reasons, "; "))
+	return fmt.Errorf("nothing to derive for %s: %s", path, strings.Join(reasons, "; "))
 }
 
 // nothingToDerive says where an opening without a keyed generator comes
@@ -265,7 +268,7 @@ func (e *entry) nothingToReproduce(scope string, path []string) error {
 func nothingToDerive(opening primitives.OpeningArgs) string {
 	switch {
 	case opening.Claim != nil:
-		return fmt.Sprintf("the opening is claim %q of the source data; read it from the source", opening.Claim.Input)
+		return fmt.Sprintf("the opening is claim %s of the source data; read it from the source", opening.Claim.Input)
 	case opening.Random != nil:
 		return "the opening is random; only the wallet holds it"
 	}

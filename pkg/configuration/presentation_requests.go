@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"gopkg.in/yaml.v2"
@@ -41,11 +43,13 @@ type PresentationRequestTemplate struct {
 	// This defines what credentials and claims to request from the wallet
 	DCQLQuery *openid4vp.DCQL `yaml:"dcql" json:"dcql" validate:"required"`
 
-	// ClaimMappings maps VP claim paths to OIDC claim names
-	// Key: VP claim path (e.g., "given_name" or "place_of_birth.country")
-	// Value: OIDC claim name (e.g., "given_name" or "birth_country")
-	// Special value "*" means map all claims through unchanged
-	ClaimMappings map[string]string `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
+	// ClaimMappings maps the claims of the presented credentials to OIDC
+	// claims: "*" maps every claim under its own name, and a map from DCQL
+	// credential query id to a list of {path, claim} entries maps each
+	// presentation through the entries of its query. The deprecated map
+	// from dotted claim names to OIDC claims maps the claims of all
+	// presentations merged.
+	ClaimMappings openid4vp.ClaimMappings `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
 
 	// Enabled indicates whether this template is active. Absent means
 	// enabled, which is why it is a POINTER: with a plain bool,
@@ -77,9 +81,19 @@ func (t *PresentationRequestTemplate) GetDCQLQuery() *openid4vp.DCQL {
 	return t.DCQLQuery
 }
 
-// GetClaimMappings returns the claim mappings (for claims extraction)
-func (t *PresentationRequestTemplate) GetClaimMappings() map[string]string {
-	return t.ClaimMappings
+// GetClaimMappings returns the claim mappings bound to the template's dcql.
+func (t *PresentationRequestTemplate) GetClaimMappings() (openid4vp.BoundClaimMappings, error) {
+	return t.ClaimMappings.Bind(t.DCQLQuery)
+}
+
+// bindTemplates binds the claim mappings of each template to its dcql.
+func bindTemplates(templates []*PresentationRequestTemplate) error {
+	for _, template := range templates {
+		if _, err := template.GetClaimMappings(); err != nil {
+			return fmt.Errorf("presentation request template %q: %w", template.ID, err)
+		}
+	}
+	return nil
 }
 
 // PresentationRequestConfig holds all presentation request templates
@@ -89,7 +103,33 @@ type PresentationRequestConfig struct {
 
 	// DefaultTemplate is the ID of the template to use when no scope matches
 	DefaultTemplate string `yaml:"default_template,omitempty" json:"default_template,omitempty"`
+
+	// Deprecations holds one record per claim spelling of an earlier
+	// release that loading read. The verifier logs each as a warning.
+	Deprecations []legacyclaims.Rewrite `yaml:"-" json:"-"`
+
+	// Fallbacks holds one record per file that fails to decode as a list
+	// of templates and loads as one template. The verifier logs each as a
+	// warning.
+	Fallbacks []*TemplateFallback `yaml:"-" json:"-"`
 }
+
+// TemplateFallback is a presentation request file that fails to decode as
+// a list of templates. It loads as one template from its top-level keys.
+type TemplateFallback struct {
+	// File is the file name.
+	File string
+	// Err is the error of the list.
+	Err error
+}
+
+// Error names the file and the error of its list.
+func (f *TemplateFallback) Error() string {
+	return fmt.Sprintf("%s fails to decode as a list of templates and loads as one template from its top-level keys: %v", f.File, f.Err)
+}
+
+// Unwrap returns the error of the list.
+func (f *TemplateFallback) Unwrap() error { return f.Err }
 
 // GetEnabledTemplates returns only the enabled templates as a generic slice
 // This is used when creating a PresentationBuilder
@@ -126,7 +166,33 @@ func LoadPresentationRequests(ctx context.Context, dirPath string) (*Presentatio
 		Templates: make([]*PresentationRequestTemplate, 0),
 	}
 
-	// Read all YAML files in directory
+	files, err := templateFiles(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load each file
+	for _, filePath := range files {
+		file, err := loadTemplateFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load %s: %w", filePath, err)
+		}
+		config.Templates = append(config.Templates, file.templates...)
+		config.Deprecations = append(config.Deprecations, file.deprecations...)
+		if file.fallback != nil {
+			config.Fallbacks = append(config.Fallbacks, file.fallback)
+		}
+	}
+
+	if err := config.check(); err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+// templateFiles returns the YAML files of a directory.
+func templateFiles(dirPath string) ([]string, error) {
 	files, err := filepath.Glob(filepath.Join(dirPath, "*.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to glob yaml files: %w", err)
@@ -141,27 +207,7 @@ func LoadPresentationRequests(ctx context.Context, dirPath string) (*Presentatio
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no YAML files found in directory: %s", dirPath)
 	}
-
-	// Load each file
-	for _, filePath := range files {
-		templates, err := loadTemplateFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load %s: %w", filePath, err)
-		}
-		config.Templates = append(config.Templates, templates...)
-	}
-
-	// Validate no duplicate IDs
-	if err := config.validateUniqueIDs(); err != nil {
-		return nil, err
-	}
-
-	// Validate no duplicate scopes (same scope in multiple templates)
-	if err := config.validateNoDuplicateScopes(); err != nil {
-		return nil, err
-	}
-
-	return config, nil
+	return files, nil
 }
 
 // LoadPresentationRequestsFromFile loads presentation request config from a single file
@@ -182,31 +228,162 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 		return nil, err
 	}
 
-	var config PresentationRequestConfig
-	if err := yaml.Unmarshal(fileBytes, &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
-	}
-
-	// Validate
-	if err := config.validateUniqueIDs(); err != nil {
+	upgraded, deprecations, err := upgradeTemplates(filePath, fileBytes, true)
+	if err != nil {
 		return nil, err
 	}
-	if err := config.validateNoDuplicateScopes(); err != nil {
+
+	var config PresentationRequestConfig
+	if err := yaml.Unmarshal(upgraded, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+	config.Deprecations = deprecations
+
+	if err := config.check(); err != nil {
 		return nil, err
 	}
 
 	return &config, nil
 }
 
+// check refuses duplicate template IDs and a scope in two templates, then
+// binds the claim mappings of each template to its dcql.
+func (c *PresentationRequestConfig) check() error {
+	if err := c.validateUniqueIDs(); err != nil {
+		return err
+	}
+	if err := c.validateNoDuplicateScopes(); err != nil {
+		return err
+	}
+	return bindTemplates(c.Templates)
+}
+
+// upgradeTemplates rewrites the claim paths of earlier releases in the
+// text of a presentation request file, and records each claim_mappings
+// written as the map from dotted claim names. With list, it upgrades the
+// entries of a non-empty "templates" list. Otherwise, and for a file
+// without such a list, it upgrades one template from the top-level keys.
+func upgradeTemplates(filePath string, src []byte, list bool) ([]byte, []legacyclaims.Rewrite, error) {
+	doc, err := legacyclaims.Parse(filePath, src)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+	if doc.Flattens() {
+		if doc, err = resolveTemplates(filePath, src, list); err != nil {
+			return nil, nil, err
+		}
+	}
+	upgrade := legacyclaims.UpgradeTemplate
+	if list {
+		upgrade = legacyclaims.UpgradeTemplates
+	}
+	if err := upgrade(doc, false); err != nil {
+		return nil, nil, err
+	}
+	text, err := doc.Bytes()
+	if err != nil {
+		return nil, nil, err
+	}
+	return text, doc.Rewrites(), nil
+}
+
+// resolveTemplates reads the text gopkg.in/yaml.v2 decodes from a
+// presentation request file: a list of templates when list is set and the
+// file holds a non-empty "templates" list, and one template otherwise.
+func resolveTemplates(filePath string, src []byte, list bool) (*legacyclaims.Document, error) {
+	root := reflect.TypeFor[PresentationRequestTemplate]()
+	if list && hasTemplateList(src) {
+		root = reflect.TypeFor[PresentationRequestConfig]()
+	}
+	return legacyclaims.Resolve(filePath, src, root)
+}
+
+// UpgradeTemplateFile rewrites the claim spellings of earlier releases in
+// the text of a presentation request file, keeping every comment, and
+// writes each claim_mappings map in the keyed form where that form maps
+// the same claims. It returns the *TemplateFallback of a file that fails
+// to decode as a list of templates. The rewrite of a file with a YAML
+// alias, merge key or repeated key must load as the rewrite of the text
+// gopkg.in/yaml.v2 reads from the file loads; otherwise UpgradeTemplateFile
+// refuses the file with legacyclaims.ErrInPlace.
+func UpgradeTemplateFile(filePath string, src []byte) ([]byte, []legacyclaims.Rewrite, error) {
+	// A file the loader refuses keeps the refusal through the rewrite.
+	if loaded, err := readTemplateFile(filePath, src); err == nil && loaded.fallback != nil {
+		return nil, nil, loaded.fallback
+	}
+	doc, err := legacyclaims.Parse(filePath, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !doc.Flattens() {
+		return convertTemplates(doc)
+	}
+	flat, err := resolveTemplates(filePath, src, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	flatText, _, err := convertTemplates(flat)
+	if err != nil {
+		return nil, nil, err
+	}
+	want, err := readTemplateList(filePath, flatText)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A rewrite in place that fails, or whose text loads otherwise, met a
+	// spelling an alias, a merge key or a repeated key reads.
+	text, rewrites, err := convertTemplates(doc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", filePath, legacyclaims.ErrInPlace)
+	}
+	got, err := readTemplateList(filePath, text)
+	if err != nil || len(got.deprecations) != len(want.deprecations) || !reflect.DeepEqual(want.templates, got.templates) {
+		return nil, nil, fmt.Errorf("%s: %w", filePath, legacyclaims.ErrInPlace)
+	}
+	return text, rewrites, nil
+}
+
+// convertTemplates rewrites the claim spellings of doc in place, and
+// writes each claim_mappings map in the keyed form where that form maps
+// the same claims.
+func convertTemplates(doc *legacyclaims.Document) ([]byte, []legacyclaims.Rewrite, error) {
+	if err := legacyclaims.UpgradeTemplates(doc, true); err != nil {
+		return nil, nil, err
+	}
+	text, err := doc.Bytes()
+	if err != nil {
+		return nil, nil, err
+	}
+	return text, doc.Rewrites(), nil
+}
+
+// templateFile is the templates of one file, and the claim spellings of
+// earlier releases they were written in.
+type templateFile struct {
+	templates    []*PresentationRequestTemplate
+	deprecations []legacyclaims.Rewrite
+	// fallback is set when the file fails to decode as a list of templates
+	// and templates holds the one template of its top-level keys.
+	fallback *TemplateFallback
+}
+
 // loadTemplateFile loads templates from a YAML file.
 // Each file may contain a single template (top-level fields) or multiple
 // templates wrapped in a "templates:" list.
-func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
+func loadTemplateFile(filePath string) (templateFile, error) {
 	fileBytes, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return templateFile{}, fmt.Errorf("failed to read file: %w", err)
 	}
+	return readTemplateFile(filePath, fileBytes)
+}
 
+// readTemplateFile reads the templates of the text of a presentation
+// request file: the entries of a non-empty "templates" list, or one
+// template from the top-level keys. A file that fails to decode as a list
+// of templates loads as one template from its top-level keys, and the
+// fallback of the result names the error of the list.
+func readTemplateFile(filePath string, fileBytes []byte) (templateFile, error) {
 	// Reject configs that still carry the removed presentation-request
 	// transformation keys. gopkg.in/yaml.v2 silently ignores unknown
 	// fields, so without this check an old template with
@@ -216,34 +393,76 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 	// derivations never run in the verifier here), so reject rather
 	// than mis-apply.
 	if err := rejectRemovedTemplateKeys(filePath, fileBytes); err != nil {
-		return nil, err
+		return templateFile{}, err
 	}
 
-	// Try loading as a config with a "templates:" list first
-	var cfg PresentationRequestConfig
-	if err := yaml.Unmarshal(fileBytes, &cfg); err == nil && len(cfg.Templates) > 0 {
-		hasID := false
-		for _, t := range cfg.Templates {
-			if t.ID != "" {
-				hasID = true
+	upgraded, deprecations, listErr := upgradeTemplates(filePath, fileBytes, true)
+	if listErr == nil {
+		// Try loading as a config with a "templates:" list first
+		var cfg PresentationRequestConfig
+		listErr = yaml.Unmarshal(upgraded, &cfg)
+		if listErr == nil && len(cfg.Templates) > 0 {
+			hasID := false
+			for _, t := range cfg.Templates {
+				if t.ID != "" {
+					hasID = true
+				}
 			}
+			if hasID {
+				return templateFile{templates: cfg.Templates, deprecations: deprecations}, nil
+			}
+			return templateFile{}, fmt.Errorf("invalid templates configuration in %s: templates list present but all entries missing id", filePath)
 		}
-		if hasID {
-			return cfg.Templates, nil
+		if listErr == nil {
+			return readTemplate(upgraded, deprecations)
 		}
-		return nil, fmt.Errorf("invalid templates configuration in %s: templates list present but all entries missing id", filePath)
 	}
 
 	// Fall back to a single template
+	upgraded, deprecations, err := upgradeTemplates(filePath, fileBytes, false)
+	if err != nil {
+		return templateFile{}, err
+	}
+	file, err := readTemplate(upgraded, deprecations)
+	if err != nil {
+		return templateFile{}, err
+	}
+	file.fallback = &TemplateFallback{File: filePath, Err: listErr}
+	return file, nil
+}
+
+// readTemplate reads the upgraded text of a presentation request file as
+// one template.
+func readTemplate(upgraded []byte, deprecations []legacyclaims.Rewrite) (templateFile, error) {
 	var template PresentationRequestTemplate
-	if err := yaml.Unmarshal(fileBytes, &template); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	if err := yaml.Unmarshal(upgraded, &template); err != nil {
+		return templateFile{}, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
 	// No defaulting here any more: Enabled is a pointer, so nil already
 	// means "not specified", and IsEnabled reads it that way. Writing true
 	// over it was what made "enabled: false" unusable in a file.
-	return []*PresentationRequestTemplate{&template}, nil
+	return templateFile{templates: []*PresentationRequestTemplate{&template}, deprecations: deprecations}, nil
+}
+
+// readTemplateList reads the templates of the text of a presentation
+// request file, and returns the *TemplateFallback of a file that fails to
+// decode as a list of templates as the error.
+func readTemplateList(filePath string, fileBytes []byte) (templateFile, error) {
+	file, err := readTemplateFile(filePath, fileBytes)
+	if err == nil && file.fallback != nil {
+		return templateFile{}, file.fallback
+	}
+	return file, err
+}
+
+// hasTemplateList reports whether a file holds a non-empty "templates"
+// list.
+func hasTemplateList(text []byte) bool {
+	var list struct {
+		Templates []any `yaml:"templates"`
+	}
+	return yaml.Unmarshal(text, &list) == nil && len(list.Templates) > 0
 }
 
 // validateUniqueIDs checks that all template IDs are unique

@@ -3,9 +3,9 @@ package issuance
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
-	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/spocputil"
 
@@ -233,7 +233,17 @@ func lookupClaim(claims map[string]any, path string) (any, bool) {
 	if value, ok := claims[path]; ok {
 		return value, true
 	}
-	return credential.GetNestedValue(claims, path)
+	var current any = claims
+	for _, key := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if current, ok = object[key]; !ok {
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 // toStringValue renders a claim value as the atom that goes into one query

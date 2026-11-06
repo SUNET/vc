@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/base64url"
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // KeyedOpeningArgs derives the opening with the keyed function F from a
@@ -22,7 +23,7 @@ type KeyedOpeningArgs[F keyedFunction] struct {
 	// Inputs are claims of the source data, each a non-empty string.
 	// Their order is part of the derivation. A presentation source lists
 	// each in its required_claims.
-	Inputs []string `yaml:"inputs" validate:"required,min=1,max=16,dive,required" doc_example:"[\"issuing_country\", \"personal_administrative_number\"]"`
+	Inputs []claimpath.Ref `yaml:"inputs" validate:"required,min=1,max=16,dive,required" doc_example:"[[\"issuing_country\"], [\"personal_administrative_number\"]]"`
 	// Bytes is the opening length.
 	Bytes int `yaml:"bytes" validate:"required" doc_example:"16"`
 }
@@ -96,17 +97,17 @@ func (a *KeyedOpeningArgs[F]) name() string {
 	return f.name()
 }
 
-func (a *KeyedOpeningArgs[F]) inputs() []string { return a.Inputs }
+func (a *KeyedOpeningArgs[F]) inputs() []claimpath.Ref { return a.Inputs }
 
 func (a *KeyedOpeningArgs[F]) validate() error {
 	_, err := a.key()
 	return err
 }
 
-func (a *KeyedOpeningArgs[F]) open(claims map[string]any) ([]byte, error) {
+func (a *KeyedOpeningArgs[F]) open(claims map[string]any, source claimpath.Shape) ([]byte, error) {
 	values := make([]string, 0, len(a.Inputs))
-	for _, path := range a.Inputs {
-		value, err := inputClaim(claims, path)
+	for _, input := range a.Inputs {
+		value, err := inputClaim(claims, source, input)
 		if err != nil {
 			return nil, err
 		}
@@ -141,7 +142,7 @@ func (a *KeyedOpeningArgs[F]) message(values []string) ([]byte, error) {
 		if err := checkFieldValue(value); err != nil {
 			// The value is personal data, so the error names the claim
 			// only.
-			return nil, fmt.Errorf("%w: %s input %q %w", ErrInvalidClaimInput, f.name(), a.Inputs[i], err)
+			return nil, fmt.Errorf("%w: %s input %s %w", ErrInvalidClaimInput, f.name(), a.Inputs[i], err)
 		}
 		message = appendField(message, value)
 	}

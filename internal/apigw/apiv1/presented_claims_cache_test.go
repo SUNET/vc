@@ -5,6 +5,7 @@ import (
 	"time"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -128,9 +129,7 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"pid_mdoc": {
-			RequiredClaims: map[string][]string{
-				"eu.europa.ec.eudi.pid.1.birth_date": nil,
-			},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date")}}},
 		}},
 	}
 	// An mdoc element value, as fxamacker/cbor decodes it.
@@ -139,7 +138,7 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 		"eu.europa.ec.eudi.pid.1.birth_date": cbor.Tag{Number: 1004, Content: "1990-01-15"},
 	}
 
-	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, "pid_mdoc", presented))
+	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "pid_mdoc", presented))
 
 	stored := authCtx.VerifiedClaims["eu.europa.ec.eudi.pid.1.birth_date"]
 	assert.IsTypef(t, "", stored,
@@ -167,9 +166,7 @@ func TestTheUnrepresentableClaimRefusalCarriesNoClaimValue(t *testing.T) {
 	const secret = "9007199254740993"
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"pid_mdoc": {
-			RequiredClaims: map[string][]string{
-				"eu.europa.ec.eudi.pid.1.personal_administrative_number": nil,
-			},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "personal_administrative_number")}}},
 		}},
 	}
 	presented := map[string]any{
@@ -177,7 +174,7 @@ func TestTheUnrepresentableClaimRefusalCarriesNoClaimValue(t *testing.T) {
 		"eu.europa.ec.eudi.pid.1.personal_administrative_number": int64(9007199254740993),
 	}
 
-	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, "pid_mdoc", presented)
+	err := c.finalisePresentationVerification(t.Context(), authCtx, "eduid_age", pScope, "pid_mdoc", presented)
 	require.Error(t, err, "a value the document cannot carry must be refused")
 	assert.NotContainsf(t, err.Error(), secret,
 		"the refusal returned the holder's claim to the caller: %v", err)

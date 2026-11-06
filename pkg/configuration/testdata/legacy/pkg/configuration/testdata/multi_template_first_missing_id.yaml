@@ -1,0 +1,37 @@
+templates:
+  - name: "No ID template"
+    description: "This template has no id"
+    version: "1.0"
+    oidc_scopes:
+      - "noid"
+    dcql:
+      credentials:
+        - id: "cred"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:test:1"
+          claims:
+            - path: ["name"]
+    claim_mappings:
+      name: "name"
+    enabled: true
+
+  - id: "valid_second"
+    name: "Valid second template"
+    description: "This template has an id"
+    version: "1.0"
+    oidc_scopes:
+      - "valid"
+    dcql:
+      credentials:
+        - id: "cred2"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:test:2"
+          claims:
+            - path: ["value"]
+    claim_mappings:
+      value: "value"
+    enabled: true

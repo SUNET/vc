@@ -210,15 +210,80 @@ func TestEndpointOAuthAuthorizationChallenge_RateLimited(t *testing.T) {
 		"a rate limited request must not reach OAuthAuthorizationChallenge")
 }
 
-// prepareAPI records the request the transport layer built.
+// prepareAPI records the request the transport layer built. A request in
+// the earlier release's form is recorded in seen without its rule, and in
+// legacy.
 type prepareAPI struct {
 	unimplementedApiv1
-	seen *apiv1.PrepareIssuanceRequest
+	seen   *apiv1.PrepareIssuanceRequest
+	legacy *apiv1.LegacyPrepareIssuanceRequest
 }
 
 func (a *prepareAPI) PrepareIssuance(_ context.Context, req *apiv1.PrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
 	a.seen = req
 	return &apiv1.PrepareIssuanceReply{IssuerState: "prepared"}, nil
+}
+
+func (a *prepareAPI) PrepareLegacyIssuance(_ context.Context, req *apiv1.LegacyPrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
+	a.seen = &apiv1.PrepareIssuanceRequest{Scope: req.Scope, AuthenticSource: req.AuthenticSource, TTLSeconds: req.TTLSeconds}
+	a.legacy = req
+	return &apiv1.PrepareIssuanceReply{IssuerState: "prepared"}, nil
+}
+
+// The earlier release's identity_match, an object of dotted claim names,
+// reaches PrepareLegacyIssuance and is answered with the RFC 9745
+// Deprecation header. The list of claims path pointers reaches
+// PrepareIssuance without it, and a malformed pointer inside the list is
+// refused with invalid_claims_path, whatever JSON type it has.
+func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
+	ctx := t.Context()
+	log, err := logger.New("prepare-forms-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-forms-test", log)
+	require.NoError(t, err)
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	for name, tc := range map[string]struct {
+		claims      string
+		status      int
+		legacy      bool
+		deprecation string
+		title       string
+	}{
+		"object of dotted names":    {`{"given_name":{"equals":"Alice"}}`, http.StatusOK, true, "@1793836800", ""},
+		"list of pointers":          {`[{"path":["given_name"],"equals":"Alice"}]`, http.StatusOK, false, "", ""},
+		"dotted string in the list": {`[{"path":"given_name","equals":"Alice"}]`, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"number in the list":        {`[{"path":7,"equals":"Alice"}]`, http.StatusBadRequest, false, "", "invalid_claims_path"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := &prepareAPI{}
+			s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+			engine := gin.New()
+			helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+			body := `{"identity_match":{"claims":` + tc.claims + `},"scope":"allowed_scope"}`
+			req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			require.Equal(t, tc.status, w.Code, "body: %s", w.Body.String())
+			assert.Equal(t, tc.deprecation, w.Header().Get("Deprecation"))
+			assert.Equal(t, tc.legacy, api.legacy != nil)
+			assert.Equal(t, tc.status == http.StatusOK, api.seen != nil)
+			if tc.title != "" {
+				var refusal struct {
+					Error struct {
+						Title string `json:"title"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal), "body: %s", w.Body.String())
+				assert.Equal(t, tc.title, refusal.Error.Title, "body: %s", w.Body.String())
+			}
+		})
+	}
 }
 
 // The scope this endpoint acts on must be the scope the authorization

@@ -3,12 +3,13 @@ package openid4vp
 import (
 	"reflect"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // TestCopyDCQL_PreservesClaimValues is a regression test for the bug where
 // copyDCQL dropped ClaimQuery.Values when deep-copying a template's DCQL.
 func TestCopyDCQL_PreservesClaimValues(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 
 	tests := []struct {
 		name   string
@@ -30,7 +31,7 @@ func TestCopyDCQL_PreservesClaimValues(t *testing.T) {
 						Claims: []ClaimQuery{
 							{
 								ID:     "claim1",
-								Path:   []*string{strPtr("nationality")},
+								Path:   claimpath.Keys("nationality"),
 								Values: tt.values,
 							},
 						},
@@ -57,7 +58,6 @@ func TestCopyDCQL_PreservesClaimValues(t *testing.T) {
 // TestCopyDCQL_ClaimValuesIsDeepCopy verifies that mutating the copied Values
 // slice does not affect the source.
 func TestCopyDCQL_ClaimValuesIsDeepCopy(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 
 	src := &DCQL{
 		Credentials: []CredentialQuery{
@@ -66,7 +66,7 @@ func TestCopyDCQL_ClaimValuesIsDeepCopy(t *testing.T) {
 				Format: "vc+sd-jwt",
 				Claims: []ClaimQuery{
 					{
-						Path:   []*string{strPtr("nationality")},
+						Path:   claimpath.Keys("nationality"),
 						Values: []any{"DE", "SE"},
 					},
 				},
@@ -83,10 +83,27 @@ func TestCopyDCQL_ClaimValuesIsDeepCopy(t *testing.T) {
 	}
 }
 
+// A template and its copies share each claims path pointer, so a write into
+// what a copy's pointer hands out stays out of the template.
+func TestCopyDCQL_PathIsolation(t *testing.T) {
+	src := &DCQL{Credentials: []CredentialQuery{{
+		Claims: []ClaimQuery{{Path: claimpath.Keys("nationality")}},
+	}}}
+
+	components, err := copyDCQL(src).Credentials[0].Claims[0].Path.Components()
+	if err != nil {
+		t.Fatal(err)
+	}
+	components[0] = claimpath.Key("MUTATED")
+
+	if got := src.Credentials[0].Claims[0].Path; !got.Equal(claimpath.Keys("nationality")) {
+		t.Errorf("source Path leaked mutation: got %s", got)
+	}
+}
+
 // TestCopyDCQL_ValuesSurviveMarshal verifies that Values round-trip through
 // JSON serialization after being copied.
 func TestCopyDCQL_ValuesSurviveMarshal(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 
 	src := &DCQL{
 		Credentials: []CredentialQuery{
@@ -95,7 +112,7 @@ func TestCopyDCQL_ValuesSurviveMarshal(t *testing.T) {
 				Format: "vc+sd-jwt",
 				Claims: []ClaimQuery{
 					{
-						Path:   []*string{strPtr("nationality")},
+						Path:   claimpath.Keys("nationality"),
 						Values: []any{"DE", "SE"},
 					},
 				},

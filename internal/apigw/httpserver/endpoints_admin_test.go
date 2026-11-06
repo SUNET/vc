@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -340,8 +341,8 @@ func TestAdminStatus_ScopeTemplates(t *testing.T) {
 				"eduid": {
 					VCTM: &sdjwtvc.VCTM{
 						Claims: []sdjwtvc.Claim{
-							{Path: []*string{&firstName}},
-							{Path: []*string{&lastName}},
+							{Path: claimpath.Keys(firstName)},
+							{Path: claimpath.Keys(lastName)},
 						},
 					},
 				},
@@ -455,11 +456,10 @@ func TestAdminStatus_ScopeTemplates_NestedPaths(t *testing.T) {
 				"pid": {
 					VCTM: &sdjwtvc.VCTM{
 						Claims: []sdjwtvc.Claim{
-							{Path: []*string{&firstName}},
-							{Path: []*string{&address, &street}},
-							{Path: []*string{&address, &city}},
-							{Path: []*string{}},    // empty path — should be skipped
-							{Path: []*string{nil}}, // nil element — should be skipped
+							{Path: claimpath.Keys(firstName)},
+							{Path: claimpath.Keys(address, street)},
+							{Path: claimpath.Keys(address, city)},
+							{Path: claimpath.New(claimpath.All())}, // nil element — should be skipped
 						},
 					},
 				},
@@ -506,9 +506,9 @@ func TestAdminStatus_ScopeTemplates_LeafOverwrittenByNested(t *testing.T) {
 					VCTM: &sdjwtvc.VCTM{
 						Claims: []sdjwtvc.Claim{
 							// First claim: "address" as a leaf
-							{Path: []*string{&address}},
+							{Path: claimpath.Keys(address)},
 							// Second claim: "address.street" as nested — should overwrite
-							{Path: []*string{&address, &street}},
+							{Path: claimpath.Keys(address, street)},
 						},
 					},
 				},
@@ -533,6 +533,80 @@ func TestAdminStatus_ScopeTemplates_LeafOverwrittenByNested(t *testing.T) {
 	addrMap, ok := pidTpl["address"].(map[string]any)
 	require.True(t, ok, "address should be a nested map after overwrite")
 	assert.Equal(t, "", addrMap["street"])
+}
+
+// TestAdminStatus_ScopeTemplates_ObjectAndArray verifies that a VCTM that
+// declares a claim as an object and as an array gets the earlier release's
+// template, and that no VCTM breaks the status endpoint. The expected
+// templates are the earlier release's (main at ff1df957) output on the
+// same claims.
+func TestAdminStatus_ScopeTemplates_ObjectAndArray(t *testing.T) {
+	tests := []struct {
+		name, claims string
+		// template is the earlier release's template of the claims, and
+		// empty where the scope gets none.
+		template string
+	}{
+		{
+			name:     "an array declared before an object",
+			claims:   `[{"path":["achievements",null]},{"path":["achievements","count"]},{"path":["given_name"]}]`,
+			template: `{"achievements":{"count":""},"given_name":""}`,
+		},
+		{
+			name:     "an object declared before an array",
+			claims:   `[{"path":["given_name"]},{"path":["achievements","count"]},{"path":["achievements",null]}]`,
+			template: `{"achievements":{"count":""},"given_name":""}`,
+		},
+		{
+			name:     "an array below the element of the array",
+			claims:   `[{"path":["a",null,"b",null]},{"path":["a","c"]}]`,
+			template: `{"a":{"b":{},"c":""}}`,
+		},
+		{
+			name:     "a claim of an object",
+			claims:   `[{"path":["x","y",null]},{"path":["x","y","z"]},{"path":["x","w"]}]`,
+			template: `{"x":{"w":"","y":{"z":""}}}`,
+		},
+		{
+			name:     "a key below the object and below the element",
+			claims:   `[{"path":["a","b"]},{"path":["a",null]},{"path":["a","b","c"]},{"path":["a",null,"b","d"]}]`,
+			template: `{"a":{"b":{"c":"","d":""}}}`,
+		},
+		{
+			name:   "an index above 255",
+			claims: `[{"path":["x",300]}]`,
+		},
+	}
+	rules := []string{
+		`(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source *)(scope *))`,
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var claims []sdjwtvc.Claim
+			require.NoError(t, json.Unmarshal([]byte(tt.claims), &claims))
+			cfg := &model.Cfg{
+				Common: &model.Common{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
+						"pid":   {VCTM: &sdjwtvc.VCTM{Claims: claims}},
+						"eduid": {VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{{Path: claimpath.Keys("given_name")}}}},
+					},
+				},
+			}
+			engine := testSetupAdminStatus(t, "alice@sunet.se", rules, cfg, &adminStatusMock{authenticSources: []string{"SUNET"}})
+			result := getStatus(t, engine, loginAndGetCookies(t, engine))
+
+			templates, ok := result["scope_templates"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, map[string]any{"given_name": ""}, templates["eduid"])
+			if tt.template == "" {
+				assert.NotContains(t, templates, "pid")
+				return
+			}
+			got, err := json.Marshal(templates["pid"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.template, string(got))
+		})
+	}
 }
 
 // ==================== End-to-end: login → status → search documents ====================

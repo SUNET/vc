@@ -3,6 +3,7 @@ package sdjwtvc_test
 import (
 	"fmt"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -80,7 +81,7 @@ func ExampleVCTM() {
 		},
 		Claims: []sdjwtvc.Claim{
 			{
-				Path: []*string{new("given_name")},
+				Path: claimpath.Keys("given_name"),
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Given Name"},
 				},
@@ -88,7 +89,7 @@ func ExampleVCTM() {
 				Mandatory: true,
 			},
 			{
-				Path: []*string{new("family_name")},
+				Path: claimpath.Keys("family_name"),
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Family Name"},
 				},
@@ -112,7 +113,7 @@ func ExampleVCTM_Attributes() {
 		VCT: "https://example.com/credentials/identity",
 		Claims: []sdjwtvc.Claim{
 			{
-				Path: []*string{new("given_name")},
+				Path: claimpath.Keys("given_name"),
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Given Name"},
 					{Locale: "sv-SE", Label: "Förnamn"},
@@ -123,20 +124,11 @@ func ExampleVCTM_Attributes() {
 	}
 
 	attrs := vctm.Attributes()
-	// Print dereferenced path values
-	for _, p := range attrs["en-US"]["Given Name"] {
-		if p != nil {
-			fmt.Printf("en-US Given Name path: %s\n", *p)
-		}
-	}
-	for _, p := range attrs["sv-SE"]["Förnamn"] {
-		if p != nil {
-			fmt.Printf("sv-SE Förnamn path: %s\n", *p)
-		}
-	}
+	fmt.Printf("en-US Given Name path: %s\n", attrs["en-US"]["Given Name"])
+	fmt.Printf("sv-SE Förnamn path: %s\n", attrs["sv-SE"]["Förnamn"])
 	// Output:
-	// en-US Given Name path: given_name
-	// sv-SE Förnamn path: given_name
+	// en-US Given Name path: ["given_name"]
+	// sv-SE Förnamn path: ["given_name"]
 }
 
 func ExampleVCTM_SRIIntegrity() {

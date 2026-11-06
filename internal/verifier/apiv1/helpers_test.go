@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -56,16 +57,18 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 						VCTValues: []string{"https://example.com/test"},
 					},
 					Claims: []openid4vp.ClaimQuery{
-						{Path: openid4vp.StringPath("given_name")},
-						{Path: openid4vp.StringPath("family_name")},
+						{Path: claimpath.Keys("given_name")},
+						{Path: claimpath.Keys("family_name")},
 					},
 				},
 			},
 		},
-		ClaimMappings: map[string]string{
-			"given_name":  "given_name",
-			"family_name": "family_name",
-		},
+		ClaimMappings: openid4vp.QueryMappings(map[string][]openid4vp.ClaimMapping{
+			"test-credential": {
+				{Path: claimpath.Keys("given_name"), Claim: "given_name"},
+				{Path: claimpath.Keys("family_name"), Claim: "family_name"},
+			},
+		}),
 		Enabled: boolPtr(true),
 	}
 }

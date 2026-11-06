@@ -685,6 +685,14 @@ build-opening-recover: bbs-native-lib-ensure ## Build the opening_recover develo
 		$(BUILD_FLAGS) -o ./bin/opening_recover \
 		$(LDFLAGS) ./developer_tools/scripts/opening_recover/
 
+# Reads configuration files as the services do, so it links the same way.
+build-migrate-claim-paths: bbs-native-lib-ensure ## Build the migrate_claim_paths developer tool
+	$(info Building migrate_claim_paths)
+	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		-tags "$(WORKER_BUILD_TAGS)" \
+		$(BUILD_FLAGS) -o ./bin/migrate_claim_paths \
+		$(LDFLAGS) ./developer_tools/scripts/migrate_claim_paths/
+
 build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 	$(info Building check_issuer_jwks)
 	$(eval CHECK_ISSUER_JWKS_VERSION := $(or $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//'),dev))

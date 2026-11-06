@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/internal/registry/httpserver"
 	"github.com/SUNET/vc/internal/registry/tokenstatuslistissuer"
 	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/legacyclaims"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
@@ -42,6 +43,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	legacyclaims.Warn(log.New("configuration"), cfg.Deprecations)
 
 	// main function log
 	mainLog := log.New("main")

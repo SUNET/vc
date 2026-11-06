@@ -16,7 +16,9 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -354,7 +356,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// MergeNestedClaims writes into existing nested maps, so a
 				// shallow maps.Clone would still share nested references
 				// (e.g. the "identity" sub-map) with the cache and let a
-				// derivation targeting a dotted path corrupt it.
+				// derivation targeting a nested claim corrupt it.
 				docData := credential.CloneNestedClaims(document.DocumentData)
 
 				// What the holder PROVED, kept aside before derivations
@@ -369,11 +371,13 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				// output feeds the next, so a dependent derivation must
 				// read the verified value rather than one a previous step
 				// computed over it.
-				derived, replaced, err := credential.ApplyDerivationsReplacing(derivs, docData, time.Now(), proved)
+				derived, replaced, err := c.applyDocumentDerivations(scope, authContext, derivs, docData, proved)
 				if err != nil {
 					return nil, err
 				}
-				credential.MergeDerived(docData, derived, replaced)
+				if err := credential.MergeDerived(docData, derived, replaced); err != nil {
+					return nil, err
+				}
 
 				// Reapplied last. The configuration says these claims come
 				// from the presentation, so they win - but a derivation
@@ -529,8 +533,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	if err != nil {
 		return nil, err
 	}
-	derivations, sourceClaims := c.sourceDerivations(scope, authContext, openingSource)
-	documentData, toWallet, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
+	documentData, toWallet, err := c.issueAuxiliaryData(ctx, scope, authContext, openingSource, documentData, fromWallet)
 	if err != nil {
 		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)
 		return nil, err
@@ -1371,4 +1374,14 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 	// string, and wrapping it again would leave the wallet decoding a layer
 	// the format does not have.
 	return []openid4vci.Credential{{Credential: reply.Credentials[0].Credential}}, nil
+}
+
+// applyDocumentDerivations runs the derivations of a document data source
+// over its document, with pinned claims.
+func (c *Client) applyDocumentDerivations(scope string, authContext *cache.AuthorizationContext, derivs []primitives.Derivation, docData, proved map[string]any) (map[string]any, []claimpath.Pointer, error) {
+	shapes, err := c.cfg.DerivationShapes(model.SourceScope{Source: model.DataSourceType(authContext.DataSource), Scope: scope})
+	if err != nil {
+		return nil, nil, err
+	}
+	return credential.ApplyDerivationsReplacing(derivs, docData, time.Now(), proved, shapes)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
@@ -30,7 +31,7 @@ func Example_combinedPresentation_universityAdmission() {
 			Enforcement:       openid4vp.BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 			BindingAttributes: []openid4vp.BindingAttributeConfig{
-				{Paths: []string{"family_name", "birth_date"}}, // compound: both must match
+				{Paths: []claimpath.Pointer{claimpath.Keys("family_name"), claimpath.Keys("birth_date")}}, // compound: both must match
 			},
 		},
 	}
@@ -144,7 +145,7 @@ func Example_combinedPresentation_warnMode() {
 			Enforcement:       openid4vp.BindingEnforcementWarn,
 			KeyBindingEnabled: true,
 			BindingAttributes: []openid4vp.BindingAttributeConfig{
-				{Paths: []string{"sub"}},
+				{Paths: []claimpath.Pointer{claimpath.Keys("sub")}},
 			},
 		},
 	}

@@ -1,0 +1,37 @@
+# Basic PID (Personal Identification Data) Presentation Request
+#
+# This template requests basic identification information from an EU Digital Identity Wallet
+# It maps to the OIDC "pid" scope
+
+id: "eudi_pid_basic"
+name: "EU Digital Identity - Basic PID"
+description: "Request basic personal identification data from EUDI wallet"
+version: "1.0"
+
+# OIDC scopes that trigger this presentation request
+oidc_scopes:
+  - "pid"
+  - "openid"
+
+# DCQL query - what credentials and claims to request
+dcql:
+  credentials:
+    - id: "eudi_pid"
+      format: "vc+sd-jwt"
+      meta:
+        vct_values:
+          - "urn:eu.europa.ec.eudi:pid:1"
+      claims:
+        - path: ["given_name"]
+        - path: ["family_name"]
+        - path: ["birthdate"]
+        - path: ["place_of_birth", "country"]
+
+# Map VP claims to OIDC UserInfo/IDToken claims
+claim_mappings:
+  given_name: "given_name"
+  family_name: "family_name"
+  birthdate: "birthdate"
+  "place_of_birth.country": "birth_country"
+
+enabled: true

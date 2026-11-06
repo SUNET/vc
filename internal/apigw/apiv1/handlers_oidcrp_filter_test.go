@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -43,8 +44,8 @@ func idTokenClaims() map[string]any {
 // present them every time.
 func TestFilterClaims_DropsUndeclared(t *testing.T) {
 	c := filterTestClient(t, "pid", &model.CredentialMetadata{VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{new("given_name")}},
-		{Path: []*string{new("family_name")}},
+		{Path: claimpath.Keys("given_name")},
+		{Path: claimpath.Keys("family_name")},
 	}}})
 
 	got := c.filterClaimsByCredentialType("pid", idTokenClaims())

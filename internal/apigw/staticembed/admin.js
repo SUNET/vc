@@ -1,52 +1,22 @@
 // @ts-nocheck
 import Alpine from '/static/alpinejs.esm.min.js';
+import { flattenObject, keySegments, segmentName, unflattenEntries } from './admin-helpers.js';
 
 window.adminApp = function () {
-    /** Flatten a nested object into dot-notation key-value pairs */
-    function flattenObject(obj, prefix) {
-        const entries = [];
-        for (const [k, v] of Object.entries(obj)) {
-            const key = prefix ? prefix + '.' + k : k;
-            if (v && typeof v === 'object' && !Array.isArray(v)) {
-                entries.push(...flattenObject(v, key));
-            } else {
-                entries.push({ key, value: v == null ? '' : String(v) });
-            }
-        }
-        return entries;
-    }
-
-    /** Rebuild a nested object from dot-notation key-value pairs */
-    function unflattenEntries(entries) {
-        const result = {};
-        for (const { key, value } of entries) {
-            const parts = key.split('.');
-            let cur = result;
-            for (let i = 0; i < parts.length - 1; i++) {
-                if (!(parts[i] in cur) || typeof cur[parts[i]] !== 'object') {
-                    cur[parts[i]] = {};
-                }
-                cur = cur[parts[i]];
-            }
-            cur[parts[parts.length - 1]] = value;
-        }
-        return result;
-    }
-
     /** Build a tree-view display list from flat dot-notation entries */
     function buildTreeView(entries) {
         const rows = [];
         const seenGroups = new Set();
         for (let idx = 0; idx < entries.length; idx++) {
-            const parts = entries[idx].key.split('.');
+            const parts = keySegments(entries[idx].key);
             for (let d = 0; d < parts.length - 1; d++) {
                 const groupKey = parts.slice(0, d + 1).join('.');
                 if (!seenGroups.has(groupKey)) {
                     seenGroups.add(groupKey);
-                    rows.push({ type: 'group', label: parts[d], depth: d, idx: -1, path: groupKey });
+                    rows.push({ type: 'group', label: segmentName(parts[d]), depth: d, idx: -1, path: groupKey });
                 }
             }
-            rows.push({ type: 'field', label: parts[parts.length - 1], depth: parts.length - 1, idx, path: entries[idx].key });
+            rows.push({ type: 'field', label: segmentName(parts[parts.length - 1]), depth: parts.length - 1, idx, path: entries[idx].key });
         }
         return rows;
     }
@@ -242,7 +212,7 @@ window.adminApp = function () {
         /** Rename a field's leaf segment (used for newly added child fields) */
         renameField(entries, idx, name) {
             const entry = entries[idx];
-            const parts = entry.key.split('.');
+            const parts = keySegments(entry.key);
             parts[parts.length - 1] = name.trim();
             entry.key = parts.join('.');
         },

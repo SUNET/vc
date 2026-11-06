@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -20,10 +21,10 @@ import (
 // context goes through the BSON encoding of the Mongo-backed store, as
 // issuance under HA reads them.
 func TestVerifiedMDocClaimsIssueAfterTheMongoStore(t *testing.T) {
-	const birthDate = "eu.europa.ec.eudi.pid.1.birth_date"
-	verified, err := verifiedClaims(openid4vp.FormatMsoMdoc, map[string]any{
-		birthDate: cbor.Tag{Number: mdoc.TagDate, Content: "1990-01-15"},
-	}, map[string][]string{birthDate: nil})
+	birthDate := claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date")
+	verified, err := verifiedClaims(openid4vp.PresentedShape(openid4vp.FormatMsoMdoc), map[string]any{
+		"eu.europa.ec.eudi.pid.1.birth_date": cbor.Tag{Number: mdoc.TagDate, Content: "1990-01-15"},
+	}, model.RequiredClaims{{Path: claimpath.Ref{Path: birthDate}}})
 	require.NoError(t, err)
 	storable, err := documentObject(verified)
 	require.NoError(t, err)
@@ -37,9 +38,10 @@ func TestVerifiedMDocClaimsIssueAfterTheMongoStore(t *testing.T) {
 		"nym_auth": {Format: openid4vp.FormatMsoMdoc, MDDL: &mdoc.MDDLSchema{Claims: map[string]mdoc.NamespaceClaims{
 			"eu.europa.ec.eudi.nym_auth.1": {"birth_date": {ValueType: "full-date"}},
 		}}},
+		"pid_mdoc": {Format: openid4vp.FormatMsoMdoc},
 	}}}}
 	pScope := model.PresentationScope{From: map[string]model.PresentedCredential{"pid_mdoc": {
-		Derivations: []primitives.Derivation{{Copy: &primitives.CopyArgs{Input: birthDate, Output: "birth_date"}}},
+		Derivations: []primitives.Derivation{{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: birthDate}, Output: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "birth_date")}}},
 	}}}
 	doc, err := c.buildPresentationDocument("nym_auth", pScope, &stored, time.Now())
 	require.NoError(t, err)

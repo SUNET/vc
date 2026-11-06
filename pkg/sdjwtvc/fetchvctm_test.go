@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +20,7 @@ func TestFetchVCTM(t *testing.T) {
 		VCT:  "https://example.com/cred/v1",
 		Name: "Test Credential",
 		Claims: []Claim{
-			{Path: []*string{&name}, SD: "always"},
+			{Path: claimpath.Keys(name), SD: "always"},
 		},
 	}
 
@@ -27,7 +29,7 @@ func TestFetchVCTM(t *testing.T) {
 		VCT:  "https://example.com/cred/v1",
 		Name: "Credential A",
 		Claims: []Claim{
-			{Path: []*string{&name}, SD: "always"},
+			{Path: claimpath.Keys(name), SD: "always"},
 		},
 	}
 	rawA, err := json.Marshal(vctmA)
@@ -39,8 +41,8 @@ func TestFetchVCTM(t *testing.T) {
 		VCT:  "https://example.com/cred/v1",
 		Name: "Credential B",
 		Claims: []Claim{
-			{Path: []*string{&name}, SD: "always"},
-			{Path: []*string{&email}, SD: "always"},
+			{Path: claimpath.Keys(name), SD: "always"},
+			{Path: claimpath.Keys(email), SD: "always"},
 		},
 	}
 	rawB, err := json.Marshal(vctmB)

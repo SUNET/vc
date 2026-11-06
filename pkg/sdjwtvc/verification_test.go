@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 )
 
@@ -36,7 +37,7 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -75,7 +76,7 @@ func TestParseAndVerify_InvalidSignature(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -108,7 +109,7 @@ func TestParseAndVerify_ExpiredCredential(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -143,7 +144,7 @@ func TestParseAndVerify_SkipTimeValidation(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -176,7 +177,7 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -219,7 +220,7 @@ func TestParseAndVerify_KeyBindingRequired(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)
@@ -250,7 +251,7 @@ func TestParseAndVerify_InvalidNonce(t *testing.T) {
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
+		Claims: []Claim{{Path: claimpath.Keys(testClaim), SD: "always"}},
 	}
 
 	vctmRaw, integrity := marshalVCTM(t, vctm)

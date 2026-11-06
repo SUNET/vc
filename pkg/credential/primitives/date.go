@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // YYYYMMDDToISO converts SCHAC schacDateOfBirth ("YYYYMMDD") to ISO
@@ -20,30 +22,26 @@ func YYYYMMDDToISO(s string) (string, error) {
 // YYYYMMDDToISOArgs configures the yyyymmdd_to_iso primitive.
 // Impossible calendar dates surface as a hard error.
 type YYYYMMDDToISOArgs struct {
-	// Input is the source claim name (must be a non-empty YYYYMMDD string).
-	Input string `yaml:"input" validate:"required" doc_example:"birthdate"`
+	// Input is the source claim (must be a non-empty YYYYMMDD string).
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
 
-	// Output is the target claim name. Defaults to Input.
-	Output string `yaml:"output,omitempty" doc_example:"birthdate"`
+	// Output is the target claim. Defaults to Input.
+	Output claimpath.Pointer `yaml:"output,omitempty" doc_example:"[\"birthdate\"]"`
 }
 
 // Apply implements Applier.
-func (a *YYYYMMDDToISOArgs) Apply(claims map[string]any, _ time.Time) (map[string]any, error) {
-	output := a.Output
-	if output == "" {
-		output = a.Input
-	}
-	val, present := claims[a.Input]
-	if !present {
-		return nil, nil
+func (a *YYYYMMDDToISOArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
+	val, present, err := claims.Input(a.Input)
+	if err != nil || !present {
+		return nil, err
 	}
 	s, ok := val.(string)
 	if !ok || s == "" {
-		return nil, fmt.Errorf("input claim %q must be a non-empty string", a.Input)
+		return nil, fmt.Errorf("input claim %s must be a non-empty string", a.Input)
 	}
 	iso, err := YYYYMMDDToISO(s)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{output: iso}, nil
+	return []Write{{Path: inPlace(a.Input.Path, a.Output), Value: iso}}, nil
 }

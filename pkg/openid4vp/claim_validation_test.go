@@ -3,6 +3,8 @@ package openid4vp
 import (
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 func TestValidateClaims(t *testing.T) {
@@ -22,7 +24,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "age_over_pass",
 			claims: map[string]any{"birthdate": "2006-01-01"}, // 20 years old on 2026-06-08
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: false,
 		},
@@ -30,7 +32,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "age_over_fail",
 			claims: map[string]any{"birthdate": "2010-01-01"}, // 16 years old on 2026-06-08
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: true,
 		},
@@ -38,7 +40,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "age_over_exactly_18",
 			claims: map[string]any{"birthdate": "2008-06-08"}, // exactly 18 on 2026-06-08
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: false,
 		},
@@ -46,7 +48,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "age_over_birthday_tomorrow",
 			claims: map[string]any{"birthdate": "2008-06-09"}, // turns 18 tomorrow
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: true,
 		},
@@ -54,7 +56,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "missing_claim",
 			claims: map[string]any{},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: true,
 		},
@@ -62,7 +64,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "invalid_date_format",
 			claims: map[string]any{"birthdate": "not-a-date"},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: true,
 		},
@@ -76,7 +78,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "unknown_rule",
 			claims: map[string]any{"birthdate": "2000-01-01"},
 			validations: []ClaimValidation{
-				{Rule: "unknown_type", Path: []string{"birthdate"}, Value: 18},
+				{Rule: "unknown_type", Path: claimpath.Keys("birthdate"), Value: 18},
 			},
 			wantErr: true,
 		},
@@ -84,7 +86,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "float64_threshold",
 			claims: map[string]any{"birthdate": "2006-01-01"}, // 20 years old
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: float64(18)},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: float64(18)},
 			},
 			wantErr: false,
 		},
@@ -92,7 +94,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "non_integer_float_threshold_rejected",
 			claims: map[string]any{"birthdate": "2006-01-01"},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: float64(18.9)},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: float64(18.9)},
 			},
 			wantErr: true,
 		},
@@ -100,7 +102,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "int32_threshold_from_bson",
 			claims: map[string]any{"birthdate": "2006-01-01"},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: int32(18)},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: int32(18)},
 			},
 			wantErr: false,
 		},
@@ -108,7 +110,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "int16_threshold",
 			claims: map[string]any{"birthdate": "2006-01-01"},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: int16(18)},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: int16(18)},
 			},
 			wantErr: false,
 		},
@@ -116,7 +118,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "int8_threshold",
 			claims: map[string]any{"birthdate": "2006-01-01"},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: int8(18)},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: int8(18)},
 			},
 			wantErr: false,
 		},
@@ -124,7 +126,7 @@ func TestValidateClaims(t *testing.T) {
 			name:   "negative_threshold_rejected",
 			claims: map[string]any{"birthdate": "2006-01-01"},
 			validations: []ClaimValidation{
-				{Rule: "age_over", Path: []string{"birthdate"}, Value: -1},
+				{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: -1},
 			},
 			wantErr: true,
 		},
@@ -182,7 +184,7 @@ func FuzzValidateAgeOver(f *testing.F) {
 	f.Fuzz(func(t *testing.T, birthdate string, threshold int) {
 		claims := map[string]any{"birthdate": birthdate}
 		validations := []ClaimValidation{
-			{Rule: "age_over", Path: []string{"birthdate"}, Value: threshold},
+			{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: threshold},
 		}
 		err := ValidateClaims(claims, validations)
 

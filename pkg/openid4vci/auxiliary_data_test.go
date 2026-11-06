@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +17,7 @@ import (
 func TestAuxiliaryDataWireShape(t *testing.T) {
 	psc := AuxiliaryDataEntry{
 		Type: AuxiliaryDataTypeHashCommitment, Alg: "sha-256",
-		Path: []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}, Commitment: "JhQM6yeuK84BoGVVSxbLL9HjjeiBERnWHEZSIIMqwd0",
+		Path: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "psc"), Commitment: "JhQM6yeuK84BoGVVSxbLL9HjjeiBERnWHEZSIIMqwd0",
 	}
 
 	t.Run("a key proof carries auxiliary_data", func(t *testing.T) {
@@ -63,8 +65,8 @@ func TestAuxiliaryDataWireShape(t *testing.T) {
 		encoded, err := json.Marshal(CredentialConfigurationsSupported{
 			Format: "mso_mdoc", Doctype: "eu.europa.ec.eudi.nym_auth.1",
 			AuxiliaryDataSupported: &AuxiliaryDataSupported{
-				ToWallet: []AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}}},
-				ToIssuer: []AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}}},
+				ToWallet: []AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc")}},
+				ToIssuer: []AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "psc")}},
 			},
 		})
 		require.NoError(t, err)
@@ -83,7 +85,7 @@ func TestAuxiliaryDataWireShape(t *testing.T) {
 		}
 		response.AddAuxiliaryData(AuxiliaryDataEntry{
 			Type: AuxiliaryDataTypeHashCommitment, Alg: "sha-256",
-			Path: []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}, Opening: "So-cHS4_SltsfY6fChssPQ",
+			Path: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc"), Opening: "So-cHS4_SltsfY6fChssPQ",
 		})
 
 		encoded, err := json.Marshal(response)

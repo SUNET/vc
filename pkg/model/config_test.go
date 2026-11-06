@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/go-playground/validator/v10"
@@ -426,13 +427,13 @@ func TestLookupCredentialSources(t *testing.T) {
 					"pid": {
 						AuthProvider: "openid4vp",
 						AuthScopes: map[string]AuthScopeEntry{
-							"pid_source": {AuthClaims: []string{"given_name"}},
+							"pid_source": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 					"ehic": {
 						AuthProvider: "openid4vp",
 						AuthScopes: map[string]AuthScopeEntry{
-							"pid": {AuthClaims: []string{"given_name"}},
+							"pid": {AuthClaims: []claimpath.Pointer{claimpath.Keys("given_name")}},
 						},
 					},
 				}},

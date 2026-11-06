@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +22,7 @@ func TestVCTM_Attributes(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&name},
+				Path: claimpath.Keys(name),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -32,7 +35,7 @@ func TestVCTM_Attributes(t *testing.T) {
 				},
 			},
 			{
-				Path: []*string{&email},
+				Path: claimpath.Keys(email),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -51,14 +54,11 @@ func TestVCTM_Attributes(t *testing.T) {
 
 	assert.Contains(t, attrs["en"], label1)
 	assert.Contains(t, attrs["en"], label2)
-	require.Len(t, attrs["en"][label1], 1)
-	assert.Equal(t, "name", *attrs["en"][label1][0])
-	require.Len(t, attrs["en"][label2], 1)
-	assert.Equal(t, "email", *attrs["en"][label2][0])
+	assert.Equal(t, claimpath.Keys("name"), attrs["en"][label1])
+	assert.Equal(t, claimpath.Keys("email"), attrs["en"][label2])
 
 	assert.Contains(t, attrs["fr"], "Nom")
-	require.Len(t, attrs["fr"]["Nom"], 1)
-	assert.Equal(t, "name", *attrs["fr"]["Nom"][0])
+	assert.Equal(t, claimpath.Keys("name"), attrs["fr"]["Nom"])
 }
 
 func TestVCTM_Attributes_RealMetadata(t *testing.T) {
@@ -128,15 +128,10 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 			for label, expectedPath := range tc.samplePathCheck {
 				for lang := range tc.expectedLabels {
 					if paths, ok := attrs[lang][label]; ok {
-						assert.NotEmpty(t, paths, "Label '%s' should have paths", label)
 						// Check if the expected path is in the paths slice
-						found := false
-						for _, p := range paths {
-							if p != nil && *p == expectedPath {
-								found = true
-								break
-							}
-						}
+						components, err := paths.Components()
+						require.NoError(t, err)
+						found := slices.Contains(components, claimpath.Key(expectedPath))
 						assert.True(t, found, "Expected path '%s' not found for label '%s'", expectedPath, label)
 					}
 				}
@@ -169,7 +164,7 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 		Claims: []Claim{
 			{
 				// Simple attribute - should be included
-				Path: []*string{&simpleName},
+				Path: claimpath.Keys(simpleName),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -183,7 +178,7 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 			},
 			{
 				// Object attribute (nested) - should be excluded
-				Path: []*string{&addressPath1, &addressPath2},
+				Path: claimpath.Keys(addressPath1, addressPath2),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -193,7 +188,7 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 			},
 			{
 				// Simple attribute - should be included
-				Path: []*string{&simpleEmail},
+				Path: claimpath.Keys(simpleEmail),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -203,7 +198,7 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 			},
 			{
 				// Object attribute (nested) - should be excluded
-				Path: []*string{&contactPath1, &contactPath2},
+				Path: claimpath.Keys(contactPath1, contactPath2),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -217,7 +212,7 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 			},
 			{
 				// Simple attribute - should be included
-				Path: []*string{&simpleAge},
+				Path: claimpath.Keys(simpleAge),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -239,12 +234,9 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 	assert.Contains(t, attrs["en"], "Name")
 	assert.Contains(t, attrs["en"], "Email")
 	assert.Contains(t, attrs["en"], "Age")
-	require.Len(t, attrs["en"]["Name"], 1)
-	assert.Equal(t, "name", *attrs["en"]["Name"][0])
-	require.Len(t, attrs["en"]["Email"], 1)
-	assert.Equal(t, "email", *attrs["en"]["Email"][0])
-	require.Len(t, attrs["en"]["Age"], 1)
-	assert.Equal(t, "age", *attrs["en"]["Age"][0])
+	assert.Equal(t, claimpath.Keys("name"), attrs["en"]["Name"])
+	assert.Equal(t, claimpath.Keys("email"), attrs["en"]["Email"])
+	assert.Equal(t, claimpath.Keys("age"), attrs["en"]["Age"])
 
 	// Check that object attributes are excluded
 	assert.NotContains(t, attrs["en"], "Street Address")
@@ -252,8 +244,7 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 
 	// Check French language
 	assert.Contains(t, attrs["fr"], "Nom")
-	require.Len(t, attrs["fr"]["Nom"], 1)
-	assert.Equal(t, "name", *attrs["fr"]["Nom"][0])
+	assert.Equal(t, claimpath.Keys("name"), attrs["fr"]["Nom"])
 	assert.NotContains(t, attrs["fr"], "Numéro de téléphone")
 }
 
@@ -277,7 +268,7 @@ func TestVCTM_AttributesWithoutObjects_OnlyObjects(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&path1, &path2},
+				Path: claimpath.Keys(path1, path2),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -286,7 +277,7 @@ func TestVCTM_AttributesWithoutObjects_OnlyObjects(t *testing.T) {
 				},
 			},
 			{
-				Path: []*string{&path3, &path4},
+				Path: claimpath.Keys(path3, path4),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -311,7 +302,7 @@ func TestVCTM_AttributesWithoutObjects_OnlySimple(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&name},
+				Path: claimpath.Keys(name),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -320,7 +311,7 @@ func TestVCTM_AttributesWithoutObjects_OnlySimple(t *testing.T) {
 				},
 			},
 			{
-				Path: []*string{&email},
+				Path: claimpath.Keys(email),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -329,7 +320,7 @@ func TestVCTM_AttributesWithoutObjects_OnlySimple(t *testing.T) {
 				},
 			},
 			{
-				Path: []*string{&age},
+				Path: claimpath.Keys(age),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -359,7 +350,7 @@ func TestVCTM_AttributesWithoutObjects_CompareWithAttributes(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&simpleName},
+				Path: claimpath.Keys(simpleName),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -368,7 +359,7 @@ func TestVCTM_AttributesWithoutObjects_CompareWithAttributes(t *testing.T) {
 				},
 			},
 			{
-				Path: []*string{&addressPath1, &addressPath2},
+				Path: claimpath.Keys(addressPath1, addressPath2),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -377,7 +368,7 @@ func TestVCTM_AttributesWithoutObjects_CompareWithAttributes(t *testing.T) {
 				},
 			},
 			{
-				Path: []*string{&simpleEmail},
+				Path: claimpath.Keys(simpleEmail),
 				Display: []ClaimDisplay{
 					{
 						Locale: "en",
@@ -414,15 +405,15 @@ func TestVCTM_ClaimJSONPath(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
 			{
-				Path:  []*string{&name},
+				Path:  claimpath.Keys(name),
 				SVGID: "name-field",
 			},
 			{
-				Path:  []*string{&name, &given},
+				Path:  claimpath.Keys(name, given),
 				SVGID: "given-name",
 			},
 			{
-				Path: []*string{&family},
+				Path: claimpath.Keys(family),
 			},
 		},
 	}
@@ -457,7 +448,7 @@ func TestClaim_JSONPath(t *testing.T) {
 	t.Run("simple_path", func(t *testing.T) {
 		name := "name"
 		claim := &Claim{
-			Path: []*string{&name},
+			Path: claimpath.Keys(name),
 		}
 
 		path := claim.JSONPath()
@@ -468,7 +459,7 @@ func TestClaim_JSONPath(t *testing.T) {
 		address := "address"
 		street := "street"
 		claim := &Claim{
-			Path: []*string{&address, &street},
+			Path: claimpath.Keys(address, street),
 		}
 
 		path := claim.JSONPath()
@@ -481,22 +472,13 @@ func TestClaim_JSONPath(t *testing.T) {
 		assert.Equal(t, "", path)
 	})
 
-	t.Run("nil_path", func(t *testing.T) {
+	t.Run("unset_path", func(t *testing.T) {
 		claim := &Claim{
-			Path: nil,
+			Path: claimpath.Pointer{},
 		}
 
 		path := claim.JSONPath()
 		assert.Equal(t, "", path)
-	})
-
-	t.Run("empty_path", func(t *testing.T) {
-		claim := &Claim{
-			Path: []*string{},
-		}
-
-		path := claim.JSONPath()
-		assert.Equal(t, "$", path)
 	})
 
 	t.Run("deep_nesting", func(t *testing.T) {
@@ -505,7 +487,7 @@ func TestClaim_JSONPath(t *testing.T) {
 		c := "c"
 		d := "d"
 		claim := &Claim{
-			Path: []*string{&a, &b, &c, &d},
+			Path: claimpath.Keys(a, b, c, d),
 		}
 
 		path := claim.JSONPath()
@@ -515,7 +497,7 @@ func TestClaim_JSONPath(t *testing.T) {
 	t.Run("wildcard_array_element", func(t *testing.T) {
 		nationalities := "nationalities"
 		claim := &Claim{
-			Path: []*string{&nationalities, nil},
+			Path: claimpath.New(claimpath.Key(nationalities), claimpath.All()),
 		}
 
 		path := claim.JSONPath()
@@ -524,7 +506,7 @@ func TestClaim_JSONPath(t *testing.T) {
 
 	t.Run("wildcard_only", func(t *testing.T) {
 		claim := &Claim{
-			Path: []*string{nil},
+			Path: claimpath.New(claimpath.All()),
 		}
 
 		path := claim.JSONPath()
@@ -535,7 +517,7 @@ func TestClaim_JSONPath(t *testing.T) {
 		addresses := "addresses"
 		street := "street"
 		claim := &Claim{
-			Path: []*string{&addresses, nil, &street},
+			Path: claimpath.New(claimpath.Key(addresses), claimpath.All(), claimpath.Key(street)),
 		}
 
 		path := claim.JSONPath()
@@ -545,7 +527,7 @@ func TestClaim_JSONPath(t *testing.T) {
 	t.Run("multiple_wildcards", func(t *testing.T) {
 		matrix := "matrix"
 		claim := &Claim{
-			Path: []*string{&matrix, nil, nil},
+			Path: claimpath.New(claimpath.Key(matrix), claimpath.All(), claimpath.All()),
 		}
 
 		path := claim.JSONPath()

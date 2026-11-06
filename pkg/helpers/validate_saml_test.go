@@ -3,6 +3,7 @@ package helpers
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 				PrivateKeyPath:   "/pki/saml.key",
 				ACSEndpoint:      "https://sp.example.com/acs",
 				SessionDuration:  300,
-				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
+				AttributeMapping: model.AttributeMapping{"test": {Claim: claimpath.Keys("test")}},
 			},
 			expectError: false,
 		},
@@ -51,7 +52,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 				PrivateKeyPath:   "/pki/saml.key",
 				ACSEndpoint:      "https://sp.example.com/acs",
 				SessionDuration:  300,
-				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
+				AttributeMapping: model.AttributeMapping{"test": {Claim: claimpath.Keys("test")}},
 			},
 			expectError: false,
 		},
@@ -68,7 +69,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 				PrivateKeyPath:   "/pki/saml.key",
 				ACSEndpoint:      "https://sp.example.com/acs",
 				SessionDuration:  300,
-				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
+				AttributeMapping: model.AttributeMapping{"test": {Claim: claimpath.Keys("test")}},
 			},
 			expectError: false,
 		},

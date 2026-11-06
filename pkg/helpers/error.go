@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/kaptinlin/jsonschema"
 	"github.com/moogar0880/problems"
@@ -131,6 +133,11 @@ func NewErrorFromError(v any) *Error {
 
 	if pbErr, ok := err.(*Error); ok {
 		return pbErr
+	}
+
+	// Before the JSON errors, so a pointer of any JSON type gets this title.
+	if errors.Is(err, claimpath.ErrMalformed) {
+		return &Error{Title: "invalid_claims_path", Err: err.Error(), HTTPStatus: http.StatusBadRequest}
 	}
 
 	// errors.As, not a direct type assertion. A handler that adds context

@@ -82,16 +82,8 @@ func presetQuery(cfg *model.Cfg, scope string, scopeCfg *model.VerificationPrese
 	// else keeps them, because for those formats the claims ARE the query.
 	if !openid4vp.IsZkpReqFormat(query.Format) {
 		for _, claim := range scopeCfg.Claims {
-			query.Claims = append(query.Claims, openid4vp.ClaimQuery{Path: stringPathToPtrPath(claim.Path)})
+			query.Claims = append(query.Claims, openid4vp.ClaimQuery{Path: claim.Path})
 		}
 	}
 	return query
-}
-
-func stringPathToPtrPath(path []string) []*string {
-	out := make([]*string, len(path))
-	for i := range path {
-		out[i] = &path[i]
-	}
-	return out
 }

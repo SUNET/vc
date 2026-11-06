@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,9 +62,9 @@ func TestDCQLQueryExample(t *testing.T) {
 					TypeValues: [][]string{{"VerifiableCredential", "PersonalID"}},
 				},
 				Claims: []ClaimQuery{
-					{Path: StringPath("given_name")},
-					{Path: StringPath("family_name")},
-					{Path: StringPath("birth_date")},
+					{Path: claimpath.Keys("given_name")},
+					{Path: claimpath.Keys("family_name")},
+					{Path: claimpath.Keys("birth_date")},
 				},
 			},
 		},

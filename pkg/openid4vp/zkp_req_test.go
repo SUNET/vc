@@ -13,6 +13,8 @@ import (
 
 	yamlv2 "gopkg.in/yaml.v2"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1377,7 +1379,7 @@ func TestCopyDCQLIsolatesItsOwnFields(t *testing.T) {
 		payload := json.RawMessage(`{"x":1,"x":2}`)
 		src := &DCQL{Credentials: []CredentialQuery{{
 			ID: "q", Format: "dc+sd-jwt", Meta: MetaQuery{VCTValues: []string{"urn:x"}},
-			Claims: []ClaimQuery{{Path: StringPath("a"), Values: []any{payload}}},
+			Claims: []ClaimQuery{{Path: claimpath.Keys("a"), Values: []any{payload}}},
 		}}}
 
 		dst := copyDCQL(src)

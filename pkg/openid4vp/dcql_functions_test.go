@@ -3,6 +3,8 @@ package openid4vp
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -515,7 +517,7 @@ func TestDCQLValidationError(t *testing.T) {
 func TestNewVC20CredentialQuery(t *testing.T) {
 	id := "my_credential"
 	typeValues := [][]string{{"VerifiableCredential", "PersonalID"}}
-	claims := []ClaimQuery{{Path: StringPath("given_name")}}
+	claims := []ClaimQuery{{Path: claimpath.Keys("given_name")}}
 
 	query := NewVC20CredentialQuery(id, typeValues, claims)
 

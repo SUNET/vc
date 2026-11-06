@@ -11,7 +11,6 @@ import (
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/credential"
-	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/issuance"
@@ -245,15 +244,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// IdP identity simply does not carry a source-only input (e.g. a
 	// birthdate that only the external API returns).
 	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
-		if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-			cc.openingClaims = primitives.OpeningInputs(derivs, cc.identity)
-			derived, replaced, derr := credential.ApplyDerivationsReplacing(derivs, cc.identity, time.Now(), nil)
-			if derr != nil {
-				span.SetStatus(codes.Error, derr.Error())
-				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
-			}
-			credential.MergeDerived(cc.identity, derived, replaced)
+		src := model.SourceScope{Source: credSourceForDerivs.DataSource, Scope: session.CredentialType}
+		openingClaims, derr := credential.ApplyScopeDerivations(c.cfg, src, cc.identity, time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, derr.Error())
+			return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
 		}
+		cc.openingClaims = openingClaims
 	}
 
 	// The authenticated claim set. It is deliberately NOT filtered against the
@@ -667,7 +664,7 @@ func (cc *callbackClaims) documentData() map[string]any {
 
 // cloneClaims copies the map and slice spine of a claim set, so that a caller
 // mutating the copy cannot reach the original. A shallow copy is not enough:
-// assertion defaults are dot-notation paths, and MergeDefaults walks into
+// an assertion default can name a nested claim, and MergeDefaults walks into
 // nested maps to set one, which would otherwise write straight into a nested
 // map the identity claims still share.
 //
@@ -710,11 +707,11 @@ func (c *Client) buildOIDCDocument(cc *callbackClaims, authenticSource string, m
 	documentData := cc.documentData()
 
 	if mergeAssertionDefaults {
-		defaults, err := c.cfg.APIGW.DataSources.Assertion.Scopes[cc.credentialType].ResolveDefaults(time.Now())
+		document, err := c.cfg.DocumentShape(cc.credentialType)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", err)
+			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
 		}
-		if err := credential.MergeDefaults(documentData, defaults); err != nil {
+		if err := c.cfg.APIGW.DataSources.Assertion.Scopes[cc.credentialType].MergeDefaults(documentData, time.Now(), document); err != nil {
 			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
 		}
 	}

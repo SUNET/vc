@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -29,9 +30,9 @@ func TestMatchPresentedIdentity_DoesNotLogTheValues(t *testing.T) {
 	c := &Client{log: log}
 
 	match := &openid4vci.IdentityMatch{
-		Claims: map[string]openid4vci.ClaimTest{
-			"given_name":          {Equals: "Anna"},
-			"personal_identifier": {Equals: "198001011234"},
+		Claims: []openid4vci.ClaimMatch{
+			{Path: claimpath.Keys("given_name"), ClaimTest: openid4vci.ClaimTest{Equals: "Anna"}},
+			{Path: claimpath.Keys("personal_identifier"), ClaimTest: openid4vci.ClaimTest{Equals: "198001011234"}},
 		},
 	}
 	presented := map[string]any{
@@ -39,7 +40,7 @@ func TestMatchPresentedIdentity_DoesNotLogTheValues(t *testing.T) {
 		"personal_identifier": "199912319876",
 	}
 
-	err = c.matchPresentedIdentity("dc+sd-jwt", presented, match)
+	err = c.matchPresentedIdentity("dc+sd-jwt", presented, match.Store(nil))
 	require.Error(t, err, "the presented identity is a different person")
 
 	written, readErr := os.ReadFile(filepath.Join(dir, "identitymatchtest.log"))

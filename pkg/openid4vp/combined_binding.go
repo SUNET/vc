@@ -10,7 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // BindingMethod represents a method used to verify combined presentation binding.
@@ -116,8 +117,23 @@ type CombinedPresentationConfig struct {
 
 // BindingAttributeConfig defines a set of attribute paths to compare across credentials.
 type BindingAttributeConfig struct {
-	// Paths lists claim paths that must ALL match across credentials (AND semantics).
-	Paths []string `yaml:"paths" json:"paths" validate:"required,min=1,dive,required" doc_example:"[\"family_name\", \"birth_date\", \"place_of_birth.locality\"]"`
+	// Paths lists the claims path pointers of the claims that must ALL match
+	// across credentials (AND semantics). Each selects one claim of the
+	// verified claims of every credential, read as a JSON object.
+	Paths []claimpath.Pointer `yaml:"paths" json:"paths" validate:"required,min=1,dive,required" doc_example:"[[\"family_name\"], [\"birth_date\"], [\"place_of_birth\", \"locality\"]]"`
+}
+
+// CheckPaths refuses a binding attribute path that selects every element
+// of an array: a binding attribute compares one claim.
+func (c *CombinedPresentationConfig) CheckPaths() error {
+	for i, attribute := range c.BindingAttributes {
+		for j, path := range attribute.Paths {
+			if _, err := claimpath.Nested().LocateOne(path); err != nil {
+				return fmt.Errorf("binding_attributes[%d].paths[%d]: %w", i, j, err)
+			}
+		}
+	}
+	return nil
 }
 
 // CombinedBindingVerifier verifies that multiple credentials in a combined
@@ -230,7 +246,14 @@ func (v *CombinedBindingVerifier) verifyAttributeBinding(credentials []VerifiedC
 			totalPaths++
 			values := make([]any, 0, len(credentials))
 			for _, cred := range credentials {
-				val := resolveSimplePath(cred.Claims, path)
+				val, err := bindingClaim(cred.Claims, path)
+				if err != nil {
+					return BindingResult{
+						Method:     BindingMethodAttribute,
+						Confidence: BindingConfidenceNone,
+						Error:      fmt.Sprintf("attribute binding failed: %v", err),
+					}
+				}
 				if val == nil {
 					// Every credential must contain the attribute for it to be comparable
 					allMatch = false
@@ -282,22 +305,15 @@ func (v *CombinedBindingVerifier) verifyAttributeBinding(credentials []VerifiedC
 	}
 }
 
-// resolveSimplePath resolves a dot-separated path against a claims map.
-// For example "address.country" resolves claims["address"]["country"].
-func resolveSimplePath(claims map[string]any, path string) any {
-	parts := strings.Split(path, ".")
-	var current any = claims
-	for _, part := range parts {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current, ok = m[part]
-		if !ok {
-			return nil
-		}
+// bindingClaim returns the claim path selects in claims, or nil when the
+// claims hold none there. A claim beneath a value that is no object or
+// array is absent.
+func bindingClaim(claims map[string]any, path claimpath.Pointer) (any, error) {
+	value, _, err := claimpath.Nested().Get(claims, path)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		return nil, nil
 	}
-	return current
+	return value, err
 }
 
 // ExtractHolderKeyThumbprint extracts the RFC 7638 SHA-256 thumbprint from

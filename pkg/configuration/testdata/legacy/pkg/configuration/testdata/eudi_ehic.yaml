@@ -1,0 +1,41 @@
+# EHIC (European Health Insurance Card) Presentation Request
+#
+# This template requests health insurance information
+# It maps to the OIDC "ehic" scope
+
+id: "eudi_ehic"
+name: "EU Digital Identity - EHIC"
+description: "Request European Health Insurance Card data"
+version: "1.0"
+
+oidc_scopes:
+  - "ehic"
+
+dcql:
+  credentials:
+    - id: "ehic_credential"
+      format: "vc+sd-jwt"
+      meta:
+        vct_values:
+          - "urn:eu.europa.ec.eudi:ehic:1"
+      claims:
+        - path: ["given_name"]
+        - path: ["family_name"]
+        - path: ["birthdate"]
+        - path: ["personal_identification_number"]
+        - path: ["institution_id"]
+        - path: ["institution_name"]
+        - path: ["card_number"]
+        - path: ["expiry_date"]
+
+claim_mappings:
+  given_name: "given_name"
+  family_name: "family_name"
+  birthdate: "birthdate"
+  personal_identification_number: "health_id"
+  institution_id: "insurer_id"
+  institution_name: "insurer_name"
+  card_number: "ehic_number"
+  expiry_date: "ehic_expiry"
+
+enabled: true

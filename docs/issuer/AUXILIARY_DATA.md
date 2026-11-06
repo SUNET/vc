@@ -59,31 +59,31 @@ apigw:
           from:
             pid:
               required_claims:
-                birthdate: []
-                issuing_country: []
-                personal_administrative_number: []
+                - path: [birthdate]
+                - path: [issuing_country]
+                - path: [personal_administrative_number]
               derivations:
-                - copy: {input: birthdate, output: birth_date}
+                - copy: {input: [birthdate], output: [eu.europa.ec.eudi.nym_auth.1, birth_date]}
                 - hash_commitment:
                     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
                     opening:
                       hkdf:
                         secret_path: /pki/nym_auth_seed.key
-                        inputs: [issuing_country, personal_administrative_number]
+                        inputs: [[issuing_country], [personal_administrative_number]]
                         bytes: 16
             pid_mdoc:
               required_claims:
-                eu.europa.ec.eudi.pid.1.birth_date: []
-                eu.europa.ec.eudi.pid.1.issuing_country: []
-                eu.europa.ec.eudi.pid.1.administrative_number: []
+                - path: [eu.europa.ec.eudi.pid.1, administrative_number]
+                - path: [eu.europa.ec.eudi.pid.1, birth_date]
+                - path: [eu.europa.ec.eudi.pid.1, issuing_country]
               derivations:
-                - copy: {input: eu.europa.ec.eudi.pid.1.birth_date, output: birth_date}
+                - copy: {input: [eu.europa.ec.eudi.pid.1, birth_date], output: [eu.europa.ec.eudi.nym_auth.1, birth_date]}
                 - hash_commitment:
                     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
                     opening:
                       hkdf:
                         secret_path: /pki/nym_auth_seed.key
-                        inputs: [eu.europa.ec.eudi.pid.1.issuing_country, eu.europa.ec.eudi.pid.1.administrative_number]
+                        inputs: [[eu.europa.ec.eudi.pid.1, issuing_country], [eu.europa.ec.eudi.pid.1, administrative_number]]
                         bytes: 16
 ```
 
@@ -91,7 +91,9 @@ A `hash_commitment` derivation reads the claims of the source data: the
 verified presented claims for a presentation scope, and for the others the
 claims the source supplied before any derivation or document filter ran. A
 presentation verifies its `required_claims` alone, so each claim an opening
-reads is a key of `required_claims`.
+reads is the path of a `required_claims` entry. Each claim is a claims path
+pointer (OpenID4VP 1.0 section 7): `[eu.europa.ec.eudi.pid.1,
+issuing_country]` names an mdoc element by namespace and element identifier.
 
 The issuer requires `credential_response_encryption` on a request for a
 credential with `to_wallet` entries, and
@@ -159,7 +161,7 @@ secret for each subject, so the issuer holds no secret of its own:
 - hash_commitment:
     path: [eu.europa.ec.eudi.nym_auth.1, ssc]
     opening:
-      claim: {input: nym_auth_opening}
+      claim: {input: [nym_auth_opening]}
 ```
 
 The extension requires at least 128 bits of entropy in an opening (section

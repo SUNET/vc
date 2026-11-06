@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -132,16 +132,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 	if auth := session.Get(adminSessionKey); auth == true {
 		subject, _ := session.Get("admin_subject").(string)
 
-		var allScopes []string
-		scopeTemplates := map[string]any{}
-		if s.cfg.Common != nil {
-			for scope, cm := range s.cfg.Common.CredentialMetadata {
-				allScopes = append(allScopes, scope)
-				if cm != nil && cm.VCTM != nil {
-					scopeTemplates[scope] = buildClaimTemplate(cm.VCTM.Claims)
-				}
-			}
-		}
+		allScopes, scopeTemplates := s.scopeClaimTemplates()
 
 		// Resolve allowed resources from SPOCP rules.
 		allowedSources := httphelpers.AllowedAuthenticSources(s.spocpEngine, subject)
@@ -229,38 +220,31 @@ func hasIdentityMappingScope(pairs []httphelpers.ResourcePair) bool {
 	return false
 }
 
-// buildClaimTemplate creates a nested map from VCTM claims with empty string values
-func buildClaimTemplate(claims []sdjwtvc.Claim) map[string]any {
-	result := map[string]any{}
-	for _, claim := range claims {
-		if len(claim.Path) == 0 {
+// scopeClaimTemplates returns every credential scope, and the claim
+// template of each scope with a VCTM. It logs a scope whose template
+// cannot be built, and returns no template for it.
+func (s *Service) scopeClaimTemplates() ([]string, map[string]any) {
+	var scopes []string
+	templates := map[string]any{}
+	if s.cfg.Common == nil {
+		return scopes, templates
+	}
+	for scope, cm := range s.cfg.Common.CredentialMetadata {
+		scopes = append(scopes, scope)
+		if cm == nil || cm.VCTM == nil {
 			continue
 		}
-		current := result
-		for i, p := range claim.Path {
-			if p == nil {
-				continue
-			}
-			if i == len(claim.Path)-1 {
-				// Leaf — only set placeholder if not already a nested map
-				if _, ok := current[*p].(map[string]any); !ok {
-					current[*p] = ""
-				}
-			} else {
-				// Intermediate — ensure nested map exists
-				if existing, ok := current[*p]; !ok {
-					current[*p] = map[string]any{}
-				} else if _, ok := existing.(map[string]any); !ok {
-					// Overwrite leaf placeholder with nested map
-					current[*p] = map[string]any{}
-				}
-				if nested, ok := current[*p].(map[string]any); ok {
-					current = nested
-				}
-			}
+		template, err := credential.ClaimTemplate(cm.VCTM.Claims)
+		if err != nil {
+			s.log.Error(err, "the admin claim template of a scope cannot be built", "scope", scope)
+			continue
 		}
+		for _, claim := range template.ObjectAndArray {
+			s.log.Warn("the VCTM declares a claim as an object and as an array; the admin claim template shows it as an object", "scope", scope, "claim", claim.String())
+		}
+		templates[scope] = template.Document
 	}
-	return result
+	return scopes, templates
 }
 
 func (s *Service) endpointAdminLogout(ctx context.Context, c *gin.Context) (any, error) {

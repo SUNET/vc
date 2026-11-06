@@ -6,6 +6,8 @@ import (
 	"crypto/sha512"
 	"hash"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // TestHashAlgorithmComparison tests all hash comparison functions thoroughly
@@ -178,11 +180,11 @@ func TestMakeCredential_AllBranches(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&level1, &level2_a, &claim_a},
+					Path: claimpath.Keys(level1, level2_a, claim_a),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&level1, &level2_b, &claim_b},
+					Path: claimpath.Keys(level1, level2_b, claim_b),
 					SD:   "always",
 				},
 			},
@@ -220,7 +222,7 @@ func TestMakeCredential_AllBranches(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 			},
@@ -282,77 +284,4 @@ func TestAddDecoyDigestsRecursive_ComplexNesting(t *testing.T) {
 	if len(nested3["_sd"].([]any)) != 3 {
 		t.Errorf("Expected 3 digests at nested3 level, got %d", len(nested3["_sd"].([]any)))
 	}
-}
-
-// TestProcessClaimPath_AllPaths tests all branches in processClaimPath
-func TestProcessClaimPath_AllPaths(t *testing.T) {
-	client := &Client{}
-
-	t.Run("claim_exists_at_nested_level", func(t *testing.T) {
-		data := map[string]any{
-			"person": map[string]any{
-				"name": "John",
-				"age":  30,
-			},
-		}
-
-		person := "person"
-		name := "name"
-		path := []*string{&person, &name}
-
-		disclosure, hash, err := client.processClaimPath(data, path, sha256.New())
-		if err != nil {
-			t.Fatalf("processClaimPath failed: %v", err)
-		}
-
-		if disclosure == "" {
-			t.Error("Expected non-empty disclosure")
-		}
-		if hash == "" {
-			t.Error("Expected non-empty hash")
-		}
-
-		// Verify claim was removed
-		personObj := data["person"].(map[string]any)
-		if _, exists := personObj["name"]; exists {
-			t.Error("Expected name to be removed")
-		}
-
-		// Age should still be there
-		if _, exists := personObj["age"]; !exists {
-			t.Error("Expected age to remain")
-		}
-	})
-
-	t.Run("claim_with_nested_object_value", func(t *testing.T) {
-		data := map[string]any{
-			"address": map[string]any{
-				"street": "123 Main St",
-				"city":   "Springfield",
-				"postal": map[string]any{
-					"code": "12345",
-				},
-			},
-		}
-
-		address := "address"
-		path := []*string{&address}
-
-		disclosure, hash, err := client.processClaimPath(data, path, sha256.New())
-		if err != nil {
-			t.Fatalf("processClaimPath failed: %v", err)
-		}
-
-		if disclosure == "" {
-			t.Error("Expected non-empty disclosure")
-		}
-		if hash == "" {
-			t.Error("Expected non-empty hash")
-		}
-
-		// Entire address should be removed
-		if _, exists := data["address"]; exists {
-			t.Error("Expected address to be removed")
-		}
-	})
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 )
 
@@ -27,7 +28,7 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 		VCT: "https://example.com/credential/test",
 		Claims: []Claim{
 			{
-				Path: []*string{&mockName},
+				Path: claimpath.Keys(mockName),
 				SD:   "always",
 			},
 		},
@@ -172,7 +173,7 @@ func TestMakeCredential_EdgeCases(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&mockName},
+					Path: claimpath.Keys(mockName),
 					SD:   "always",
 				},
 			},
@@ -196,7 +197,7 @@ func TestMakeCredential_EdgeCases(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&sdName},
+					Path: claimpath.Keys(sdName),
 					SD:   "always",
 				},
 			},
@@ -217,7 +218,7 @@ func TestMakeCredential_EdgeCases(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&ellipsis},
+					Path: claimpath.Keys(ellipsis),
 					SD:   "always",
 				},
 			},
@@ -566,64 +567,4 @@ func TestGenerateSalt_Randomness(t *testing.T) {
 	if len(salts) != 50 {
 		t.Errorf("Expected 50 unique salts, got %d", len(salts))
 	}
-}
-
-// TestProcessClaimPath_ComplexScenarios tests complex claim paths
-func TestProcessClaimPath_ComplexScenarios(t *testing.T) {
-	client := &Client{}
-
-	t.Run("non_existent_claim_path", func(t *testing.T) {
-		data := map[string]any{
-			"name": "John",
-		}
-
-		nonExistent := "address"
-		path := []*string{&nonExistent}
-
-		disclosure, hash, err := client.processClaimPath(data, path, sha256.New())
-		if err != nil {
-			t.Fatalf("processClaimPath failed: %v", err)
-		}
-
-		// Should return empty strings for non-existent path
-		if disclosure != "" {
-			t.Error("Expected empty disclosure for non-existent claim")
-		}
-		if hash != "" {
-			t.Error("Expected empty hash for non-existent claim")
-		}
-	})
-
-	t.Run("nested_claim_with_nested_object_value", func(t *testing.T) {
-		data := map[string]any{
-			"person": map[string]any{
-				"address": map[string]any{
-					"street": "123 Main St",
-					"city":   "Springfield",
-				},
-			},
-		}
-
-		person := "person"
-		address := "address"
-		path := []*string{&person, &address}
-
-		disclosure, hash, err := client.processClaimPath(data, path, sha256.New())
-		if err != nil {
-			t.Fatalf("processClaimPath failed: %v", err)
-		}
-
-		if disclosure == "" {
-			t.Error("Expected non-empty disclosure")
-		}
-		if hash == "" {
-			t.Error("Expected non-empty hash")
-		}
-
-		// Verify the claim was removed
-		personObj := data["person"].(map[string]any)
-		if _, exists := personObj["address"]; exists {
-			t.Error("Expected address to be removed after processing")
-		}
-	})
 }

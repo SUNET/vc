@@ -7,6 +7,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/data_sources/externalapi"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -24,8 +25,9 @@ type Service struct {
 
 // New creates a new data sources service, starting all enabled sources. Each
 // remote becomes its own source and receives the external_api scopes that
-// reference it, so per-scope attribute mappings are applied.
-func New(ctx context.Context, remotes map[string]model.Remote, externalAPI model.ExternalAPIConfig, docCache pkgcache.Cache[map[string]*model.CompleteDocument], log *logger.Log) (*Service, error) {
+// reference it, so per-scope attribute mappings are applied. documentShape
+// returns the shape of a scope's document, which a mapping writes.
+func New(ctx context.Context, remotes map[string]model.Remote, externalAPI model.ExternalAPIConfig, documentShape func(scope string) (claimpath.Shape, error), docCache pkgcache.Cache[map[string]*model.CompleteDocument], log *logger.Log) (*Service, error) {
 	s := &Service{sources: make(map[string]source, len(remotes))}
 
 	for remoteName, remote := range remotes {
@@ -34,14 +36,14 @@ func New(ctx context.Context, remotes map[string]model.Remote, externalAPI model
 
 		switch remote.Type {
 		case model.RemoteTypeEduAPI:
-			svc, err := externalapi.NewEduAPI(ctx, remote, scopes, docCache, tokenCache, log)
+			svc, err := externalapi.NewEduAPI(ctx, remote, scopes, documentShape, docCache, tokenCache, log)
 			if err != nil {
 				return nil, err
 			}
 			s.sources[remoteName] = svc
 			log.Info("Edu-API data source initialized", "remote", remoteName, "base_url", remote.BaseURL)
 		case model.RemoteTypeOEAPI:
-			svc, err := externalapi.NewOEAPI(ctx, remote, scopes, docCache, tokenCache, log)
+			svc, err := externalapi.NewOEAPI(ctx, remote, scopes, documentShape, docCache, tokenCache, log)
 			if err != nil {
 				return nil, err
 			}

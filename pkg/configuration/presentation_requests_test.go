@@ -11,52 +11,52 @@ import (
 )
 
 func TestLoadTemplateFile_SingleTemplate(t *testing.T) {
-	templates, err := loadTemplateFile("testdata/eudi_pid_basic.yaml")
+	file, err := loadTemplateFile("testdata/eudi_pid_basic.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(templates) != 1 {
-		t.Fatalf("expected 1 template, got %d", len(templates))
+	if len(file.templates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(file.templates))
 	}
-	if templates[0].ID != "eudi_pid_basic" {
-		t.Errorf("expected ID 'eudi_pid_basic', got %q", templates[0].ID)
+	if file.templates[0].ID != "eudi_pid_basic" {
+		t.Errorf("expected ID 'eudi_pid_basic', got %q", file.templates[0].ID)
 	}
-	if !templates[0].IsEnabled() {
+	if !file.templates[0].IsEnabled() {
 		t.Error("expected template to be enabled")
 	}
 }
 
 func TestLoadTemplateFile_SingleTemplateDefaultEnabled(t *testing.T) {
-	templates, err := loadTemplateFile("testdata/single_template_no_enabled.yaml")
+	file, err := loadTemplateFile("testdata/single_template_no_enabled.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(templates) != 1 {
-		t.Fatalf("expected 1 template, got %d", len(templates))
+	if len(file.templates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(file.templates))
 	}
-	if templates[0].ID != "auto_enabled" {
-		t.Errorf("expected ID 'auto_enabled', got %q", templates[0].ID)
+	if file.templates[0].ID != "auto_enabled" {
+		t.Errorf("expected ID 'auto_enabled', got %q", file.templates[0].ID)
 	}
-	if !templates[0].IsEnabled() {
+	if !file.templates[0].IsEnabled() {
 		t.Error("expected template to be enabled by default")
 	}
 }
 
 func TestLoadTemplateFile_MultiTemplate(t *testing.T) {
-	templates, err := loadTemplateFile("testdata/multi_template.yaml")
+	file, err := loadTemplateFile("testdata/multi_template.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(templates) != 2 {
-		t.Fatalf("expected 2 templates, got %d", len(templates))
+	if len(file.templates) != 2 {
+		t.Fatalf("expected 2 templates, got %d", len(file.templates))
 	}
-	if templates[0].ID != "basic_pid" {
-		t.Errorf("expected first template ID 'basic_pid', got %q", templates[0].ID)
+	if file.templates[0].ID != "basic_pid" {
+		t.Errorf("expected first template ID 'basic_pid', got %q", file.templates[0].ID)
 	}
-	if templates[1].ID != "basic_ehic" {
-		t.Errorf("expected second template ID 'basic_ehic', got %q", templates[1].ID)
+	if file.templates[1].ID != "basic_ehic" {
+		t.Errorf("expected second template ID 'basic_ehic', got %q", file.templates[1].ID)
 	}
-	for i, tmpl := range templates {
+	for i, tmpl := range file.templates {
 		if !tmpl.IsEnabled() {
 			t.Errorf("expected template %d to be enabled", i)
 		}
@@ -64,14 +64,14 @@ func TestLoadTemplateFile_MultiTemplate(t *testing.T) {
 }
 
 func TestLoadTemplateFile_MultiTemplateDefaultEnabled(t *testing.T) {
-	templates, err := loadTemplateFile("testdata/multi_template_no_enabled.yaml")
+	file, err := loadTemplateFile("testdata/multi_template_no_enabled.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(templates) != 2 {
-		t.Fatalf("expected 2 templates, got %d", len(templates))
+	if len(file.templates) != 2 {
+		t.Fatalf("expected 2 templates, got %d", len(file.templates))
 	}
-	for i, tmpl := range templates {
+	for i, tmpl := range file.templates {
 		if !tmpl.IsEnabled() {
 			t.Errorf("expected template %d to be enabled by default", i)
 		}
@@ -81,18 +81,18 @@ func TestLoadTemplateFile_MultiTemplateDefaultEnabled(t *testing.T) {
 func TestLoadTemplateFile_MultiTemplateFirstMissingID(t *testing.T) {
 	// First template has no ID, second has a valid ID.
 	// The function should still return templates because at least one has an ID.
-	templates, err := loadTemplateFile("testdata/multi_template_first_missing_id.yaml")
+	file, err := loadTemplateFile("testdata/multi_template_first_missing_id.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(templates) != 2 {
-		t.Fatalf("expected 2 templates, got %d", len(templates))
+	if len(file.templates) != 2 {
+		t.Fatalf("expected 2 templates, got %d", len(file.templates))
 	}
-	if templates[0].ID != "" {
-		t.Errorf("expected first template ID to be empty, got %q", templates[0].ID)
+	if file.templates[0].ID != "" {
+		t.Errorf("expected first template ID to be empty, got %q", file.templates[0].ID)
 	}
-	if templates[1].ID != "valid_second" {
-		t.Errorf("expected second template ID 'valid_second', got %q", templates[1].ID)
+	if file.templates[1].ID != "valid_second" {
+		t.Errorf("expected second template ID 'valid_second', got %q", file.templates[1].ID)
 	}
 }
 
@@ -135,9 +135,9 @@ func newTestTemplate() *PresentationRequestTemplate {
 		Name:       "Test",
 		OIDCScopes: []string{"scope1", "scope2"},
 		DCQLQuery:  &openid4vp.DCQL{},
-		ClaimMappings: map[string]string{
+		ClaimMappings: openid4vp.NameMappings(map[string]string{
 			"a": "b",
-		},
+		}),
 		Enabled: boolPtr(true),
 	}
 }
@@ -166,9 +166,13 @@ func TestGetDCQLQuery(t *testing.T) {
 
 func TestGetClaimMappings(t *testing.T) {
 	tmpl := newTestTemplate()
-	m := tmpl.GetClaimMappings()
-	if m["a"] != "b" {
-		t.Errorf("GetClaimMappings() = %v, want map[a:b]", m)
+	m, err := tmpl.GetClaimMappings()
+	if err != nil {
+		t.Fatalf("GetClaimMappings() error = %v", err)
+	}
+	got, err := m.MapClaims([]openid4vp.Presentation{{Claims: map[string]any{"a": "x"}}})
+	if err != nil || got["b"] != "x" {
+		t.Errorf("GetClaimMappings() maps a to %v (%v), want b", got, err)
 	}
 }
 
@@ -177,9 +181,9 @@ func TestGetClaimMappings(t *testing.T) {
 func newTestConfig() *PresentationRequestConfig {
 	return &PresentationRequestConfig{
 		Templates: []*PresentationRequestTemplate{
-			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: boolPtr(true), ClaimMappings: map[string]string{"a": "b"}},
-			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: boolPtr(true), ClaimMappings: map[string]string{"c": "d"}},
-			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: boolPtr(false), ClaimMappings: map[string]string{}},
+			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: boolPtr(true), ClaimMappings: openid4vp.NameMappings(map[string]string{"a": "b"})},
+			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: boolPtr(true), ClaimMappings: openid4vp.NameMappings(map[string]string{"c": "d"})},
+			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: boolPtr(false), ClaimMappings: openid4vp.NameMappings(map[string]string{})},
 		},
 		DefaultTemplate: "pid",
 	}
@@ -568,30 +572,30 @@ func TestLoadTemplateFile_HonoursAnExplicitEnabledFalse(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			templates, err := loadTemplateFile(path)
+			file, err := loadTemplateFile(path)
 			if err != nil {
 				t.Fatalf("loadTemplateFile() error = %v", err)
 			}
-			if len(templates) != 1 {
-				t.Fatalf("loaded %d templates, want 1", len(templates))
+			if len(file.templates) != 1 {
+				t.Fatalf("loaded %d templates, want 1", len(file.templates))
 			}
-			if templates[0].IsEnabled() {
+			if file.templates[0].IsEnabled() {
 				t.Error("a template that says enabled: false must not be enabled")
 			}
 
 			// And it must be invisible to every lookup, which is the part
 			// an operator actually sees.
-			cfg := &PresentationRequestConfig{Templates: templates}
+			cfg := &PresentationRequestConfig{Templates: file.templates}
 			if got := cfg.GetEnabledTemplates(); len(got) != 0 {
 				t.Errorf("GetEnabledTemplates returned %d, want none", len(got))
 			}
 			if got := cfg.ListEnabledTemplates(); len(got) != 0 {
 				t.Errorf("ListEnabledTemplates returned %d, want none", len(got))
 			}
-			if _, err := cfg.GetTemplateByID(templates[0].ID); err == nil {
+			if _, err := cfg.GetTemplateByID(file.templates[0].ID); err == nil {
 				t.Error("GetTemplateByID returned a disabled template")
 			}
-			if _, err := cfg.GetTemplateByScope(templates[0].OIDCScopes[0]); err == nil {
+			if _, err := cfg.GetTemplateByScope(file.templates[0].OIDCScopes[0]); err == nil {
 				t.Error("GetTemplateByScope returned a disabled template")
 			}
 		})
@@ -606,11 +610,11 @@ func TestLoadTemplateFile_DefaultsToEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	templates, err := loadTemplateFile(path)
+	file, err := loadTemplateFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !templates[0].IsEnabled() {
+	if !file.templates[0].IsEnabled() {
 		t.Error("a template that does not mention enabled must be enabled")
 	}
 }

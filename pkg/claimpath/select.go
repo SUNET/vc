@@ -1,0 +1,213 @@
+package claimpath
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+)
+
+// ErrNoClaim is the error of a pointer that selects nothing.
+var ErrNoClaim = errors.New("claimpath: the pointer selects no claim")
+
+// ErrMismatch is the error of a pointer whose component meets a value of
+// the wrong type: a key on a non-object, or null or an index on a
+// non-array.
+var ErrMismatch = errors.New("claimpath: the claims do not have the structure the pointer selects")
+
+// Select processes the pointer against a JSON credential as OpenID4VP 1.0
+// section 7.1 defines it, starting at the root object. A missing key or
+// index drops its element from the selection. A key on a non-object and
+// null or an index on a non-array are an error, and so is an empty final
+// selection.
+func (p Pointer) Select(root map[string]any) ([]any, error) {
+	if err := p.requireComponents(); err != nil {
+		return nil, err
+	}
+	selection := []any{root}
+	for i, c := range p.components {
+		next := make([]any, 0, len(selection))
+		for _, element := range selection {
+			children, err := c.children(element)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, i, err)
+			}
+			next = append(next, children...)
+		}
+		selection = next
+	}
+	if len(selection) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrNoClaim, p)
+	}
+	return selection, nil
+}
+
+// children returns what the component selects in one element.
+func (c Component) children(element any) ([]any, error) {
+	if c.kind == keyKind {
+		object, ok := element.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("key %q on a %T", c.key, element)
+		}
+		if value, present := object[c.key]; present {
+			return []any{value}, nil
+		}
+		return nil, nil
+	}
+	array, ok := asArray(element)
+	if !ok {
+		return nil, fmt.Errorf("%s on a %T", c, element)
+	}
+	if c.kind == allKind {
+		return array, nil
+	}
+	if c.index < uint(len(array)) {
+		return []any{array[c.index]}, nil
+	}
+	return nil, nil
+}
+
+// Child returns what a key or an index selects in value: a member of an
+// object, or an element of an array. It reports false when value holds no
+// such member or element, and for null.
+func (c Component) Child(value any) (any, bool) {
+	if c.kind == allKind {
+		return nil, false
+	}
+	children, err := c.children(value)
+	if err != nil || len(children) == 0 {
+		return nil, false
+	}
+	return children[0], true
+}
+
+// String renders the component as its JSON value.
+func (c Component) String() string {
+	return New(c).String()
+}
+
+// asArray returns the elements of a JSON array, whichever slice type
+// holds it. A byte slice is a byte string.
+func asArray(value any) ([]any, bool) {
+	switch v := value.(type) {
+	case []any:
+		return v, true
+	case []byte, nil:
+		return nil, false
+	}
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Slice {
+		return nil, false
+	}
+	out := make([]any, rv.Len())
+	for i := range out {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out, true
+}
+
+// get returns the one claim a pointer of keys and indices selects.
+func (p Pointer) get(root map[string]any) (any, bool, error) {
+	var current any = root
+	for i, c := range p.components {
+		children, err := c.children(current)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, i, err)
+		}
+		if len(children) == 0 {
+			return nil, false, nil
+		}
+		current = children[0]
+	}
+	return current, true, nil
+}
+
+// set writes value at a pointer of keys and indices, creating the objects
+// a key passes through. With replace, a key also replaces a null, a scalar
+// or an array it passes through with a new object.
+func (p Pointer) set(root map[string]any, value any, replace bool) error {
+	n := len(p.components) - 1
+	var container any = root
+	for i, c := range p.components[:n] {
+		next, err := c.child(container, p.components[i+1], replace)
+		if err != nil {
+			return fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, i, err)
+		}
+		container = next
+	}
+	if err := p.components[n].put(container, value); err != nil {
+		return fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, n, err)
+	}
+	return nil
+}
+
+// child returns the container the component selects in container. It
+// creates an object at a missing key that the next component, a key,
+// passes through. With replace, it also creates one in place of a value
+// other than an object that the next component, a key, passes through.
+func (c Component) child(container any, next Component, replace bool) (any, error) {
+	children, err := c.children(container)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(children) == 1:
+		if _, object := children[0].(map[string]any); object || !replace || next.kind != keyKind {
+			return children[0], nil
+		}
+	case c.kind != keyKind || next.kind != keyKind:
+		return nil, fmt.Errorf("%s selects no element to write into", c)
+	}
+	created := map[string]any{}
+	if err := c.put(container, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// put writes value at the component in container.
+func (c Component) put(container any, value any) error {
+	switch c.kind {
+	case keyKind:
+		object, ok := container.(map[string]any)
+		if !ok {
+			return fmt.Errorf("key %q on a %T", c.key, container)
+		}
+		object[c.key] = value
+		return nil
+	case indexKind:
+		array, ok := container.([]any)
+		if !ok {
+			return fmt.Errorf("%s on a %T", c, container)
+		}
+		if c.index >= uint(len(array)) {
+			return fmt.Errorf("%s on an array of %d elements", c, len(array))
+		}
+		array[c.index] = value
+		return nil
+	}
+	return fmt.Errorf("%s writes no single element", c)
+}
+
+// delete removes the claim at a pointer of keys and indices whose last
+// component is a key.
+func (p Pointer) delete(root map[string]any) error {
+	n := len(p.components) - 1
+	last := p.components[n]
+	if last.kind != keyKind {
+		return fmt.Errorf("%w: %s, element %d: %s removes no member of an object", ErrMismatch, p, n, last)
+	}
+	var container any = root
+	if n > 0 {
+		parent, present, err := Pointer{components: p.components[:n:n]}.get(root)
+		if err != nil || !present {
+			return err
+		}
+		container = parent
+	}
+	object, ok := container.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%w: %s, element %d: key %q on a %T", ErrMismatch, p, n, last.key, container)
+	}
+	delete(object, last.key)
+	return nil
+}

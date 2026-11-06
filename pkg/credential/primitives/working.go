@@ -1,0 +1,150 @@
+package primitives
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/SUNET/vc/pkg/claimpath"
+)
+
+// Shapes are how a derivation list's claims are held: the source claims
+// it reads, and the document of the credential it issues, which it
+// writes.
+type Shapes struct {
+	Source claimpath.Shape
+	Issued claimpath.Shape
+}
+
+// Working is the claims map a derivation list runs on: the source claims
+// and the claims its earlier derivations wrote. It implements Claims.
+type Working struct {
+	claims  map[string]any
+	shapes  Shapes
+	written []claimpath.Pointer
+}
+
+// NewWorking returns the working claims of a derivation list over claims.
+func NewWorking(claims map[string]any, shapes Shapes) *Working {
+	return &Working{claims: claims, shapes: shapes}
+}
+
+// Input implements Claims. A key on a null, a scalar or an array, and an
+// index on a non-array, select no claim, so the derivation skips it.
+// OpenID4VP 1.0 section 7.1 has a Wallet that processes a query refuse
+// such a pointer; a derivation reads the issuer's own source data.
+func (w *Working) Input(r claimpath.Ref) (any, bool, error) {
+	value, present, err := r.Get(w.InputShape(r.Path), w.claims)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		return nil, false, nil
+	}
+	return value, present, err
+}
+
+// InputLocation returns where Input reads r in the claims: the top-level
+// key of its dotted name when the claims hold it, and the location of its
+// pointer otherwise.
+func (w *Working) InputLocation(r claimpath.Ref) (claimpath.Pointer, error) {
+	if dotted, ok := r.Dotted(); ok {
+		if _, held := r.Literal(w.claims); held {
+			return claimpath.Keys(dotted), nil
+		}
+	}
+	return w.InputShape(r.Path).Locate(r.Path)
+}
+
+// Issued implements Claims. The pointer's structure is checked before the
+// top-level key of a dotted name is read.
+func (w *Working) Issued(r claimpath.Ref) (any, bool, error) {
+	value, present, err := w.shapes.Issued.Get(w.claims, r.Path)
+	if err != nil {
+		return nil, false, err
+	}
+	if literal, ok := r.Literal(w.claims); ok {
+		return literal, true, nil
+	}
+	return value, present, nil
+}
+
+// Named implements Claims.
+func (w *Working) Named(name string) (claimpath.Pointer, error) {
+	return w.shapes.Issued.Key(name)
+}
+
+// InputShape returns the shape an input pointer reads: the issued shape
+// when an earlier derivation writes the pointer or a prefix of it, the
+// source shape otherwise.
+func (w *Working) InputShape(p claimpath.Pointer) claimpath.Shape {
+	if writtenBefore(w.written, p) {
+		return w.shapes.Issued
+	}
+	return w.shapes.Source
+}
+
+// Write writes value at a pointer into the issued claims. A key replaces
+// a null, a scalar or an array it passes through with a new object.
+func (w *Working) Write(p claimpath.Pointer, value any) error {
+	return w.shapes.Issued.SetReplacing(w.claims, p, value)
+}
+
+// Wrote records the claims a derivation writes, for the inputs of the
+// derivations after it.
+func (w *Working) Wrote(outputs []claimpath.Pointer) {
+	w.written = append(w.written, outputs...)
+}
+
+// writtenBefore reports whether one of written is p or a prefix of it.
+func writtenBefore(written []claimpath.Pointer, p claimpath.Pointer) bool {
+	return slices.ContainsFunc(written, func(q claimpath.Pointer) bool { return p.HasPrefix(q) })
+}
+
+// CheckDerivations checks that every claim a derivation list reads or
+// writes is one claim its shape locates.
+//
+//   - An output, and the input of a primitive that writes in place, is a
+//     claim of the issued credential's document.
+//   - An input is a claim of the source data, or of the issued document
+//     when an earlier derivation of the list writes it or a claim above it.
+//   - An opening input is a claim of the source data.
+func CheckDerivations(list []Derivation, shapes Shapes) error {
+	var written []claimpath.Pointer
+	for i := range list {
+		a, name, err := list[i].selected()
+		if err != nil {
+			return fmt.Errorf("derivations[%d]: %w", i, err)
+		}
+		if err := checkArgs(a, shapes, written); err != nil {
+			return fmt.Errorf("derivations[%d].%s.%w", i, name, err)
+		}
+		outputs, err := list[i].Outputs(shapes.Issued.Key)
+		if err != nil {
+			return fmt.Errorf("derivations[%d].%s: %w", i, name, err)
+		}
+		written = append(written, outputs...)
+	}
+	return nil
+}
+
+// checkArgs checks the claims of one primitive's arguments.
+func checkArgs(a Applier, shapes Shapes, written []claimpath.Pointer) error {
+	if hc, ok := a.(*HashCommitmentArgs); ok {
+		return hc.checkInputs(shapes.Source)
+	}
+	if output, ok := outputOf(a); ok {
+		if _, err := shapes.Issued.LocateOne(output); err != nil {
+			return fmt.Errorf("output: %w", err)
+		}
+	}
+	input, ok := inputOf(a)
+	if !ok {
+		return nil
+	}
+	space := shapes.Source
+	if writtenBefore(written, input.Path) {
+		space = shapes.Issued
+	}
+	if _, err := space.LocateOne(input.Path); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	return nil
+}

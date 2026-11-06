@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/base64url"
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // HashCommitmentArgs fulfils the to_wallet hash_commitment entry at Path.
 type HashCommitmentArgs struct {
 	// Path is the claims path pointer of the to_wallet entry it fulfils.
-	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
+	Path claimpath.Pointer `yaml:"path" validate:"required,nonempty_keys" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
 	// Opening produces the opening.
 	Opening OpeningArgs `yaml:"opening" validate:"required"`
 }
@@ -47,34 +48,63 @@ type RandomOpeningArgs struct {
 // refused when the credential carries the claim or another derivation
 // reads it.
 type ClaimOpeningArgs struct {
-	// Input is the claim of the source data that holds the opening.
-	// Supports dot-notation claim paths and literal dotted keys. A
+	// Input is the claim of the source data that holds the opening. A
 	// presentation source lists it in its required_claims.
-	Input string `yaml:"input" validate:"required" doc_example:"\"nym_auth_opening\""`
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"nym_auth_opening\"]"`
 }
 
 // Apply implements Applier. The derivation pipeline skips hash_commitment,
 // whose opening comes from NewOpening.
-func (a *HashCommitmentArgs) Apply(map[string]any, time.Time) (map[string]any, error) {
+func (a *HashCommitmentArgs) Apply(Claims, time.Time) ([]Write, error) {
 	return nil, errors.New("hash_commitment produces its opening through NewOpening")
+}
+
+// outputs implements ownOutputs: hash_commitment writes no claim of the
+// source data.
+func (a *HashCommitmentArgs) outputs(func(string) (claimpath.Pointer, error)) ([]claimpath.Pointer, error) {
+	return nil, nil
+}
+
+// checkInputs checks that each opening input is one claim of the source
+// data.
+func (a *HashCommitmentArgs) checkInputs(source claimpath.Shape) error {
+	generator, err := a.Opening.generator()
+	if err != nil {
+		return fmt.Errorf("opening: %w", err)
+	}
+	if claim, ok := generator.(*ClaimOpeningArgs); ok {
+		if _, err := source.LocateOne(claim.Input.Path); err != nil {
+			return fmt.Errorf("opening.claim.input: %w", err)
+		}
+		return nil
+	}
+	for i, input := range generator.inputs() {
+		if _, err := source.LocateOne(input.Path); err != nil {
+			return fmt.Errorf("opening.%s.inputs[%d]: %w", generator.name(), i, err)
+		}
+	}
+	return nil
 }
 
 // HashCommitmentFor returns the hash_commitment derivation of list for
 // path.
-func HashCommitmentFor(list []Derivation, path []string) *HashCommitmentArgs {
+func HashCommitmentFor(list []Derivation, path claimpath.Pointer) *HashCommitmentArgs {
 	for _, d := range list {
-		if d.HashCommitment != nil && slices.Equal(d.HashCommitment.Path, path) {
+		if d.HashCommitment != nil && d.HashCommitment.Path.Equal(path) {
 			return d.HashCommitment
 		}
 	}
 	return nil
 }
 
-// OpeningInputs returns the claims of source that the hash_commitment
-// derivations of list read as opening inputs, each a deep copy held under
-// its path as one literal key, so a later write into source or a filter on
-// it leaves them as they were. An input source lacks is left out.
-func OpeningInputs(list []Derivation, source map[string]any) map[string]any {
+// OpeningInputs returns the claims of source, held in shape, that the
+// hash_commitment derivations of list read as opening inputs. Each is a
+// deep copy of the claim at the input's leading keys, held where source
+// holds it, so a later write into source or a filter on it leaves them as
+// they were. An input upgraded from a dotted name reads the top-level key
+// of that name first, and the result holds its claim under that key, as
+// the earlier release held it. An input source lacks is left out.
+func OpeningInputs(list []Derivation, source map[string]any, shape claimpath.Shape) (map[string]any, error) {
 	var out map[string]any
 	for _, d := range list {
 		if d.HashCommitment == nil {
@@ -82,29 +112,61 @@ func OpeningInputs(list []Derivation, source map[string]any) map[string]any {
 		}
 		_, inputs, err := d.HashCommitment.Opening.Inputs()
 		if err != nil {
-			continue
+			return nil, err
 		}
-		for _, path := range inputs {
-			value, present := lookupClaim(source, path)
+		for _, input := range inputs {
+			location, value, present, err := openingInput(source, shape, input)
+			if err != nil {
+				return nil, err
+			}
 			if !present {
 				continue
 			}
 			if out == nil {
 				out = map[string]any{}
 			}
-			out[path] = cloneClaimValue(value)
+			if err := claimpath.Nested().Set(out, location, cloneClaimValue(value)); err != nil {
+				return nil, err
+			}
 		}
 	}
-	return out
+	return out, nil
 }
 
-// NewOpening produces the opening from the claims of the source data.
-func (a *HashCommitmentArgs) NewOpening(claims map[string]any) ([]byte, error) {
+// openingInput returns the claim of source an opening input reads, and
+// where the result of OpeningInputs holds it: under the top-level key of
+// the input's dotted name, and otherwise where source holds the input's
+// leading keys.
+func openingInput(source map[string]any, shape claimpath.Shape, input claimpath.Ref) (claimpath.Pointer, any, bool, error) {
+	keys, ok := input.Path.KeyPrefix()
+	if !ok {
+		return claimpath.Pointer{}, nil, false, fmt.Errorf("opening input %s starts with no key", input)
+	}
+	location, err := shape.LocateOne(keys)
+	if err != nil {
+		return claimpath.Pointer{}, nil, false, err
+	}
+	if dotted, ok := input.Dotted(); ok {
+		location = claimpath.Keys(dotted)
+	}
+	if value, ok := input.Literal(source); ok {
+		return location, value, true, nil
+	}
+	value, present, err := shape.Get(source, keys)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		return claimpath.Pointer{}, nil, false, nil
+	}
+	return location, value, present, err
+}
+
+// NewOpening produces the opening from the claims of the source data,
+// held in the source shape.
+func (a *HashCommitmentArgs) NewOpening(claims map[string]any, source claimpath.Shape) ([]byte, error) {
 	generator, err := a.Opening.generator()
 	if err != nil {
 		return nil, err
 	}
-	return generator.open(claims)
+	return generator.open(claims, source)
 }
 
 // openingGenerator produces an opening from the claims of the source data.
@@ -112,8 +174,8 @@ type openingGenerator interface {
 	// name is the generator's key under opening.
 	name() string
 	// inputs are the claims of the source data the generator reads.
-	inputs() []string
-	open(claims map[string]any) ([]byte, error)
+	inputs() []claimpath.Ref
+	open(claims map[string]any, source claimpath.Shape) ([]byte, error)
 	// validate checks what the configuration fixes: the length, and a
 	// secret.
 	validate() error
@@ -152,12 +214,12 @@ func (o OpeningArgs) Validate() error {
 
 // Inputs returns the key of the generator the opening sets, and the claims
 // of the source data it reads.
-func (o OpeningArgs) Inputs() (generator string, claims []string, err error) {
+func (o OpeningArgs) Inputs() (generator string, claims []claimpath.Ref, err error) {
 	g, err := o.generator()
 	if err != nil {
 		return "", nil, err
 	}
-	return g.name(), g.inputs(), nil
+	return g.name(), slices.Clone(g.inputs()), nil
 }
 
 // Keyed returns the generator of an opening that sets hkdf or hmac alone.
@@ -184,20 +246,27 @@ func (r lengthRange) check(n int) error {
 	return nil
 }
 
-// inputClaim returns the value of the claim at path of the source data,
-// which is a string.
-func inputClaim(claims map[string]any, path string) (string, error) {
-	value, present := lookupClaim(claims, path)
+// inputClaim returns the value of the claim an opening input names in the
+// source data, held in the source shape, which is a string. An input
+// upgraded from a dotted name reads the top-level key of that name when
+// the claims hold it.
+func inputClaim(claims map[string]any, source claimpath.Shape, input claimpath.Ref) (string, error) {
+	value, present, err := input.Get(source, claims)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		value, present = nil, false
+	} else if err != nil {
+		return "", err
+	}
 	s, ok := value.(string)
 	if !present || !ok {
 		// The value is personal data, so the error names the claim only.
-		return "", fmt.Errorf("%w: opening input %q must be a string", ErrInvalidClaimInput, path)
+		return "", fmt.Errorf("%w: opening input %s must be a string", ErrInvalidClaimInput, input)
 	}
 	return s, nil
 }
 
-func (a *RandomOpeningArgs) name() string     { return "random" }
-func (a *RandomOpeningArgs) inputs() []string { return nil }
+func (a *RandomOpeningArgs) name() string            { return "random" }
+func (a *RandomOpeningArgs) inputs() []claimpath.Ref { return nil }
 
 func (a *RandomOpeningArgs) validate() error {
 	if err := openingLengths.check(a.Bytes); err != nil {
@@ -206,7 +275,7 @@ func (a *RandomOpeningArgs) validate() error {
 	return nil
 }
 
-func (a *RandomOpeningArgs) open(map[string]any) ([]byte, error) {
+func (a *RandomOpeningArgs) open(map[string]any, claimpath.Shape) ([]byte, error) {
 	opening := make([]byte, a.Bytes)
 	if _, err := rand.Read(opening); err != nil {
 		return nil, err
@@ -214,26 +283,26 @@ func (a *RandomOpeningArgs) open(map[string]any) ([]byte, error) {
 	return opening, nil
 }
 
-func (a *ClaimOpeningArgs) name() string     { return "claim" }
-func (a *ClaimOpeningArgs) inputs() []string { return []string{a.Input} }
+func (a *ClaimOpeningArgs) name() string            { return "claim" }
+func (a *ClaimOpeningArgs) inputs() []claimpath.Ref { return []claimpath.Ref{a.Input} }
 
 // validate accepts every claim: its value is checked when it is read.
 func (a *ClaimOpeningArgs) validate() error {
 	return nil
 }
 
-func (a *ClaimOpeningArgs) open(claims map[string]any) ([]byte, error) {
-	value, err := inputClaim(claims, a.Input)
+func (a *ClaimOpeningArgs) open(claims map[string]any, source claimpath.Shape) ([]byte, error) {
+	value, err := inputClaim(claims, source, a.Input)
 	if err != nil {
 		return nil, err
 	}
 	// The value is a secret, so each error names the claim only.
 	opening, err := base64url.Decode(value)
 	if err != nil {
-		return nil, fmt.Errorf("%w: opening input %q: %w", ErrInvalidClaimInput, a.Input, err)
+		return nil, fmt.Errorf("%w: opening input %s: %w", ErrInvalidClaimInput, a.Input, err)
 	}
 	if err := openingLengths.check(len(opening)); err != nil {
-		return nil, fmt.Errorf("%w: opening input %q: %w", ErrInvalidClaimInput, a.Input, err)
+		return nil, fmt.Errorf("%w: opening input %s: %w", ErrInvalidClaimInput, a.Input, err)
 	}
 	return opening, nil
 }

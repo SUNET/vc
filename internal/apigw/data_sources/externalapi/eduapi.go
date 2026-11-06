@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/eduapi"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -23,8 +24,8 @@ type EduAPI struct {
 // NewEduAPI creates an Edu-API data source from a remote connection definition
 // and the external_api scopes that reference it. Each scope's AttributeMapping
 // is wired into a per-credential-type mapper.
-func NewEduAPI(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*EduAPI, error) {
-	base, err := newService(remote, scopes, "application/json", "eduapi", docCache, tokenCache, log)
+func NewEduAPI(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, documentShape func(scope string) (claimpath.Shape, error), docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*EduAPI, error) {
+	base, err := newService(remote, scopes, documentShape, "application/json", "eduapi", docCache, tokenCache, log)
 	if err != nil {
 		return nil, err
 	}
