@@ -33,9 +33,9 @@ func checkOpeningClaims(cfg *model.Cfg, src model.SourceScope, meta *model.Crede
 
 // checkOpeningInputs keeps a claim opening's claim out of the credential,
 // and requires a presentation to require each input.
-func checkOpeningInputs(cfg *model.Cfg, src model.SourceScope, meta *model.CredentialMetadata, opening primitives.OpeningArgs, inputs []claimpath.Pointer) error {
+func checkOpeningInputs(cfg *model.Cfg, src model.SourceScope, meta *model.CredentialMetadata, opening primitives.OpeningArgs, inputs []claimpath.Ref) error {
 	if opening.Claim != nil {
-		if err := checkClaimSecret(cfg, src, meta, opening.Claim.Input); err != nil {
+		if err := checkClaimSecret(cfg, src, meta, opening.Claim.Input.Path); err != nil {
 			return err
 		}
 	}
@@ -44,12 +44,12 @@ func checkOpeningInputs(cfg *model.Cfg, src model.SourceScope, meta *model.Crede
 
 // checkInputsRequired refuses an input a presentation source does not
 // require: its source data holds the required claims alone.
-func checkInputsRequired(src model.SourceScope, inputs []claimpath.Pointer) error {
+func checkInputsRequired(src model.SourceScope, inputs []claimpath.Ref) error {
 	if src.Source != model.DataSourcePresentation {
 		return nil
 	}
 	for _, input := range inputs {
-		if !slices.ContainsFunc(src.RequiredClaims, func(r model.RequiredClaim) bool { return r.Path.Equal(input) }) {
+		if !slices.ContainsFunc(src.RequiredClaims, func(r model.RequiredClaim) bool { return r.Path.Equal(input.Path) }) {
 			return fmt.Errorf("input %s is the path of no required_claims entry", input)
 		}
 	}
@@ -145,7 +145,7 @@ func pathsOverlap(declared, location claimpath.Pointer) bool {
 // credential's document.
 func checkClaimUnread(derivations []primitives.Derivation, claim claimpath.Pointer) error {
 	for i, d := range derivations {
-		if input, ok := d.Input(); ok && (input.HasPrefix(claim) || claim.HasPrefix(input)) {
+		if input, ok := d.Input(); ok && (input.Path.HasPrefix(claim) || claim.HasPrefix(input.Path)) {
 			return fmt.Errorf("derivations[%d] reads claim %s into the credential's document", i, claim)
 		}
 	}

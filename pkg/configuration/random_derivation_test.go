@@ -27,8 +27,8 @@ func presentationCfg(derivations ...primitives.Derivation) *model.Cfg {
 // errors, the two values simply differ.
 func TestCheckRandomDerivations_RefusesOnAPresentationSource(t *testing.T) {
 	err := checkRandomDerivations(presentationCfg(
-		primitives.Derivation{Trim: &primitives.TrimArgs{Input: claimpath.Keys("name")}},
-		primitives.Derivation{Random: &primitives.RandomArgs{Output: claimpath.Keys("document_id")}},
+		primitives.Derivation{Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("name")}}},
+		primitives.Derivation{Random: &primitives.RandomArgs{Output: claimpath.Ref{Path: claimpath.Keys("document_id")}}},
 	))
 
 	require.Error(t, err)
@@ -40,8 +40,8 @@ func TestCheckRandomDerivations_RefusesOnAPresentationSource(t *testing.T) {
 func TestCheckRandomDerivations_Accepts(t *testing.T) {
 	t.Run("a presentation scope with other primitives", func(t *testing.T) {
 		assert.NoError(t, checkRandomDerivations(presentationCfg(
-			primitives.Derivation{Trim: &primitives.TrimArgs{Input: claimpath.Keys("name")}},
-			primitives.Derivation{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Keys("email")}},
+			primitives.Derivation{Trim: &primitives.TrimArgs{Input: claimpath.Ref{Path: claimpath.Keys("name")}}},
+			primitives.Derivation{Lowercase: &primitives.LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}}},
 		)))
 	})
 
@@ -60,7 +60,7 @@ func TestCheckRandomDerivations_Accepts(t *testing.T) {
 		cfg := &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
 			Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
 				"diploma": {Derivations: []primitives.Derivation{
-					{Random: &primitives.RandomArgs{Output: claimpath.Keys("document_id")}},
+					{Random: &primitives.RandomArgs{Output: claimpath.Ref{Path: claimpath.Keys("document_id")}}},
 				}},
 			}},
 		}}}

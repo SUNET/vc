@@ -20,9 +20,9 @@ import (
 // source holds them, and nothing else.
 func TestOpeningInputs(t *testing.T) {
 	list := []Derivation{
-		{Lowercase: &LowercaseArgs{Input: claimpath.Keys("email")}},
+		{Lowercase: &LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}}},
 		{HashCommitment: &HashCommitmentArgs{Path: claimpath.Keys("ns", "ssc"), Opening: OpeningArgs{
-			HKDF: &HKDFOpeningArgs{SecretPath: "/unused", Inputs: []claimpath.Pointer{claimpath.Keys("country"), claimpath.Keys("subject", "pan"), claimpath.Keys("absent")}, Bytes: 16},
+			HKDF: &HKDFOpeningArgs{SecretPath: "/unused", Inputs: []claimpath.Ref{{Path: claimpath.Keys("country")}, {Path: claimpath.Keys("subject", "pan")}, {Path: claimpath.Keys("absent")}}, Bytes: 16},
 		}}},
 	}
 	source := map[string]any{"country": "SE", "subject": map[string]any{"pan": "pan-1", "name": "Ada"}, "email": "A@B.se"}
@@ -34,7 +34,7 @@ func TestOpeningInputs(t *testing.T) {
 	source["subject"].(map[string]any)["pan"] = "changed"
 	assert.Equal(t, "pan-1", got["subject"].(map[string]any)["pan"], "a later write into the source does not reach the copy")
 
-	none, err := OpeningInputs([]Derivation{{Lowercase: &LowercaseArgs{Input: claimpath.Keys("email")}}}, source, claimpath.Nested())
+	none, err := OpeningInputs([]Derivation{{Lowercase: &LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}}}}, source, claimpath.Nested())
 	require.NoError(t, err)
 	assert.Nil(t, none, "no opening, no claims")
 }
@@ -56,10 +56,10 @@ func TestKeyedOpening(t *testing.T) {
 		opening  func(secretPath string, n, inputs int) ValueOpener
 	}{
 		{"hkdf", 64, func(secretPath string, n, inputs int) ValueOpener {
-			return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Pointer, inputs), Bytes: n}
+			return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Ref, inputs), Bytes: n}
 		}},
 		{"hmac", 32, func(secretPath string, n, inputs int) ValueOpener {
-			return &HMACOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Pointer, inputs), Bytes: n}
+			return &HMACOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Ref, inputs), Bytes: n}
 		}},
 	}
 	hkdf, hmac := generators[0], generators[1]
@@ -103,7 +103,7 @@ func TestKeyedOpening(t *testing.T) {
 // One fixture per refusal of a claim opening. Each error names the claim
 // and never its value, which is a secret.
 func TestClaimOpeningRefusals(t *testing.T) {
-	opening := &ClaimOpeningArgs{Input: claimpath.Keys("subject", "opening")}
+	opening := &ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys("subject", "opening")}}
 	for rule, tc := range map[string]struct {
 		value any
 		want  string

@@ -9,7 +9,7 @@ import (
 // CopyArgs configures the copy primitive.
 type CopyArgs struct {
 	// Input is the source claim.
-	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"birthdate\"]"`
 	// Output is the target claim.
 	Output claimpath.Pointer `yaml:"output" validate:"required" doc_example:"[\"birth_date\"]"`
 }

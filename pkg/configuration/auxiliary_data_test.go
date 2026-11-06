@@ -51,7 +51,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("personal_administrative_number")}, {Path: claimpath.Keys("nym_auth_opening")}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-								SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 16,
+								SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16,
 							}},
 						}}}},
 					}}},
@@ -77,7 +77,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 	})
 
 	claimOpening := func(c *model.Cfg, claim string) {
-		derivation(c).Opening = primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Keys(claim)}}
+		derivation(c).Opening = primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys(claim)}}}
 	}
 	t.Run("a claim opening whose claim the credential withholds", func(t *testing.T) {
 		cfg := base()
@@ -134,18 +134,18 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		}, "exactly one of hkdf, hmac, random and claim"},
 		"an hmac opening longer than the HMAC": {func(c *model.Cfg) {
 			derivation(c).Opening = primitives.OpeningArgs{HMAC: &primitives.HMACOpeningArgs{
-				SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 33,
+				SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 33,
 			}}
 		}, "hmac: an opening has 16 to 32 bytes, got 33"},
 		"a claim opening whose claim the MDDL declares": {func(c *model.Cfg) {
 			claimOpening(c, "birth_date")
 		}, `the credential carries claim ["birth_date"]: the MDDL declares element "birth_date"`},
 		"an hkdf input the presentation does not require": {func(c *model.Cfg) {
-			derivation(c).Opening.HKDF.Inputs = []claimpath.Pointer{claimpath.Keys("issuing_country")}
+			derivation(c).Opening.HKDF.Inputs = []claimpath.Ref{{Path: claimpath.Keys("issuing_country")}}
 		}, `from.pid.derivations[0].hash_commitment.opening.hkdf: input ["issuing_country"] is the path of no required_claims entry`},
 		"an hmac input the presentation does not require": {func(c *model.Cfg) {
 			derivation(c).Opening = primitives.OpeningArgs{HMAC: &primitives.HMACOpeningArgs{
-				SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number"), claimpath.Keys("issuing_country")}, Bytes: 16,
+				SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}, {Path: claimpath.Keys("issuing_country")}}, Bytes: 16,
 			}}
 		}, `from.pid.derivations[0].hash_commitment.opening.hmac: input ["issuing_country"] is the path of no required_claims entry`},
 		"a claim input the presentation does not require": {func(c *model.Cfg) {
@@ -154,7 +154,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"a claim opening whose claim another derivation reads": {func(c *model.Cfg) {
 			claimOpening(c, "nym_auth_opening")
 			pid := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"]
-			pid.Derivations = append(pid.Derivations, primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Keys("nym_auth_opening"), Output: claimpath.Keys("copied")}})
+			pid.Derivations = append(pid.Derivations, primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}, Output: claimpath.Keys("copied")}})
 			c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = pid
 		}, `derivations[1] reads claim ["nym_auth_opening"]`},
 	} {
@@ -199,7 +199,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("personal_administrative_number")}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-								SecretPath: secretPath, Inputs: []claimpath.Pointer{claimpath.Keys("personal_administrative_number")}, Bytes: 16,
+								SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16,
 							}},
 						}}}},
 					}}},
@@ -211,7 +211,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 	claimOpening := func(claim string) []primitives.Derivation {
 		return []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 			Path:    ssc,
-			Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Keys(claim)}},
+			Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys(claim)}}},
 		}}}
 	}
 

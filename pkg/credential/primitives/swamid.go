@@ -66,7 +66,7 @@ func SWAMIDHighestAssuranceLevel(value any) string {
 // errors if the input is present but no SWAMID URI is recognised.
 type SWAMIDHighestAssuranceLevelArgs struct {
 	// Input is the source claim (string or list of strings).
-	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"assurance_level\"]"`
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"assurance_level\"]"`
 
 	// Output is the target claim. Defaults to Input (in-place).
 	Output claimpath.Pointer `yaml:"output,omitempty" doc_example:"[\"assurance_level\"]"`
@@ -82,5 +82,5 @@ func (a *SWAMIDHighestAssuranceLevelArgs) Apply(claims Claims, _ time.Time) ([]W
 	if uri == "" {
 		return nil, fmt.Errorf("no recognized SWAMID assurance URI in claim %s", a.Input)
 	}
-	return []Write{{Path: inPlace(a.Input, a.Output), Value: uri}}, nil
+	return []Write{{Path: inPlace(a.Input.Path, a.Output), Value: uri}}, nil
 }

@@ -3,6 +3,7 @@ package legacyclaims
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/claimpath"
@@ -19,23 +20,65 @@ type reader func(name string) (claimpath.Pointer, error)
 // returns the zero pointer for a null node, and the dotted name it
 // rewrote, which is empty when the node holds no scalar.
 func (d *Document) pointer(n ast.Node, read reader) (claimpath.Pointer, string, error) {
+	c, err := readClaim(n, read)
+	if err != nil || c.name == "" {
+		return c.path, "", err
+	}
+	return c.path, c.name, d.replaceScalar(c.node, c.path)
+}
+
+// claimNode is the claim a node holds: a pointer, or main's dotted name
+// and the pointer a role reads it as.
+type claimNode struct {
+	path claimpath.Pointer
+	// name is the dotted name, and node its scalar; name is empty for a
+	// node that holds a pointer or null.
+	name string
+	node ast.Node
+}
+
+// readClaim reads the claim a node holds, reading a dotted name with
+// read.
+func readClaim(n ast.Node, read reader) (claimNode, error) {
 	n, err := unwrap(n)
 	if err != nil || isNull(n) {
-		return claimpath.Pointer{}, "", err
+		return claimNode{}, err
 	}
 	name, scalar := dottedName(n)
 	if !scalar {
 		p, err := pointerOf(n)
-		return p, "", err
+		return claimNode{path: p}, err
 	}
 	if name == "" {
-		return claimpath.Pointer{}, "", fmt.Errorf("%s: the claim name is empty", n.GetPath())
+		return claimNode{}, fmt.Errorf("%s: the claim name is empty", n.GetPath())
 	}
 	p, err := read(name)
 	if err != nil {
-		return claimpath.Pointer{}, "", fmt.Errorf("%s: %w", n.GetPath(), err)
+		return claimNode{}, fmt.Errorf("%s: %w", n.GetPath(), err)
 	}
-	return p, name, d.replaceScalar(n, p)
+	return claimNode{path: p, name: name, node: n}, nil
+}
+
+// carry writes a dotted name that a role looked up as one top-level key
+// before the claim its pointer names. The loader replaces the scalar with
+// the mapping {dotted: <name>, path: <pointer>}, which reads in that
+// order; the converter leaves the scalar as written. Both record the
+// spelling with the reason the converter leaves it.
+func (d *Document) carry(c claimNode, convert bool) error {
+	text, err := pointerText(c.path)
+	if err != nil {
+		return err
+	}
+	start, end, err := d.span(c.node)
+	if err != nil {
+		return err
+	}
+	if !convert {
+		d.replace(start, end, "{dotted: "+scalarText(c.name)+", path: "+text+"}")
+	}
+	key := strconv.Quote(c.name)
+	note := fmt.Sprintf("it reads the key %s before %s; write %s when the claims hold no key %s", key, text, text, key)
+	return d.recordKept(c.node, string(d.src[start:end]), text, note)
 }
 
 // replaceScalar replaces a scalar with the sequence of a pointer.

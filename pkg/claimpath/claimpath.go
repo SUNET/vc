@@ -426,9 +426,11 @@ func ValidationValue(field reflect.Value) any {
 // non-empty string.
 const NonEmptyKeysTag = "nonempty_keys"
 
-// RegisterValidation registers ValidationValue and NonEmptyKeysTag with v.
+// RegisterValidation registers ValidationValue and NonEmptyKeysTag with
+// v. A Ref validates as its pointer.
 func RegisterValidation(v *validator.Validate) error {
 	v.RegisterCustomTypeFunc(ValidationValue, Pointer{})
+	v.RegisterCustomTypeFunc(refValidationValue, Ref{})
 	return v.RegisterValidation(NonEmptyKeysTag, nonEmptyKeys)
 }
 

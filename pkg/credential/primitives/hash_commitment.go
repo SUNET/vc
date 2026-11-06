@@ -50,7 +50,7 @@ type RandomOpeningArgs struct {
 type ClaimOpeningArgs struct {
 	// Input is the claim of the source data that holds the opening. A
 	// presentation source lists it in its required_claims.
-	Input claimpath.Pointer `yaml:"input" validate:"required" doc_example:"[\"nym_auth_opening\"]"`
+	Input claimpath.Ref `yaml:"input" validate:"required" doc_example:"[\"nym_auth_opening\"]"`
 }
 
 // Apply implements Applier. The derivation pipeline skips hash_commitment,
@@ -73,13 +73,13 @@ func (a *HashCommitmentArgs) checkInputs(source claimpath.Shape) error {
 		return fmt.Errorf("opening: %w", err)
 	}
 	if claim, ok := generator.(*ClaimOpeningArgs); ok {
-		if _, err := source.LocateOne(claim.Input); err != nil {
+		if _, err := source.LocateOne(claim.Input.Path); err != nil {
 			return fmt.Errorf("opening.claim.input: %w", err)
 		}
 		return nil
 	}
 	for i, input := range generator.inputs() {
-		if _, err := source.LocateOne(input); err != nil {
+		if _, err := source.LocateOne(input.Path); err != nil {
 			return fmt.Errorf("opening.%s.inputs[%d]: %w", generator.name(), i, err)
 		}
 	}
@@ -101,7 +101,8 @@ func HashCommitmentFor(list []Derivation, path claimpath.Pointer) *HashCommitmen
 // hash_commitment derivations of list read as opening inputs. Each is a
 // deep copy of the claim at the input's leading keys, held where source
 // holds it, so a later write into source or a filter on it leaves them as
-// they were. An input source lacks is left out.
+// they were. An input upgraded from a dotted name takes the top-level key
+// of that name when source holds it. An input source lacks is left out.
 func OpeningInputs(list []Derivation, source map[string]any, shape claimpath.Shape) (map[string]any, error) {
 	var out map[string]any
 	for _, d := range list {
@@ -112,27 +113,47 @@ func OpeningInputs(list []Derivation, source map[string]any, shape claimpath.Sha
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range inputs {
-			keys, ok := path.KeyPrefix()
-			if !ok {
-				return nil, fmt.Errorf("opening input %s starts with no key", path)
-			}
-			value, present, err := shape.Get(source, keys)
-			if errors.Is(err, claimpath.ErrMismatch) || (err == nil && !present) {
-				continue
-			}
+		for _, input := range inputs {
+			location, value, present, err := openingInput(source, shape, input)
 			if err != nil {
 				return nil, err
+			}
+			if !present {
+				continue
 			}
 			if out == nil {
 				out = map[string]any{}
 			}
-			if err := shape.Set(out, keys, cloneClaimValue(value)); err != nil {
+			if err := claimpath.Nested().Set(out, location, cloneClaimValue(value)); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return out, nil
+}
+
+// openingInput returns the claim of source an opening input reads, and
+// the location source holds it at: the top-level key of the input's
+// dotted name when source holds it, and the input's leading keys
+// otherwise.
+func openingInput(source map[string]any, shape claimpath.Shape, input claimpath.Ref) (claimpath.Pointer, any, bool, error) {
+	if value, ok := input.Literal(source); ok {
+		dotted, _ := input.Dotted()
+		return claimpath.Keys(dotted), value, true, nil
+	}
+	keys, ok := input.Path.KeyPrefix()
+	if !ok {
+		return claimpath.Pointer{}, nil, false, fmt.Errorf("opening input %s starts with no key", input)
+	}
+	location, err := shape.LocateOne(keys)
+	if err != nil {
+		return claimpath.Pointer{}, nil, false, err
+	}
+	value, present, err := shape.Get(source, keys)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		return claimpath.Pointer{}, nil, false, nil
+	}
+	return location, value, present, err
 }
 
 // NewOpening produces the opening from the claims of the source data,
@@ -150,7 +171,7 @@ type openingGenerator interface {
 	// name is the generator's key under opening.
 	name() string
 	// inputs are the claims of the source data the generator reads.
-	inputs() []claimpath.Pointer
+	inputs() []claimpath.Ref
 	open(claims map[string]any, source claimpath.Shape) ([]byte, error)
 	// validate checks what the configuration fixes: the length, and a
 	// secret.
@@ -190,7 +211,7 @@ func (o OpeningArgs) Validate() error {
 
 // Inputs returns the key of the generator the opening sets, and the claims
 // of the source data it reads.
-func (o OpeningArgs) Inputs() (generator string, claims []claimpath.Pointer, err error) {
+func (o OpeningArgs) Inputs() (generator string, claims []claimpath.Ref, err error) {
 	g, err := o.generator()
 	if err != nil {
 		return "", nil, err
@@ -222,23 +243,31 @@ func (r lengthRange) check(n int) error {
 	return nil
 }
 
-// inputClaim returns the value of the claim at path of the source data,
-// held in the source shape, which is a string.
-func inputClaim(claims map[string]any, source claimpath.Shape, path claimpath.Pointer) (string, error) {
-	value, present, err := source.Get(claims, path)
-	if err != nil && !errors.Is(err, claimpath.ErrMismatch) {
-		return "", err
+// inputClaim returns the value of the claim an opening input names in the
+// source data, held in the source shape, which is a string. An input
+// upgraded from a dotted name reads the top-level key of that name when
+// the claims hold it.
+func inputClaim(claims map[string]any, source claimpath.Shape, input claimpath.Ref) (string, error) {
+	value, present := input.Literal(claims)
+	if !present {
+		var err error
+		value, present, err = source.Get(claims, input.Path)
+		if errors.Is(err, claimpath.ErrMismatch) {
+			value, present = nil, false
+		} else if err != nil {
+			return "", err
+		}
 	}
 	s, ok := value.(string)
-	if err != nil || !present || !ok {
+	if !present || !ok {
 		// The value is personal data, so the error names the claim only.
-		return "", fmt.Errorf("%w: opening input %s must be a string", ErrInvalidClaimInput, path)
+		return "", fmt.Errorf("%w: opening input %s must be a string", ErrInvalidClaimInput, input)
 	}
 	return s, nil
 }
 
-func (a *RandomOpeningArgs) name() string                { return "random" }
-func (a *RandomOpeningArgs) inputs() []claimpath.Pointer { return nil }
+func (a *RandomOpeningArgs) name() string            { return "random" }
+func (a *RandomOpeningArgs) inputs() []claimpath.Ref { return nil }
 
 func (a *RandomOpeningArgs) validate() error {
 	if err := openingLengths.check(a.Bytes); err != nil {
@@ -255,8 +284,8 @@ func (a *RandomOpeningArgs) open(map[string]any, claimpath.Shape) ([]byte, error
 	return opening, nil
 }
 
-func (a *ClaimOpeningArgs) name() string                { return "claim" }
-func (a *ClaimOpeningArgs) inputs() []claimpath.Pointer { return []claimpath.Pointer{a.Input} }
+func (a *ClaimOpeningArgs) name() string            { return "claim" }
+func (a *ClaimOpeningArgs) inputs() []claimpath.Ref { return []claimpath.Ref{a.Input} }
 
 // validate accepts every claim: its value is checked when it is read.
 func (a *ClaimOpeningArgs) validate() error {

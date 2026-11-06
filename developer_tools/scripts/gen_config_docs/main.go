@@ -478,8 +478,12 @@ func parseStructTag(raw string) TagInfo {
 
 // ---- Display helpers ----
 
-// claimsPathPointer is the Go type of a claims path pointer field.
-const claimsPathPointer = "claimpath.Pointer"
+// claimsPathPointer and claimRef are the Go types of a claims path
+// pointer field. A claimpath.Ref is written as a pointer.
+const (
+	claimsPathPointer = "claimpath.Pointer"
+	claimRef          = "claimpath.Ref"
+)
 
 func (r *TypeRegistry) displayType(expr ast.Expr) string {
 	switch t := expr.(type) {
@@ -535,7 +539,7 @@ func displayArrayType(t *ast.ArrayType) string {
 	switch typeExprStr(t.Elt) {
 	case "string":
 		return "`[]string`"
-	case claimsPathPointer:
+	case claimsPathPointer, claimRef:
 		return "`[]claims path pointer`"
 	case "int":
 		return "`[]int`"
@@ -549,7 +553,7 @@ func displaySelectorType(t *ast.SelectorExpr) string {
 	switch {
 	case t.Sel.Name == "Duration":
 		return "`duration`"
-	case typeExprStr(t) == claimsPathPointer:
+	case typeExprStr(t) == claimsPathPointer, typeExprStr(t) == claimRef:
 		return "`claims path pointer`"
 	}
 	return "`object`"

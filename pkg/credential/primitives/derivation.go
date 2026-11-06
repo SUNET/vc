@@ -15,9 +15,9 @@ import (
 // generator. Derivation is the single source of truth: gen_config_docs walks
 // these fields, and the derivation_entry struct-level validator (registered
 // in pkg/helpers) enforces the exactly-one-field rule. A primitive reads the
-// claim at its claimpath.Pointer field Input and writes the claim at its
-// field Output, which defaults to Input; CheckDerivations finds both by
-// these names.
+// claim at its claimpath.Ref field Input and writes the claim at its field
+// Output, a claimpath.Pointer or a claimpath.Ref, which defaults to Input;
+// CheckDerivations finds both by these names.
 
 // Derivation is one post-verification claim computation configured on a scope; exactly one field must be set and that field's Apply method runs.
 //
@@ -79,13 +79,17 @@ type Applier interface {
 
 // Claims is what a derivation reads.
 type Claims interface {
-	// Input returns the claim at an input pointer: in the issued claims
-	// when an earlier derivation of the list writes the pointer or a
-	// prefix of it, in the source claims otherwise. A claim the claims
-	// hold in another structure than the pointer selects is absent.
-	Input(p claimpath.Pointer) (any, bool, error)
-	// Issued returns the claim at a pointer into the issued claims.
-	Issued(p claimpath.Pointer) (any, bool, error)
+	// Input returns the claim an input names. An input upgraded from a
+	// dotted name reads the top-level key of that name when the claims
+	// hold it. Otherwise it reads its pointer: in the issued claims when
+	// an earlier derivation of the list writes the pointer or a prefix of
+	// it, in the source claims otherwise. A claim the claims hold in
+	// another structure than the pointer selects is absent.
+	Input(r claimpath.Ref) (any, bool, error)
+	// Issued returns the claim at a pointer into the issued claims. A Ref
+	// upgraded from a dotted name reads the top-level key of that name
+	// when the claims hold it.
+	Issued(r claimpath.Ref) (any, bool, error)
 	// Named returns the pointer into the issued claims of a claim a
 	// primitive names itself, such as age_over_18.
 	Named(name string) (claimpath.Pointer, error)
@@ -114,17 +118,13 @@ func (d *Derivation) Apply(claims Claims, now time.Time) ([]Write, error) {
 	return out, nil
 }
 
-// Input returns the pointer of the claim the configured primitive reads.
-func (d *Derivation) Input() (claimpath.Pointer, bool) {
+// Input returns the claim the configured primitive reads.
+func (d *Derivation) Input() (claimpath.Ref, bool) {
 	a, _, err := d.selected()
 	if err != nil {
-		return claimpath.Pointer{}, false
+		return claimpath.Ref{}, false
 	}
-	input, ok := pointerField(a, "Input")
-	if !ok {
-		return claimpath.Pointer{}, false
-	}
-	return *input, true
+	return inputOf(a)
 }
 
 // ownOutputs is a primitive that names the claims it writes itself.
@@ -153,23 +153,39 @@ func (d *Derivation) Outputs(named func(string) (claimpath.Pointer, error)) ([]c
 // outputOf returns the claim a primitive writes: its Output, or its Input
 // when Output is unset.
 func outputOf(a Applier) (claimpath.Pointer, bool) {
-	if output, ok := pointerField(a, "Output"); ok && !output.IsZero() {
-		return *output, true
+	if output, ok := claimField(a, "Output"); ok && !output.IsZero() {
+		return output.Path, true
 	}
-	if input, ok := pointerField(a, "Input"); ok {
-		return *input, true
+	if input, ok := inputOf(a); ok {
+		return input.Path, true
 	}
 	return claimpath.Pointer{}, false
 }
 
-// pointerField returns the address of a primitive's claimpath.Pointer field
-// name.
-func pointerField(a Applier, name string) (*claimpath.Pointer, bool) {
-	f := reflect.ValueOf(a).Elem().FieldByName(name)
-	if !f.IsValid() || f.Type() != reflect.TypeFor[claimpath.Pointer]() {
-		return nil, false
+// inputOf returns a primitive's claimpath.Ref field Input.
+func inputOf(a Applier) (claimpath.Ref, bool) {
+	f := reflect.ValueOf(a).Elem().FieldByName("Input")
+	if !f.IsValid() {
+		return claimpath.Ref{}, false
 	}
-	return f.Addr().Interface().(*claimpath.Pointer), true
+	input, ok := f.Interface().(claimpath.Ref)
+	return input, ok
+}
+
+// claimField returns a primitive's field name, a claimpath.Pointer or a
+// claimpath.Ref, as a Ref.
+func claimField(a Applier, name string) (claimpath.Ref, bool) {
+	f := reflect.ValueOf(a).Elem().FieldByName(name)
+	if !f.IsValid() {
+		return claimpath.Ref{}, false
+	}
+	switch claim := f.Interface().(type) {
+	case claimpath.Pointer:
+		return claimpath.Ref{Path: claim}, true
+	case claimpath.Ref:
+		return claim, true
+	}
+	return claimpath.Ref{}, false
 }
 
 // ReformatsInput reports whether the configured primitive's output is a

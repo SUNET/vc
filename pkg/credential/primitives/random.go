@@ -72,7 +72,7 @@ type RandomArgs struct {
 	// Output is the target claim.
 	//
 	// There is no Input: this primitive reads nothing.
-	Output claimpath.Pointer `yaml:"output" validate:"required" doc_example:"[\"document_id\"]"`
+	Output claimpath.Ref `yaml:"output" validate:"required" doc_example:"[\"document_id\"]"`
 
 	// Format selects the shape of the value: "uuid" (the default), "hex" or
 	// "base64url".
@@ -109,7 +109,7 @@ func (a *RandomArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Write{{Path: a.Output, Value: value}}, nil
+	return []Write{{Path: a.Output.Path, Value: value}}, nil
 }
 
 // generate produces one value in the configured format. Config validation

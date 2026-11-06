@@ -257,13 +257,17 @@ func (d *Document) claimMappings(template ast.Node, queries []query, convert boo
 	if err != nil {
 		return err
 	}
+	note := conversion.note
+	if note != "" {
+		note += "; the keyed form reads " + conversion.text
+	}
 	d.rewrites = append(d.rewrites, Rewrite{
 		File: d.file,
 		Path: entry.GetPath(),
 		Line: line,
 		Old:  old,
 		New:  conversion.text,
-		Note: conversion.note,
+		Note: note,
 	})
 	if !convert || conversion.note != "" {
 		return nil
