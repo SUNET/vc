@@ -65,10 +65,11 @@
 
 ### Fixed
 
-- **`CloneNestedClaims` deep-copies arrays**: it assigned every `[]any` by
-  reference, including arrays inside copied objects, so a write through the
-  copy into an array reached the caller's claims. The derivation pipeline
-  walks objects only, so this affects code that writes into array elements.
+- **`CloneNestedClaims` deep-copies arrays**: it assigned every `[]any`,
+  `[]string`, `bson.A` and `bson.D` by reference, including arrays inside
+  copied objects, so a write through the copy into an array reached the
+  caller's claims. The derivation pipeline walks objects only, so this affects
+  code that writes into array elements.
 
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
