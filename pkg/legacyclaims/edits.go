@@ -3,6 +3,7 @@ package legacyclaims
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -79,6 +80,60 @@ func (d *Document) carry(c claimNode, convert bool) error {
 	key := strconv.Quote(c.name)
 	note := fmt.Sprintf("it reads the key %s before %s; write %s when the claims hold no key %s", key, text, text, key)
 	return d.recordKept(c.node, string(d.src[start:end]), text, note)
+}
+
+// ErrUpgradedRef refuses the mapping {dotted, path} where a file writes a
+// claim. The loader writes that mapping for a dotted name a role looks up
+// as one top-level key first. A file writes the name, which warns at load,
+// or a claims path pointer.
+var ErrUpgradedRef = errors.New("the mapping {dotted, path} is the form the loader gives a dotted claim name; write the name or a claims path pointer")
+
+// refuseUpgradedRefs refuses the mapping {dotted, path} where n holds it
+// as a claim: as the value of one of keys, or as an element of a sequence
+// that value is. It reads each mapping a merge key adds where the merge
+// key writes it. The loader resolves each alias before it reads a file,
+// and the decode of that text meets the mapping an alias stands for.
+func refuseUpgradedRefs(n ast.Node, keys ...string) error {
+	if isNull(n) {
+		return nil
+	}
+	var found ast.Node
+	ast.Walk(visitFunc(func(child ast.Node) {
+		entry, ok := child.(*ast.MappingValueNode)
+		if !ok || found != nil {
+			return
+		}
+		name, ok := scalarKey(annotated(entry.Key))
+		if !ok || !slices.Contains(keys, name) {
+			return
+		}
+		claims := []ast.Node{entry.Value}
+		if list, ok := annotated(entry.Value).(*ast.SequenceNode); ok {
+			claims = list.Values
+		}
+		if i := slices.IndexFunc(claims, isUpgradedRef); i >= 0 {
+			found = claims[i]
+		}
+	}), n)
+	if found != nil {
+		return fmt.Errorf("%s: %w", found.GetPath(), ErrUpgradedRef)
+	}
+	return nil
+}
+
+// isUpgradedRef reports whether a node is a mapping with the key dotted.
+func isUpgradedRef(n ast.Node) bool {
+	var list []*ast.MappingValueNode
+	switch v := annotated(n).(type) {
+	case *ast.MappingNode:
+		list = v.Values
+	case *ast.MappingValueNode:
+		list = []*ast.MappingValueNode{v}
+	}
+	return slices.ContainsFunc(list, func(entry *ast.MappingValueNode) bool {
+		name, ok := scalarKey(annotated(entry.Key))
+		return ok && name == "dotted"
+	})
 }
 
 // replaceScalar replaces a scalar with the sequence of a pointer.

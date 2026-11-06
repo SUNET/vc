@@ -55,10 +55,13 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		dotted, pointer string
-		claim           func(model.DataSources) claimpath.Ref
-		want            claimpath.Pointer
+		name   string
+		dotted string
+		// pointer is the claim in the current spelling. It is empty where
+		// the upgrade carries the name: a file writes no such claim.
+		pointer string
+		claim   func(model.DataSources) claimpath.Ref
+		want    claimpath.Pointer
 		// carried is the name the upgrade carries beside the pointer.
 		carried string
 	}{
@@ -79,7 +82,6 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 		{
 			name:    "a bare claim of a presented mdoc",
 			dotted:  presentation("pid_mdoc", "          required_claims:\n            given_name: []\n"),
-			pointer: presentation("pid_mdoc", "          required_claims:\n            - path: {dotted: given_name, path: [org.iso.18013.5.1, given_name]}\n"),
 			claim:   requiredClaim,
 			want:    claimpath.Keys("org.iso.18013.5.1", "given_name"),
 			carried: "given_name",
@@ -119,7 +121,6 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 		{
 			name:    "a derivation input an earlier derivation writes",
 			dotted:  derivations("            - copy: {input: birthdate, output: a.b}\n            - copy: {input: a.b, output: birth_date}\n"),
-			pointer: derivations("            - copy: {input: [birthdate], output: [a, b]}\n            - copy: {input: {dotted: a.b, path: [a, b]}, output: [" + nymAuth + ", birth_date]}\n"),
 			claim:   copyOf(1, false),
 			want:    claimpath.Keys("a", "b"),
 			carried: "a.b",
@@ -136,7 +137,6 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 		{
 			name:    "a key a primitive wrote as the whole name, read by a later derivation",
 			dotted:  derivations("            - swamid_highest_assurance_level: {input: assurance_level, output: a.b}\n            - copy: {input: a.b, output: birth_date}\n"),
-			pointer: derivations("            - swamid_highest_assurance_level: {input: [assurance_level], output: [a.b]}\n            - copy: {input: {dotted: a.b, path: [a, b]}, output: [" + nymAuth + ", birth_date]}\n"),
 			claim:   copyOf(1, false),
 			want:    claimpath.Keys("a", "b"),
 			carried: "a.b",
@@ -145,6 +145,9 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for form, dataSources := range map[string]string{"dotted": tt.dotted, "pointer": tt.pointer} {
+				if dataSources == "" {
+					continue
+				}
 				cfg := rolesCfg()
 				sources, _, err := decodeDataSources("roles.yaml", dataSourcesFile(dataSources), cfg)
 				require.NoError(t, err, form)
@@ -155,6 +158,37 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 				carried, _ := claim.Dotted()
 				assert.Equal(t, tt.carried, carried, form)
 			}
+		})
+	}
+}
+
+// The loader refuses a file that writes the mapping {dotted, path}, its
+// own form of an upgraded dotted name, at each claim that decodes it, and
+// through an alias that stands for it.
+func TestAFileWritesNoUpgradedName(t *testing.T) {
+	const presented = "presentation:\n  scopes:\n    nym_auth:\n      from:\n        pid_mdoc:\n          required_claims:\n"
+	tests := []struct{ name, dataSources string }{
+		{
+			name:        "a derivation input",
+			dataSources: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      derivations:\n        - copy: {input: {dotted: a.b, path: [a, b]}, output: [c]}\n",
+		},
+		{
+			name:        "a derivation input of a presented credential",
+			dataSources: presented + "            - path: [eu.europa.ec.eudi.pid.1, given_name]\n          derivations:\n            - copy: {input: {dotted: given_name, path: [eu.europa.ec.eudi.pid.1, given_name]}, output: [eu.europa.ec.eudi.nym_auth.1, given_name]}\n",
+		},
+		{
+			name:        "a required claim",
+			dataSources: presented + "            - path: {dotted: given_name, path: [eu.europa.ec.eudi.pid.1, given_name]}\n",
+		},
+		{
+			name:        "an alias",
+			dataSources: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      x-claim: &claim {dotted: a.b, path: [a, b]}\n      derivations:\n        - copy: {input: *claim, output: [c]}\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := decodeDataSources("names.yaml", dataSourcesFile(tt.dataSources), rolesCfg())
+			require.ErrorIs(t, err, legacyclaims.ErrUpgradedRef)
 		})
 	}
 }

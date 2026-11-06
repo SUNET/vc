@@ -17,16 +17,23 @@ import (
 // unwrap returns the node an anchor or a tag annotates. An alias is an
 // error: the upgrade reads each claim where it is written.
 func unwrap(n ast.Node) (ast.Node, error) {
+	n = annotated(n)
+	if alias, ok := n.(*ast.AliasNode); ok {
+		return nil, fmt.Errorf("%s is an alias; write the claims it stands for in place", alias.GetPath())
+	}
+	return n, nil
+}
+
+// annotated returns the node an anchor or a tag annotates.
+func annotated(n ast.Node) ast.Node {
 	for {
 		switch v := n.(type) {
 		case *ast.AnchorNode:
 			n = v.Value
 		case *ast.TagNode:
 			n = v.Value
-		case *ast.AliasNode:
-			return nil, fmt.Errorf("%s is an alias; write the claims it stands for in place", v.GetPath())
 		default:
-			return n, nil
+			return n
 		}
 	}
 }

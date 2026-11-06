@@ -317,8 +317,15 @@ func (u *configUpgrade) derivationsOf(n ast.Node, source, issued *lazy, prepende
 	if err != nil {
 		return err
 	}
+	if err := refuseUpgradedRefs(derivations, derivationClaims...); err != nil {
+		return err
+	}
 	return u.derivations(derivations, source, issued, prepended)
 }
+
+// derivationClaims are the keys of the claims of a derivation and of its
+// opening.
+var derivationClaims = []string{"input", "output", "inputs"}
 
 // isMapping reports whether a node is a mapping: main's map form of a
 // list.
