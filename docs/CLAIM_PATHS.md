@@ -151,6 +151,11 @@ before then.
 | `claim_mappings` | `{given_name: given_name}` | `{<query id>: [{path: [given_name], claim: given_name}]}` |
 | `identity_match.claims` | `{"family_name": {"equals": "Doe"}}` | `[{"path": ["family_name"], "equals": "Doe"}]` |
 
+The entries of a `required_claims` or `document_claims` map load in name
+order, the order the earlier release read them in. The DCQL query asks for
+their claims in that order. Of two `document_claims` entries that write one
+claim, the later one in name order sets it.
+
 A dotted name reads as the role that holds it read it:
 
 | Role | JSON-based credential | mdoc |
@@ -231,6 +236,10 @@ map to the keyed form when the keyed form maps the same claims:
 
 It leaves any other map as written and prints why. Such a map keeps loading
 with its warning.
+
+It converts a `required_claims` or `document_claims` map whose entries are
+in name order. It leaves any other such map as written and prints why: a
+list keeps the order written. Sort the entries by name, then run it again.
 
 It leaves a name of a role that reads the whole name first as written, and
 prints why, where the table gives another claim than the top-level key of

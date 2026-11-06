@@ -83,8 +83,10 @@ func TestMigrateKeepsTheMeaningAndTheComments(t *testing.T) {
 				require.NoError(t, err)
 				got, err := configuration.LoadFile(t.Context(), file, schemas)
 				require.NoError(t, err)
-				assert.Empty(t, got.Deprecations, "the converted file holds no earlier spelling")
-				want.Deprecations = nil
+				for _, rewrite := range got.Deprecations {
+					assert.NotEmpty(t, rewrite.Note, "the converter leaves only spellings it reports: %s", rewrite)
+				}
+				want.Deprecations, got.Deprecations = nil, nil
 				assert.Equal(t, want, got)
 				return
 			}
