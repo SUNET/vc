@@ -67,10 +67,10 @@ tmp/
 # Runtime secrets – never commit real values
 secrets.yaml
 
-# Per-profile secrets from the removed Fly tooling. Nothing generates these
-# any more, but a checkout that ran the old `make fly-launch-*` still has
-# them, and un-ignoring a real secret is not worth the tidiness.
-/secrets.sunet-vc*.yaml
+# The secrets file fly/deploy.sh writes for each --env prefix.
+/secrets.*.yaml
+!/secrets.example.yaml
 
-# A candidate fly/deploy.sh kept after a failed rename holds live secrets.
-/secrets.*.yaml.*
+# A candidate fly/deploy.sh kept after a failed send or rename holds live
+# secrets. It sits beside the file a symlink resolves to.
+secrets*.yaml.*
