@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/gin-contrib/sessions"
@@ -147,7 +147,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 		}
 
 		// This page serves every route, so it shows the union over all of them.
-		reach, err := httphelpers.ResolveResourceReachOnAnyRoute(s.spocpEngine, spocpService, subject)
+		reach, err := resourcereach.ResolveOnAnyRoute(s.spocpEngine, spocpService, subject)
 		if err != nil {
 			return nil, err
 		}
@@ -191,7 +191,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			"scopes":                    scopes,
 			"scope_templates":           scopeTemplates,
 			"allowed_authentic_sources": allowedSources,
-			"has_identity_mapping":      reach.ReachesScope(httphelpers.IdentityMappingScope),
+			"has_identity_mapping":      reach.ReachesScope(resourcereach.IdentityMappingScope),
 			"csrf_token":                session.Get("csrf_token"),
 			"unrestricted":              !authEnabled,
 			"preauth_scopes":            preauthScopes,
@@ -201,7 +201,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 }
 
 // filterAllowedScopes returns the configured scopes that reach accepts.
-func filterAllowedScopes(allScopes []string, reach httphelpers.ResourceReach) []string {
+func filterAllowedScopes(allScopes []string, reach resourcereach.Reach) []string {
 	scopes := make([]string, 0, len(allScopes))
 	for _, scope := range allScopes {
 		if reach.ReachesScope(scope) {

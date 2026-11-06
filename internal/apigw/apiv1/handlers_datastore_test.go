@@ -6,10 +6,10 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/stretchr/testify/assert"
@@ -176,7 +176,7 @@ func TestDatastoreList(t *testing.T) {
 
 	t.Run("list by identity", func(t *testing.T) {
 		reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			IdentityMappingID: "person-001",
 		})
 		require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestDatastoreList(t *testing.T) {
 
 	t.Run("list by identity and scope", func(t *testing.T) {
 		reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			IdentityMappingID: "person-001",
 			Scope:             "ehic",
 		})
@@ -195,7 +195,7 @@ func TestDatastoreList(t *testing.T) {
 
 	t.Run("list by identity, scope, and source", func(t *testing.T) {
 		reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			AuthenticSource:   "SUNET",
 			IdentityMappingID: "person-001",
 			Scope:             "ehic",
@@ -207,7 +207,7 @@ func TestDatastoreList(t *testing.T) {
 
 	t.Run("no matches", func(t *testing.T) {
 		reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			IdentityMappingID: "non-existent",
 		})
 		require.NoError(t, err)
@@ -531,7 +531,7 @@ func TestMultipleDocumentsPerIdentity(t *testing.T) {
 	}
 
 	reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-		Reach:             httphelpers.ReachEverything(),
+		Reach:             resourcereach.Everything(),
 		AuthenticSource:   "SUNET",
 		IdentityMappingID: "person-001",
 	})
@@ -540,7 +540,7 @@ func TestMultipleDocumentsPerIdentity(t *testing.T) {
 
 	// Filter by scope
 	reply, err = client.DatastoreList(t.Context(), &DatastoreListRequest{
-		Reach:             httphelpers.ReachEverything(),
+		Reach:             resourcereach.Everything(),
 		AuthenticSource:   "SUNET",
 		IdentityMappingID: "person-001",
 		Scope:             "pda1",
@@ -585,7 +585,7 @@ func TestMultipleIdentitiesPerDocument(t *testing.T) {
 	t.Run("each identity can list the document", func(t *testing.T) {
 		for _, id := range []string{"person-A", "person-B"} {
 			reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-				Reach:             httphelpers.ReachEverything(),
+				Reach:             resourcereach.Everything(),
 				AuthenticSource:   "SUNET",
 				IdentityMappingID: id,
 				Scope:             "shared",
@@ -652,7 +652,7 @@ func TestMultipleIdentitiesPerDocument(t *testing.T) {
 
 		// person-A can no longer list
 		listReply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			AuthenticSource:   "SUNET",
 			IdentityMappingID: "person-A",
 			Scope:             "shared",
@@ -662,7 +662,7 @@ func TestMultipleIdentitiesPerDocument(t *testing.T) {
 
 		// person-B still has access
 		listReply, err = client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			AuthenticSource:   "SUNET",
 			IdentityMappingID: "person-B",
 			Scope:             "shared",
@@ -673,7 +673,7 @@ func TestMultipleIdentitiesPerDocument(t *testing.T) {
 		// person-C still has access
 		_ = identityStore // used in setup
 		listReply, err = client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			AuthenticSource:   "SUNET",
 			IdentityMappingID: "person-C",
 			Scope:             "shared",
@@ -908,7 +908,7 @@ func TestDatastoreUpload(t *testing.T) {
 		require.NoError(t, err)
 
 		reply, err := client.DatastoreList(t.Context(), &DatastoreListRequest{
-			Reach:             httphelpers.ReachEverything(),
+			Reach:             resourcereach.Everything(),
 			AuthenticSource:   "SUNET",
 			IdentityMappingID: "list-person",
 			Scope:             "ehic",

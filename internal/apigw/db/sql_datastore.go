@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/sqlstore"
 
 	"github.com/jmoiron/sqlx"
@@ -450,7 +450,7 @@ func (w *sqlWhere) selected(dialect sqlstore.Dialect, column, value string) {
 
 // withinReach adds the pair condition of reach. It returns false when reach
 // matches no document.
-func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach httphelpers.ResourceReach, sourceColumn, scopeColumn string) bool {
+func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach resourcereach.Reach, sourceColumn, scopeColumn string) bool {
 	if reach.Everything() {
 		return true
 	}
@@ -476,7 +476,7 @@ func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach httphelpers.Resou
 }
 
 // datastoreWhere adds the conditions of the selected values and the reach.
-func (c *SQLDatastoreColl) datastoreWhere(where *sqlWhere, source, scope string, reach httphelpers.ResourceReach) bool {
+func (c *SQLDatastoreColl) datastoreWhere(where *sqlWhere, source, scope string, reach resourcereach.Reach) bool {
 	where.selected(c.dialect, "d.authentic_source", source)
 	where.selected(c.dialect, "d.scope", scope)
 	return where.withinReach(c.dialect, reach, "d.authentic_source", "d.scope")

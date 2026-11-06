@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/SUNET/vc/internal/apigw/db"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"github.com/google/uuid"
 )
@@ -200,7 +200,7 @@ type IdentityMappingSearchRequest struct {
 	Limit           int64  `json:"limit" form:"limit"`
 
 	// Reach comes from the authorization middleware. Every binder ignores it.
-	Reach httphelpers.ResourceReach `json:"-" form:"-" header:"-" uri:"-"`
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // IdentityMappingSearchReply is the reply for searching identity mappings

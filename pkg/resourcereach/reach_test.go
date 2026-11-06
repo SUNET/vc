@@ -1,7 +1,11 @@
-package httphelpers
+package resourcereach_test
 
 import (
 	"testing"
+
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,13 +26,14 @@ func TestResourceReachAgreesWithEngine(t *testing.T) {
 		for _, scope := range positions {
 			rule := "(vc (service apigw)(method GET)(path /api/v1/*)(subject alice)(authentic_source " + source + ")(scope " + scope + "))"
 			t.Run(rule, func(t *testing.T) {
-				engine := buildEngine(t, rule)
-				reach, err := ResolveResourceReach(engine, service, method, path, subject)
+				engine, err := httphelpers.BuildSPOCPEngine(model.APIAuth{Rules: []string{rule}})
+				require.NoError(t, err)
+				reach, err := resourcereach.Resolve(engine, service, method, path, subject)
 				require.NoError(t, err)
 
 				for _, namedSource := range values {
 					for _, namedScope := range values {
-						allowed := engine.QueryElement(BuildSPOCPQuery(service, method, path, subject, namedSource, namedScope))
+						allowed := engine.QueryElement(httphelpers.BuildSPOCPQuery(service, method, path, subject, namedSource, namedScope))
 						assert.Equal(t, allowed, !reach.Selecting(namedSource, namedScope).Nothing(),
 							"Selecting(%q, %q)", namedSource, namedScope)
 						if !allowed {
@@ -41,11 +46,11 @@ func TestResourceReachAgreesWithEngine(t *testing.T) {
 	}
 }
 
-func reachPairsAccept(reach ResourceReach, source, scope string) bool {
+func reachPairsAccept(reach resourcereach.Reach, source, scope string) bool {
 	if reach.Everything() {
 		return true
 	}
-	matches := func(value ResourceValue, stored string) bool {
+	matches := func(value resourcereach.Value, stored string) bool {
 		exact, isExact := value.Exact()
 		return !isExact || exact == stored
 	}

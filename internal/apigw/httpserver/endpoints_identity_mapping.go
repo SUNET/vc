@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"go.opentelemetry.io/otel/codes"
 
@@ -89,7 +90,7 @@ func (s *Service) endpointIdentityMappingSearch(ctx context.Context, c *gin.Cont
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	if !reach.ReachesScope(httphelpers.IdentityMappingScope) {
+	if !reach.ReachesScope(resourcereach.IdentityMappingScope) {
 		return nil, errForbidden
 	}
 

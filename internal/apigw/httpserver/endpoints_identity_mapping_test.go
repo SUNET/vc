@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-contrib/sessions"
@@ -324,7 +325,7 @@ func TestIdentityMappingSearch_SPOCPAllowed(t *testing.T) {
 	assert.True(t, mock.searchCalled)
 	// The named source is the only one reached.
 	require.NotNil(t, mock.searchReq)
-	sources, everySource := mock.searchReq.Reach.SourcesForScope(httphelpers.IdentityMappingScope)
+	sources, everySource := mock.searchReq.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
 	assert.False(t, everySource)
 	assert.Equal(t, []string{"SUNET"}, sources)
 }

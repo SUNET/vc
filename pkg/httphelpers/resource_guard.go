@@ -8,6 +8,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,7 +49,7 @@ func normalizeResourcePairs(c *gin.Context, pairs []resourcePair) []resourcePair
 	if strings.Contains(c.FullPath(), "/identity/mapping") {
 		for i := range pairs {
 			if pairs[i].authenticSource != "" && pairs[i].scope == "" {
-				pairs[i].scope = IdentityMappingScope
+				pairs[i].scope = resourcereach.IdentityMappingScope
 			}
 		}
 	}

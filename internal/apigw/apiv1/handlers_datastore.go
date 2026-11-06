@@ -10,9 +10,9 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/google/uuid"
@@ -311,7 +311,7 @@ type DatastoreListRequest struct {
 	ValidTo           int64  `json:"valid_to"`
 
 	// Reach comes from the authorization middleware. Every binder ignores it.
-	Reach httphelpers.ResourceReach `json:"-" form:"-" header:"-" uri:"-"`
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreListReply is the reply for a list of documents
@@ -430,7 +430,7 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		Scope:             req.Scope,
 		IdentityMappingID: personID,
 		// The SPOCP guard answered the selectors this request names.
-		Reach: httphelpers.ReachEverything(),
+		Reach: resourcereach.Everything(),
 	})
 	if err != nil {
 		return nil, err
@@ -506,7 +506,7 @@ type DatastoreSearchRequest struct {
 	Limit           int64  `json:"limit" form:"limit"`
 
 	// Reach comes from the authorization middleware. Every binder ignores it.
-	Reach httphelpers.ResourceReach `json:"-" form:"-" header:"-" uri:"-"`
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreSearchReply is the reply for searching documents

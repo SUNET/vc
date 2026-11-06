@@ -13,6 +13,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/spocputil"
 
 	"github.com/gin-gonic/gin"
@@ -331,10 +332,8 @@ func (p *oidcKeySetProvider) GetKeySet(ctx context.Context) (jwk.Set, error) {
 // internal/verifier.
 type SafeEngine = spocputil.Engine
 
-// apiAuthRuleDimensions lists the tagged sub-lists that every SPOCP endpoint
-// rule must contain, in positional order. All six parts are mandatory — use
-// * as wildcard for fields you don't want to restrict.
-var apiAuthRuleDimensions = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
+// apiAuthRuleDimensions lists the tagged sub-lists of an SPOCP endpoint rule.
+var apiAuthRuleDimensions = resourcereach.RuleDimensions()
 
 // BuildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
@@ -619,7 +618,7 @@ func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth
 	default:
 		m.log.Info("api_auth_mode", "mode", "none")
 		return func(c *gin.Context) {
-			c.Set(resourceReachKey, ReachEverything())
+			c.Set(resourceReachKey, resourcereach.Everything())
 			c.Next()
 		}, nil
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 
 	"github.com/stretchr/testify/assert"
@@ -75,7 +76,7 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	assert.Equal(t, "doc-1", byIdentity["SUNET"].Meta.DocumentID)
 
 	// List
-	listed, err := store.List(ctx, &ListQuery{IdentityMappingID: "identity-2", Reach: httphelpers.ReachEverything()})
+	listed, err := store.List(ctx, &ListQuery{IdentityMappingID: "identity-2", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 	assert.Equal(t, "doc-1", listed[0].Meta.DocumentID)
@@ -102,13 +103,13 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	assert.Equal(t, []string{"OTHER", "SUNET"}, sources)
 
 	// Search by free text across document_data.
-	results, err := store.Search(ctx, &SearchDocumentsQuery{Search: "Karlsson", Reach: httphelpers.ReachEverything()})
+	results, err := store.Search(ctx, &SearchDocumentsQuery{Search: "Karlsson", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "doc-2", results[0].Meta.DocumentID)
 
 	// Search by authentic_source filter.
-	results, err = store.Search(ctx, &SearchDocumentsQuery{AuthenticSource: "OTHER", Reach: httphelpers.ReachEverything()})
+	results, err = store.Search(ctx, &SearchDocumentsQuery{AuthenticSource: "OTHER", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 
@@ -208,7 +209,7 @@ func testDatastoreReachContract(t *testing.T, store DatastoreStore) {
 		t.Run(row.name, func(t *testing.T) {
 			engine, err := httphelpers.BuildSPOCPEngine(model.APIAuth{Rules: row.rules})
 			require.NoError(t, err)
-			reach, err := httphelpers.ResolveResourceReach(engine, "apigw", "POST", "/p", "alice")
+			reach, err := resourcereach.Resolve(engine, "apigw", "POST", "/p", "alice")
 			require.NoError(t, err)
 			reach = reach.Selecting(row.source, row.scope)
 

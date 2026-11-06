@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -237,7 +237,7 @@ func (c *DatastoreColl) GetByIdentity(ctx context.Context, scope, identityMappin
 
 // datastoreFilter holds the equality condition of each selected value and the
 // pair condition of reach. It returns false when reach matches no document.
-func datastoreFilter(source, scope string, reach httphelpers.ResourceReach) (bson.M, bool) {
+func datastoreFilter(source, scope string, reach resourcereach.Reach) (bson.M, bool) {
 	filter := bson.M{}
 	if source != "" {
 		filter["meta.authentic_source"] = bson.M{"$eq": source}
@@ -276,7 +276,7 @@ type ListQuery struct {
 	ValidTo           int64  `json:"valid_to" bson:"valid_to"`
 
 	// Reach bounds the result. Its zero value matches no document.
-	Reach httphelpers.ResourceReach `json:"-" bson:"-"`
+	Reach resourcereach.Reach `json:"-" bson:"-"`
 }
 
 // List return matching documents if any, or error
@@ -382,7 +382,7 @@ type SearchDocumentsQuery struct {
 	Limit           int64  `json:"limit"`
 
 	// Reach bounds the result. Its zero value matches no document.
-	Reach httphelpers.ResourceReach `json:"-"`
+	Reach resourcereach.Reach `json:"-"`
 }
 
 // Search returns documents matching a text search or filters, with a limit

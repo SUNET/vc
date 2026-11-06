@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -245,8 +245,8 @@ type SearchMappingsQuery struct {
 	Limit           int64  `json:"limit"`
 
 	// Reach bounds the result by the sources it pairs with
-	// httphelpers.IdentityMappingScope. Its zero value matches no mapping.
-	Reach httphelpers.ResourceReach `json:"-"`
+	// resourcereach.IdentityMappingScope. Its zero value matches no mapping.
+	Reach resourcereach.Reach `json:"-"`
 }
 
 // SearchMappings returns identity mappings matching a text search or filters, with a limit
@@ -259,7 +259,7 @@ func (c *IdentityMappingsColl) SearchMappings(ctx context.Context, query *Search
 	if query.AuthenticSource != "" {
 		sourceCondition["$eq"] = query.AuthenticSource
 	}
-	sources, everySource := query.Reach.SourcesForScope(httphelpers.IdentityMappingScope)
+	sources, everySource := query.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
 	if !everySource {
 		if len(sources) == 0 {
 			return []*model.IdentityMapping{}, nil

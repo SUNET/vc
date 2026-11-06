@@ -6,6 +6,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 
 	"github.com/stretchr/testify/assert"
@@ -100,13 +101,13 @@ func testIdentityMappingStoreContract(t *testing.T, store IdentityMappingStore) 
 	assert.ErrorIs(t, err, helpers.ErrNoIdentityFound)
 
 	// SearchMappings: free-text search over family_name.
-	results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: "Karlsson", Reach: httphelpers.ReachEverything()})
+	results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: "Karlsson", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "person-3", results[0].AuthenticSourcePersonID)
 
 	// SearchMappings: filter by authentic_source.
-	results, err = store.SearchMappings(ctx, &SearchMappingsQuery{AuthenticSource: "OTHER", Reach: httphelpers.ReachEverything()})
+	results, err = store.SearchMappings(ctx, &SearchMappingsQuery{AuthenticSource: "OTHER", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 
@@ -210,13 +211,13 @@ func testIdentityMappingReachContract(t *testing.T, store IdentityMappingStore) 
 		t.Run(row.name, func(t *testing.T) {
 			engine, err := httphelpers.BuildSPOCPEngine(model.APIAuth{Rules: row.rules})
 			require.NoError(t, err)
-			reach, err := httphelpers.ResolveResourceReach(engine, "apigw", "GET", "/p", "alice")
+			reach, err := resourcereach.Resolve(engine, "apigw", "GET", "/p", "alice")
 			require.NoError(t, err)
 
 			want := []string{}
 			for _, source := range sources {
 				if (row.source == "" || row.source == source) &&
-					engine.QueryElement(httphelpers.BuildSPOCPQuery("apigw", "GET", "/p", "alice", source, httphelpers.IdentityMappingScope)) {
+					engine.QueryElement(httphelpers.BuildSPOCPQuery("apigw", "GET", "/p", "alice", source, resourcereach.IdentityMappingScope)) {
 					want = append(want, source)
 				}
 			}

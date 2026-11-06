@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,11 +20,11 @@ import (
 
 // reachAccepts answers for a fixture what a store's pair condition answers. The
 // store contract test holds the same answer on Mongo, Postgres and MariaDB.
-func reachAccepts(reach httphelpers.ResourceReach, source, scope string) bool {
+func reachAccepts(reach resourcereach.Reach, source, scope string) bool {
 	if reach.Everything() {
 		return true
 	}
-	matches := func(value httphelpers.ResourceValue, stored string) bool {
+	matches := func(value resourcereach.Value, stored string) bool {
 		exact, isExact := value.Exact()
 		return !isExact || exact == stored
 	}
@@ -51,7 +52,7 @@ type mappingFixtureStore struct {
 }
 
 func (s *mappingFixtureStore) SearchMappings(_ context.Context, query *db.SearchMappingsQuery) ([]*model.IdentityMapping, error) {
-	sources, everySource := query.Reach.SourcesForScope(httphelpers.IdentityMappingScope)
+	sources, everySource := query.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
 	found := []*model.IdentityMapping{}
 	seen := []string{}
 	for _, meta := range s.documents {
@@ -112,7 +113,7 @@ func TestIdentityMappingSearchKeepsSourcesPairedWithItsScope(t *testing.T) {
 			}
 			want := []string{}
 			for _, source := range sources {
-				if chain.spocp.QueryElement(httphelpers.BuildSPOCPQuery("apigw", http.MethodGet, "/api/v1/identity/mapping/search", "alice", source, httphelpers.IdentityMappingScope)) {
+				if chain.spocp.QueryElement(httphelpers.BuildSPOCPQuery("apigw", http.MethodGet, "/api/v1/identity/mapping/search", "alice", source, resourcereach.IdentityMappingScope)) {
 					want = append(want, source)
 				}
 			}

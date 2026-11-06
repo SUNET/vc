@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/sqlstore"
 
 	"github.com/jmoiron/sqlx"
@@ -230,7 +230,7 @@ func (c *SQLIdentityMappingsColl) SearchMappings(ctx context.Context, query *Sea
 
 	where := sqlWhere{}
 	where.selected(c.dialect, "authentic_source", query.AuthenticSource)
-	sources, everySource := query.Reach.SourcesForScope(httphelpers.IdentityMappingScope)
+	sources, everySource := query.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
 	if !everySource {
 		if len(sources) == 0 {
 			return []*model.IdentityMapping{}, nil
