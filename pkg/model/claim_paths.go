@@ -274,11 +274,18 @@ func (c *Cfg) checkScopeAttributeMapping(mapping AttributeMapping, scope string)
 	return checkAttributeMapping(mapping, document)
 }
 
-// checkAttributeMapping locates the claim of each attribute in shape.
+// checkAttributeMapping locates the claim of each attribute in shape. A
+// mapping writes into an empty document, which holds no array, so a claim's
+// location holds keys alone.
 func checkAttributeMapping(mapping AttributeMapping, shape claimpath.Shape) error {
 	for _, attribute := range slices.Sorted(maps.Keys(mapping)) {
-		if _, err := shape.LocateOne(mapping[attribute].Claim); err != nil {
+		claim := mapping[attribute].Claim
+		location, err := shape.LocateOne(claim)
+		if err != nil {
 			return fmt.Errorf("%s.claim: %w", attribute, err)
+		}
+		if keys, ok := location.KeyPrefix(); !ok || keys.Len() != location.Len() {
+			return fmt.Errorf("%s.claim: %s names an array element, and a mapping creates no array", attribute, claim)
 		}
 	}
 	return nil

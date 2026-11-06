@@ -924,12 +924,12 @@ AttributeConfig is a pure rename + presence step. Any value transformation
 a derivation on the target scope; see the Derivation Primitives catalog
 (pkg/credential/primitives).
 
-| Field      | Type                  | Description                                                                                                                                                      | Example                  | Default | Required |
-| ---------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
-| `claim`    | `claims path pointer` | Claims path pointer of the target claim in the document the mapping writes: the claims of an auth provider, or the credential document of an external_api scope. | `[identity, given_name]` | -       | Yes      |
-| `required` | `bool`                | Required indicates if this attribute must be present in the assertion/response                                                                                   | -                        | `false` | No       |
-| `default`  | `string`              | Optional default value if attribute is missing                                                                                                                   | -                        | -       | No       |
-| `as_array` | `bool`                | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim).         | -                        | -       | No       |
+| Field      | Type                  | Description                                                                                                                                                                                                                         | Example                  | Default | Required |
+| ---------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
+| `claim`    | `claims path pointer` | Claims path pointer of the target claim in the document the mapping writes: the claims of an auth provider, or the credential document of an external_api scope. A mapping creates no array, so the pointer names no array element. | `[identity, given_name]` | -       | Yes      |
+| `required` | `bool`                | Required indicates if this attribute must be present in the assertion/response                                                                                                                                                      | -                        | `false` | No       |
+| `default`  | `string`              | Optional default value if attribute is missing                                                                                                                                                                                      | -                        | -       | No       |
+| `as_array` | `bool`                | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim).                                                                            | -                        | -       | No       |
 
 ### `presentation`
 

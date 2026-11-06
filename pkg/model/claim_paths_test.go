@@ -31,6 +31,11 @@ func TestCheckClaimPathsRefusals(t *testing.T) {
 			refused:  "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      derivations:\n        - copy: {input: [nationalities, null], output: [nationality]}\n",
 			accepted: "assertion:\n  scopes:\n    ehic:\n      auth_provider: oidc\n      derivations:\n        - copy: {input: [nationalities, 0], output: [nationality]}\n",
 		},
+		{
+			name:     "an attribute mapping names no array element",
+			refused:  "external_api:\n  scopes:\n    ehic:\n      attribute_mapping:\n        degree: {claim: [degrees, 0, type]}\n",
+			accepted: "external_api:\n  scopes:\n    ehic:\n      attribute_mapping:\n        degree: {claim: [degrees, type]}\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

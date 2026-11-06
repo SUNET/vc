@@ -545,7 +545,8 @@ type AttributeMapping map[string]AttributeConfig
 type AttributeConfig struct {
 	// Claim is the claims path pointer of the target claim in the
 	// document the mapping writes: the claims of an auth provider, or the
-	// credential document of an external_api scope.
+	// credential document of an external_api scope. A mapping creates no
+	// array, so the pointer names no array element.
 	Claim claimpath.Pointer `yaml:"claim" validate:"required" doc_example:"[identity, given_name]"`
 
 	// Required indicates if this attribute must be present in the assertion/response
