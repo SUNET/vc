@@ -93,16 +93,16 @@ type RandomArgs struct {
 	Overwrite bool `yaml:"overwrite,omitempty"`
 }
 
-// Apply implements Applier.
+// Apply implements Applier. An output below a null, a scalar or an array
+// is an error, with or without Overwrite: the write would replace that
+// value, a claim the source data supplied.
 func (a *RandomArgs) Apply(claims Claims, _ time.Time) ([]Write, error) {
-	if !a.Overwrite {
-		v, present, err := claims.Issued(a.Output)
-		if err != nil {
-			return nil, err
-		}
-		if present && !isBlankClaim(v) {
-			return nil, nil
-		}
+	v, present, err := claims.Issued(a.Output)
+	if err != nil {
+		return nil, err
+	}
+	if !a.Overwrite && present && !isBlankClaim(v) {
+		return nil, nil
 	}
 
 	value, err := a.generate()

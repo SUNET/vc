@@ -165,7 +165,18 @@ func (s Shape) Set(claims map[string]any, p Pointer, value any) error {
 	if err != nil {
 		return err
 	}
-	return location.set(claims, value)
+	return location.set(claims, value, false)
+}
+
+// SetReplacing is Set where a key replaces a null, a scalar or an array
+// it passes through with a new object. An index still needs an element
+// of an array.
+func (s Shape) SetReplacing(claims map[string]any, p Pointer, value any) error {
+	location, err := s.LocateOne(p)
+	if err != nil {
+		return err
+	}
+	return location.set(claims, value, true)
 }
 
 // Delete removes the one claim p names from claims. An absent claim is

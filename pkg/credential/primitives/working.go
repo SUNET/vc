@@ -61,9 +61,10 @@ func (w *Working) InputShape(p claimpath.Pointer) claimpath.Shape {
 	return w.shapes.Source
 }
 
-// Write writes value at a pointer into the issued claims.
+// Write writes value at a pointer into the issued claims. A key replaces
+// a null, a scalar or an array it passes through with a new object.
 func (w *Working) Write(p claimpath.Pointer, value any) error {
-	return w.shapes.Issued.Set(w.claims, p, value)
+	return w.shapes.Issued.SetReplacing(w.claims, p, value)
 }
 
 // Wrote records the claims a derivation writes, for the inputs of the

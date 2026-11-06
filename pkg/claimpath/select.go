@@ -123,12 +123,13 @@ func (p Pointer) get(root map[string]any) (any, bool, error) {
 }
 
 // set writes value at a pointer of keys and indices, creating the objects
-// a key passes through.
-func (p Pointer) set(root map[string]any, value any) error {
+// a key passes through. With replace, a key also replaces a null, a scalar
+// or an array it passes through with a new object.
+func (p Pointer) set(root map[string]any, value any, replace bool) error {
 	n := len(p.components) - 1
 	var container any = root
 	for i, c := range p.components[:n] {
-		next, err := c.child(container, p.components[i+1])
+		next, err := c.child(container, p.components[i+1], replace)
 		if err != nil {
 			return fmt.Errorf("%w: %s, element %d: %w", ErrMismatch, p, i, err)
 		}
@@ -140,22 +141,27 @@ func (p Pointer) set(root map[string]any, value any) error {
 	return nil
 }
 
-// child returns the container the component selects in container, and
+// child returns the container the component selects in container. It
 // creates an object at a missing key that the next component, a key,
-// passes through.
-func (c Component) child(container any, next Component) (any, error) {
+// passes through. With replace, it also creates one in place of a value
+// other than an object that the next component, a key, passes through.
+func (c Component) child(container any, next Component, replace bool) (any, error) {
 	children, err := c.children(container)
 	if err != nil {
 		return nil, err
 	}
-	if len(children) == 1 {
-		return children[0], nil
-	}
-	if c.kind != keyKind || next.kind != keyKind {
+	switch {
+	case len(children) == 1:
+		if _, object := children[0].(map[string]any); object || !replace || next.kind != keyKind {
+			return children[0], nil
+		}
+	case c.kind != keyKind || next.kind != keyKind:
 		return nil, fmt.Errorf("%s selects no element to write into", c)
 	}
 	created := map[string]any{}
-	container.(map[string]any)[c.key] = created
+	if err := c.put(container, created); err != nil {
+		return nil, err
+	}
 	return created, nil
 }
 
