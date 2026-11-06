@@ -35,9 +35,10 @@ type DatastoreConfig struct {
 	Scopes map[string]DatastoreScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 
 	// Import configures automatic data import from JSON files at startup.
-	// When configured, APIGW reads JSON files on every startup and imports
-	// each document whose natural key is not already present, so newly added
-	// fixtures (or a whole new scope) are imported on restart.
+	// When configured, APIGW reads JSON files on every startup and inserts
+	// each document whose natural key is absent, so newly added fixtures (or a
+	// whole new scope) are imported on restart. A document already present is
+	// left untouched, or overwritten when replace_existing is true.
 	Import *DatastoreImport `yaml:"import,omitempty"`
 }
 
@@ -45,8 +46,9 @@ type DatastoreConfig struct {
 type DatastoreImport struct {
 	// FilePaths lists JSON files to import into the datastore.
 	// Each JSON file should contain a map of person IDs to CompleteDocument objects.
-	// On every startup each document is imported only if one with the same
-	// natural key is not already present; existing documents are left untouched.
+	// On every startup each document whose natural key is absent is inserted.
+	// A document already present is left untouched, or overwritten when
+	// replace_existing is true.
 	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/pid.json\", \"./bootstrapping/ehic.json\"]"`
 
 	// Users limits which person IDs to import. If empty, all persons are imported.
