@@ -32,8 +32,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSAMLIntegration_FullFlow tests the complete SAML authentication flow
-// from metadata retrieval through credential issuance
+// TestSAMLIntegration_FullFlow tests the SAML authentication flow from metadata
+// retrieval through claim mapping.
 func TestSAMLIntegration_FullFlow(t *testing.T) {
 	// Setup test environment
 	env := setupTestEnvironment(t)
@@ -42,9 +42,8 @@ func TestSAMLIntegration_FullFlow(t *testing.T) {
 	// Test Steps:
 	// 1. Verify SP metadata is accessible
 	// 2. Initiate authentication request
-	// 3. Simulate IdP response (SAML assertion)
-	// 4. Process assertion and extract claims
-	// 5. Verify credential issuance
+	// 3. Process a signed IdP response and map its attributes to claims
+	// 4. Map attribute sets to claims
 
 	t.Run("Step1_VerifySPMetadata", func(t *testing.T) {
 		testSPMetadata(t, env)
@@ -305,27 +304,41 @@ func testInitiateAuth(t *testing.T, env *testEnvironment) {
 	t.Logf("Created session ID: %s", authReq.ID)
 }
 
-// testProcessAssertion tests SAML assertion processing
+// testProcessAssertion drives a response signed by the IdP key in the metadata
+// through ProcessAssertion. testExpiredAssertion and testInvalidSignature build
+// their responses the same way, so this acceptance shows their refusals come
+// from the expiry and the key they change.
 func testProcessAssertion(t *testing.T, env *testEnvironment) {
-	// Create a test SAML assertion
-	assertion := createTestAssertion(t, env.idpEntityID, env.config.EntityID)
+	ctx := t.Context()
 
-	// Create mapper
+	authReq, err := env.samlSPService.InitiateAuth(ctx, env.idpEntityID, "pid")
+	require.NoError(t, err)
+
+	samlResponseB64 := createSignedSAMLResponse(t, env.idpEntityID, env.config.EntityID,
+		env.config.ACSEndpoint, authReq.ID, env.idpKey, env.idpCert, time.Now().Add(5*time.Minute))
+
+	assertion, err := env.samlSPService.ProcessAssertion(ctx, samlResponseB64, authReq.RelayState)
+	require.NoError(t, err)
+
+	assert.Equal(t, "user@example.com", assertion.NameID)
+	assert.Equal(t, authReq.ID, assertion.SessionID)
+
 	mapper, err := env.samlSPService.BuildAttributeMapper()
 	require.NoError(t, err)
 
-	// Convert SAML AttributeStatements to simple map
-	attributes := samlAttributesToMap(assertion.AttributeStatements)
+	attributes := make(map[string]any, len(assertion.Attributes))
+	for name, values := range assertion.Attributes {
+		attributes[name] = values
+	}
 
-	// Transform claims
 	claims, err := mapper.Apply(attributes)
 	require.NoError(t, err)
-	require.NotNil(t, claims)
 
-	// Verify expected claims
-	assert.Equal(t, "John", claims["given_name"])
-	assert.Equal(t, "Doe", claims["family_name"])
-	assert.Equal(t, "1990-01-01", claims["birth_date"])
+	assert.Equal(t, map[string]any{
+		"given_name":  "John",
+		"family_name": "Doe",
+		"birth_date":  "1990-01-01",
+	}, claims)
 }
 
 // testClaimTransformation tests various claim transformation scenarios
@@ -407,8 +420,9 @@ func testCredentialTypeFlow(t *testing.T, env *testEnvironment, credentialType s
 	require.NoError(t, err)
 	assert.NotEmpty(t, authReq.RedirectURL)
 
-	// Note: Session is managed internally by the service
-	t.Logf("Created session for %s: %s", credentialType, authReq.ID)
+	session, err := env.samlSPService.GetSession(ctx, authReq.ID)
+	require.NoError(t, err)
+	assert.Equal(t, credentialType, session.CredentialType)
 }
 
 // testInvalidIdP tests handling of invalid IdP entity ID
@@ -443,16 +457,20 @@ func testMissingAttributes(t *testing.T, env *testEnvironment) {
 	assert.Contains(t, err.Error(), "required attribute")
 }
 
-// testExpiredAssertion tests handling of expired assertions
+// testExpiredAssertion tests that a correctly signed response whose Conditions
+// ended past the clock-skew allowance is refused.
 func testExpiredAssertion(t *testing.T, env *testEnvironment) {
-	// Create assertion with past validity
-	assertion := createExpiredAssertion(t, env.idpEntityID, env.config.EntityID)
+	ctx := t.Context()
 
-	// This would be tested in the actual ACS endpoint validation
-	// For now, verify the assertion structure
-	assert.NotNil(t, assertion)
-	// Check Conditions.NotOnOrAfter
-	assert.True(t, assertion.Conditions.NotOnOrAfter.Before(time.Now()))
+	authReq, err := env.samlSPService.InitiateAuth(ctx, env.idpEntityID, "pid")
+	require.NoError(t, err)
+
+	samlResponseB64 := createSignedSAMLResponse(t, env.idpEntityID, env.config.EntityID,
+		env.config.ACSEndpoint, authReq.ID, env.idpKey, env.idpCert, time.Now().Add(-10*time.Minute))
+
+	_, err = env.samlSPService.ProcessAssertion(ctx, samlResponseB64, authReq.RelayState)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse SAML response")
 }
 
 // testInvalidSignature tests that a SAML response signed with a wrong key is rejected
@@ -481,7 +499,7 @@ func testInvalidSignature(t *testing.T, env *testEnvironment) {
 
 	// Build a signed SAML response using the WRONG key
 	samlResponseB64 := createSignedSAMLResponse(t, env.idpEntityID, env.config.EntityID,
-		env.config.ACSEndpoint, authReq.ID, wrongKey, wrongCert)
+		env.config.ACSEndpoint, authReq.ID, wrongKey, wrongCert, time.Now().Add(5*time.Minute))
 
 	// Process the response — should fail signature validation
 	_, err = env.samlSPService.ProcessAssertion(ctx, samlResponseB64, authReq.RelayState)
@@ -493,8 +511,9 @@ func testInvalidSignature(t *testing.T, env *testEnvironment) {
 // createSignedSAMLResponse builds a complete, XML-signed SAML Response using
 // the crewjam/saml IdentityProvider machinery. The response is signed with
 // the provided key/cert and returned as a base64-encoded string suitable for
-// passing to ProcessAssertion.
-func createSignedSAMLResponse(t *testing.T, idpEntityID, spEntityID, acsURL, inResponseTo string, key *rsa.PrivateKey, cert *x509.Certificate) string {
+// passing to ProcessAssertion. conditionsNotOnOrAfter ends the assertion's
+// Conditions window; its SubjectConfirmationData stays valid either way.
+func createSignedSAMLResponse(t *testing.T, idpEntityID, spEntityID, acsURL, inResponseTo string, key *rsa.PrivateKey, cert *x509.Certificate, conditionsNotOnOrAfter time.Time) string {
 	t.Helper()
 
 	now := time.Now()
@@ -525,8 +544,8 @@ func createSignedSAMLResponse(t *testing.T, idpEntityID, spEntityID, acsURL, inR
 			},
 		},
 		Conditions: &samltypes.Conditions{
-			NotBefore:    now.Add(-1 * time.Minute),
-			NotOnOrAfter: now.Add(5 * time.Minute),
+			NotBefore:    conditionsNotOnOrAfter.Add(-6 * time.Minute),
+			NotOnOrAfter: conditionsNotOnOrAfter,
 			AudienceRestrictions: []samltypes.AudienceRestriction{
 				{Audience: samltypes.Audience{Value: spEntityID}},
 			},
@@ -597,75 +616,6 @@ func mustRandomBytes(t *testing.T, n int) []byte {
 	_, err := rand.Read(b)
 	require.NoError(t, err)
 	return b
-}
-
-// createTestAssertion creates a test SAML assertion with standard attributes
-func createTestAssertion(t *testing.T, issuer, audience string) *samltypes.Assertion {
-	now := time.Now()
-	return &samltypes.Assertion{
-		ID:           "assertion-" + base64.StdEncoding.EncodeToString([]byte(time.Now().String())),
-		IssueInstant: now,
-		Version:      "2.0",
-		Issuer: samltypes.Issuer{
-			Value: issuer,
-		},
-		Subject: &samltypes.Subject{
-			NameID: &samltypes.NameID{
-				Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
-				Value:  "user@example.com",
-			},
-		},
-		Conditions: &samltypes.Conditions{
-			NotBefore:    now,
-			NotOnOrAfter: now.Add(5 * time.Minute),
-			AudienceRestrictions: []samltypes.AudienceRestriction{
-				{
-					Audience: samltypes.Audience{Value: audience},
-				},
-			},
-		},
-		AttributeStatements: []samltypes.AttributeStatement{
-			{
-				Attributes: []samltypes.Attribute{
-					{
-						Name: "urn:oid:2.5.4.42",
-						Values: []samltypes.AttributeValue{
-							{Value: "John"},
-						},
-					},
-					{
-						Name: "urn:oid:2.5.4.4",
-						Values: []samltypes.AttributeValue{
-							{Value: "Doe"},
-						},
-					},
-					{
-						Name: "urn:oid:1.3.6.1.5.5.7.9.1",
-						Values: []samltypes.AttributeValue{
-							{Value: "1990-01-01"},
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-// createExpiredAssertion creates an assertion with expired validity
-func createExpiredAssertion(t *testing.T, issuer, audience string) *samltypes.Assertion {
-	past := time.Now().Add(-10 * time.Minute)
-	return &samltypes.Assertion{
-		ID:           "expired-assertion",
-		IssueInstant: past,
-		Version:      "2.0",
-		Issuer: samltypes.Issuer{
-			Value: issuer,
-		},
-		Conditions: &samltypes.Conditions{
-			NotBefore:    past,
-			NotOnOrAfter: past.Add(1 * time.Minute), // Already expired
-		},
-	}
 }
 
 // samlAttributesToMap converts SAML AttributeStatements to a simple map
@@ -804,6 +754,17 @@ func TestSAMLIntegration_MetadataSignatureValidation(t *testing.T) {
 
 	// Sign the metadata with federation key
 	signedMetadata := signMetadataXML(t, metadataXML, fedKey, fedCert)
+
+	t.Run("RefuseMDQWithoutSigningCert", func(t *testing.T) {
+		config := createTestSAMLConfig("https://mdq.example.com", "https://idp.example.com/sso", idpEntityID, certPath, keyPath)
+
+		sessionCache := pkgcache.NewMemoryCache[*samlsp.Session](3600 * time.Second)
+		defer sessionCache.Stop()
+
+		_, err := samlsp.New(ctx, config, sessionCache, log)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "metadata_signing_cert_path")
+	})
 
 	t.Run("AcceptValidSignature", func(t *testing.T) {
 		// Create MDQ server serving signed metadata
