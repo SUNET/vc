@@ -94,6 +94,14 @@ func TestIdentityMatchBSONReadsTheMapShape(t *testing.T) {
 	assert.Equal(t, []ClaimMatch{{Path: claimpath.Keys("read", "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}}}, rule.Claims)
 }
 
+// A stored claim names a claim.
+func TestIdentityMatchBSONRefusesAnEmptyPath(t *testing.T) {
+	data, err := bson.Marshal(bson.M{"claims": bson.A{bson.M{"path": bson.A{}, "test": bson.M{"equals": "Anna"}}}})
+	require.NoError(t, err)
+	var got StoredIdentityMatch
+	assert.ErrorContains(t, bson.Unmarshal(data, &got), "a stored claim has no path")
+}
+
 // A request lists claims as pointers. The dotted string inside the list
 // form was never released, so it is refused.
 func TestIdentityMatchJSON(t *testing.T) {
