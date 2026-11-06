@@ -234,6 +234,24 @@ func (c *DatastoreColl) GetByIdentity(ctx context.Context, scope, identityMappin
 	return docs, nil
 }
 
+// selectWithinAllowed adds the condition on field: the selected value when
+// there is one, otherwise the allowed list when it is not empty. It returns
+// false when the selected value lies outside a non-empty allowed list, which
+// matches no document.
+func selectWithinAllowed(filter bson.M, field, selected string, allowed []string) bool {
+	if selected != "" {
+		if len(allowed) > 0 && !slices.Contains(allowed, selected) {
+			return false
+		}
+		filter[field] = bson.M{"$eq": selected}
+		return true
+	}
+	if len(allowed) > 0 {
+		filter[field] = bson.M{"$in": allowed}
+	}
+	return true
+}
+
 // ListQuery is the query to get document list
 type ListQuery struct {
 	AuthenticSource   string `json:"authentic_source" bson:"authentic_source"`
@@ -241,6 +259,11 @@ type ListQuery struct {
 	Scope             string `json:"scope" bson:"scope"`
 	ValidFrom         int64  `json:"valid_from" bson:"valid_from"`
 	ValidTo           int64  `json:"valid_to" bson:"valid_to"`
+
+	// AllowedAuthenticSources and AllowedScopes restrict the result as in
+	// SearchDocumentsQuery. Nil or empty leaves that dimension unrestricted.
+	AllowedAuthenticSources []string `json:"-" bson:"-"`
+	AllowedScopes           []string `json:"-" bson:"-"`
 }
 
 // List return matching documents if any, or error
@@ -251,12 +274,9 @@ func (c *DatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.Do
 
 	filter := bson.M{}
 
-	if query.AuthenticSource != "" {
-		filter["meta.authentic_source"] = bson.M{"$eq": query.AuthenticSource}
-	}
-
-	if query.Scope != "" {
-		filter["meta.scope"] = bson.M{"$eq": query.Scope}
+	if !selectWithinAllowed(filter, "meta.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
+		!selectWithinAllowed(filter, "meta.scope", query.Scope, query.AllowedScopes) {
+		return []*model.DocumentList{}, nil
 	}
 
 	filter["identity_mapping_ids"] = bson.M{"$eq": query.IdentityMappingID}
@@ -359,21 +379,9 @@ func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery)
 	defer span.End()
 
 	filter := bson.M{}
-	if query.AuthenticSource != "" {
-		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
-			return []*model.CompleteDocument{}, nil
-		}
-		filter["meta.authentic_source"] = bson.M{"$eq": query.AuthenticSource}
-	} else if len(query.AllowedAuthenticSources) > 0 {
-		filter["meta.authentic_source"] = bson.M{"$in": query.AllowedAuthenticSources}
-	}
-	if query.Scope != "" {
-		if len(query.AllowedScopes) > 0 && !slices.Contains(query.AllowedScopes, query.Scope) {
-			return []*model.CompleteDocument{}, nil
-		}
-		filter["meta.scope"] = bson.M{"$eq": query.Scope}
-	} else if len(query.AllowedScopes) > 0 {
-		filter["meta.scope"] = bson.M{"$in": query.AllowedScopes}
+	if !selectWithinAllowed(filter, "meta.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
+		!selectWithinAllowed(filter, "meta.scope", query.Scope, query.AllowedScopes) {
+		return []*model.CompleteDocument{}, nil
 	}
 	if query.Search != "" {
 		searchRegex := bson.M{"$regex": regexp.QuoteMeta(query.Search), "$options": "i"}
