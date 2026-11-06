@@ -501,12 +501,8 @@ func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *test
 		})
 	}
 
-	// A chunked request declares no length, and both other readers skip a
-	// body without one: extractResourcePairs does not look at it, and
-	// Binding.Request skips its JSON and form branches and falls through
-	// to binding from the QUERY STRING by field name. So a harmless "{}"
-	// body plus "?Scope=..." reaches the handler with a scope the
-	// middleware never saw under that spelling.
+	// A chunked request declares no length, and this gate refuses a body
+	// without one, whatever its query string names.
 	t.Run("a chunked request with its values in the query", func(t *testing.T) {
 		api.seen = nil
 		req := httptest.NewRequest(http.MethodPost,

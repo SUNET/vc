@@ -1,6 +1,7 @@
 package httphelpers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -78,6 +79,27 @@ func truncationAsSyntaxError(body []byte, err error) error {
 	return err
 }
 
+// requestHasBody reports whether the request carries body bytes. A declared
+// length decides. An unknown length (chunked, or HTTP/2 with no content-length)
+// is decided by peeking one byte: only a clean EOF means no body, so a read
+// error reaches the decoder. The peeked byte stays readable in c.Request.Body.
+func requestHasBody(c *gin.Context) bool {
+	if c.Request.ContentLength >= 0 {
+		return c.Request.ContentLength > 0
+	}
+	if c.Request.Body == nil {
+		return false
+	}
+
+	buffered := bufio.NewReader(c.Request.Body)
+	_, err := buffered.Peek(1)
+	c.Request.Body = struct {
+		io.Reader
+		io.Closer
+	}{buffered, c.Request.Body}
+	return !errors.Is(err, io.EOF)
+}
+
 func (b *bindingHandler) Request(ctx context.Context, c *gin.Context, v any) error {
 	_, span := b.client.tracer.Start(ctx, "httpserver:bindRequest")
 	defer span.End()
@@ -105,12 +127,12 @@ func (b *bindingHandler) Request(ctx context.Context, c *gin.Context, v any) err
 	}
 
 	// Bind JSON body if present
-	if c.Request.ContentLength > 0 && c.ContentType() == "application/json" {
+	if c.ContentType() == "application/json" && requestHasBody(c) {
 		return b.JSONBody(ctx, c, v)
 	}
 
 	// Bind form data if present (application/x-www-form-urlencoded or multipart/form-data)
-	if c.Request.ContentLength > 0 && (c.ContentType() == "application/x-www-form-urlencoded" || c.ContentType() == "multipart/form-data") {
+	if (c.ContentType() == "application/x-www-form-urlencoded" || c.ContentType() == "multipart/form-data") && requestHasBody(c) {
 		if err := c.ShouldBind(v); err != nil {
 			return err
 		}

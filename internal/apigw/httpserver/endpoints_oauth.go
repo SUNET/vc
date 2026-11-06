@@ -827,16 +827,11 @@ func requireCanonicalJSONBody(c *gin.Context, allowed ...string) error {
 		return refuse("this request must be sent as application/json")
 	}
 
-	// A declared length, because both of the other readers insist on one.
-	//
-	// extractResourcePairs skips the body unless ContentLength > 0, and
-	// Binding.Request skips BOTH its JSON and its form branch on the same
-	// condition - and then falls through to binding from the query string
-	// by FIELD NAME. So a chunked request (ContentLength == -1) carrying
-	// a harmless "{}" body reaches binding with its values taken from
-	// "?Scope=...", which the middleware never looked at under that
-	// spelling. Refusing an undeclared length is what keeps all three
-	// reading the same request.
+	// A declared length, like the pinned content type, narrows what this gate
+	// accepts. A request with no body bytes would bind from the query string by
+	// FIELD NAME, and the middleware never looks at "?Scope=..." under that
+	// spelling. A chunked request is refused here, although both other readers
+	// read its body.
 	if c.Request.ContentLength <= 0 {
 		return refuse("this request must carry a body with a declared length")
 	}
