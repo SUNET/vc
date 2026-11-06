@@ -52,7 +52,7 @@ func TestEndpointResetUniqueCommitment_Operator(t *testing.T) {
 	})
 	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "auxiliary_data/reset", http.StatusNoContent, s.endpointResetUniqueCommitment)
 	post := func() int {
-		body := `{"scope":"nym_auth","path":["eu.europa.ec.eudi.nym_auth.1","psc"],"key":[{"path":["eu.europa.ec.eudi.nym_auth.1","ssc"],"inputs":["SE","pan-200"]}],"evidence_ref":"case-1"}`
+		body := `{"scope":"nym_auth","path":["eu.europa.ec.eudi.nym_auth.1","psc"],"key":[{"path":["eu.europa.ec.eudi.nym_auth.1","ssc"],"inputs":{"issuing_country":"SE","personal_administrative_number":"pan-200"}}],"evidence_ref":"case-1"}`
 		req := httptest.NewRequest(http.MethodPost, "/auxiliary_data/reset", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
