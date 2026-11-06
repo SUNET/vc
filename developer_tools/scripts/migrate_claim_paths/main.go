@@ -15,6 +15,10 @@
 // rewrite in place would change what the file loads. The warnings at load
 // name each spelling of such a file.
 //
+// It leaves a presentation request file that fails to decode as a list of
+// templates as written, and prints a line with the error: the file loads
+// as one template from its top-level keys.
+//
 // A configuration names its credential schemas by deployment paths, such
 // as /metadata/pid_mdoc.mdoc.json. -schemas maps such a prefix to a local
 // directory: -schemas /metadata=./metadata.
@@ -86,6 +90,11 @@ func migrate(ctx context.Context, file string, schemas prefixes, dryRun bool, ou
 	upgraded, rewrites, err := upgrade(ctx, file, src, schemas.apply)
 	if errors.Is(err, legacyclaims.ErrInPlace) {
 		_, err := fmt.Fprintf(out, "%s: left as written: %v; rewrite the claim spellings its warnings at load name\n", file, legacyclaims.ErrInPlace)
+		return err
+	}
+	var fallback *configuration.TemplateFallback
+	if errors.As(err, &fallback) {
+		_, err := fmt.Fprintf(out, "%s: left as written: it fails to decode as a list of templates and loads as one template from its top-level keys: %v\n", file, fallback.Err)
 		return err
 	}
 	if err != nil {

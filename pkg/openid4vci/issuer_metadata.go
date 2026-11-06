@@ -2,6 +2,9 @@ package openid4vci
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/SUNET/vc/pkg/claimpath"
 
@@ -65,6 +68,26 @@ type CredentialIssuerMetadataParameters struct {
 // (credential_issuer), used to verify it matches the request's iss claim.
 func (c *CredentialIssuerMetadataParameters) MetadataIssuer() string {
 	return c.CredentialIssuer
+}
+
+// EmptyClaimPaths names each claim description whose path is empty, null
+// or absent.
+func (c *CredentialIssuerMetadataParameters) EmptyClaimPaths() []string {
+	var names []string
+	collect := func(where string, claims []ClaimDescription) {
+		for i, claim := range claims {
+			if claim.Path.Len() == 0 {
+				names = append(names, fmt.Sprintf("%s[%d]", where, i))
+			}
+		}
+	}
+	collect("claims", c.Claims)
+	for _, id := range slices.Sorted(maps.Keys(c.CredentialConfigurationsSupported)) {
+		if metadata := c.CredentialConfigurationsSupported[id].CredentialMetadata; metadata != nil {
+			collect("credential_configurations_supported."+id+".credential_metadata.claims", metadata.Claims)
+		}
+	}
+	return names
 }
 
 func (c *CredentialIssuerMetadataParameters) MarshalJWTClaims() (jwt.MapClaims, error) {
@@ -279,6 +302,35 @@ type ClaimDescription struct {
 
 	// Display: OPTIONAL. A non-empty array of objects containing display properties for the claim.
 	Display []ClaimDisplayProperties `json:"display,omitempty" yaml:"display,omitempty"`
+}
+
+// MarshalJSON writes an unset path as null.
+func (c ClaimDescription) MarshalJSON() ([]byte, error) {
+	type plain ClaimDescription
+	if !c.Path.IsZero() {
+		return json.Marshal(plain(c))
+	}
+	return json.Marshal(struct {
+		Path []string `json:"path"`
+		plain
+	}{plain: plain(c)})
+}
+
+// UnmarshalJSON reads a claim description. Its path decodes as
+// claimpath.Lenient decodes it. A member the JSON leaves out keeps its
+// value, as encoding/json keeps it in a struct.
+func (c *ClaimDescription) UnmarshalJSON(data []byte) error {
+	type plain ClaimDescription
+	claim := struct {
+		plain
+		Path claimpath.Lenient `json:"path"`
+	}{plain: plain(*c), Path: claimpath.Lenient{Pointer: c.Path}}
+	if err := json.Unmarshal(data, &claim); err != nil {
+		return err
+	}
+	*c = ClaimDescription(claim.plain)
+	c.Path = claim.Path.Pointer
+	return nil
 }
 
 // ClaimDisplayProperties contains display properties for a claim.

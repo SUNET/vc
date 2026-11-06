@@ -26,15 +26,25 @@ func UpgradeTemplates(d *Document, convert bool) error {
 	if d.root == nil {
 		return nil
 	}
-	return d.fail(d.upgradeTemplates(convert))
-}
-
-// upgradeTemplates is UpgradeTemplates for a document with a root.
-func (d *Document) upgradeTemplates(convert bool) error {
 	templates, err := templateNodes(d.root)
 	if err != nil {
-		return err
+		return d.fail(err)
 	}
+	return d.fail(d.upgradeTemplates(templates, convert))
+}
+
+// UpgradeTemplate upgrades a presentation request file as one template
+// from its top-level keys, as the earlier release read a file whose
+// "templates" list fails to decode.
+func UpgradeTemplate(d *Document, convert bool) error {
+	if d.root == nil {
+		return nil
+	}
+	return d.fail(d.upgradeTemplates([]ast.Node{d.root}, convert))
+}
+
+// upgradeTemplates upgrades each template.
+func (d *Document) upgradeTemplates(templates []ast.Node, convert bool) error {
 	for _, template := range templates {
 		queries, err := d.templateDCQL(template)
 		if err != nil {

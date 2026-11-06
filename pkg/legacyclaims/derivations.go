@@ -30,6 +30,9 @@ func (u *configUpgrade) derivations(list ast.Node, source, issued *lazy, written
 	if err != nil {
 		return err
 	}
+	if err := u.commitmentPaths(nodes); err != nil {
+		return err
+	}
 	if !slices.ContainsFunc(nodes, hasDottedClaim) {
 		return nil
 	}
@@ -51,6 +54,43 @@ func (u *configUpgrade) derivations(list ast.Node, source, issued *lazy, written
 		}
 	}
 	return nil
+}
+
+// commitmentPaths upgrades the path of each hash_commitment derivation,
+// which main read as a list of strings. The path names a to_wallet entry
+// of the issued credential, so it reads no schema. An alias, a node that
+// is no mapping and a key that is no scalar stay as written for the
+// decoder.
+func (u *configUpgrade) commitmentPaths(nodes []ast.Node) error {
+	for _, node := range nodes {
+		path := keyedValue(keyedValue(node, "hash_commitment"), "path")
+		if path == nil {
+			continue
+		}
+		if err := u.listPath(path, false, u.convert, commitmentEmptyPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// keyedValue returns the value of the last entry of the mapping n whose
+// key is the scalar key, and nil for any other node.
+func keyedValue(n ast.Node, key string) ast.Node {
+	var list []*ast.MappingValueNode
+	switch m := annotated(n).(type) {
+	case *ast.MappingNode:
+		list = m.Values
+	case *ast.MappingValueNode:
+		list = []*ast.MappingValueNode{m}
+	}
+	var value ast.Node
+	for _, entry := range list {
+		if name, ok := scalarKey(entry.Key); ok && name == key {
+			value = entry.Value
+		}
+	}
+	return value
 }
 
 // hasDottedClaim reports whether a derivation spells a claim as main's

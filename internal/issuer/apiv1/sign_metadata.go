@@ -109,6 +109,12 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 		return nil, grpcstatus.Errorf(codes.InvalidArgument, "metadata validation failed: %v", err)
 	}
 
+	if issuer, ok := metadata.(*openid4vci.CredentialIssuerMetadataParameters); ok {
+		for _, claim := range issuer.EmptyClaimPaths() {
+			c.log.Warn("deprecated empty claims path pointer in signed issuer metadata; write the pointer of a claim", "claim", claim)
+		}
+	}
+
 	// Verify the metadata's own issuer identifier matches req.iss to prevent
 	// signing metadata that points to attacker-controlled endpoints.
 	if metaIss := metadata.MetadataIssuer(); metaIss != req.GetIss() {
