@@ -2,11 +2,12 @@
 // service configuration files and presentation request files, in place.
 // Each dotted claim name becomes a claims path pointer (OpenID4VP 1.0
 // section 7), each map keyed by dotted names becomes the list form, and a
-// claim_mappings map of one credential query becomes the keyed form.
+// claim_mappings map becomes the keyed form under the conditions
+// docs/CLAIM_PATHS.md lists.
 //
 // It keeps every comment. It prints a line per claim_mappings it leaves
-// as written, because the keyed form would map other claims, and a line
-// per file it rewrites. A second run changes nothing.
+// as written, with the reason, and a line per file it rewrites. A second
+// run changes nothing.
 //
 // It leaves a file with a YAML alias, merge key or repeated key as written,
 // and prints a line, when an alias stands where it reads claims, or when a

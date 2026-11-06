@@ -173,6 +173,9 @@ map to the keyed form when the keyed form maps the same claims:
 
 - The template has one credential query, and the query allows one
   presentation.
+- The query is a mapping with a non-empty `id`. YAML reads its `id` and
+  `format` as strings and its `multiple` as a boolean, each written as a
+  plain or quoted scalar.
 - Each name maps to a distinct, non-empty OIDC claim.
 - Each name is a dotted name of non-empty segments. In an mdoc query, it is
   the bare identifier of an element of `org.iso.18013.5.1`.
