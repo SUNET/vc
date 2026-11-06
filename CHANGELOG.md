@@ -78,14 +78,19 @@
 - **`fly/deploy.sh` keeps the local secrets file in step with Fly**: the
   generated MongoDB URI was written locally after a failed `secrets set`, and
   the OIDC `client_secret` reached Keycloak before a local write that could
-  still fail. Both local writes are now prepared before the set and happen
-  only after it succeeds. The MongoDB URI goes to `common.mongo.uri`, so a
-  file with no `uri:` line receives it and other `uri` keys stay. A secrets
-  file that is missing or read-only stops the MongoDB or OIDC step before Fly
-  receives anything when the app exists; an absent app gets a "missing" note
-  and `launch` continues. When MongoDB's credentials exist and wallet-backend
-  lacks `WALLET_STORAGE_MONGODB_URI`, `launch` now sets the URI from the local
-  secrets file. When the file holds no generated URI, `launch` stops and names
+  still fail. Each write to the file goes to a temp file beside it first,
+  and a rename replaces the file. For a secret, the temp file is written
+  before the set, and the rename follows a successful set. A failed write
+  stops before Fly receives anything, and a failed rename stops with the path
+  of the temp file holding the value Fly accepted. A symlinked secrets file
+  stays a symlink. The MongoDB URI goes to `common.mongo.uri`, so a file with
+  no `uri:` line receives it and other `uri` keys stay. A secrets file that is
+  missing or read-only, or a directory that refuses the temp file, stops the
+  MongoDB or OIDC step before Fly receives anything when the app exists; an
+  absent app gets a "missing" note and `launch` continues. When MongoDB's
+  credentials exist and wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`,
+  `launch` now sets the URI from the local secrets file. When the file holds
+  no generated URI, `launch` stops and names
   the two ways out: restore the file, or reset MongoDB's credentials. An
   absent wallet-backend gets a "missing" note and `launch` continues;
   `launch --service wallet-backend` applies this rule once the app exists.
