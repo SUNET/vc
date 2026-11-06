@@ -3,6 +3,7 @@ package db
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -61,7 +62,7 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 	require.NoError(t, err)
 	stored := uniqueCommitmentRow{Scope: relied.Scope, Path: relied.Path, KeyHash: relied.KeyHash, Commitment: "c", AcceptedAt: now.UTC(), ReleasableBy: "storer"}
 	require.NoError(t, store.backend.insertCommitment(ctx, stored))
-	require.NoError(t, store.backend.keepCommitment(ctx, relied, stored.Commitment))
+	require.NoError(t, store.backend.keepCommitments(ctx, []uniqueCommitmentRow{stored}))
 	require.NoError(t, store.backend.releaseCommitment(ctx, relied, "storer"))
 	_, err = store.backend.record(ctx, relied)
 	require.NoError(t, err, "the kept row stays")
@@ -140,17 +141,47 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 		}
 	}
 
+	// A keep that fails refuses the batch and leaves no row of it.
+	batch := []UniqueCommitment{{keyOf("a person of a failed keep"), first}, {keyOf("another person of a failed keep"), first}}
+	failedKeep := &UniqueCommitments{Service: store.Service, backend: failedKeepBackend{store.backend}}
+	assert.ErrorIs(t, failedKeep.Accept(ctx, batch, now), errKeepFailed)
+	for _, c := range batch {
+		_, err = store.Find(ctx, c.Key)
+		assert.ErrorIs(t, err, ErrNoDocuments, "the failed keep leaves nothing")
+	}
+
+	// An accept that succeeds holds each of its rows, also one a reset removed
+	// while the accept stored another.
+	removed, later := keyOf("a person reset during an accept"), keyOf("a person accepted after that reset")
+	during := func() {
+		require.NoError(t, store.Reset(ctx, removed, UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "case-during", At: now}))
+	}
+	require.NoError(t, interleaved(t, store, later, during).Accept(ctx, []UniqueCommitment{{removed, first}, {later, first}}, now))
+	_, err = store.Find(ctx, removed)
+	assert.NoError(t, err, "the accept stored the removed row again")
+	conflictAt(t, accept(UniqueCommitment{removed, second}), 0, "the row stored again is kept")
+
 	// A reset that lost to a reset under the same evidence reference leaves
 	// the approval that reset relies on.
 	contested := keyOf("a contested person")
 	require.NoError(t, accept(UniqueCommitment{contested, first}))
 	sameRef := UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "case-contested", At: now}
-	during := func() { assert.NoError(t, store.Reset(ctx, contested, sameRef), "the reset that runs first succeeds") }
+	during = func() { assert.NoError(t, store.Reset(ctx, contested, sameRef), "the reset that runs first succeeds") }
 	assert.ErrorIs(t, interleaved(t, store, contested, during).Reset(ctx, contested, sameRef), ErrNoDocuments, "the other found the commitment gone")
 	k, err := storedKeyOf(contested)
 	require.NoError(t, err)
 	_, err = store.backend.resetPrevious(ctx, k, sameRef.EvidenceRef)
 	assert.NoError(t, err, "the approval of the reset that succeeded stays")
+}
+
+// errKeepFailed is the failure of failedKeepBackend.
+var errKeepFailed = errors.New("the keep failed")
+
+// failedKeepBackend fails each keep.
+type failedKeepBackend struct{ uniqueCommitmentBackend }
+
+func (failedKeepBackend) keepCommitments(context.Context, []uniqueCommitmentRow) error {
+	return errKeepFailed
 }
 
 // interleavedBackend runs during once, before the first insert or delete of
