@@ -1,6 +1,6 @@
 // @ts-nocheck
 import Alpine from '/static/alpinejs.esm.min.js';
-import { flattenObject, segmentName, unflattenEntries } from './admin-helpers.js';
+import { flattenObject, keySegments, segmentName, unflattenEntries } from './admin-helpers.js';
 
 window.adminApp = function () {
     /** Build a tree-view display list from flat dot-notation entries */
@@ -8,7 +8,7 @@ window.adminApp = function () {
         const rows = [];
         const seenGroups = new Set();
         for (let idx = 0; idx < entries.length; idx++) {
-            const parts = entries[idx].key.split('.');
+            const parts = keySegments(entries[idx].key);
             for (let d = 0; d < parts.length - 1; d++) {
                 const groupKey = parts.slice(0, d + 1).join('.');
                 if (!seenGroups.has(groupKey)) {
@@ -212,7 +212,7 @@ window.adminApp = function () {
         /** Rename a field's leaf segment (used for newly added child fields) */
         renameField(entries, idx, name) {
             const entry = entries[idx];
-            const parts = entry.key.split('.');
+            const parts = keySegments(entry.key);
             parts[parts.length - 1] = name.trim();
             entry.key = parts.join('.');
         },
