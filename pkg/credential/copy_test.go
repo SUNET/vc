@@ -89,3 +89,36 @@ func TestASkippedCopyClearsNothing(t *testing.T) {
 	MergeDerived(doc, out, replaced)
 	assert.Equal(t, map[string]any{"name": "alice", "country": "SE"}, doc["identity"])
 }
+
+// A write through the clone leaves the caller's document unchanged, inside
+// arrays as well as objects.
+func TestCloneNestedClaims_WriteLeavesTheOriginalUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		original map[string]any
+		write    func(clone map[string]any)
+		want     map[string]any
+	}{
+		{
+			name:     "an array of maps",
+			original: map[string]any{"items": []any{map[string]any{"name": "first"}}},
+			write: func(clone map[string]any) {
+				clone["items"].([]any)[0].(map[string]any)["name"] = "CLOBBERED"
+			},
+			want: map[string]any{"items": []any{map[string]any{"name": "first"}}},
+		},
+		{
+			name:     "a plain array nested inside a cloned map",
+			original: map[string]any{"nested": map[string]any{"deep": []any{"a", "b"}}},
+			write: func(clone map[string]any) {
+				clone["nested"].(map[string]any)["deep"].([]any)[1] = "CLOBBERED"
+			},
+			want: map[string]any{"nested": map[string]any{"deep": []any{"a", "b"}}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.write(CloneNestedClaims(tc.original))
+			assert.Equal(t, tc.want, tc.original)
+		})
+	}
+}

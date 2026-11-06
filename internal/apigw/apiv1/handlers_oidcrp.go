@@ -191,8 +191,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	//
 	// Deep, not maps.Clone: MergeNestedClaims recurses into nested
 	// map[string]any, so a shallow copy shares exactly the maps it writes
-	// through. CloneNestedClaims recurses in the same places, which is what
-	// makes it deep ENOUGH rather than merely deeper.
+	// through. CloneNestedClaims copies those maps and every []any.
 	policyClaims := credential.CloneNestedClaims(authResp.Claims)
 
 	// Retrieve session to get credential type.
