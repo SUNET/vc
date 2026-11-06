@@ -29,6 +29,14 @@ array, the derivation replaces that value with an object. An index of an
 output pointer needs an element of an array. `random` refuses an output
 below a null, a scalar or an array.
 
+The admin UI starts a new document from the claim template of the scope's
+VCTM. A key adds an object member, `null` an array of one element, and an
+index i an array of i+1 elements. A claim the VCTM declares as an object
+and as an array, such as `[achievements, null]` beside
+`[achievements, count]`, is an object of the keys below it, and the status
+endpoint logs a warning that names it. A scope whose VCTM indexes an array
+past 255 gets no template, and the status endpoint logs an error.
+
 ## Fields
 
 | Field | Form |
