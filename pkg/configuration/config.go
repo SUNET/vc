@@ -140,7 +140,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
-	if err := refuseRemovedSeedSettings(configFile, removedSeedConfigSettings); err != nil {
+	if err := refuseRemovedSeedSettings(configFile, &seedConfigProbe{}); err != nil {
 		return nil, err
 	}
 
@@ -1229,7 +1229,7 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 		return nil, fmt.Errorf("cannot parse secrets file %q: %w", cleanPath, err)
 	}
 
-	if err := refuseRemovedSeedSettings(data, removedSeedSecretsSettings); err != nil {
+	if err := refuseRemovedSeedSettings(data, &seedSecretsProbe{}); err != nil {
 		return nil, fmt.Errorf("%s: %w", cleanPath, err)
 	}
 
