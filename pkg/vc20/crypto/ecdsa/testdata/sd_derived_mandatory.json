@@ -1,0 +1,38 @@
+{
+ "issuerPublicKeyMultibase": "zDnaerbkf36b9DBWLFUsnRWhYa9RWNo3LAJUykBLWJRMuqiXt",
+ "mandatoryIndexes": [
+  2,
+  3,
+  5,
+  6,
+  7
+ ],
+ "credential": {
+  "@context": [
+   "https://www.w3.org/ns/credentials/v2"
+  ],
+  "id": "urn:uuid:5d3a7a52-0000-4000-8000-000000000003",
+  "type": [
+   "VerifiableCredential"
+  ],
+  "issuer": {
+   "id": "did:web:issuer.example",
+   "name": "Example Authority"
+  },
+  "validFrom": "2026-01-01T00:00:00Z",
+  "validUntil": "2027-01-01T00:00:00Z",
+  "credentialSubject": {
+   "id": "did:example:holder",
+   "name": "Jane Roe",
+   "description": "Holder of an example credential"
+  },
+  "proof": {
+   "type": "DataIntegrityProof",
+   "cryptosuite": "ecdsa-sd-2023",
+   "created": "2026-11-04T00:00:00Z",
+   "verificationMethod": "did:web:issuer.example#key-1",
+   "proofPurpose": "assertionMethod",
+   "proofValue": "u2V0BhVhAqYkdFJmA1Ywa4qM343NuGKYCO5zPsIvJvNnVb-H7BkB_Vawk05zxei2PnBW_cJh90QfKpXfCvUaPJjdnRE6NJVgjgCQC8otDknCT4tIp-dsIliYAO_s-2TkFDSEcnQAX2t7-qcGDWEAbdQr3cTc_EbRiv6RsPxIBnWCqslaW335OGcYQ4OL61Dj09EO_9mkCUYh5xASwp1j0Or3w9QUXdZ83XYvmze67WEDY5Do24rTjFm2FQNxx67OidOEe3T5qJF0tdsQPtIkarraiwXQdq8OgPgSCIX9G5u0Cb_0TeZT0CASJdmGKmbRPWEBTJ1IQlZHapb6K8OoZLmwPMb8SGMpYTYxTZ3iJcXeXYnMV0C-xhPyh5YjnUA8rVCa98Bv9K7zcKcbPVyWVKyNroIUCAwUGBw"
+  }
+ }
+}

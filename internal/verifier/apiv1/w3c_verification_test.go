@@ -43,6 +43,12 @@ func (e *staticKeyEvaluator) ResolveKey(_ context.Context, verificationMethod st
 	return key, nil
 }
 
+// ResolveKeyFor answers as a PDP does for a DID document that authorizes every method
+// it lists for every relationship.
+func (e *staticKeyEvaluator) ResolveKeyFor(ctx context.Context, verificationMethod, _ string) (crypto.PublicKey, error) {
+	return e.ResolveKey(ctx, verificationMethod)
+}
+
 // TestVerificationDirectPostW3C drives a real signed W3C VC 2.0 credential
 // through the verifier: minted with a Data Integrity proof, returned as the
 // vp_token of an encrypted direct_post, and verified through the same switch
@@ -77,7 +83,7 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	created, err := issuerHandler.CreateCredential(ctx, &openid4vp.VC20CreateRequest{
 		Types:              []string{"UniversityDegreeCredential"},
 		AdditionalContexts: []string{degreeContext},
-		Subject:            map[string]any{"id": "did:example:subject", "degree": "Master of Science"},
+		Subject:            map[string]any{"id": "did:example:holder", "degree": "Master of Science"},
 	})
 	require.NoError(t, err)
 

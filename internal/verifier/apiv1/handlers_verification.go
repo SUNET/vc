@@ -646,7 +646,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, fmt.Errorf("W3C VC verification for scope %s needs a key-resolving trust evaluator", scope)
 			}
 
-			vc20Opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
+			// The holder's key is a different question from the issuer's, and
+			// it is not the trust service's to answer. A did:key or did:jwk
+			// carries its key in the identifier, and no registry lists a
+			// holder, so putting the presentation proof's verification method
+			// to the PDP denies every presentation that carries one ("no
+			// registry returned positive match"). The OIDC path resolves it
+			// locally; this is the same exchange reached through a session,
+			// and it resolves it the same way. The issuer's key still always
+			// comes from the trust resolver.
+			vc20Opts := []openid4vp.VC20HandlerOption{
+				openid4vp.WithVC20KeyResolver(resolver),
+				openid4vp.WithVC20HolderKeyResolver(newHolderKeyResolver(resolver)),
+			}
 
 			// Holder binding, when the request asked for it (the OpenID4VP
 			// default). The credential's issuer proof says it was issued; only

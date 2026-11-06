@@ -6,8 +6,13 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"encoding/base64"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
+	"strings"
+
+	mb "github.com/multiformats/go-multibase"
 )
 
 // ecdsaToJWK converts an ECDSA public key to JWK format.
@@ -147,6 +152,20 @@ func jwkToEd25519(jwk map[string]any) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(pubBytes), nil
 }
 
+// errNoKeyMaterial marks a verification method that carries no key this package reads.
+var errNoKeyMaterial = errors.New("verification method has no supported key material")
+
+// methodKey reads the public key out of one verification method.
+func methodKey(vm map[string]any) (crypto.PublicKey, error) {
+	if jwk, ok := vm["publicKeyJwk"].(map[string]any); ok {
+		return extractKeyFromJWK(jwk)
+	}
+	if multibase, ok := vm["publicKeyMultibase"].(string); ok {
+		return decodeMultibaseKey(multibase)
+	}
+	return nil, errNoKeyMaterial
+}
+
 // extractKeyFromMetadata extracts a public key from trust metadata (DID document).
 func extractKeyFromMetadata(metadata any, verificationMethod string) (crypto.PublicKey, error) {
 	doc, ok := metadata.(map[string]any)
@@ -167,18 +186,88 @@ func extractKeyFromMetadata(metadata any, verificationMethod string) (crypto.Pub
 			continue
 		}
 
-		// Handle publicKeyJwk
-		if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
-			return extractKeyFromJWK(jwk)
+		key, err := methodKey(vmMap)
+		if errors.Is(err, errNoKeyMaterial) {
+			continue
 		}
-
-		// Handle publicKeyMultibase (Ed25519)
-		if multibase, ok := vmMap["publicKeyMultibase"].(string); ok {
-			return decodeMultibaseKey(multibase)
-		}
+		return key, err
 	}
 
 	return nil, fmt.Errorf("verification method not found in metadata: %s", verificationMethod)
+}
+
+// extractKeyForRelationship extracts the key of a verification method only when the DID
+// document says that method belongs to the DID and is authorized for the relationship
+// ("authentication", "assertionMethod", ...). A method listed under verificationMethod
+// alone is not authorized for anything, and one whose controller is another DID is not
+// this DID's to sign as.
+func extractKeyForRelationship(metadata any, verificationMethod, relationship string) (crypto.PublicKey, error) {
+	doc, ok := metadata.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid trust metadata format")
+	}
+
+	did, _, _ := strings.Cut(verificationMethod, "#")
+	docID, _ := doc["id"].(string)
+	if docID == "" {
+		docID = did
+	}
+	if docID != did {
+		return nil, fmt.Errorf("DID document is for %q, not %q", docID, did)
+	}
+
+	var vmMap map[string]any
+	authorized := false
+	entries, _ := doc[relationship].([]any)
+	for _, entry := range entries {
+		switch e := entry.(type) {
+		case string:
+			authorized = authorized || absoluteRef(e, docID) == verificationMethod
+		case map[string]any:
+			if id, _ := e["id"].(string); absoluteRef(id, docID) == verificationMethod {
+				authorized = true
+				vmMap = e
+			}
+		}
+	}
+	if !authorized {
+		return nil, fmt.Errorf("verification method %s is not authorized for %s", verificationMethod, relationship)
+	}
+
+	if vmMap == nil {
+		vms, _ := doc["verificationMethod"].([]any)
+		for _, vm := range vms {
+			m, ok := vm.(map[string]any)
+			if !ok {
+				continue
+			}
+			if id, _ := m["id"].(string); absoluteRef(id, docID) == verificationMethod {
+				vmMap = m
+				break
+			}
+		}
+	}
+	if vmMap == nil {
+		return nil, fmt.Errorf("verification method not found in metadata: %s", verificationMethod)
+	}
+
+	if controller, _ := vmMap["controller"].(string); controller != did {
+		return nil, fmt.Errorf("verification method %s is controlled by %q, not %q", verificationMethod, controller, did)
+	}
+
+	key, err := methodKey(vmMap)
+	if errors.Is(err, errNoKeyMaterial) {
+		return nil, fmt.Errorf("verification method not found in metadata: %s", verificationMethod)
+	}
+	return key, err
+}
+
+// absoluteRef resolves a DID document's relative reference ("#key-1") against its id.
+func absoluteRef(ref, docID string) string {
+	if strings.HasPrefix(ref, "#") {
+		return docID + ref
+	}
+	return ref
 }
 
 // extractKeyFromJWK extracts a public key from a JWK map.
@@ -195,17 +284,56 @@ func extractKeyFromJWK(jwk map[string]any) (crypto.PublicKey, error) {
 	}
 }
 
-// decodeMultibaseKey decodes a multibase-encoded public key (Ed25519).
+// Multicodec prefixes (unsigned varint) of the public key types a Multikey can carry.
+const (
+	multicodecEd25519 = 0xed
+	multicodecP256    = 0x1200
+	multicodecP384    = 0x1201
+	multicodecP521    = 0x1202
+)
+
+// decodeMultibaseKey decodes a multibase-encoded Multikey: multibase(multicodec || key).
+// Ed25519 and the NIST curves (compressed point) are understood, which is what a DID document's
+// publicKeyMultibase carries for the cryptosuites in use.
 func decodeMultibaseKey(multibase string) (crypto.PublicKey, error) {
 	if len(multibase) < 2 {
 		return nil, fmt.Errorf("multibase string too short")
 	}
 
-	// Handle 'z' prefix (base58-btc)
-	if multibase[0] == 'z' {
-		// For now, return error - full multibase/multicodec support would require additional dependencies
-		return nil, fmt.Errorf("base58-btc multibase decoding not implemented in trust package")
+	enc, decoded, err := mb.Decode(multibase)
+	if err != nil {
+		return nil, fmt.Errorf("decoding multibase: %w", err)
+	}
+	if enc != mb.Base58BTC {
+		return nil, fmt.Errorf("unsupported multibase encoding: %c", multibase[0])
 	}
 
-	return nil, fmt.Errorf("unsupported multibase encoding: %c", multibase[0])
+	codec, n := binary.Uvarint(decoded)
+	if n <= 0 {
+		return nil, fmt.Errorf("multikey has no multicodec prefix")
+	}
+	key := decoded[n:]
+
+	var curve elliptic.Curve
+	switch codec {
+	case multicodecEd25519:
+		if len(key) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid Ed25519 public key size: got %d, expected %d", len(key), ed25519.PublicKeySize)
+		}
+		return ed25519.PublicKey(key), nil
+	case multicodecP256:
+		curve = elliptic.P256()
+	case multicodecP384:
+		curve = elliptic.P384()
+	case multicodecP521:
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported multicodec 0x%x", codec)
+	}
+
+	x, y := elliptic.UnmarshalCompressed(curve, key)
+	if x == nil {
+		return nil, fmt.Errorf("invalid compressed %s point", curve.Params().Name)
+	}
+	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 }
