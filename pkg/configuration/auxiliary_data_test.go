@@ -205,7 +205,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		}, "the type metadata declares no claim at key part"},
 		"a key part that is the entry itself": {func(c *model.Cfg) {
 			withPSC(c, primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{psc}}})
-		}, "is the entry itself, which every commitment matches"},
+		}, "holds the entry"},
 		"a key part that is an optional to_issuer entry": {func(c *model.Cfg) {
 			opt := []string{ssc[0], "opt"}
 			c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: opt}}
@@ -271,6 +271,12 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		}
 	}
 	meta := func(c *model.Cfg) *model.CredentialMetadata { return c.Common.CredentialMetadata["example"] }
+	uniquePSC := func(c *model.Cfg, key ...[]string) {
+		from := c.APIGW.DataSources.Presentation.Scopes["example"].From
+		pid := from["pid"]
+		pid.Derivations = append(pid.Derivations, primitives.Derivation{HashCommitment: &primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: key}}})
+		from["pid"] = pid
+	}
 	claimOpening := func(claim string) []primitives.Derivation {
 		return []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 			Path:    ssc,
@@ -289,6 +295,10 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 	}
 	require.NoError(t, checkAuxiliaryData(cfg, "apigw"), "a presentation's claim the VCTM leaves out stays out of the credential")
 
+	cfg = base()
+	uniquePSC(cfg, ssc)
+	require.NoError(t, checkAuxiliaryData(cfg, "apigw"), "a key part may sit next to the entry")
+
 	for name, tc := range map[string]struct {
 		mutate func(*model.Cfg)
 		want   string
@@ -296,6 +306,14 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		"a path the VCTM does not declare": {func(c *model.Cfg) {
 			meta(c).AuxiliaryData.ToIssuer[0].Path = []string{"commitments", "other"}
 		}, "the VCTM declares no claim"},
+		"a key part that holds the entry": {func(c *model.Cfg) {
+			meta(c).VCTM.Claims = append(meta(c).VCTM.Claims, claim("", true, "commitments"))
+			uniquePSC(c, []string{"commitments"})
+		}, `key part ["commitments"] holds the entry`},
+		"a key part the SD-JWT builder writes": {func(c *model.Cfg) {
+			meta(c).VCTM.Claims = append(meta(c).VCTM.Claims, claim("", true, "iss"))
+			uniquePSC(c, []string{"iss"})
+		}, "the SD-JWT builder writes"},
 		"an empty path": {func(c *model.Cfg) {
 			meta(c).AuxiliaryData.ToIssuer[0].Path = nil
 		}, "the path is empty"},

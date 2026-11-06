@@ -577,8 +577,9 @@ func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet, 
 }
 
 // checkUniqueKey accepts key parts that are claims of the credential's type
-// metadata. It refuses the entry itself, which every commitment matches,
-// and an optional to_issuer entry, which a wallet may leave out.
+// metadata. It refuses a part that holds the entry, which every commitment
+// changes, an optional to_issuer entry, which a wallet may leave out, and an
+// SD-JWT claim the builder writes after the commitments are accepted.
 func checkUniqueKey(meta *model.CredentialMetadata, hc *primitives.HashCommitmentArgs) error {
 	if hc.Unique == nil {
 		return nil
@@ -586,12 +587,17 @@ func checkUniqueKey(meta *model.CredentialMetadata, hc *primitives.HashCommitmen
 	toIssuer := entryPaths(meta.AuxiliaryDataSupported().ToIssuer)
 	for _, part := range hc.Unique.Key {
 		switch {
-		case slices.Equal(part, hc.Path):
-			return fmt.Errorf("key part %q is the entry itself, which every commitment matches", part)
+		case slices.Equal(part, hc.Path[:min(len(part), len(hc.Path))]):
+			return fmt.Errorf("key part %q holds the entry %q, which every commitment changes", part, hc.Path)
 		case !claimDeclared(meta, part):
 			return fmt.Errorf("the type metadata declares no claim at key part %q", part)
 		case toIssuer[claimsPathKey(part)] != nil && !claimMandatory(meta, part):
 			return fmt.Errorf("key part %q is an optional to_issuer entry, which a wallet may leave out", part)
+		}
+		if meta.Format != openid4vp.FormatMsoMdoc {
+			if err := checkSDJWTClaimName(part); err != nil {
+				return fmt.Errorf("key part: %w", err)
+			}
 		}
 	}
 	return nil
