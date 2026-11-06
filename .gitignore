@@ -71,3 +71,6 @@ secrets.yaml
 # any more, but a checkout that ran the old `make fly-launch-*` still has
 # them, and un-ignoring a real secret is not worth the tidiness.
 /secrets.sunet-vc*.yaml
+
+# A candidate fly/deploy.sh kept after a failed rename holds live secrets.
+/secrets.*.yaml.*
