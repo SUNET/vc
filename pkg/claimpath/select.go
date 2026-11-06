@@ -20,12 +20,11 @@ var ErrMismatch = errors.New("claimpath: the claims do not have the structure th
 // null or an index on a non-array are an error, and so is an empty final
 // selection.
 func (p Pointer) Select(root map[string]any) ([]any, error) {
-	components, err := p.Components()
-	if err != nil {
+	if err := p.requireComponents(); err != nil {
 		return nil, err
 	}
 	selection := []any{root}
-	for i, c := range components {
+	for i, c := range p.components {
 		next := make([]any, 0, len(selection))
 		for _, element := range selection {
 			children, err := c.children(element)

@@ -102,16 +102,24 @@ func (p Pointer) IsZero() bool { return len(p.components) == 0 && !p.empty }
 // IsEmptyArray reports whether the pointer is the empty array.
 func (p Pointer) IsEmptyArray() bool { return p.empty }
 
-// Components returns the pointer's components. An unset pointer and the
-// empty array are an error.
+// Components returns a copy of the pointer's components. An unset pointer
+// and the empty array are an error.
 func (p Pointer) Components() ([]Component, error) {
+	if err := p.requireComponents(); err != nil {
+		return nil, err
+	}
+	return slices.Clone(p.components), nil
+}
+
+// requireComponents refuses an unset pointer and the empty array.
+func (p Pointer) requireComponents() error {
 	switch {
 	case p.empty:
-		return nil, errors.New("claimpath: the claims path pointer is the empty array")
+		return errors.New("claimpath: the claims path pointer is the empty array")
 	case len(p.components) == 0:
-		return nil, errors.New("claimpath: the claims path pointer is unset")
+		return errors.New("claimpath: the claims path pointer is unset")
 	}
-	return p.components, nil
+	return nil
 }
 
 // KeyNames returns the keys of a pointer made only of keys.
@@ -353,7 +361,7 @@ func indexOf(n int64) (Component, error) {
 
 // MarshalJSON writes the pointer as its JSON array.
 func (p Pointer) MarshalJSON() ([]byte, error) {
-	if _, err := p.Components(); err != nil && !p.empty {
+	if err := p.requireComponents(); err != nil && !p.empty {
 		return nil, err
 	}
 	return json.Marshal(p.values())
@@ -384,7 +392,7 @@ func (p *Pointer) UnmarshalJSON(data []byte) error {
 
 // MarshalYAML writes the pointer as a sequence.
 func (p Pointer) MarshalYAML() (any, error) {
-	if _, err := p.Components(); err != nil && !p.empty {
+	if err := p.requireComponents(); err != nil && !p.empty {
 		return nil, err
 	}
 	return p.values(), nil

@@ -83,6 +83,24 @@ func TestCopyDCQL_ClaimValuesIsDeepCopy(t *testing.T) {
 	}
 }
 
+// A template and its copies share each claims path pointer, so a write into
+// what a copy's pointer hands out stays out of the template.
+func TestCopyDCQL_PathIsolation(t *testing.T) {
+	src := &DCQL{Credentials: []CredentialQuery{{
+		Claims: []ClaimQuery{{Path: claimpath.Keys("nationality")}},
+	}}}
+
+	components, err := copyDCQL(src).Credentials[0].Claims[0].Path.Components()
+	if err != nil {
+		t.Fatal(err)
+	}
+	components[0] = claimpath.Key("MUTATED")
+
+	if got := src.Credentials[0].Claims[0].Path; !got.Equal(claimpath.Keys("nationality")) {
+		t.Errorf("source Path leaked mutation: got %s", got)
+	}
+}
+
 // TestCopyDCQL_ValuesSurviveMarshal verifies that Values round-trip through
 // JSON serialization after being copied.
 func TestCopyDCQL_ValuesSurviveMarshal(t *testing.T) {
