@@ -110,6 +110,20 @@ set_app_secrets() {
     return 1
 }
 
+# Decides whether a secret generated for Fly app $2 may be sent. Fly secrets are
+# write-only, so secrets file $1 must be able to receive secret $3 first.
+# Returns 0 when the file is writable. Otherwise returns 1 after an "app
+# missing" note when the app is absent, and stops when it exists.
+secrets_file_can_record() {
+    local _file="$1" _app="$2" _secret="$3"
+    [[ -f "$_file" && -w "$_file" ]] && return 0
+    if app_listed "$_app" "$_file is missing or read-only, and listing the apps failed"; then
+        die "$_file is missing or read-only; it must receive $_secret before $_app does"
+    fi
+    echo "    ($_app missing; secrets left unset)"
+    return 1
+}
+
 require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
 }
@@ -235,7 +249,7 @@ cmd_launch() {
     local secrets_file
     secrets_file="$(secrets_file_path)"
 
-    local mongo_app mongo_pass mongo_uri mongo_secrets mongo_creds_set=0
+    local mongo_app mongo_pass mongo_uri="" mongo_secrets mongo_creds_set=0
     mongo_app="$(app_name "mongodb")"
 
     # Idempotent: if MongoDB already has creds, keep them. Rotating
@@ -247,31 +261,31 @@ cmd_launch() {
     if grep -q '"MONGO_INITDB_ROOT_PASSWORD"' <<<"$mongo_secrets"; then
         echo "==> MongoDB secrets already set for $mongo_app (skipping)"
         mongo_creds_set=1
-        mongo_pass=""
-        mongo_uri=""
     else
         # hex, not base64: password is embedded in a URI, must be URL-safe.
         mongo_pass="$(openssl rand -hex 24)"
-        mongo_uri="$(mongo_uri_for "$mongo_pass" "$mongo_app")"
 
         if [[ ! -f "$secrets_file" ]]; then
             cp "${ROOT_DIR}/secrets.example.yaml" "$secrets_file"
             echo "    Created $secrets_file from secrets.example.yaml"
         fi
-        # Prepared before the set, so the local write after it is a plain
-        # overwrite of an existing file.
-        local mongo_secrets_content
-        mongo_secrets_content="$(sed "s|uri:.*|uri: \"${mongo_uri}\"|" "$secrets_file")"
 
         echo "==> Setting MongoDB secrets for $mongo_app"
-        if set_app_secrets "$mongo_app" \
-            MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
-            MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
-            echo "    MongoDB secrets set"
-            printf '%s\n' "$mongo_secrets_content" > "$secrets_file"
-            echo "    Updated $secrets_file with MongoDB URI"
-        else
-            mongo_uri=""
+        if secrets_file_can_record "$secrets_file" "$mongo_app" "the MongoDB password"; then
+            # Prepared before the set, so the local write after it is a plain
+            # overwrite of a writable file.
+            local generated_mongo_uri mongo_secrets_content
+            generated_mongo_uri="$(mongo_uri_for "$mongo_pass" "$mongo_app")"
+            mongo_secrets_content="$(sed "s|uri:.*|uri: \"${generated_mongo_uri}\"|" "$secrets_file")"
+
+            if set_app_secrets "$mongo_app" \
+                MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
+                MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
+                echo "    MongoDB secrets set"
+                printf '%s\n' "$mongo_secrets_content" > "$secrets_file"
+                echo "    Updated $secrets_file with MongoDB URI"
+                mongo_uri="$generated_mongo_uri"
+            fi
         fi
     fi
 
@@ -295,24 +309,24 @@ cmd_launch() {
         # not production authorisation surfaces.
         demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
 
-        # The local file and Keycloak must hold the same client_secret. The
-        # new file is prepared before the set, so a failure stops before Fly
-        # holds a secret the file lacks; after a successful set only the
-        # overwrite remains. A failed set leaves the file unchanged, so apigw
-        # never ships a secret Keycloak lacks.
-        [[ -f "$secrets_file" && -w "$secrets_file" ]] \
-            || die "$secrets_file is missing or read-only; it must receive apigw's OIDC client_secret before $oidc_app does"
-        local oidc_secrets_content
-        oidc_secrets_content="$(yq ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file")"
-
         echo "==> Setting OIDC secrets for $oidc_app"
-        if set_app_secrets "$oidc_app" \
-            APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
-            DEMO_USER_PASSWORD="$demo_user_password"; then
-            echo "    OIDC secrets set"
-            printf '%s\n' "$oidc_secrets_content" > "$secrets_file"
-            echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
-            echo "    Demo user password (Keycloak realm users): $demo_user_password"
+        if secrets_file_can_record "$secrets_file" "$oidc_app" "apigw's OIDC client_secret"; then
+            # The local file and Keycloak must hold the same client_secret. The
+            # new file is prepared before the set, so a failure stops before
+            # Fly holds a secret the file lacks; after a successful set only
+            # the overwrite remains. A failed set leaves the file unchanged, so
+            # apigw never ships a secret Keycloak lacks.
+            local oidc_secrets_content
+            oidc_secrets_content="$(yq ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file")"
+
+            if set_app_secrets "$oidc_app" \
+                APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
+                DEMO_USER_PASSWORD="$demo_user_password"; then
+                echo "    OIDC secrets set"
+                printf '%s\n' "$oidc_secrets_content" > "$secrets_file"
+                echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
+                echo "    Demo user password (Keycloak realm users): $demo_user_password"
+            fi
         fi
     fi
 
@@ -325,8 +339,12 @@ cmd_launch() {
         local existing_client_secret
         existing_client_secret="$(yq -r '.apigw.auth_providers.oidc.registration.preconfigured.client_secret // ""' "$secrets_file")"
         if [[ -n "$existing_client_secret" && "$existing_client_secret" != "null" ]]; then
-            yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file"
-            echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
+            if [[ -w "$secrets_file" ]]; then
+                yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file"
+                echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
+            else
+                echo "    ($secrets_file is read-only; apigw.api_server.api_auth.oidc.client_secret left as is)"
+            fi
         fi
     fi
 

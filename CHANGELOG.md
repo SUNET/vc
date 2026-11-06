@@ -79,10 +79,12 @@
   generated MongoDB URI was written locally after a failed `secrets set`, and
   the OIDC `client_secret` reached Keycloak before a local write that could
   still fail. Both local writes are now prepared before the set and happen
-  only after it succeeds. A missing or read-only secrets file stops the OIDC
-  step before Fly receives anything. When MongoDB's credentials exist and
-  wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`, `launch` now sets the
-  URI from the local secrets file. When the file holds no generated URI,
+  only after it succeeds. A secrets file that is missing or read-only stops
+  the MongoDB or OIDC step before Fly receives anything when the app exists;
+  an absent app gets a "missing" note and `launch` continues. When MongoDB's
+  credentials exist and wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`,
+  `launch` now sets the URI from the local secrets file. When the file holds
+  no generated URI,
   `launch` stops and names the two ways out: restore the file, or reset
   MongoDB's credentials. An absent wallet-backend gets a "missing" note and
   `launch` continues; `launch --service wallet-backend` applies this rule
