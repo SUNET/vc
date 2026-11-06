@@ -46,10 +46,10 @@ func writeWRPACKeyPair(t *testing.T) (*pki.KeyConfig, string) {
 		},
 		NotBefore: time.Now().Add(-time.Hour),
 		NotAfter:  time.Now().Add(24 * time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
-		URIs:     []*url.URL{contact},
-		DNSNames: []string{"issuer.example.com"},
-		Policies: []x509.OID{policy},
+		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
+		URIs:      []*url.URL{contact},
+		DNSNames:  []string{"issuer.example.com"},
+		Policies:  []x509.OID{policy},
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
