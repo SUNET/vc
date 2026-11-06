@@ -53,23 +53,55 @@ usage() {
 
 die() { echo "Error: $*" >&2; exit 1; }
 
+# Runs `fly $3..`, storing its stdout in the variable named $1 and its stderr
+# in the variable named $2. Returns fly's exit status.
+fly_capture() {
+    local _out_var="$1" _err_var="$2" _err_file _out _status=0
+    shift 2
+    _err_file="$(mktemp)"
+    _out="$(fly "$@" 2>"$_err_file")" || _status=$?
+    printf -v "$_err_var" '%s' "$(cat "$_err_file")"
+    rm -f "$_err_file"
+    printf -v "$_out_var" '%s' "$_out"
+    return "$_status"
+}
+
+# Returns when Fly app $1 is absent, and stops with fly's error $3 when it
+# exists. $2 names the failed call. `launch --service <name>` provisions apps
+# it did not create, so a failure on an absent app is expected; any other
+# failure would read as "nothing there" and replace live state.
+require_app_absent() {
+    local _apps _err
+    fly_capture _apps _err apps list --json \
+        || die "$2 of $1 failed, and so did listing the apps: $_err"
+    if printf '%s' "$_apps" | grep -q "\"$1\""; then
+        die "$2 of $1 failed: $3"
+    fi
+}
+
 # Stores the secrets of Fly app $1, as JSON, in the variable named $2. An
-# absent app stores "[]": `launch --service <name>` provisions apps it did not
-# create, and their `secrets set` calls then fail with "app missing?". Every
-# other listing failure stops the script: provisioning after a failed listing
-# replaces live secrets.
+# absent app stores "[]".
 read_app_secrets() {
-    local _app="$1" _json _apps
-    if _json="$(fly secrets list --app "$_app" --json 2>/dev/null)"; then
+    local _json _err
+    if fly_capture _json _err secrets list --app "$1" --json; then
         printf -v "$2" '%s' "$_json"
         return 0
     fi
-    _apps="$(fly apps list --json 2>/dev/null)" \
-        || die "listing the secrets of $_app failed, and so did listing the apps; provisioning would replace existing secrets"
-    if printf '%s' "$_apps" | grep -q "\"$_app\""; then
-        die "listing the secrets of $_app failed; provisioning would replace existing secrets"
-    fi
+    require_app_absent "$1" "listing the secrets" "$_err"
     printf -v "$2" '%s' '[]'
+}
+
+# Sets the secrets $2.. on Fly app $1. Returns 1 after an "app missing" note
+# when the app is absent.
+set_app_secrets() {
+    local _app="$1" _err
+    shift
+    if { _err="$(fly secrets set --app "$_app" "$@" 2>&1 1>&3 3>&-)"; } 3>&1; then
+        return 0
+    fi
+    require_app_absent "$_app" "setting secrets" "$_err"
+    echo "    ($_app missing; secrets left unset)"
+    return 1
 }
 
 require_flyctl() {
@@ -146,11 +178,15 @@ cmd_launch() {
     # `fly launch`-style deploy or an explicit allocation. Do it here so the
     # first `deploy` is enough to make the app reachable.
     echo "==> Ensuring public IPs for all apps"
-    local ips_json
+    local ips_json ips_err
     for service in "${SERVICES[@]}"; do
         local app
         app="$(app_name "$service")"
-        ips_json="$(fly ips list --app "$app" --json 2>/dev/null || echo '[]')"
+        if ! fly_capture ips_json ips_err ips list --app "$app" --json; then
+            require_app_absent "$app" "listing the IPs" "$ips_err"
+            echo "  ($app missing; IPs left unallocated)"
+            continue
+        fi
         if ! echo "$ips_json" | grep -qE '"Type":\s*"(shared_v4|v4)"'; then
             echo "  [ipv4] $app"
             fly ips allocate-v4 --shared --app "$app" 2>/dev/null || echo "    (failed; check manually)"
@@ -184,18 +220,25 @@ cmd_launch() {
         mongo_pass="$(openssl rand -hex 24)"
         mongo_uri="mongodb://${mongo_user}:${mongo_pass}@${mongo_app}.internal:27017/?authSource=admin"
 
-        echo "==> Setting MongoDB secrets for $mongo_app"
-        fly secrets set --app "$mongo_app" \
-            MONGO_INITDB_ROOT_USERNAME="$mongo_user" \
-            MONGO_INITDB_ROOT_PASSWORD="$mongo_pass" \
-            2>/dev/null && echo "    MongoDB secrets set" || echo "    (failed to set MongoDB secrets)"
-
         if [[ ! -f "$secrets_file" ]]; then
             cp "${ROOT_DIR}/secrets.example.yaml" "$secrets_file"
             echo "    Created $secrets_file from secrets.example.yaml"
         fi
-        sed -i "s|uri:.*|uri: \"${mongo_uri}\"|" "$secrets_file"
-        echo "    Updated $secrets_file with MongoDB URI"
+        # Prepared before the set, so the local write after it is a plain
+        # overwrite of an existing file.
+        local mongo_secrets_content
+        mongo_secrets_content="$(sed "s|uri:.*|uri: \"${mongo_uri}\"|" "$secrets_file")"
+
+        echo "==> Setting MongoDB secrets for $mongo_app"
+        if set_app_secrets "$mongo_app" \
+            MONGO_INITDB_ROOT_USERNAME="$mongo_user" \
+            MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
+            echo "    MongoDB secrets set"
+            printf '%s\n' "$mongo_secrets_content" > "$secrets_file"
+            echo "    Updated $secrets_file with MongoDB URI"
+        else
+            mongo_uri=""
+        fi
     fi
 
     local oidc_app apigw_client_secret demo_user_password oidc_first_launch oidc_secrets
@@ -218,21 +261,25 @@ cmd_launch() {
         # not production authorisation surfaces.
         demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
 
+        # The local file and Keycloak must hold the same client_secret. The
+        # new file is prepared before the set, so a failure stops before Fly
+        # holds a secret the file lacks; after a successful set only the
+        # overwrite remains. A failed set leaves the file unchanged, so apigw
+        # never ships a secret Keycloak lacks.
+        [[ -f "$secrets_file" && -w "$secrets_file" ]] \
+            || die "$secrets_file is missing or read-only; it must receive apigw's OIDC client_secret before $oidc_app does"
+        local oidc_secrets_content
+        oidc_secrets_content="$(yq ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file")"
+
         echo "==> Setting OIDC secrets for $oidc_app"
-        # Abort on failure: if fly rejects the secrets, we must NOT write the
-        # generated client_secret into the local secrets file. Otherwise apigw
-        # ships with a secret Keycloak never received and every OIDC login
-        # fails.
-        if ! fly secrets set --app "$oidc_app" \
+        if set_app_secrets "$oidc_app" \
             APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
             DEMO_USER_PASSWORD="$demo_user_password"; then
-            die "Failed to set OIDC secrets for $oidc_app; refusing to write local client_secret"
+            echo "    OIDC secrets set"
+            printf '%s\n' "$oidc_secrets_content" > "$secrets_file"
+            echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
+            echo "    Demo user password (Keycloak realm users): $demo_user_password"
         fi
-        echo "    OIDC secrets set"
-
-        yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
-        echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
-        echo "    Demo user password (Keycloak realm users): $demo_user_password"
     fi
 
     # api_auth.oidc.client_secret mirrors the preconfigured client_secret.
@@ -270,17 +317,17 @@ cmd_launch() {
     else
         as_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout)"
         as_key_b64="$(printf '%s' "$as_key_pem" | base64 | tr -d '\n')"
-        fly secrets set --app "$wallet_backend_app" \
-            AS_SIGNING_KEY_PEM="$as_key_b64" \
-            2>/dev/null && echo "    AS signing key set" || echo "    (failed to set AS_SIGNING_KEY_PEM; app missing?)"
+        if set_app_secrets "$wallet_backend_app" AS_SIGNING_KEY_PEM="$as_key_b64"; then
+            echo "    AS signing key set"
+        fi
     fi
 
     # Idempotent: only push the URI if we generated a fresh one above.
     if [[ -n "$mongo_uri" ]]; then
         echo "==> Setting Mongo URI for $wallet_backend_app"
-        fly secrets set --app "$wallet_backend_app" \
-            WALLET_STORAGE_MONGODB_URI="$mongo_uri" \
-            2>/dev/null && echo "    Mongo URI set" || echo "    (failed to set WALLET_STORAGE_MONGODB_URI; app missing?)"
+        if set_app_secrets "$wallet_backend_app" WALLET_STORAGE_MONGODB_URI="$mongo_uri"; then
+            echo "    Mongo URI set"
+        fi
     else
         echo "==> Mongo URI on $wallet_backend_app left in place (MongoDB creds unchanged)"
     fi
@@ -302,10 +349,11 @@ cmd_launch() {
             if printf '%s' "$svc_secrets" | grep -q '"SIGNING_EC_PRIVATE_KEY"'; then
                 echo "    (SIGNING_EC_PRIVATE_KEY already set, leaving in place)"
             else
-                fly secrets set --app "$svc_app" \
+                if set_app_secrets "$svc_app" \
                     SIGNING_EC_PRIVATE_KEY="$signing_key_b64" \
-                    SIGNING_EC_CHAIN="$signing_chain_b64" \
-                    2>/dev/null && echo "    Signing secrets set" || echo "    (failed to set signing secrets; app missing?)"
+                    SIGNING_EC_CHAIN="$signing_chain_b64"; then
+                    echo "    Signing secrets set"
+                fi
             fi
         done
     else
@@ -352,11 +400,11 @@ provision_apigw_saml_sp_keypair() {
             >/dev/null 2>&1; then
         saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
         saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
-        fly secrets set --app "$apigw_app" \
+        if set_app_secrets "$apigw_app" \
             SAML_SP_CERT="$saml_cert_b64" \
-            SAML_SP_KEY="$saml_key_b64" \
-            2>/dev/null && echo "    SAML SP keypair set" \
-            || echo "    (failed to set SAML SP keypair; app missing?)"
+            SAML_SP_KEY="$saml_key_b64"; then
+            echo "    SAML SP keypair set"
+        fi
     else
         echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
     fi
@@ -375,18 +423,18 @@ provision_apigw_nym_auth_secrets() {
     else
         echo "==> Provisioning CREDENTIAL_ENCRYPTION_KEY for $apigw_app"
         value="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')"
-        fly secrets set --app "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value" \
-            2>/dev/null && echo "    CREDENTIAL_ENCRYPTION_KEY set" \
-            || echo "    (failed to set CREDENTIAL_ENCRYPTION_KEY; app missing?)"
+        if set_app_secrets "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value"; then
+            echo "    CREDENTIAL_ENCRYPTION_KEY set"
+        fi
     fi
     if printf '%s' "$secrets_json" | grep -q '"NYM_AUTH_SEED"'; then
         echo "==> NYM_AUTH_SEED already set for $apigw_app (skipping)"
     else
         echo "==> Provisioning NYM_AUTH_SEED for $apigw_app"
         value="$(openssl rand 32 | basenc --base64url | tr -d '=' | base64 | tr -d '\n')"
-        fly secrets set --app "$apigw_app" NYM_AUTH_SEED="$value" \
-            2>/dev/null && echo "    NYM_AUTH_SEED set" \
-            || echo "    (failed to set NYM_AUTH_SEED; app missing?)"
+        if set_app_secrets "$apigw_app" NYM_AUTH_SEED="$value"; then
+            echo "    NYM_AUTH_SEED set"
+        fi
     fi
 }
 
@@ -583,7 +631,13 @@ cmd_status() {
         local app
         app="$(app_name "$service")"
         echo "  [$app]"
-        fly status --app "$app" 2>/dev/null || echo "    (not deployed)"
+        local status_out status_err
+        if fly_capture status_out status_err status --app "$app"; then
+            [[ -z "$status_out" ]] || printf '%s\n' "$status_out"
+        else
+            require_app_absent "$app" "reading the status" "$status_err"
+            echo "    (not deployed)"
+        fi
         echo ""
     done
 }
@@ -606,7 +660,13 @@ cmd_destroy() {
         local app
         app="$(app_name "$service")"
         echo "  [destroy] $app"
-        fly apps destroy "$app" --yes 2>/dev/null || echo "    (already gone)"
+        local destroy_out destroy_err
+        if fly_capture destroy_out destroy_err apps destroy "$app" --yes; then
+            [[ -z "$destroy_out" ]] || printf '%s\n' "$destroy_out"
+        else
+            require_app_absent "$app" "destroying" "$destroy_err"
+            echo "    (already gone)"
+        fi
     done
 }
 

@@ -65,13 +65,21 @@
 
 ### Fixed
 
-- **`fly/deploy.sh` stops when listing an app's secrets fails**: the
+- **`fly/deploy.sh` stops when a `fly` call on an existing app fails**: the
   checks for the MongoDB credentials, OIDC secrets, AS signing key, service
   signing keys and SAML SP keypair read a failed listing as "secret absent",
-  then generated and set new values over the live ones. Every listing now
-  stops the script with the app's name. A listing for an app that `fly apps
-  list` does not show counts as empty, so `launch --service <name>` still
-  continues past apps it did not create.
+  then generated and set new values over the live ones. A failed `ips list`
+  allocated more IPs, and failed `secrets set`, `status` and `apps destroy`
+  calls read as "app missing", "not deployed" and "already gone". Each of
+  these calls now stops the script with the app's name and fly's error. A
+  call on an app that `fly apps list` does not show is reported as missing,
+  so `launch --service <name>` still continues past apps it did not create.
+- **`fly/deploy.sh` keeps the local secrets file in step with Fly**: the
+  generated MongoDB URI was written locally after a failed `secrets set`, and
+  the OIDC `client_secret` reached Keycloak before a local write that could
+  still fail. Both local writes are now prepared before the set and happen
+  only after it succeeds. A missing or read-only secrets file stops the OIDC
+  step before Fly receives anything.
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only
