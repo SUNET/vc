@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -367,6 +368,86 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// A chunked request has ContentLength -1. The authorization middleware and the
+// binding must read the same body: a body only the binding reads carries an
+// authentic_source that nothing authorized. A real server produces the length.
+func TestUnknownLengthBodyReachesMiddlewareAndBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.New("chunkedtest", t.TempDir(), true)
+	require.NoError(t, err)
+	ctx := context.Background()
+	tracer, err := trace.NewForTesting(ctx, "test", log)
+	require.NoError(t, err)
+	client, err := New(ctx, tracer, &model.Cfg{Common: &model.Common{}}, log)
+	require.NoError(t, err)
+
+	type target struct {
+		AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	}
+	engine := gin.New()
+	engine.Use(client.Middleware.MaxBodySize(64))
+	client.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "bind", http.StatusOK,
+		func(_ context.Context, c *gin.Context) (any, error) {
+			pairs := extractResourcePairs(c)
+			v := &target{}
+			if err := client.Binding.Request(ctx, c, v); err != nil {
+				return nil, err
+			}
+			authorized := ""
+			if len(pairs) > 0 {
+				authorized = pairs[0].authenticSource
+			}
+			return map[string]string{"bound": v.AuthenticSource, "authorized": authorized}, nil
+		})
+	server := httptest.NewServer(engine)
+	defer server.Close()
+
+	const jsonType = "application/json"
+	for _, tc := range []struct {
+		name           string
+		query          string
+		contentType    string
+		body           io.Reader
+		wantStatus     int
+		wantTitle      string
+		wantBound      string
+		wantAuthorized string
+	}{
+		{name: "valid JSON", contentType: jsonType, body: strings.NewReader(`{"authentic_source":"a"}`), wantStatus: http.StatusOK, wantBound: "a", wantAuthorized: "a"},
+		{name: "wrong type", contentType: jsonType, body: strings.NewReader(`{"authentic_source":[1]}`), wantStatus: http.StatusBadRequest, wantTitle: "json_type_error"},
+		{name: "no body bytes", query: "?authentic_source=q", contentType: jsonType, body: strings.NewReader(""), wantStatus: http.StatusOK, wantBound: "q", wantAuthorized: "q"},
+		{name: "whitespace", contentType: jsonType, body: strings.NewReader("   "), wantStatus: http.StatusBadRequest, wantTitle: "json_syntax_error"},
+		{name: "form", contentType: "application/x-www-form-urlencoded", body: strings.NewReader("authentic_source=f"), wantStatus: http.StatusOK, wantBound: "f"},
+		{name: "over the size limit", contentType: jsonType, body: strings.NewReader(`{"authentic_source":"` + strings.Repeat("x", 64) + `"}`), wantStatus: http.StatusRequestEntityTooLarge, wantTitle: "internal_server_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// io.MultiReader hides the length, so the client sends chunked.
+			req, err := http.NewRequest(http.MethodPost, server.URL+"/bind"+tc.query, io.MultiReader(tc.body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", tc.contentType)
+
+			resp, err := server.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			var reply struct {
+				Bound      string         `json:"bound"`
+				Authorized string         `json:"authorized"`
+				Error      map[string]any `json:"error"`
+			}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&reply))
+			assert.Equal(t, tc.wantStatus, resp.StatusCode)
+			if tc.wantTitle != "" {
+				assert.Equal(t, tc.wantTitle, reply.Error["title"])
+			}
+			assert.Equal(t, tc.wantBound, reply.Bound)
+			if tc.wantAuthorized != "" {
+				assert.Equal(t, tc.wantAuthorized, reply.Authorized)
+			}
+		})
 	}
 }
 
