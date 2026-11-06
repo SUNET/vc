@@ -62,7 +62,7 @@ func (r Ref) MarshalYAML() (any, error) {
 	if r.dotted == "" {
 		return r.Path.MarshalYAML()
 	}
-	if _, err := r.Path.Components(); err != nil {
+	if err := r.Path.requireComponents(); err != nil {
 		return nil, err
 	}
 	return upgradedRef{Dotted: r.dotted, Path: r.Path}, nil

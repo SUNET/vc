@@ -76,7 +76,7 @@ func (s Shape) Equal(t Shape) bool {
 // namespace nor as an element addresses a document key outside the MDDL:
 // an intermediate claim a derivation reads or writes.
 func (s Shape) Locate(p Pointer) (Pointer, error) {
-	if _, err := p.Components(); err != nil {
+	if err := p.requireComponents(); err != nil {
 		return Pointer{}, err
 	}
 	switch s.kind {
