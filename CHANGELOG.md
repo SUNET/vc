@@ -65,6 +65,19 @@
 
 ### Fixed
 
+- **A JSON request body the client got wrong answers 400**: wrong-typed,
+  truncated or malformed JSON, failed validation and values a decoder refuses
+  answer 400 on every endpoint that binds a JSON body, whichever words the
+  error text holds. Truncated or whitespace-only bodies carry the title
+  `json_syntax_error`. Values refused by a decoder, such as a malformed time,
+  carry the new title `json_value_error`. Both titles replace
+  `internal_server_error`.
+- **Request bodies with no declared length are read**: a chunked request or an
+  HTTP/2 request with no `content-length` binds its JSON or form body, and the
+  authorization middleware checks the resource pairs in its JSON body. Such a
+  request with no body bytes binds as a request with `Content-Length: 0` does.
+  The issuance prepare and datastore pre-authorized offer endpoints require a
+  canonical JSON body and refuse an undeclared length with 400.
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

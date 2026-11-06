@@ -80,6 +80,10 @@ func StatusCode(ctx context.Context, err error) int {
 		return http.StatusRequestEntityTooLarge
 	}
 
+	if helpers.IsClientJSONError(err) {
+		return http.StatusBadRequest
+	}
+
 	// Check for OAuth2 sentinel errors (fallback for code that hasn't migrated to OAuthError yet)
 	if errors.Is(err, oauth2.ErrInvalidClient) {
 		return http.StatusUnauthorized // RFC 6749 §5.2

@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -254,6 +257,198 @@ func jsonSyntaxError(t *testing.T) error {
 	err := json.Unmarshal([]byte(`{"broken":`), &v)
 	require.Error(t, err)
 	return err
+}
+
+type rejectingDecoder struct{}
+
+func (*rejectingDecoder) UnmarshalJSON([]byte) error {
+	return errors.New("the token is missing")
+}
+
+type clientBody struct {
+	Name        string            `json:"name"`
+	AccessToken string            `json:"access_token"`
+	MissingItem string            `json:"missing_item"`
+	When        time.Time         `json:"when"`
+	Rejecting   *rejectingDecoder `json:"rejecting"`
+}
+
+type requiredTokenBody struct {
+	AccessToken string `json:"access_token" binding:"required" validate:"required"`
+}
+
+// HTTP's contract: a request body the client got wrong is a 4xx error
+// (RFC 9110 §15.5), whichever words the decoder's error text holds, and a
+// body over the limit is a 413 (§15.5.14).
+func TestClientJSONBodyErrorStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.New("bodytest", t.TempDir(), true)
+	require.NoError(t, err)
+	ctx := context.Background()
+	tracer, err := trace.NewForTesting(ctx, "test", log)
+	require.NoError(t, err)
+	client, err := New(ctx, tracer, &model.Cfg{Common: &model.Common{}}, log)
+	require.NoError(t, err)
+
+	request := func(c *gin.Context, v any) error { return client.Binding.Request(ctx, c, v) }
+	binders := []struct {
+		name string
+		bind func(c *gin.Context, v any) error
+		// typeOnly binders run only the rows whose error a JSON type
+		// identifies: FastAndSimple skips validation and ShouldBindJSON
+		// sets no RequestBodyError.
+		typeOnly bool
+	}{
+		{name: "Request", bind: request},
+		{name: "JSONBody", bind: func(c *gin.Context, v any) error { return client.Binding.JSONBody(ctx, c, v) }},
+		{name: "wrapped", bind: func(c *gin.Context, v any) error {
+			if err := request(c, v); err != nil {
+				return fmt.Errorf("binding the request: %w", err)
+			}
+			return nil
+		}},
+		{name: "FastAndSimple", typeOnly: true, bind: func(c *gin.Context, v any) error { return client.Binding.FastAndSimple(ctx, c, v) }},
+		{name: "ShouldBindJSON", typeOnly: true, bind: func(c *gin.Context, v any) error { return c.ShouldBindJSON(v) }},
+	}
+
+	newClientBody := func() any { return &clientBody{} }
+	for _, tc := range []struct {
+		name       string
+		body       string
+		target     func() any
+		maxBytes   int64
+		typeOnly   bool
+		wantStatus int
+		wantTitle  string
+	}{
+		{name: "wrong type", body: `{"name":[1]}`, target: newClientBody, typeOnly: true, wantStatus: http.StatusBadRequest, wantTitle: "json_type_error"},
+		{name: "wrong type in a token field", body: `{"access_token":[1]}`, target: newClientBody, typeOnly: true, wantStatus: http.StatusBadRequest, wantTitle: "json_type_error"},
+		{name: "wrong type in a missing field", body: `{"missing_item":[1]}`, target: newClientBody, typeOnly: true, wantStatus: http.StatusBadRequest, wantTitle: "json_type_error"},
+		{name: "syntax", body: `{"name":}`, target: newClientBody, typeOnly: true, wantStatus: http.StatusBadRequest, wantTitle: "json_syntax_error"},
+		{name: "truncated", body: `{"name":"x"`, target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_syntax_error"},
+		{name: "whitespace", body: "   ", target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_syntax_error"},
+		{name: "required token field absent", body: `{}`, target: func() any { return &requiredTokenBody{} }, wantStatus: http.StatusBadRequest, wantTitle: "validation_error"},
+		{name: "malformed time", body: `{"when":"yesterday"}`, target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_value_error"},
+		{name: "custom decoder refusal", body: `{"rejecting":1}`, target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_value_error"},
+		{name: "over the size limit", body: `{"name":"x"}`, target: newClientBody, maxBytes: 4, wantStatus: http.StatusRequestEntityTooLarge, wantTitle: "internal_server_error"},
+	} {
+		for _, binder := range binders {
+			if binder.typeOnly && !tc.typeOnly {
+				continue
+			}
+			for _, endpoint := range []string{"RegEndpoint", "RegStreamEndpoint"} {
+				t.Run(tc.name+"/"+binder.name+"/"+endpoint, func(t *testing.T) {
+					engine := gin.New()
+					rg := engine.Group("")
+					handler := func(c *gin.Context) (any, error) {
+						if tc.maxBytes > 0 {
+							c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, tc.maxBytes)
+						}
+						return map[string]string{}, binder.bind(c, tc.target())
+					}
+					if endpoint == "RegEndpoint" {
+						client.Server.RegEndpoint(ctx, rg, http.MethodPost, "bind", http.StatusOK,
+							func(_ context.Context, c *gin.Context) (any, error) { return handler(c) })
+					} else {
+						client.Server.RegStreamEndpoint(ctx, rg, http.MethodPost, "bind", http.StatusOK, nil,
+							func(_ context.Context, c *gin.Context, _ chan string) (any, error) { return handler(c) })
+					}
+
+					req := httptest.NewRequest(http.MethodPost, "/bind", strings.NewReader(tc.body))
+					req.Header.Set("Content-Type", "application/json")
+					w := httptest.NewRecorder()
+					engine.ServeHTTP(w, req)
+
+					var body struct {
+						Error map[string]any `json:"error"`
+					}
+					require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "body: %s", w.Body.String())
+					assert.Equal(t, tc.wantStatus, w.Code, "body: %s", w.Body.String())
+					assert.Equal(t, tc.wantTitle, body.Error["title"], "body: %s", w.Body.String())
+				})
+			}
+		}
+	}
+}
+
+// A chunked request has ContentLength -1. The authorization middleware and the
+// binding must read the same body: a body only the binding reads carries an
+// authentic_source that nothing authorized. A real server produces the length.
+func TestUnknownLengthBodyReachesMiddlewareAndBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.New("chunkedtest", t.TempDir(), true)
+	require.NoError(t, err)
+	ctx := context.Background()
+	tracer, err := trace.NewForTesting(ctx, "test", log)
+	require.NoError(t, err)
+	client, err := New(ctx, tracer, &model.Cfg{Common: &model.Common{}}, log)
+	require.NoError(t, err)
+
+	type target struct {
+		AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	}
+	engine := gin.New()
+	engine.Use(client.Middleware.MaxBodySize(64))
+	client.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "bind", http.StatusOK,
+		func(_ context.Context, c *gin.Context) (any, error) {
+			pairs := extractResourcePairs(c)
+			v := &target{}
+			if err := client.Binding.Request(ctx, c, v); err != nil {
+				return nil, err
+			}
+			authorized := ""
+			if len(pairs) > 0 {
+				authorized = pairs[0].authenticSource
+			}
+			return map[string]string{"bound": v.AuthenticSource, "authorized": authorized}, nil
+		})
+	server := httptest.NewServer(engine)
+	defer server.Close()
+
+	const jsonType = "application/json"
+	for _, tc := range []struct {
+		name           string
+		query          string
+		contentType    string
+		body           io.Reader
+		wantStatus     int
+		wantTitle      string
+		wantBound      string
+		wantAuthorized string
+	}{
+		{name: "valid JSON", contentType: jsonType, body: strings.NewReader(`{"authentic_source":"a"}`), wantStatus: http.StatusOK, wantBound: "a", wantAuthorized: "a"},
+		{name: "wrong type", contentType: jsonType, body: strings.NewReader(`{"authentic_source":[1]}`), wantStatus: http.StatusBadRequest, wantTitle: "json_type_error"},
+		{name: "no body bytes", query: "?authentic_source=q", contentType: jsonType, body: strings.NewReader(""), wantStatus: http.StatusOK, wantBound: "q", wantAuthorized: "q"},
+		{name: "whitespace", contentType: jsonType, body: strings.NewReader("   "), wantStatus: http.StatusBadRequest, wantTitle: "json_syntax_error"},
+		{name: "form", contentType: "application/x-www-form-urlencoded", body: strings.NewReader("authentic_source=f"), wantStatus: http.StatusOK, wantBound: "f"},
+		{name: "over the size limit", contentType: jsonType, body: strings.NewReader(`{"authentic_source":"` + strings.Repeat("x", 64) + `"}`), wantStatus: http.StatusRequestEntityTooLarge, wantTitle: "internal_server_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// io.MultiReader hides the length, so the client sends chunked.
+			req, err := http.NewRequest(http.MethodPost, server.URL+"/bind"+tc.query, io.MultiReader(tc.body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", tc.contentType)
+
+			resp, err := server.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			var reply struct {
+				Bound      string         `json:"bound"`
+				Authorized string         `json:"authorized"`
+				Error      map[string]any `json:"error"`
+			}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&reply))
+			assert.Equal(t, tc.wantStatus, resp.StatusCode)
+			if tc.wantTitle != "" {
+				assert.Equal(t, tc.wantTitle, reply.Error["title"])
+			}
+			assert.Equal(t, tc.wantBound, reply.Bound)
+			if tc.wantAuthorized != "" {
+				assert.Equal(t, tc.wantAuthorized, reply.Authorized)
+			}
+		})
+	}
 }
 
 // The OAuth and OpenID4VCI branches return before publicError, so moving

@@ -140,11 +140,8 @@ func NewErrorFromError(v any) *Error {
 	// error text; now that it redacts, it turns a client error into an
 	// opaque internal_server_error and the caller loses the parse offset
 	// that would have told them what to fix.
-	if jsonUnmarshalTypeError, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
-		return &Error{Title: "json_type_error", Err: formatJSONUnmarshalTypeError(jsonUnmarshalTypeError)}
-	}
-	if jsonSyntaxError, ok := errors.AsType[*json.SyntaxError](err); ok {
-		return &Error{Title: "json_syntax_error", Err: map[string]any{"position": jsonSyntaxError.Offset, "error": jsonSyntaxError.Error()}}
+	if clientErr := clientJSONError(err); clientErr != nil {
+		return clientErr
 	}
 	if validatorErr, ok := errors.AsType[validator.ValidationErrors](err); ok {
 		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
@@ -166,6 +163,52 @@ func NewErrorFromError(v any) *Error {
 	}
 
 	return &Error{Title: "internal_server_error", Err: err.Error(), unclassified: true}
+}
+
+// RequestBodyError marks Err as a failure of the client's JSON request body.
+//
+// The binding sets it after reading the whole body, so Err can only describe
+// the bytes the client sent. It carries what the error's type cannot show: a
+// time.ParseError or a custom UnmarshalJSON failure names no origin.
+type RequestBodyError struct {
+	Err error
+}
+
+func (e *RequestBodyError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *RequestBodyError) Unwrap() error {
+	return e.Err
+}
+
+// IsClientJSONError reports whether err is JSON the client got wrong. The HTTP
+// layer answers such an error with 400, whichever words its text holds.
+func IsClientJSONError(err error) bool {
+	return clientJSONError(err) != nil
+}
+
+// clientJSONError shapes an error that IsClientJSONError accepts and returns
+// nil for any other error.
+func clientJSONError(err error) *Error {
+	if typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+		return &Error{Title: "json_type_error", Err: formatJSONUnmarshalTypeError(typeErr)}
+	}
+	if syntaxErr, ok := errors.AsType[*json.SyntaxError](err); ok {
+		return &Error{Title: "json_syntax_error", Err: map[string]any{"position": syntaxErr.Offset, "error": syntaxErr.Error()}}
+	}
+
+	bodyErr, ok := errors.AsType[*RequestBodyError](err)
+	if !ok {
+		return nil
+	}
+	if validatorErr, ok := errors.AsType[validator.ValidationErrors](err); ok {
+		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
+	}
+	if chosen, ok := errors.AsType[*Error](err); ok {
+		return chosen
+	}
+	return &Error{Title: "json_value_error", Err: map[string]any{"error": bodyErr.Error()}}
 }
 
 func formatValidationErrors(err validator.ValidationErrors) []map[string]any {

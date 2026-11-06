@@ -275,8 +275,9 @@ func extractResourcePairs(c *gin.Context) []resourcePair {
 		pairs = append(pairs, resourcePair{authenticSource: qSource, scope: qScope})
 	}
 
-	// JSON body (POST/PUT/DELETE endpoints).
-	if c.Request.Body != nil && c.Request.ContentLength > 0 {
+	// JSON body (POST/PUT/DELETE endpoints). An unknown length (-1) is read too:
+	// the binding decodes that body, so its pairs must be authorized.
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err == nil {
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))

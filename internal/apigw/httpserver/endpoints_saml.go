@@ -81,7 +81,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 	}
 
 	var req SAMLInitiateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := s.httpHelpers.Binding.JSONBody(ctx, c, &req); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
