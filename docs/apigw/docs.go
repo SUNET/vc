@@ -1666,7 +1666,7 @@ const docTemplate = `{
                     "maxLength": 128
                 },
                 "created_at": {
-                    "description": "CreatedAt is the timestamp when the document was created",
+                    "description": "CreatedAt is assigned by the store at first save and never changes. A value in a request is ignored.",
                     "type": "string"
                 },
                 "document_data_validation": {

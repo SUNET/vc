@@ -99,7 +99,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			continue
 		}
 
-		existing, present, err := lookupDocument(ctx, store, doc.Meta)
+		present, err := documentPresent(ctx, store, doc.Meta)
 		if err != nil {
 			return fmt.Errorf("check document %s/%s: %w", name, id, err)
 		}
@@ -110,13 +110,6 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			// Operator-edited data keeps the default insert-only behaviour
 			// (replaceExisting false) and is never overwritten.
 			if replaceExisting {
-				// Preserve the creation timestamp assigned on first import: the
-				// generated fixture serializes a zero created_at that would
-				// otherwise overwrite the stored value and reset created-at
-				// ordering on every restart.
-				if existing.Meta != nil {
-					doc.Meta.CreatedAt = existing.Meta.CreatedAt
-				}
 				if err := store.Replace(ctx, doc); err != nil {
 					return fmt.Errorf("replace document %s/%s: %w", name, id, err)
 				}
@@ -145,32 +138,20 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 	return nil
 }
 
-// lookupDocument returns the stored document with the same natural key
-// (authentic_source, scope, document_id) when one exists. The bool reports
-// presence so a re-run only inserts what is missing, and callers replacing an
-// existing record can carry over immutable fields (e.g. created_at) instead of
-// overwriting them with fixture defaults.
-func lookupDocument(ctx context.Context, store db.DatastoreStore, meta *model.MetaData) (*model.CompleteDocument, bool, error) {
+// documentPresent reports whether a document with the same natural key
+// (authentic_source, scope, document_id) exists. A nil meta is an error.
+func documentPresent(ctx context.Context, store db.DatastoreStore, meta *model.MetaData) (bool, error) {
 	if meta == nil {
-		return nil, false, errors.New("document has no meta")
+		return false, errors.New("document has no meta")
 	}
-	existing, err := store.GetByKey(ctx, meta.AuthenticSource, meta.Scope, meta.DocumentID)
+	_, err := store.GetByKey(ctx, meta.AuthenticSource, meta.Scope, meta.DocumentID)
 	if err == nil {
-		return existing, true, nil
+		return true, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, helpers.ErrNoDocumentFound) {
-		return nil, false, nil
+		return false, nil
 	}
-	return nil, false, err
-}
-
-// documentPresent reports whether a document with the same natural key
-// (authentic_source, scope, document_id) already exists, so a re-run only
-// inserts what is missing instead of overwriting existing (possibly edited)
-// documents.
-func documentPresent(ctx context.Context, store db.DatastoreStore, meta *model.MetaData) (bool, error) {
-	_, present, err := lookupDocument(ctx, store, meta)
-	return present, err
+	return false, err
 }
 
 func shouldImport(id string, users []string) bool {

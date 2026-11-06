@@ -26,6 +26,8 @@ type DatastoreStore interface {
 	Get(ctx context.Context, meta *model.MetaData) (*model.Document, error)
 	GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error)
 	List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error)
+	// Replace replaces one document, keeps the stored created_at, and does
+	// nothing when no document matches.
 	Replace(ctx context.Context, doc *model.CompleteDocument) error
 	GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
 	DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error
