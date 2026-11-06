@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"gopkg.in/yaml.v2"
 )
 
@@ -111,6 +112,26 @@ func TestShapes(t *testing.T) {
 				t.Errorf("Get() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// The codec reads each pointer it writes.
+func TestBSONRoundTrip(t *testing.T) {
+	type stored struct {
+		Path Pointer `bson:"path"`
+	}
+	for _, path := range []Pointer{Keys("a", "b"), New(Key("a"), Index(3), All()), EmptyArray()} {
+		data, err := bson.Marshal(stored{Path: path})
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		var read stored
+		if err := bson.Unmarshal(data, &read); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if read.Path.String() != path.String() || read.Path.IsEmptyArray() != path.IsEmptyArray() {
+			t.Errorf("read %s, want %s", read.Path, path)
+		}
 	}
 }
 

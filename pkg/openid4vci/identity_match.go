@@ -339,7 +339,7 @@ func (m *StoredIdentityMatch) readEntries(entries []claimEntryRawBSON) error {
 		if err := path.UnmarshalBSONValue(byte(entry.Path.Type), entry.Path.Value); err != nil {
 			return err
 		}
-		if path.IsZero() {
+		if path.IsZero() || path.IsEmptyArray() {
 			return errors.New("identity match: a stored claim has no path")
 		}
 		m.claims = append(m.claims, storedClaim{path: pointerPath{path}, test: entry.Test})

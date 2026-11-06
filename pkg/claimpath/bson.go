@@ -28,8 +28,8 @@ func (p Pointer) MarshalBSONValue() (byte, []byte, error) {
 	return byte(typ), data, err
 }
 
-// UnmarshalBSONValue reads a BSON array. BSON null leaves the pointer
-// unset.
+// UnmarshalBSONValue reads a BSON array, and an empty one as EmptyArray.
+// BSON null leaves the pointer unset.
 func (p *Pointer) UnmarshalBSONValue(typ byte, data []byte) error {
 	switch bson.Type(typ) {
 	case bson.TypeNull:
@@ -47,6 +47,10 @@ func (p *Pointer) UnmarshalBSONValue(typ byte, data []byte) error {
 	var values []any
 	if err := bson.UnmarshalValue(bson.Type(typ), data, &values); err != nil {
 		return fmt.Errorf("%w: %w", ErrMalformed, err)
+	}
+	if len(values) == 0 {
+		*p = EmptyArray()
+		return nil
 	}
 	pointer, err := fromValues(values)
 	if err != nil {
