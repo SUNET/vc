@@ -105,6 +105,13 @@ func TestEarlierReleaseDerivationsRunAsTheEarlierReleaseRanThem(t *testing.T) {
 			opening:     `null`,
 		},
 		{
+			name:        "an empty optional output writes in place",
+			derivations: "- trim: {input: identity.country, output: \"\"}\n",
+			claims:      `{"identity":{"country":" Sweden "}}`,
+			document:    `{"identity":{"country":"Sweden"}}`,
+			opening:     `null`,
+		},
+		{
 			name:        "an empty last segment of an output is an empty key",
 			derivations: "- copy: {input: given_name, output: name.}\n",
 			claims:      `{"given_name":"Anna"}`,
