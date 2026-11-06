@@ -157,6 +157,12 @@ func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (an
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	// A request may name no selector, so the middleware has no pair to check
+	// and the store applies these lists.
+	request.AllowedAuthenticSources = c.GetStringSlice("spocp_allowed_authentic_sources")
+	request.AllowedScopes = c.GetStringSlice("spocp_allowed_scopes")
+
 	reply, err := s.apiv1.DatastoreList(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())

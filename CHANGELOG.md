@@ -65,6 +65,13 @@
 
 ### Fixed
 
+- **`POST /api/v1/datastore/list` honours the SPOCP allowed lists**: a session
+  limited to one authentic source could list the document metadata of every
+  source for an identity mapping id it knew, by naming no selector. The route
+  and both stores apply `spocp_allowed_authentic_sources` and
+  `spocp_allowed_scopes` as `GET /api/v1/datastore/search` does. The allowed
+  lists on the list and search requests are unreachable from request headers.
+
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

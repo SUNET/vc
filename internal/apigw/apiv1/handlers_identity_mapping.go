@@ -197,7 +197,7 @@ type IdentityMappingSearchRequest struct {
 	Search                  string   `json:"search" form:"search"`
 	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
 	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-"`
+	AllowedAuthenticSources []string `json:"-" form:"-" header:"-"`
 }
 
 // IdentityMappingSearchReply is the reply for searching identity mappings

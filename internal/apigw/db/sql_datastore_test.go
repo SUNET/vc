@@ -157,6 +157,74 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	count, err = store.Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
+
+	testDatastoreAllowedListsContract(t, store)
+}
+
+// testDatastoreAllowedListsContract states, for one stored fixture, which
+// documents an authorization restriction leaves visible through List and Search.
+func testDatastoreAllowedListsContract(t *testing.T, store DatastoreStore) {
+	t.Helper()
+	ctx := t.Context()
+
+	const identity = "allowed-lists-identity"
+	require.NoError(t, store.SaveMany(ctx, []*model.CompleteDocument{
+		mkDoc("A", "pid", "A-pid", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("A", "ehic", "A-ehic", []string{identity}, map[string]any{"family_name": "x"}),
+		mkDoc("B", "pid", "B-pid", []string{identity}, map[string]any{"family_name": "x"}),
+	}))
+
+	all := []string{"A-pid", "A-ehic", "B-pid"}
+	for _, row := range []struct {
+		name           string
+		source, scope  string
+		allowedSources []string
+		allowedScopes  []string
+		visible        []string
+	}{
+		{name: "nil lists", visible: all},
+		{name: "empty lists", allowedSources: []string{}, allowedScopes: []string{}, visible: all},
+		{name: "one source", allowedSources: []string{"A"}, visible: []string{"A-pid", "A-ehic"}},
+		{name: "one scope", allowedScopes: []string{"pid"}, visible: []string{"A-pid", "B-pid"}},
+		{name: "source and scope", allowedSources: []string{"A"}, allowedScopes: []string{"pid"}, visible: []string{"A-pid"}},
+		{name: "lists apply independently", allowedSources: []string{"A", "B"}, allowedScopes: []string{"ehic"}, visible: []string{"A-ehic"}},
+		{name: "selected source inside", source: "A", allowedSources: []string{"A"}, visible: []string{"A-pid", "A-ehic"}},
+		{name: "selected source outside", source: "B", allowedSources: []string{"A"}, visible: nil},
+		{name: "selected scope inside", scope: "pid", allowedScopes: []string{"pid"}, allowedSources: []string{"B"}, visible: []string{"B-pid"}},
+		{name: "selected scope outside", scope: "ehic", allowedScopes: []string{"pid"}, visible: nil},
+		{name: "selection without lists", source: "B", visible: []string{"B-pid"}},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			listed, err := store.List(ctx, &ListQuery{
+				IdentityMappingID:       identity,
+				AuthenticSource:         row.source,
+				Scope:                   row.scope,
+				AllowedAuthenticSources: row.allowedSources,
+				AllowedScopes:           row.allowedScopes,
+			})
+			require.NoError(t, err)
+			listedIDs := make([]string, 0, len(listed))
+			for _, doc := range listed {
+				listedIDs = append(listedIDs, doc.Meta.DocumentID)
+			}
+			assert.ElementsMatch(t, row.visible, listedIDs, "documents received from List")
+
+			found, err := store.Search(ctx, &SearchDocumentsQuery{
+				Search:                  identity,
+				AuthenticSource:         row.source,
+				Scope:                   row.scope,
+				Limit:                   10,
+				AllowedAuthenticSources: row.allowedSources,
+				AllowedScopes:           row.allowedScopes,
+			})
+			require.NoError(t, err)
+			foundIDs := make([]string, 0, len(found))
+			for _, doc := range found {
+				foundIDs = append(foundIDs, doc.Meta.DocumentID)
+			}
+			assert.ElementsMatch(t, row.visible, foundIDs, "documents received from Search")
+		})
+	}
 }
 
 func TestSQLDatastoreColl_Postgres(t *testing.T) {

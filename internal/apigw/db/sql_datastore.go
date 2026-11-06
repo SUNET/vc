@@ -434,22 +434,46 @@ func (c *SQLDatastoreColl) GetByIdentity(ctx context.Context, scope, identityMap
 	return docs, nil
 }
 
+// sqlWhere collects WHERE conditions with their positional arguments.
+type sqlWhere struct {
+	conditions []string
+	args       []any
+}
+
+// selectWithinAllowed adds the condition on column: the selected value when
+// there is one, otherwise the allowed list when it is not empty. It returns
+// false when the selected value lies outside a non-empty allowed list, which
+// matches no document.
+func (w *sqlWhere) selectWithinAllowed(column, selected string, allowed []string) bool {
+	if selected != "" {
+		if len(allowed) > 0 && !slices.Contains(allowed, selected) {
+			return false
+		}
+		w.conditions = append(w.conditions, column+" = ?")
+		w.args = append(w.args, selected)
+		return true
+	}
+	if len(allowed) > 0 {
+		for _, value := range allowed {
+			w.args = append(w.args, value)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(allowed)), ", ")
+		w.conditions = append(w.conditions, fmt.Sprintf("%s IN (%s)", column, placeholders))
+	}
+	return true
+}
+
 // List returns matching document metadata, filtered by identity mapping and
-// optionally authentic_source/scope.
+// optionally authentic_source/scope, within the allowed lists.
 func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error) {
 	if err := helpers.Check(ctx, c.Service.cfg, query, c.Service.log); err != nil {
 		return nil, err
 	}
 
-	conditions := []string{"m.identity_mapping_id = ?"}
-	args := []any{query.IdentityMappingID}
-	if query.AuthenticSource != "" {
-		conditions = append(conditions, "d.authentic_source = ?")
-		args = append(args, query.AuthenticSource)
-	}
-	if query.Scope != "" {
-		conditions = append(conditions, "d.scope = ?")
-		args = append(args, query.Scope)
+	where := sqlWhere{conditions: []string{"m.identity_mapping_id = ?"}, args: []any{query.IdentityMappingID}}
+	if !where.selectWithinAllowed("d.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
+		!where.selectWithinAllowed("d.scope", query.Scope, query.AllowedScopes) {
+		return []*model.DocumentList{}, nil
 	}
 
 	sqlQuery := c.dialect.Rebind(fmt.Sprintf(
@@ -458,11 +482,11 @@ func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model
 		 JOIN datastore_identity_mapping m
 			ON d.authentic_source = m.authentic_source AND d.scope = m.scope AND d.document_id = m.document_id
 		 WHERE %s`,
-		strings.Join(conditions, " AND "),
+		strings.Join(where.conditions, " AND "),
 	))
 
 	var rows []datastoreMetaRow
-	if err := c.db.SelectContext(ctx, &rows, sqlQuery, args...); err != nil {
+	if err := c.db.SelectContext(ctx, &rows, sqlQuery, where.args...); err != nil {
 		return nil, err
 	}
 
@@ -580,38 +604,12 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:datastore:searchDocuments")
 	defer span.End()
 
-	conditions := []string{}
-	args := []any{}
-
-	if query.AuthenticSource != "" {
-		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
-			return []*model.CompleteDocument{}, nil
-		}
-		conditions = append(conditions, "d.authentic_source = ?")
-		args = append(args, query.AuthenticSource)
-	} else if len(query.AllowedAuthenticSources) > 0 {
-		placeholders := make([]string, len(query.AllowedAuthenticSources))
-		for i, src := range query.AllowedAuthenticSources {
-			placeholders[i] = "?"
-			args = append(args, src)
-		}
-		conditions = append(conditions, fmt.Sprintf("d.authentic_source IN (%s)", strings.Join(placeholders, ", ")))
+	where := sqlWhere{}
+	if !where.selectWithinAllowed("d.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
+		!where.selectWithinAllowed("d.scope", query.Scope, query.AllowedScopes) {
+		return []*model.CompleteDocument{}, nil
 	}
-
-	if query.Scope != "" {
-		if len(query.AllowedScopes) > 0 && !slices.Contains(query.AllowedScopes, query.Scope) {
-			return []*model.CompleteDocument{}, nil
-		}
-		conditions = append(conditions, "d.scope = ?")
-		args = append(args, query.Scope)
-	} else if len(query.AllowedScopes) > 0 {
-		placeholders := make([]string, len(query.AllowedScopes))
-		for i, scope := range query.AllowedScopes {
-			placeholders[i] = "?"
-			args = append(args, scope)
-		}
-		conditions = append(conditions, fmt.Sprintf("d.scope IN (%s)", strings.Join(placeholders, ", ")))
-	}
+	conditions, args := where.conditions, where.args
 
 	if query.Search != "" {
 		term := "%" + escapeLike(query.Search) + "%"
