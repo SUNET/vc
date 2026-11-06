@@ -256,8 +256,9 @@ type ResettableKeyPart struct {
 	// Label names a part the operator enters as the credential carries it.
 	Label string `json:"label,omitempty"`
 	// Inputs name, in order, the identifiers a part derived with hkdf or
-	// hmac takes instead.
-	Inputs []string `json:"inputs,omitempty"`
+	// hmac takes instead: one list for each number of inputs its openings
+	// take, which is what derivedTexts tells them apart by.
+	Inputs [][]string `json:"inputs,omitempty"`
 }
 
 // ResettableEntries lists the unique entries of scopes.
@@ -279,17 +280,25 @@ func ResettableEntries(cfg *model.Cfg, scopes []string) []ResettableEntry {
 	return entries
 }
 
-// resettableKeyPart labels a key part: by the inputs of its first hkdf or
-// hmac opening, or by its claim.
+// resettableKeyPart labels a key part: by the inputs of its hkdf or hmac
+// openings, or by its claim.
 func resettableKeyPart(meta *model.CredentialMetadata, part model.KeyPart) ResettableKeyPart {
 	if len(part.Openings) == 0 {
 		return ResettableKeyPart{Path: part.Path, Label: claimName(meta, part.Path)}
 	}
-	inputs := make([]string, 0, len(part.Openings[0].InputClaims()))
-	for _, input := range part.Openings[0].InputClaims() {
-		inputs = append(inputs, humanize(input))
+	labelled := ResettableKeyPart{Path: part.Path}
+	for _, opening := range part.Openings {
+		claims := opening.InputClaims()
+		if slices.ContainsFunc(labelled.Inputs, func(inputs []string) bool { return len(inputs) == len(claims) }) {
+			continue
+		}
+		inputs := make([]string, 0, len(claims))
+		for _, input := range claims {
+			inputs = append(inputs, humanize(input))
+		}
+		labelled.Inputs = append(labelled.Inputs, inputs)
 	}
-	return ResettableKeyPart{Path: part.Path, Inputs: inputs}
+	return labelled
 }
 
 // credentialName is the credential's name as the consent page shows it, or

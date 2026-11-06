@@ -171,9 +171,10 @@ their wallet account and was re-identified.
 
 In the admin UI, **Commitments** finds the commitment for the values an
 operator enters, shows when it was recorded, and resets it with a case
-reference. Reset needs an operator signed in through
-`apigw.api_server.api_auth.oidc`. Through the API, both calls take the
-entry and a value per key part:
+reference. When a key claim's openings take different numbers of inputs,
+**Identified by** picks the list of identifiers the operator holds. Reset
+needs an operator signed in through `apigw.api_server.api_auth.oidc`.
+Through the API, both calls take the entry and a value per key part:
 
 ```
 POST /api/v1/auxiliary_data/lookup
