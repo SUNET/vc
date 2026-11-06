@@ -107,8 +107,9 @@
   read `rootCA.key`, `signing_rsa_private.pem` and the client keys. Each key
   file and the nym_auth seed start empty, with mode 600 and no inherited
   ACL entry, before any key material reaches them. A failed or interrupted
-  generation removes the file, so the next run generates that key. The EC
-  signing key leaves no intermediate file.
+  generation, certificate step included, removes the file, so the next run
+  generates that key and its certificate. The EC signing key leaves no
+  intermediate file.
 - **The Linux dev stack can read its keys**: OpenSSL 1.1 and later write
   private keys 0600, and the script wrote the nym_auth seed 0600, so the
   containers (uid 65532) could not read the keys they mount. On Linux the

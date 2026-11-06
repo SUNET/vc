@@ -25,8 +25,8 @@ if [ "$(uname -s)" = Linux ]; then
     grant_acl=1
 fi
 
-# The `[ ! -f key ]` guards take any file for a key, so the key file being
-# generated is removed when the script ends before it is complete.
+# The `[ ! -f key ]` guards skip a whole block when its key file exists, so the
+# key is removed when the script ends before its block is complete.
 generating_key=
 remove_unfinished_key() {
     [ -n "$generating_key" ] || return 0
@@ -68,7 +68,6 @@ generate_key() {
     shift
     create_key_file "$owner_key"
     "$@"
-    generating_key=
 }
 
 # Runs command $2.. to write key file $1, readable by the owner and the container
@@ -79,6 +78,10 @@ generate_container_key() {
     create_key_file "$container_key"
     grant_container_read "$container_key"
     "$@"
+}
+
+# Ends the block of the key generated last, which a later run may skip.
+key_block_complete() {
     generating_key=
 }
 
@@ -132,6 +135,7 @@ if [ ! -f "${PKI_DIR}/rootCA.key" ]; then
     openssl req -x509 -new -nodes -key "${PKI_DIR}/rootCA.key" -sha256 -days 3650 -out "${PKI_DIR}/rootCA.crt" -config ca.conf \
         -addext "basicConstraints=critical,CA:TRUE" \
         -addext "keyUsage=critical,keyCertSign,cRLSign"
+    key_block_complete
 fi
 
 # Create leaf certificates for each service
@@ -193,6 +197,7 @@ EOF
     if [ $ext_generated -eq 1 ]; then
 	rm ${service_name}.ext
     fi
+    key_block_complete
 fi
 }
 
@@ -243,6 +248,7 @@ EOF
         
         # Clean up
         rm -f signing_rsa.csr signing_rsa.conf signing_rsa.ext
+        key_block_complete
     fi
 
     # EC signing key pair (ES256 - P-256 curve) with certificate
@@ -290,12 +296,14 @@ EOF
         
         # Clean up
         rm -f signing_ec.csr signing_ec.conf signing_ec.ext
+        key_block_complete
     fi
 
     # EC key-agreement key (P-256) for Credential Request and Response encryption
     if [ ! -f "${PKI_DIR}/credential_encryption.pem" ]; then
         echo "Generating credential encryption key (P-256)..."
         generate_container_key "${PKI_DIR}/credential_encryption.pem" write_p256_pkcs8 "${PKI_DIR}/credential_encryption.pem"
+        key_block_complete
     fi
 
     # Secret of the nym_auth ssc hkdf opening
@@ -307,6 +315,7 @@ EOF
             exit 1
         fi
         generate_container_key "${PKI_DIR}/nym_auth_seed.key" write_seed "${PKI_DIR}/nym_auth_seed.key"
+        key_block_complete
     fi
 }
 
@@ -359,6 +368,7 @@ EOF
         
         # Clean up
         rm -f ${client_name}.csr ${client_name}.conf ${client_name}.ext
+        key_block_complete
     fi
 }
 
