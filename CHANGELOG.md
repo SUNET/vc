@@ -139,7 +139,8 @@
     invalid_claims_path`.
   - The admin UI's claim template builds an array for `null` and for an
     index. A claim a VCTM declares as an object and as an array stays an
-    object, and logs a warning that names it.
+    object, and logs a warning that names it. The document form keeps a
+    member named `hasClaim[0]`, as in `vctm_elm.json`, as that member.
   - The SD-JWT issuer accepts a `null` before the end of an `sd: always`
     path, such as `[degrees, null, date_awarded]`, and discloses the
     property in every element. Earlier releases stopped the issuance at

@@ -15,6 +15,9 @@ describe("unflattenEntries(flattenObject(document))", () => {
         "an array of objects": { degrees: [{ type: "BSc", university: "KTH" }, { type: "MSc" }] },
         "nested arrays": { matrix: [["a", "b"], ["c"]] },
         "an indexed claim template": { elm: { credentialSubject: { hasClaim: [{ title: "" }] } } },
+        "the member name of vctm_elm.json": { elm: { credentialSubject: { "hasClaim[0]": { title: "" } } } },
+        "an array under a member name with brackets": { "m[1]": ["a", "b"] },
+        "member names with a backslash": { "a\\": { b: "" }, "c\\[0]": "" },
     };
     for (const [name, document] of Object.entries(documents)) {
         it(`returns ${name}`, () => {

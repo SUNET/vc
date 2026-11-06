@@ -1,6 +1,6 @@
 // @ts-nocheck
 import Alpine from '/static/alpinejs.esm.min.js';
-import { flattenObject, unflattenEntries } from './admin-helpers.js';
+import { flattenObject, segmentName, unflattenEntries } from './admin-helpers.js';
 
 window.adminApp = function () {
     /** Build a tree-view display list from flat dot-notation entries */
@@ -13,10 +13,10 @@ window.adminApp = function () {
                 const groupKey = parts.slice(0, d + 1).join('.');
                 if (!seenGroups.has(groupKey)) {
                     seenGroups.add(groupKey);
-                    rows.push({ type: 'group', label: parts[d], depth: d, idx: -1, path: groupKey });
+                    rows.push({ type: 'group', label: segmentName(parts[d]), depth: d, idx: -1, path: groupKey });
                 }
             }
-            rows.push({ type: 'field', label: parts[parts.length - 1], depth: parts.length - 1, idx, path: entries[idx].key });
+            rows.push({ type: 'field', label: segmentName(parts[parts.length - 1]), depth: parts.length - 1, idx, path: entries[idx].key });
         }
         return rows;
     }
