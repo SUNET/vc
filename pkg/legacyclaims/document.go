@@ -147,16 +147,22 @@ func (d *Document) Rewrites() []Rewrite {
 	return out
 }
 
-// Bytes returns the file with every edit applied, in its encoding.
-func (d *Document) Bytes() ([]byte, error) {
-	edits := slices.Clone(d.edits)
-	slices.SortStableFunc(edits, func(a, b edit) int {
+// sortEdits orders edits by offset. An insertion at an offset goes before
+// a replacement there.
+func sortEdits(edits []edit) []edit {
+	sorted := slices.Clone(edits)
+	slices.SortStableFunc(sorted, func(a, b edit) int {
 		if a.start != b.start {
 			return a.start - b.start
 		}
-		// An insertion at an offset goes before a replacement there.
 		return (a.end - a.start) - (b.end - b.start)
 	})
+	return sorted
+}
+
+// Bytes returns the file with every edit applied, in its encoding.
+func (d *Document) Bytes() ([]byte, error) {
+	edits := sortEdits(d.edits)
 	var out bytes.Buffer
 	// end is the end of the last edit in src, and at the offset of the
 	// file's text that out holds up to.

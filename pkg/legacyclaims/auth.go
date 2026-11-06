@@ -131,13 +131,13 @@ func (u *configUpgrade) identityAttributes(n ast.Node, presented *lazy) ([]claim
 }
 
 // documentClaims rewrites the map {presented claim: issued claim} as a
-// list of copies.
+// list of copies, in name order.
 func (u *configUpgrade) documentClaims(n ast.Node, presented, document *lazy) error {
 	copies, err := descend(n, "document_claims")
 	if err != nil || !isMapping(copies) {
 		return err
 	}
-	return u.convertMap(copies, func(key string, value ast.Node) (listEntry, error) {
+	_, err = u.convertNamedMap(copies, func(key string, value ast.Node) (listEntry, error) {
 		from, err := presented.dotted(key)
 		if err != nil {
 			return listEntry{}, err
@@ -156,6 +156,7 @@ func (u *configUpgrade) documentClaims(n ast.Node, presented, document *lazy) er
 		}
 		return item, nil
 	})
+	return err
 }
 
 // addRenames adds an identity_attributes entry for each auth claim main

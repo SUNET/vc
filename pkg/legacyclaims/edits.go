@@ -174,33 +174,173 @@ type listEntry struct {
 // item per entry, and records one rewrite per entry. entry gives the list
 // item of each map entry.
 func (d *Document) convertMap(n ast.Node, entry func(key string, value ast.Node) (listEntry, error)) error {
-	n, err := unwrap(n)
+	converted, err := d.convertEntries(n, entry)
 	if err != nil {
 		return err
 	}
+	d.edits = append(d.edits, converted.edits()...)
+	return nil
+}
+
+// nameOrderNote says why migrate_claim_paths leaves a map whose entries
+// are out of name order.
+const nameOrderNote = "the earlier release read the entries of this map in name order, and a list keeps the order written; sort the entries by name"
+
+// convertNamedMap rewrites a map the earlier release read in name order in
+// the list form, as convertMap does, with the items in name order. The
+// record of each entry of a map out of name order carries nameOrderNote.
+// With convert, it leaves such a map as written, and reports false.
+func (u *configUpgrade) convertNamedMap(n ast.Node, entry func(key string, value ast.Node) (listEntry, error)) (bool, error) {
+	records := len(u.rewrites)
+	converted, err := u.convertEntries(n, entry)
+	if err != nil {
+		return false, err
+	}
+	if converted.inNameOrder() {
+		u.edits = append(u.edits, converted.edits()...)
+		return true, nil
+	}
+	for i := records; i < len(u.rewrites); i++ {
+		u.rewrites[i].Note = nameOrderNote
+	}
+	if u.convert {
+		return false, nil
+	}
+	return true, u.permute(converted)
+}
+
+// convertedMap is a map convertEntries rewrote, with the edits that
+// rewrite it held apart from the document's.
+type convertedMap struct {
+	// frame holds the edits of the map's own indicators.
+	frame []edit
+	// entries are the entries in the order written.
+	entries []convertedEntry
+}
+
+// convertedEntry is one entry of a convertedMap: its key, the span of its
+// text, and the edits that rewrite that text.
+type convertedEntry struct {
+	key        string
+	start, end int
+	edits      []edit
+}
+
+// edits returns the edits that rewrite the map in place.
+func (m convertedMap) edits() []edit {
+	out := slices.Clone(m.frame)
+	for _, e := range m.entries {
+		out = append(out, e.edits...)
+	}
+	return out
+}
+
+// inNameOrder reports whether the entries are in name order, the order
+// the earlier release read them in.
+func (m convertedMap) inNameOrder() bool {
+	return slices.IsSortedFunc(m.entries, compareEntryKeys)
+}
+
+func compareEntryKeys(a, b convertedEntry) int { return strings.Compare(a.key, b.key) }
+
+// convertEntries rewrites each entry of a map keyed by dotted names as a
+// list item, and records one rewrite per entry, as convertMap does. It
+// returns the edits apart from the document's.
+func (d *Document) convertEntries(n ast.Node, entry func(key string, value ast.Node) (listEntry, error)) (convertedMap, error) {
+	n, err := unwrap(n)
+	if err != nil {
+		return convertedMap{}, err
+	}
 	mapping, ok := n.(*ast.MappingNode)
 	if !ok {
-		return fmt.Errorf("%s is no mapping", n.GetPath())
+		return convertedMap{}, fmt.Errorf("%s is no mapping", n.GetPath())
 	}
+	var converted convertedMap
 	if mapping.IsFlowStyle {
+		before := len(d.edits)
 		if err := d.flowBrackets(mapping); err != nil {
-			return err
+			return convertedMap{}, err
 		}
+		converted.frame = d.detach(before)
 	}
 	for _, mv := range mapping.Values {
 		key, err := keyOf(mv)
 		if err != nil {
-			return err
+			return convertedMap{}, err
 		}
 		item, err := entry(key, mv.Value)
 		if err != nil {
-			return fmt.Errorf("%s: %w", mv.GetPath(), err)
+			return convertedMap{}, fmt.Errorf("%s: %w", mv.GetPath(), err)
 		}
+		before := len(d.edits)
 		if err := d.convertEntry(mapping, mv, item); err != nil {
+			return convertedMap{}, err
+		}
+		e := convertedEntry{key: key, edits: d.detach(before)}
+		if e.start, e.end, err = d.entrySpan(mapping, mv); err != nil {
+			return convertedMap{}, err
+		}
+		converted.entries = append(converted.entries, e)
+	}
+	return converted, nil
+}
+
+// detach removes the edits from index first on and returns them.
+func (d *Document) detach(first int) []edit {
+	detached := slices.Clone(d.edits[first:])
+	d.edits = d.edits[:first]
+	return detached
+}
+
+// entrySpan returns the span of a map entry's text: from its key through
+// its value, and in a block mapping through the end of the value's last
+// line.
+func (d *Document) entrySpan(mapping *ast.MappingNode, mv *ast.MappingValueNode) (int, int, error) {
+	start, _, err := d.span(mv.Key)
+	if err != nil {
+		return 0, 0, err
+	}
+	if mapping.IsFlowStyle {
+		end, err := d.valueEnd(mv)
+		return start, end, err
+	}
+	return start, d.lineEnd(lastLine(mv)), nil
+}
+
+// permute adds the edits that write the converted entries of a map in
+// name order: the span of the i-th entry as written holds the rewritten
+// text of the i-th entry by name.
+func (d *Document) permute(m convertedMap) error {
+	byName := slices.SortedStableFunc(slices.Values(m.entries), compareEntryKeys)
+	texts := make([]string, len(byName))
+	for i, e := range byName {
+		text, err := d.render(e)
+		if err != nil {
 			return err
 		}
+		texts[i] = text
+	}
+	d.edits = append(d.edits, m.frame...)
+	for i, slot := range m.entries {
+		d.replace(slot.start, slot.end, texts[i])
 	}
 	return nil
+}
+
+// render returns the text of a converted entry with its edits applied.
+func (d *Document) render(e convertedEntry) (string, error) {
+	var b strings.Builder
+	at := e.start
+	for _, ed := range sortEdits(e.edits) {
+		if ed.start < at || ed.end > e.end {
+			return "", fmt.Errorf("%s: line %d: an upgrade of a map entry reaches outside its text", d.file, d.fileLine(ed.start))
+		}
+		b.Write(d.src[at:ed.start])
+		b.WriteString(ed.text)
+		at = ed.end
+	}
+	b.Write(d.src[at:e.end])
+	return b.String(), nil
 }
 
 // flowBrackets turns the braces of a flow mapping into the brackets of a

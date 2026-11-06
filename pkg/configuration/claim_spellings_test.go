@@ -162,6 +162,34 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	}
 }
 
+// The earlier release read the entries of a required_claims and of a
+// document_claims map in name order. Its DCQL query asked for the claims in
+// that order, and of two entries that write one claim, the later by name
+// set it. The upgrade lists the entries in that order.
+func TestUpgradeListsAMapInNameOrder(t *testing.T) {
+	const pid = "eu.europa.ec.eudi.pid.1"
+	sources, _, err := decodeDataSources("order.yaml", dataSourcesFile(
+		"datastore:\n  scopes:\n    ehic:\n      auth_provider: openid4vp\n      auth_scopes:\n        pid:\n          auth_claims: [[given_name]]\n"+
+			"          document_claims:\n            family_name: x_copy\n            birthdate: x_copy\n"+
+			"presentation:\n  scopes:\n    nym_auth:\n      from:\n        pid_mdoc:\n          required_claims:\n"+
+			"            "+pid+".issuing_country: []\n            "+pid+".birth_date: []\n            "+pid+".administrative_number: []\n"), rolesCfg())
+	require.NoError(t, err)
+
+	assert.Equal(t, model.DocumentClaims{
+		{From: claimpath.Keys("birthdate"), To: claimpath.Keys("x_copy")},
+		{From: claimpath.Keys("family_name"), To: claimpath.Keys("x_copy")},
+	}, sources.Datastore.Scopes["ehic"].AuthScopes["pid"].DocumentClaims)
+	var required []claimpath.Pointer
+	for _, claim := range sources.Presentation.Scopes["nym_auth"].From["pid_mdoc"].RequiredClaims {
+		required = append(required, claim.Path.Path)
+	}
+	assert.Equal(t, []claimpath.Pointer{
+		claimpath.Keys(pid, "administrative_number"),
+		claimpath.Keys(pid, "birth_date"),
+		claimpath.Keys(pid, "issuing_country"),
+	}, required)
+}
+
 // The loader refuses a file that writes the mapping {dotted, path}, its
 // own form of an upgraded dotted name, at each claim that decodes it, and
 // through an alias that stands for it.

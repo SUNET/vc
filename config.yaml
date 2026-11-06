@@ -262,9 +262,9 @@ apigw:
                         bytes: 16
             pid_mdoc:
               required_claims:
+                - path: [eu.europa.ec.eudi.pid.1, administrative_number]
                 - path: [eu.europa.ec.eudi.pid.1, birth_date]
                 - path: [eu.europa.ec.eudi.pid.1, issuing_country]
-                - path: [eu.europa.ec.eudi.pid.1, administrative_number]
               derivations:
                 - copy: {input: [eu.europa.ec.eudi.pid.1, birth_date], output: [eu.europa.ec.eudi.nym_auth.1, birth_date]}
                 - hash_commitment:

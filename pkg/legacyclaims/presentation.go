@@ -9,8 +9,8 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// presentedCredential upgrades the required claims and derivations of a
-// credential a presentation scope accepts.
+// presentedCredential upgrades the required claims, in name order, and the
+// derivations of a credential a presentation scope accepts.
 //
 // main kept a required claim under its spelling, and the issued document
 // starts from the required claims. An mdoc claim spelled as a bare element
@@ -42,8 +42,9 @@ func (u *configUpgrade) presentedCredential(n ast.Node, presented, document *laz
 	}
 	var copies []string
 	var outputs []claimpath.Pointer
+	converted := true
 	if isMapping(required) {
-		err := u.convertMap(required, func(key string, _ ast.Node) (listEntry, error) {
+		converted, err = u.convertNamedMap(required, func(key string, _ ast.Node) (listEntry, error) {
 			path, err := presented.dotted(key)
 			if err != nil {
 				return listEntry{}, err
@@ -76,8 +77,11 @@ func (u *configUpgrade) presentedCredential(n ast.Node, presented, document *laz
 			return err
 		}
 	}
-	if err := u.prependDerivations(n, derivations, copies); err != nil {
-		return err
+	// A map left as written gains its copies when the loader reads it.
+	if converted {
+		if err := u.prependDerivations(n, derivations, copies); err != nil {
+			return err
+		}
 	}
 	return u.derivations(derivations, presented, document, outputs)
 }
