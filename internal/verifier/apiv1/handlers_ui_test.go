@@ -1469,3 +1469,39 @@ func TestValidZKSystemTypes(t *testing.T) {
 	assert.False(t, validZKSystemTypes(append(ok, openid4vp.ZKSystemTypeSpec{ID: "y"})),
 		"one unusable entry invalidates the request")
 }
+
+// A preset that lists no claims of a credential requests the leaf claims of
+// its type metadata, with the key "null" read as null and every other key as
+// written. The expected values are the earlier release's output.
+func TestPresetWithoutClaimsReadsAKeyAsTheEarlierReleaseRead(t *testing.T) {
+	for _, tt := range []struct{ path, want string }{
+		{`["nationalities", "null"]`, `["nationalities", null]`},
+		{`["a", "null", "b"]`, `["a", null, "b"]`},
+		{`["null", "x"]`, `[null, "x"]`},
+		{`["nullable"]`, `["nullable"]`},
+		{`["a", "*", "b"]`, `["a", "*", "b"]`},
+		{`["names[0]"]`, `["names[0]"]`},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			var vctm sdjwtvc.VCTM
+			require.NoError(t, json.Unmarshal([]byte(`{"vct":"urn:x","claims":[{"path":`+tt.path+`}]}`), &vctm))
+			cfg := &model.Cfg{
+				Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+					"x": {Format: "dc+sd-jwt", VCTM: &vctm, Attributes: vctm.Attributes()},
+				}},
+				Verifier: &model.Verifier{Presets: map[string]model.PresetDefinition{
+					"P": {Credentials: model.VerificationPreset{"x": nil}},
+				}},
+			}
+			client, _ := CreateTestClientWithMock(t, cfg)
+			client.cfg = cfg
+
+			reply, err := client.UIMetadata(t.Context())
+			require.NoError(t, err)
+			require.Len(t, reply.Presets["P"].Credentials, 1)
+			claims, err := json.Marshal(reply.Presets["P"].Credentials[0].Claims)
+			require.NoError(t, err)
+			assert.JSONEq(t, `[{"path":`+tt.want+`}]`, string(claims))
+		})
+	}
+}
