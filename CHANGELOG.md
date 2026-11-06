@@ -95,10 +95,15 @@
   ended the deploy with no message. Each case now skips the registration
   with a message. A `fly proxy` that had already exited ended the deploy
   after the registration; it now counts as stopped.
-- **`create_pki.sh` writes private keys owner-only**: each private key and
-  the nym_auth seed are created under umask 077. LibreSSL's `openssl`, the
-  one macOS ships, honours the umask, so under the usual umask 022 the keys
-  were world-readable.
+- **`create_pki.sh` creates private keys owner-only before writing them**:
+  LibreSSL's `openssl`, the one macOS ships, honours the umask, so under the
+  usual umask 022 the keys were world-readable. A default ACL on the PKI
+  directory overrides the umask, so with LibreSSL on Linux another user could
+  read `rootCA.key`, `signing_rsa_private.pem` and the client keys. Each key
+  file and the nym_auth seed start empty, with mode 600 and no inherited
+  ACL entry, before any key material reaches them. A failed or interrupted
+  generation removes the file, so the next run generates that key. The EC
+  signing key leaves no intermediate file.
 - **The Linux dev stack can read its keys**: OpenSSL 1.1 and later write
   private keys 0600, and the script wrote the nym_auth seed 0600, so the
   containers (uid 65532) could not read the keys they mount. On Linux the
