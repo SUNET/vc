@@ -150,6 +150,8 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 
 	// Create test configuration
 	config := createTestSAMLConfig(mockMDQServer.URL, mockIdPServer.URL, idpEntityID, certPath, keyPath)
+	// createMockMDQServer serves unsigned metadata.
+	config.AllowUnsignedMetadata = true
 
 	// Create session cache
 	samlSPSessionCache := pkgcache.NewMemoryCache[*samlsp.Session](3600 * time.Second)
@@ -362,6 +364,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 					Attributes: []samltypes.Attribute{
 						{Name: "urn:oid:2.5.4.42", Values: []samltypes.AttributeValue{{Value: "Bob"}}},
 						{Name: "urn:oid:2.5.4.4", Values: []samltypes.AttributeValue{{Value: "Johnson"}}},
+						{Name: "urn:oid:1.3.6.1.5.5.7.9.1", Values: []samltypes.AttributeValue{{Value: "1992-03-20"}}},
 						{Name: "urn:eudi:degree", Values: []samltypes.AttributeValue{{Value: "Bachelor of Science"}}},
 						{Name: "urn:eudi:ehic:cardnumber", Values: []samltypes.AttributeValue{{Value: "EHIC123"}}},
 					},
@@ -370,6 +373,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 			expected: map[string]any{
 				"given_name":  "Bob",
 				"family_name": "Johnson",
+				"birth_date":  "1992-03-20",
 				"degree":      "Bachelor of Science",
 				"card_number": "EHIC123",
 			},
