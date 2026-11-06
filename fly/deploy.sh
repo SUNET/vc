@@ -113,14 +113,26 @@ set_app_secrets() {
 
 # The next content of the secrets file, named <target>.<random> beside the file a
 # symlink resolves to. Fly secrets are write-only and a failed write can destroy
-# the file, so a new value reaches the file by rename. Exit removes it.
+# the file, so a new value reaches the file by rename.
 secrets_candidate=""
+# How to settle the candidate once Fly may hold a value only the candidate records.
+secrets_candidate_note=""
 
 remove_secrets_candidate() {
     [[ -z "$secrets_candidate" ]] || rm -f "$secrets_candidate"
     secrets_candidate=""
+    secrets_candidate_note=""
 }
-trap remove_secrets_candidate EXIT
+
+# Exit keeps and names a candidate with a note, and removes any other.
+settle_secrets_candidate() {
+    if [[ -n "$secrets_candidate_note" ]]; then
+        echo "Error: $secrets_candidate_note" >&2
+    else
+        remove_secrets_candidate
+    fi
+}
+trap settle_secrets_candidate EXIT
 
 # Creates the candidate for secrets file $1. Returns 1 when the directory refuses
 # it.
@@ -140,13 +152,26 @@ write_secrets_candidate() {
     fi
 }
 
-# Renames the candidate over the file it replaces. A failure keeps the candidate
-# and stops the script, naming the candidate as the holder of $1.
+# Renames the candidate over the file it replaces. A failure stops the script.
 record_secrets_candidate() {
-    local _held="$1" _candidate="$secrets_candidate"
+    mv -f "$secrets_candidate" "${secrets_candidate%.*}" \
+        || die "replacing ${secrets_candidate%.*} failed"
     secrets_candidate=""
-    mv -f "$_candidate" "${_candidate%.*}" \
-        || die "replacing ${_candidate%.*} failed; $_candidate holds $_held"
+    secrets_candidate_note=""
+}
+
+# Sends secrets $4.. to Fly app $1, with the candidate recording $3. A failed or
+# interrupted send can still reach Fly, so from here the candidate stays until the
+# rename. $2 is the secret that `fly secrets list` shows once Fly holds the values.
+# Returns 1 with the candidate removed when the app is absent.
+send_recorded_secrets() {
+    local _app="$1" _listed="$2" _holds="$3"
+    shift 3
+    secrets_candidate_note="$secrets_candidate holds $_holds. If fly secrets list --app $_app shows $_listed, move this file over ${secrets_candidate%.*}. Otherwise delete it."
+    set_app_secrets "$_app" "$@" || {
+        remove_secrets_candidate
+        return 1
+    }
 }
 
 # Decides whether a secret generated for Fly app $2 may be sent. Secrets file $1
@@ -320,15 +345,14 @@ cmd_launch() {
             mongo_secrets_content="$(yq ".common.mongo.uri = \"$generated_mongo_uri\"" "$secrets_file")"
             write_secrets_candidate "$mongo_secrets_content"
 
-            if set_app_secrets "$mongo_app" \
+            if send_recorded_secrets "$mongo_app" MONGO_INITDB_ROOT_PASSWORD \
+                "the MongoDB URI sent to $mongo_app" \
                 MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
                 MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
+                record_secrets_candidate
                 echo "    MongoDB secrets set"
-                record_secrets_candidate "the value Fly accepted"
                 echo "    Updated $secrets_file with MongoDB URI"
                 mongo_uri="$generated_mongo_uri"
-            else
-                remove_secrets_candidate
             fi
         fi
     fi
@@ -362,17 +386,14 @@ cmd_launch() {
             oidc_secrets_content="$(yq ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file")"
             write_secrets_candidate "$oidc_secrets_content"
 
-            if set_app_secrets "$oidc_app" \
+            if send_recorded_secrets "$oidc_app" APIGW_OIDC_CLIENT_SECRET \
+                "the OIDC client_secret sent to $oidc_app, and the demo user password sent with it is $demo_user_password" \
                 APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
                 DEMO_USER_PASSWORD="$demo_user_password"; then
+                record_secrets_candidate
                 echo "    OIDC secrets set"
-                # Printed first: the candidate omits the password, and Fly never
-                # returns it.
-                echo "    Demo user password (Keycloak realm users): $demo_user_password"
-                record_secrets_candidate "the value Fly accepted"
                 echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
-            else
-                remove_secrets_candidate
+                echo "    Demo user password (Keycloak realm users): $demo_user_password"
             fi
         fi
     fi
@@ -394,7 +415,7 @@ cmd_launch() {
                 local reconciled_secrets_content
                 reconciled_secrets_content="$(yq ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file")"
                 write_secrets_candidate "$reconciled_secrets_content"
-                record_secrets_candidate "the reconciled secrets file"
+                record_secrets_candidate
                 echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
             fi
         fi

@@ -81,9 +81,10 @@
   still fail. Each write to the file goes to a temp file beside it first,
   and a rename replaces the file. For a secret, the temp file is written
   before the set, and the rename follows a successful set. A failed write
-  stops before Fly receives anything, and a failed rename stops with the path
-  of the temp file holding the value Fly accepted. A symlinked secrets file
-  stays a symlink. The MongoDB URI goes to `common.mongo.uri`, so a file with
+  stops before Fly receives anything. A set that fails or is interrupted can
+  still reach Fly, so from the set until the rename the script keeps the temp
+  file on any stop, and names its path and how to settle it. A symlinked
+  secrets file stays a symlink. The MongoDB URI goes to `common.mongo.uri`, so a file with
   no `uri:` line receives it and other `uri` keys stay. A secrets file that is
   missing or read-only, or a directory that refuses the temp file, stops the
   MongoDB or OIDC step before Fly receives anything when the app exists; an
