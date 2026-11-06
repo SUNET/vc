@@ -177,18 +177,26 @@ func writtenBefore(written []claimpath.Pointer, p claimpath.Pointer) bool {
 // emptyClaim reports whether an output is absent: null, or main's empty
 // string.
 func emptyClaim(n ast.Node) bool {
+	value, err := unwrap(n)
+	return (err == nil && isNull(value)) || emptyString(n)
+}
+
+// emptyString reports whether a node is the empty string, which the
+// strict decode refuses as a pointer.
+func emptyString(n ast.Node) bool {
 	n, err := unwrap(n)
 	if err != nil {
 		return false
 	}
 	name, scalar := dottedName(n)
-	return isNull(n) || (scalar && name == "")
+	return scalar && name == ""
 }
 
 // inPlace returns the claim a primitive writes without an output: its
 // input's claim. main wrote it at the input's name in the issued
-// document, which read reads, so when that reads as another pointer than
-// the input, the upgrade writes the output.
+// document, which read reads. The upgrade writes the output when that
+// reads as another pointer than the input, or when the output is the
+// empty string.
 func (u *configUpgrade) inPlace(args ast.Node, input, output *ast.MappingValueNode, in inputClaim, read reader) ([]claimpath.Pointer, error) {
 	if in.dotted == "" {
 		return []claimpath.Pointer{in.path}, nil
@@ -197,7 +205,7 @@ func (u *configUpgrade) inPlace(args ast.Node, input, output *ast.MappingValueNo
 	if err != nil {
 		return nil, fmt.Errorf("output: %w", err)
 	}
-	if out.Equal(in.path) {
+	if out.Equal(in.path) && (output == nil || !emptyString(output.Value)) {
 		return []claimpath.Pointer{out}, nil
 	}
 	text, err := pointerText(out)
