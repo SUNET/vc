@@ -79,16 +79,16 @@
   generated MongoDB URI was written locally after a failed `secrets set`, and
   the OIDC `client_secret` reached Keycloak before a local write that could
   still fail. Both local writes are now prepared before the set and happen
-  only after it succeeds. A secrets file that is missing or read-only stops
-  the MongoDB or OIDC step before Fly receives anything when the app exists;
-  an absent app gets a "missing" note and `launch` continues. When MongoDB's
-  credentials exist and wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`,
-  `launch` now sets the URI from the local secrets file. When the file holds
-  no generated URI,
-  `launch` stops and names the two ways out: restore the file, or reset
-  MongoDB's credentials. An absent wallet-backend gets a "missing" note and
-  `launch` continues; `launch --service wallet-backend` applies this rule
-  once the app exists.
+  only after it succeeds. The MongoDB URI goes to `common.mongo.uri`, so a
+  file with no `uri:` line receives it and other `uri` keys stay. A secrets
+  file that is missing or read-only stops the MongoDB or OIDC step before Fly
+  receives anything when the app exists; an absent app gets a "missing" note
+  and `launch` continues. When MongoDB's credentials exist and wallet-backend
+  lacks `WALLET_STORAGE_MONGODB_URI`, `launch` now sets the URI from the local
+  secrets file. When the file holds no generated URI, `launch` stops and names
+  the two ways out: restore the file, or reset MongoDB's credentials. An
+  absent wallet-backend gets a "missing" note and `launch` continues;
+  `launch --service wallet-backend` applies this rule once the app exists.
 - **`fly/deploy.sh` registers no duplicate issuer on wallet-backend**: a
   failed issuer listing, an HTTP error or an unparseable body read as "no
   issuers", and the registration POSTed a second issuer. A non-JSON body

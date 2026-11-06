@@ -278,7 +278,7 @@ cmd_launch() {
             # overwrite of a writable file.
             local generated_mongo_uri mongo_secrets_content
             generated_mongo_uri="$(mongo_uri_for "$mongo_pass" "$mongo_app")"
-            mongo_secrets_content="$(sed "s|uri:.*|uri: \"${generated_mongo_uri}\"|" "$secrets_file")"
+            mongo_secrets_content="$(yq ".common.mongo.uri = \"$generated_mongo_uri\"" "$secrets_file")"
 
             if set_app_secrets "$mongo_app" \
                 MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
