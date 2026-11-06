@@ -147,7 +147,9 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 
 // verifiedClaims returns the required claims of a presented credential,
 // each checked against its allow-list, in the shape the presented
-// credential used. Values are not yet storable: the caller converts them
+// credential used. A claim upgraded from a bare mdoc element identifier
+// is held under that identifier, which a replica running the earlier
+// release reads. Values are not yet storable: the caller converts them
 // with documentObject before they reach the cache.
 func verifiedClaims(shape claimpath.Shape, presented map[string]any, required model.RequiredClaims) (map[string]any, error) {
 	verified := make(map[string]any, len(required))
@@ -165,7 +167,7 @@ func verifiedClaims(shape claimpath.Shape, presented map[string]any, required mo
 // verifyRequiredClaim refuses a presentation that does not carry a required
 // claim, or none of whose values is in the claim's allow-list.
 func verifyRequiredClaim(shape claimpath.Shape, presented map[string]any, claim model.RequiredClaim) error {
-	values, err := shape.Select(presented, claim.Path)
+	values, err := requiredValues(shape, presented, claim.Path)
 	if errors.Is(err, claimpath.ErrNoClaim) || errors.Is(err, claimpath.ErrMismatch) {
 		return helpers.NewErrorDetailsWithStatus("missing_required_claim",
 			fmt.Sprintf("claim %s not present on presented credential", claim.Path),
@@ -182,21 +184,40 @@ func verifyRequiredClaim(shape claimpath.Shape, presented map[string]any, claim 
 	return nil
 }
 
-// copyPresentedClaim copies the claim at path, up to its first null or
+// requiredValues returns the values a required claim selects in the
+// presented credential: the top-level key of its dotted name when the
+// presentation holds it, and the values its pointer selects otherwise.
+func requiredValues(shape claimpath.Shape, presented map[string]any, claim claimpath.Ref) ([]any, error) {
+	if value, ok := claim.Literal(presented); ok {
+		return []any{value}, nil
+	}
+	return shape.Select(presented, claim.Path)
+}
+
+// copyPresentedClaim copies a required claim, up to its first null or
 // index, from presented into verified, in the same shape. The downstream
 // VCTM filter (which walks nested maps) then sees it under the shape the
-// presented credential used, and a claim's array keeps its positions.
-func copyPresentedClaim(shape claimpath.Shape, verified, presented map[string]any, path claimpath.Pointer) error {
-	keys, ok := path.KeyPrefix()
+// presented credential used, and a claim's array keeps its positions. A
+// claim upgraded from a dotted name is read and held at the top-level key
+// of that name, as the earlier release held it.
+func copyPresentedClaim(shape claimpath.Shape, verified, presented map[string]any, claim claimpath.Ref) error {
+	keys, ok := claim.Path.KeyPrefix()
 	if !ok {
-		return fmt.Errorf("claim %s starts with no key", path)
+		return fmt.Errorf("claim %s starts with no key", claim)
 	}
-	value, present, err := shape.Get(presented, keys)
-	if err != nil {
-		return fmt.Errorf("claim %s: %w", path, err)
+	value, present := claim.Literal(presented)
+	if !present {
+		var err error
+		if value, present, err = shape.Get(presented, keys); err != nil {
+			return fmt.Errorf("claim %s: %w", claim, err)
+		}
 	}
 	if !present {
-		return fmt.Errorf("claim %s: the presentation holds no claim at %s", path, keys)
+		return fmt.Errorf("claim %s: the presentation holds no claim at %s", claim, keys)
+	}
+	if dotted, ok := claim.Dotted(); ok {
+		verified[dotted] = value
+		return nil
 	}
 	return shape.Set(verified, keys, value)
 }

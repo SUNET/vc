@@ -226,7 +226,7 @@ func (c *Cfg) checkRequiredClaims(claims RequiredClaims, presented string) error
 		return err
 	}
 	for i, claim := range claims {
-		if _, err := shape.Locate(claim.Path); err != nil {
+		if _, err := shape.Locate(claim.Path.Path); err != nil {
 			return fmt.Errorf("required_claims[%d].path: %w", i, err)
 		}
 	}

@@ -15,9 +15,12 @@ import (
 // main kept a required claim under its spelling, and the issued document
 // starts from the required claims. An mdoc claim spelled as a bare element
 // identifier, such as birth_date, so reached the document under that
-// identifier. The upgrade keeps it there with a copy at the start of the
-// derivations. A claim an opening takes as its secret gets none: the
-// configuration keeps that claim out of the credential.
+// identifier. The loader carries the identifier beside the pointer, and
+// the verified claims hold the claim under it, as main's did. A copy at
+// the start of the derivations puts the claim there in the issued
+// document when the verified claims hold it under its namespace, as the
+// converted file stores it. A claim an opening takes as its secret gets
+// no copy: the configuration keeps that claim out of the credential.
 func (u *configUpgrade) presentedCredential(n ast.Node, presented, document *lazy) error {
 	derivations, err := descend(n, "derivations")
 	if err != nil {
@@ -41,8 +44,14 @@ func (u *configUpgrade) presentedCredential(n ast.Node, presented, document *laz
 			}
 			entry := listEntry{keyField: "path", key: path, valueField: "values", omitEmpty: true}
 			shape, err := presented.read()
-			if err != nil || !shape.bareAlias(key) || slices.ContainsFunc(secrets, path.Equal) {
+			if err != nil || !shape.bareAlias(key) {
 				return entry, err
+			}
+			if !u.convert {
+				entry.dotted = key
+			}
+			if slices.ContainsFunc(secrets, path.Equal) {
+				return entry, nil
 			}
 			output, err := document.topLevel(key)
 			if err != nil {

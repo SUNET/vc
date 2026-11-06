@@ -20,7 +20,7 @@ func ageDerivingScope() model.PresentationScope {
 	return model.PresentationScope{
 		From: map[string]model.PresentedCredential{
 			"eduid": {
-				RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}},
+				RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("birthdate")}}},
 				Derivations: []primitives.Derivation{{
 					AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
 						Input: claimpath.Ref{Path: claimpath.Keys("birthdate")}, Thresholds: []int{18},

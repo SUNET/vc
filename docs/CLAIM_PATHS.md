@@ -174,6 +174,24 @@ of `org.iso.18013.5.1` under its bare identifier too.
 answers with the header `Deprecation: @1793836800` (RFC 9745) and logs a
 warning.
 
+### Upgrading replicas
+
+Replicas of the earlier release and of this release share authorization
+contexts for 15 minutes and cached documents for 5 minutes. From a file in
+the earlier spellings, this release stores them as the earlier release did:
+
+- The opening claims of a `hash_commitment` hold the claim of an input
+  upgraded from a dotted name under that name, as
+  `{"identity.pnr": "199001011234"}`.
+- The verified claims hold a required claim spelled as a bare mdoc element
+  identifier under that identifier.
+- A deprecated `identity_match` object is stored as its dotted names.
+
+This release reads that form and its own. Run `migrate_claim_paths` once
+every replica runs this release: a converted file stores the verified claim
+of a bare identifier under its namespace-qualified name, which the earlier
+release misreads.
+
 ### `migrate_claim_paths`
 
 `migrate_claim_paths` rewrites configuration files and presentation request

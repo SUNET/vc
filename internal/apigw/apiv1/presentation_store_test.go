@@ -24,7 +24,7 @@ func TestVerifiedMDocClaimsIssueAfterTheMongoStore(t *testing.T) {
 	birthDate := claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date")
 	verified, err := verifiedClaims(openid4vp.PresentedShape(openid4vp.FormatMsoMdoc), map[string]any{
 		"eu.europa.ec.eudi.pid.1.birth_date": cbor.Tag{Number: mdoc.TagDate, Content: "1990-01-15"},
-	}, model.RequiredClaims{{Path: birthDate}})
+	}, model.RequiredClaims{{Path: claimpath.Ref{Path: birthDate}}})
 	require.NoError(t, err)
 	storable, err := documentObject(verified)
 	require.NoError(t, err)

@@ -37,7 +37,7 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 	}
 	requiredClaim := func(ds model.DataSources) claimpath.Ref {
 		for _, accepted := range ds.Presentation.Scopes["nym_auth"].From {
-			return claimpath.Ref{Path: accepted.RequiredClaims[0].Path}
+			return accepted.RequiredClaims[0].Path
 		}
 		return claimpath.Ref{}
 	}
@@ -76,9 +76,10 @@ func TestUpgradeReadsEachRoleAsTheEarlierReleaseDid(t *testing.T) {
 		{
 			name:    "a bare claim of a presented mdoc",
 			dotted:  presentation("pid_mdoc", "          required_claims:\n            given_name: []\n"),
-			pointer: presentation("pid_mdoc", "          required_claims:\n            - path: [org.iso.18013.5.1, given_name]\n"),
+			pointer: presentation("pid_mdoc", "          required_claims:\n            - path: {dotted: given_name, path: [org.iso.18013.5.1, given_name]}\n"),
 			claim:   requiredClaim,
 			want:    claimpath.Keys("org.iso.18013.5.1", "given_name"),
+			carried: "given_name",
 		},
 		{
 			name:    "a claim of a JSON-based document",

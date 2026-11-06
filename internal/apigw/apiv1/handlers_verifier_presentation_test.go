@@ -139,7 +139,7 @@ func TestFinalisePresentationVerification_Success(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}, {Path: claimpath.Keys("assurance_level"), Values: []string{
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("birthdate")}}, {Path: claimpath.Ref{Path: claimpath.Keys("assurance_level")}, Values: []string{
 				"http://www.swamid.se/policy/assurance/al3",
 			}}},
 			Derivations: []primitives.Derivation{
@@ -182,7 +182,7 @@ func TestFinalisePresentationVerification_MissingRequiredClaim(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}, {Path: claimpath.Keys("assurance_level")}},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("birthdate")}}, {Path: claimpath.Ref{Path: claimpath.Keys("assurance_level")}}},
 		}},
 	}
 	presented := map[string]any{
@@ -207,7 +207,7 @@ func TestFinalisePresentationVerification_ScalarAllowList(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("assurance_level"), Values: []string{
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("assurance_level")}, Values: []string{
 				"http://www.swamid.se/policy/assurance/al3",
 			}}},
 		}},
@@ -232,7 +232,7 @@ func TestFinalisePresentationVerification_ArrayAllowList(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("assurance_level"), Values: []string{
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("assurance_level")}, Values: []string{
 				"http://www.swamid.se/policy/assurance/al3",
 			}}},
 		}},
@@ -268,7 +268,7 @@ func TestFinalisePresentationVerification_WrongVCT(t *testing.T) {
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"eduid": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("birthdate")}},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("birthdate")}}},
 		}},
 	}
 	presented := map[string]any{

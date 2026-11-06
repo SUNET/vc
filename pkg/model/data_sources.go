@@ -420,7 +420,7 @@ type PresentedCredential struct {
 type RequiredClaim struct {
 	// Path is the claim. A null selects every element of an array, and
 	// the claim is present when it selects one.
-	Path claimpath.Pointer `yaml:"path" validate:"required" doc_example:"[nationalities, null]"`
+	Path claimpath.Ref `yaml:"path" validate:"required" doc_example:"[nationalities, null]"`
 	// Values is the allow-list: empty lets any value pass. Otherwise a
 	// selected value must equal one of the listed strings, or, for an
 	// array, one of its elements must.
@@ -434,7 +434,7 @@ type RequiredClaims []RequiredClaim
 func (r RequiredClaims) Paths() []claimpath.Pointer {
 	paths := make([]claimpath.Pointer, 0, len(r))
 	for _, claim := range r {
-		paths = append(paths, claim.Path)
+		paths = append(paths, claim.Path.Path)
 	}
 	return paths
 }

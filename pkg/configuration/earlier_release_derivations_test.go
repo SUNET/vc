@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -17,14 +20,17 @@ import (
 
 // A derivation list in the earlier release's spellings loads and runs over
 // an assertion's claims as the earlier release ran it. The expected
-// document and opening claims are the earlier release's (main at
-// ff1df957) output on the same configuration and claims.
+// document, cached opening claims and opening are the earlier release's
+// (main at ff1df957) output on the same configuration and claims. A
+// replica of either release opens the opening claims the other caches.
 func TestEarlierReleaseDerivationsRunAsTheEarlierReleaseRanThem(t *testing.T) {
-	const opening = "- hash_commitment:\n    path: [eu.europa.ec.eudi.nym_auth.1, ssc]\n    opening: {hkdf: {secret_path: /nonexistent, bytes: 16, inputs: [identity.pnr, issuing_country]}}\n"
+	const opening = "- hash_commitment:\n    path: [eu.europa.ec.eudi.nym_auth.1, ssc]\n    opening: {hkdf: {secret_path: SECRET, bytes: 16, inputs: [identity.pnr, issuing_country]}}\n"
 	tests := []struct {
 		name, derivations, claims string
-		// document and opening are the earlier release's output.
-		document, opening string
+		// document and opening are the earlier release's output, and
+		// opened its opening of the opening claims, in hex, where it opens
+		// them.
+		document, opening, opened string
 	}{
 		{
 			name:        "an input below a null is absent",
@@ -81,6 +87,15 @@ func TestEarlierReleaseDerivationsRunAsTheEarlierReleaseRanThem(t *testing.T) {
 			claims:      `{"identity.pnr":"199001011234","issuing_country":"SE"}`,
 			document:    `{"identity.pnr":"199001011234","issuing_country":"SE"}`,
 			opening:     `{"identity.pnr":"199001011234","issuing_country":"SE"}`,
+			opened:      "cdc2068f38b4e274571acf1fdbcb81c0",
+		},
+		{
+			name:        "an opening input caches a nested claim under the whole name",
+			derivations: opening,
+			claims:      `{"identity":{"pnr":"199001011234"},"issuing_country":"SE"}`,
+			document:    `{"identity":{"pnr":"199001011234"},"issuing_country":"SE"}`,
+			opening:     `{"identity.pnr":"199001011234","issuing_country":"SE"}`,
+			opened:      "cdc2068f38b4e274571acf1fdbcb81c0",
 		},
 		{
 			name:        "an empty segment of an input is an empty key",
@@ -100,18 +115,22 @@ func TestEarlierReleaseDerivationsRunAsTheEarlierReleaseRanThem(t *testing.T) {
 	root := repoRoot(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			list := strings.Split(strings.TrimSuffix(tt.derivations, "\n"), "\n")
+			dir := t.TempDir()
+			secret := filepath.Join(dir, "secret.key")
+			require.NoError(t, os.WriteFile(secret, []byte("c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M"), 0o600))
+			list := strings.Split(strings.TrimSuffix(strings.ReplaceAll(tt.derivations, "SECRET", secret), "\n"), "\n")
 			for i, line := range list {
 				list[i] = "            " + line
 			}
-			file := filepath.Join(t.TempDir(), "config.yaml")
+			file := filepath.Join(dir, "config.yaml")
 			require.NoError(t, os.WriteFile(file, []byte("common:\n  credential_metadata:\n    pid:\n      format: dc+sd-jwt\n      vctm_file_path: /metadata/vctm_pid.json\napigw:\n  data_sources:\n    assertion:\n      scopes:\n        pid:\n          auth_provider: oidc\n          derivations:\n"+strings.Join(list, "\n")+"\n"), 0o600))
 			cfg, err := LoadFile(t.Context(), file, metadataIn(root))
 			require.NoError(t, err)
 
 			var claims map[string]any
 			require.NoError(t, json.Unmarshal([]byte(tt.claims), &claims))
-			openingClaims, err := credential.ApplyScopeDerivations(cfg, model.SourceScope{Source: model.DataSourceAssertion, Scope: "pid"}, claims, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
+			src := model.SourceScope{Source: model.DataSourceAssertion, Scope: "pid"}
+			openingClaims, err := credential.ApplyScopeDerivations(cfg, src, claims, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
 			require.NoError(t, err)
 			document, err := json.Marshal(claims)
 			require.NoError(t, err)
@@ -119,6 +138,19 @@ func TestEarlierReleaseDerivationsRunAsTheEarlierReleaseRanThem(t *testing.T) {
 			got, err := json.Marshal(openingClaims)
 			require.NoError(t, err)
 			assert.JSONEq(t, tt.opening, string(got), "opening claims")
+			if tt.opened == "" {
+				return
+			}
+
+			shapes, err := cfg.DerivationShapes(src)
+			require.NoError(t, err)
+			commitment := primitives.HashCommitmentFor(cfg.APIGW.DataSources.DerivationsForSource("pid", model.DataSourceAssertion), claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "ssc"))
+			require.NotNil(t, commitment)
+			var cached map[string]any
+			require.NoError(t, json.Unmarshal([]byte(tt.opening), &cached))
+			opened, err := commitment.NewOpening(cached, shapes.Source)
+			require.NoError(t, err)
+			assert.Equal(t, tt.opened, hex.EncodeToString(opened), "opening")
 		})
 	}
 }
