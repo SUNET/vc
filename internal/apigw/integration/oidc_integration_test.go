@@ -16,6 +16,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -509,31 +510,31 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRP {
 		// for passthrough. Include transform/default examples for testing.
 		AttributeMapping: model.AttributeMapping{
 			"given_name": {
-				Claim: "given_name",
+				Claim: claimpath.Keys("given_name"),
 			},
 			"family_name": {
-				Claim: "family_name",
+				Claim: claimpath.Keys("family_name"),
 			},
 			"birthdate": {
-				Claim: "birth_date",
+				Claim: claimpath.Keys("birth_date"),
 			},
 			"degree": {
-				Claim: "degree",
+				Claim: claimpath.Keys("degree"),
 			},
 			"card_number": {
-				Claim: "card_number",
+				Claim: claimpath.Keys("card_number"),
 			},
 			"email": {
-				Claim: "email",
+				Claim: claimpath.Keys("email"),
 			},
 			"name": {
-				Claim: "display_name",
+				Claim: claimpath.Keys("display_name"),
 			},
 			"note": {
-				Claim: "note",
+				Claim: claimpath.Keys("note"),
 			},
 			"country": {
-				Claim:   "country",
+				Claim:   claimpath.Keys("country"),
 				Default: "SE",
 			},
 		},

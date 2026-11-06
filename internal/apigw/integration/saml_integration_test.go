@@ -22,6 +22,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/samlsp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -194,22 +195,22 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 		SessionDuration:  3600,
 		AttributeMapping: model.AttributeMapping{
 			"urn:oid:2.5.4.42": {
-				Claim:    "given_name",
+				Claim:    claimpath.Keys("given_name"),
 				Required: true,
 			},
 			"urn:oid:2.5.4.4": {
-				Claim:    "family_name",
+				Claim:    claimpath.Keys("family_name"),
 				Required: true,
 			},
 			"urn:oid:1.3.6.1.5.5.7.9.1": {
-				Claim:    "birth_date",
+				Claim:    claimpath.Keys("birth_date"),
 				Required: true,
 			},
 			"urn:eudi:degree": {
-				Claim: "degree",
+				Claim: claimpath.Keys("degree"),
 			},
 			"urn:eudi:ehic:cardnumber": {
-				Claim: "card_number",
+				Claim: claimpath.Keys("card_number"),
 			},
 		},
 	}
