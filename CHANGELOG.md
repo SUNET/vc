@@ -181,6 +181,21 @@
   **Migration:** write the pointer every reader should read, such as
   `["hasClaim", 0]`. `migrate_claim_paths` prints each such key of a type
   metadata file and leaves the file as written.
+- **Empty claim paths**: `path: []` in `auxiliary_data`, a preset, a
+  `hash_commitment` or `attributes` loads and logs a warning. The services
+  that refused it in the earlier release refuse it: the apigw and the
+  verifier for `auxiliary_data`, the verifier for a preset, the apigw for a
+  `hash_commitment`. The issuer signs an issuer metadata claim description
+  with an empty, null or absent `path` and logs a warning.
+
+  **Migration:** write the pointer of a claim, or remove the entry.
+  `migrate_claim_paths` prints each such path and leaves it as written.
+- **Presentation request files that fail to decode as a list of templates**:
+  such a file loads as one template from its top-level keys, and the
+  verifier logs a warning with the error.
+
+  **Migration:** correct the list. `migrate_claim_paths` prints the error
+  and leaves the file as written.
 
 ### Note
 

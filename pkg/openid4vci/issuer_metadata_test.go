@@ -287,6 +287,30 @@ func TestMarshal(t *testing.T) {
 	})
 }
 
+// The issuer signs a claim description whose path is empty, null or
+// absent. Each want is what a run of the earlier release signed.
+func TestClaimDescriptionPathSignsAsTheEarlierReleaseSignedIt(t *testing.T) {
+	for _, tt := range []struct{ claim, want string }{
+		{`{"path":[]}`, `{"path":[]}`},
+		{`{"path":[],"mandatory":true,"svg_id":"x"}`, `{"mandatory":true,"path":[],"svg_id":"x"}`},
+		{`{"path":null}`, `{"path":null}`},
+		{`{"svg_id":"x"}`, `{"path":null,"svg_id":"x"}`},
+		{`{"path":["a"],"path":[]}`, `{"path":[]}`},
+		{`{"PATH":[]}`, `{"path":[]}`},
+		{`{"path":["a",null]}`, `{"path":["a",null]}`},
+	} {
+		t.Run(tt.claim, func(t *testing.T) {
+			var metadata CredentialIssuerMetadataParameters
+			require.NoError(t, json.Unmarshal([]byte(`{"claims":[`+tt.claim+`]}`), &metadata))
+			claims, err := metadata.MarshalJWTClaims()
+			require.NoError(t, err)
+			signed, err := json.Marshal(claims["claims"])
+			require.NoError(t, err)
+			assert.JSONEq(t, "["+tt.want+"]", string(signed))
+		})
+	}
+}
+
 func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {
 	// Marshal mockIssuerMetadata to JSON
 	marshaledData, err := json.Marshal(mockIssuerMetadata)

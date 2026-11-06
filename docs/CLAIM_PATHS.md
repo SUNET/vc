@@ -209,6 +209,49 @@ metadata/vctm_elm.json:70: $.claims[2].path[2]: deprecated claim spelling "hasCl
 Write the pointer every reader should read, such as `["hasClaim", 0]`, or
 `null` for `"*"`.
 
+### Empty paths
+
+A pointer is a non-empty array. The empty array loads in these fields with
+the earlier release's effect, and logs a warning:
+
+| Field | Effect of `[]` |
+| --- | --- |
+| `auxiliary_data.{to_wallet,to_issuer}[].path` | The apigw and the verifier refuse the file at startup. |
+| `verifier.presets.*.credentials.*.{claims,exclude_claims,validations}[].path` | The verifier refuses the file at startup. |
+| `hash_commitment.path` | The apigw refuses the file at startup. |
+| `common.credential_metadata.*.attributes` | No service reads the entry. |
+
+Each other service loads the file. Write the pointer of a claim, or remove
+the entry.
+
+An issuer metadata claim description with an empty, null or absent `path`
+decodes. The issuer signs it as written and logs a warning.
+
+A type metadata claim with an empty, null or absent `path` decodes. The apigw
+and the verifier stop at startup when `common.credential_metadata` names such
+a file.
+
+### Presentation request files that fail to decode
+
+A file whose `templates` list fails to decode loads as one template from
+its top-level keys, and the verifier drops the templates of the list. Each
+of these fails a list:
+
+- a value of another type in any entry, such as `enabled: maybe`;
+- a DCQL claim path that is `[]` or a string;
+- a key that a credential query repeats.
+
+The verifier logs a warning per such file:
+
+```text
+presentation_requests/pid.yaml fails to decode as a list of templates and loads as one template from its top-level keys: yaml: unmarshal errors:
+  line 15: cannot unmarshal !!str `maybe` into bool
+```
+
+A file without top-level keys loads one empty enabled template, which
+answers no scope. A second such file in the directory stops the verifier
+with `duplicate template ID`. Correct the list.
+
 ### Upgrading replicas
 
 Replicas of the earlier release and of this release share authorization
@@ -276,3 +319,9 @@ spellings its warnings at load name.
 It leaves a type metadata file as written, and prints a line per key of
 the table under "Type metadata claim paths": a rewrite changes what some
 reader reads.
+
+It leaves an empty path of the table under "Empty paths" as written, and
+prints what to write. Such a path keeps loading with its warning.
+
+It leaves a presentation request file that fails to decode as a list of
+templates as written, and prints the error.

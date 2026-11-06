@@ -37,7 +37,7 @@ func decodeShared(file string, src []byte, cfg *model.Cfg) ([]legacyclaims.Rewri
 	if err != nil {
 		return nil, err
 	}
-	if err := legacyclaims.UpgradeShared(doc); err != nil {
+	if err := legacyclaims.UpgradeShared(doc, false); err != nil {
 		return nil, err
 	}
 	if err := legacyclaims.ClearDataSources(doc); err != nil {

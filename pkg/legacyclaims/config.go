@@ -88,7 +88,7 @@ func (l *lazy) topLevel(name string) (claimpath.Pointer, error) {
 // UpgradeConfig rewrites the claim spellings of earlier releases in a
 // service configuration: UpgradeShared, then UpgradeDataSources.
 func UpgradeConfig(d *Document, shapes Shapes, convert bool) error {
-	if err := UpgradeShared(d); err != nil {
+	if err := UpgradeShared(d, convert); err != nil {
 		return err
 	}
 	return UpgradeDataSources(d, shapes, convert)
@@ -96,13 +96,22 @@ func UpgradeConfig(d *Document, shapes Shapes, convert bool) error {
 
 // UpgradeShared rewrites the claim spellings outside apigw.data_sources,
 // which read no credential schema: the auth provider attribute mappings,
-// the verifier presets and binding attributes, and the auxiliary_data
-// paths.
-func UpgradeShared(d *Document) error {
+// the verifier presets and binding attributes, the auxiliary_data paths
+// and the credential attributes. An empty path of a preset, an
+// auxiliary_data entry or an attribute becomes null without convert, and
+// stays as written with convert; its record says why.
+func UpgradeShared(d *Document, convert bool) error {
 	if d.root == nil {
 		return nil
 	}
-	for _, upgrade := range []func() error{d.upgradeAuthProviders, d.upgradePresets, d.upgradeBindingAttributes, d.upgradeAuxiliaryData} {
+	upgrades := []func() error{
+		d.upgradeAuthProviders,
+		func() error { return d.upgradePresets(convert) },
+		d.upgradeBindingAttributes,
+		func() error { return d.upgradeAuxiliaryData(convert) },
+		func() error { return d.upgradeCredentialAttributes(convert) },
+	}
+	for _, upgrade := range upgrades {
 		if err := upgrade(); err != nil {
 			return d.fail(err)
 		}
@@ -377,8 +386,16 @@ func (d *Document) clearDataSources() error {
 	return nil
 }
 
+// The notes of an empty path, which main loaded where no service read it.
+const (
+	presetEmptyPath     = "the verifier refuses an empty path; write the pointer of a claim, or remove the entry"
+	auxiliaryEmptyPath  = "the apigw and the verifier refuse an empty path; write the pointer of the claim that holds the commitment"
+	commitmentEmptyPath = "the apigw refuses an empty path; write the path of a to_wallet entry"
+	attributeEmptyPath  = "a claims path pointer is a non-empty array; write the pointer of a claim, or remove the attribute"
+)
+
 // upgradePresets upgrades the claim paths of the verifier presets.
-func (d *Document) upgradePresets() error {
+func (d *Document) upgradePresets(convert bool) error {
 	presets, err := descend(d.root, "verifier", "presets")
 	if err != nil {
 		return err
@@ -397,7 +414,7 @@ func (d *Document) upgradePresets() error {
 			return err
 		}
 		for _, scope := range scopes {
-			if err := d.presetScope(scope.Value); err != nil {
+			if err := d.presetScope(scope.Value, convert); err != nil {
 				return err
 			}
 		}
@@ -408,7 +425,7 @@ func (d *Document) upgradePresets() error {
 // presetScope upgrades the claim paths of one preset credential: those of
 // its claims and exclude_claims, where main read the string "null" as
 // every element of an array, and those of its validations.
-func (d *Document) presetScope(n ast.Node) error {
+func (d *Document) presetScope(n ast.Node, convert bool) error {
 	for _, key := range []string{"claims", "exclude_claims", "validations"} {
 		entries, err := descend(n, key)
 		if err != nil {
@@ -423,7 +440,7 @@ func (d *Document) presetScope(n ast.Node) error {
 			if err != nil {
 				return err
 			}
-			if err := d.stringPath(path, key != "validations"); err != nil {
+			if err := d.listPath(path, key != "validations", convert, presetEmptyPath); err != nil {
 				return err
 			}
 		}
@@ -463,7 +480,7 @@ func (d *Document) upgradeBindingAttributes() error {
 
 // upgradeAuxiliaryData upgrades the path of each auxiliary_data entry of
 // each credential.
-func (d *Document) upgradeAuxiliaryData() error {
+func (d *Document) upgradeAuxiliaryData(convert bool) error {
 	metadata, err := descend(d.root, "common", "credential_metadata")
 	if err != nil {
 		return err
@@ -487,13 +504,70 @@ func (d *Document) upgradeAuxiliaryData() error {
 				if err != nil {
 					return err
 				}
-				if err := d.stringPath(path, false); err != nil {
+				if err := d.listPath(path, false, convert, auxiliaryEmptyPath); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// upgradeCredentialAttributes upgrades the path of each attribute of each
+// credential, a list of strings for main.
+func (d *Document) upgradeCredentialAttributes(convert bool) error {
+	metadata, err := descend(d.root, "common", "credential_metadata")
+	if err != nil {
+		return err
+	}
+	scopes, err := entries(metadata)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		attributes, err := descend(scope.Value, "attributes")
+		if err != nil {
+			return err
+		}
+		locales, err := entries(attributes)
+		if err != nil {
+			return err
+		}
+		for _, locale := range locales {
+			names, err := entries(locale.Value)
+			if err != nil {
+				return err
+			}
+			for _, name := range names {
+				if err := d.listPath(name.Value, false, convert, attributeEmptyPath); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// listPath upgrades a claim path main read as a list of strings: each
+// element as stringPath upgrades it, and the empty list, which main loaded
+// where no service read it. The loader reads the empty list as null, and
+// the converter leaves it as written; note says why.
+func (d *Document) listPath(path ast.Node, nullString, convert bool, note string) error {
+	path, err := unwrap(path)
+	if err != nil {
+		return err
+	}
+	if sequence, isList := path.(*ast.SequenceNode); isList && len(sequence.Values) == 0 {
+		start, end, err := d.span(sequence)
+		if err != nil {
+			return err
+		}
+		if !convert {
+			d.replace(start, end, "null")
+		}
+		return d.recordKept(sequence, string(d.src[start:end]), "null", note)
+	}
+	return d.stringPath(path, nullString)
 }
 
 // stringPath upgrades a claim path main read as a list of strings. A

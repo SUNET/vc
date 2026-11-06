@@ -3,6 +3,7 @@ package configuration
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -663,12 +664,11 @@ type earlierTemplates struct {
 	} `yaml:"templates"`
 }
 
-// A presentation request file with an alias, a merge key or a repeated key
-// loads as its twin written out by hand does, which gopkg.in/yaml.v2 reads
-// as the same templates. A credential query reads its own mappings: the
-// claims a merge key sets are upgraded, and a key it repeats refuses the
-// file, as gopkg.in/yaml.v2 refuses it. Each warning names the line that
-// holds the spelling.
+// A presentation request file with an alias or a merge key loads as its
+// twin written out by hand does, which gopkg.in/yaml.v2 reads as the same
+// templates. A credential query reads its own mappings: the claims a merge
+// key sets are upgraded. Each warning names the line that holds the
+// spelling.
 func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
 	const template = "templates:\n  - id: age\n    oidc_scopes: [age]\n    dcql:\n      credentials:\n        - %s\n    claim_mappings:%s\n"
 	const query = "id: age\n          format: dc+sd-jwt\n          claims:\n            - path: [age_over_18]"
@@ -676,8 +676,6 @@ func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
 	tests := []struct {
 		name, file, twin string
 		lines            []int
-		// refused is the error gopkg.in/yaml.v2 refuses the file with.
-		refused string
 	}{
 		{
 			name:  "an alias of the claim mappings",
@@ -691,11 +689,6 @@ func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
 			twin:  fmt.Sprintf(template, "id: age\n          format: dc+sd-jwt\n          claims:\n            - path: [name_by_language, no]", mappings),
 			lines: []int{3, 12},
 		},
-		{
-			name:    "a key a credential query repeats",
-			file:    fmt.Sprintf(template, "id: other\n          "+query, mappings),
-			refused: "credential query: id is named more than once, and YAML keeps only the last",
-		},
 	}
 	load := func(text string) (*PresentationRequestConfig, error) {
 		dir := t.TempDir()
@@ -704,13 +697,6 @@ func TestTemplateAliasesLoadAsYAMLv2ReadsThem(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.refused != "" {
-				var read PresentationRequestConfig
-				require.ErrorContains(t, yaml.Unmarshal([]byte(tt.file), &read), tt.refused)
-				_, err := load(tt.file)
-				require.ErrorContains(t, err, tt.refused)
-				return
-			}
 			var earlier, earlierTwin earlierTemplates
 			require.NoError(t, yaml.Unmarshal([]byte(tt.file), &earlier))
 			require.NoError(t, yaml.Unmarshal([]byte(tt.twin), &earlierTwin))
@@ -775,6 +761,145 @@ func TestBindingAttributesReadAsTheEarlierReleaseDid(t *testing.T) {
 	_, err = decode("[[nationalities, null]]")
 	require.ErrorContains(t, err, "verifier.combined_presentation.binding_attributes[0].paths[0]: ")
 	require.ErrorContains(t, err, "selects every element of an array")
+}
+
+// A file that fails to decode as a list of templates loads one template
+// from its top-level keys, and names the error of the list. Each row holds
+// the id, the scopes and the query of the template a run of the earlier
+// release loaded from the file.
+func TestListThatFailsToDecodeLoadsTheTopLevelKeys(t *testing.T) {
+	const entry = "templates:\n  - id: t1\n    oidc_scopes: [s1]\n    dcql:\n      credentials:\n        - id: q1\n          format: dc+sd-jwt\n          claims:\n            - path: %s\n    claim_mappings:\n      given_name: given_name\n    enabled: %s\n"
+	const top = "id: top\noidc_scopes: [stop]\n"
+	const alias = "x-meta: &meta\n  vct_values: [urn:x]\ntemplates:\n  - id: t1\n    dcql:\n      credentials:\n        - id: q1\n          meta: *meta\n          claims:\n            - path: []\n"
+	const queryTop = "dcql:\n  credentials:\n    - id: q0\n      format: dc+sd-jwt\n      meta: {vct_values: [urn:x]}\n      claims:\n        - path: [place_of_birth, locality]\nclaim_mappings:\n  place_of_birth.locality: locality\n"
+	tests := []struct {
+		name, file string
+		id         string
+		scopes     []string
+		// query is the JSON of the template's dcql; empty for none.
+		query string
+		// fault is the part of the list's error that names the fault.
+		fault string
+	}{
+		{name: "an empty claims path", file: fmt.Sprintf(entry, "[]", "true"), fault: "non-empty array"},
+		{name: "a claims path that is a string", file: fmt.Sprintf(entry, "family_name", "true"), fault: "family_name"},
+		{name: "a claims path element that is a list", file: fmt.Sprintf(entry, "[[]]", "true"), fault: "element 0"},
+		{name: "a value of another type", file: fmt.Sprintf(entry, "[given_name]", "notabool"), fault: "notabool"},
+		{name: "a key a credential query repeats", file: "templates:\n  - id: t1\n    dcql:\n      credentials:\n        - id: other\n          id: q1\n", fault: "id is named more than once"},
+		{name: "a list that is a scalar", file: "templates: notalist\n", fault: "$.templates"},
+		{name: "entries that are scalars", file: top + "templates: [a, b]\n", id: "top", scopes: []string{"stop"}, fault: "$.templates[0]"},
+		{name: "top-level keys beside the list", file: top + fmt.Sprintf(entry, "[given_name]", "notabool"), id: "top", scopes: []string{"stop"}, fault: "notabool"},
+		{name: "an alias in the list", file: alias, fault: "non-empty array"},
+		{name: "a default template of another type", file: "default_template: [x]\n" + top, id: "top", scopes: []string{"stop"}, fault: "!!seq"},
+		{
+			name:   "an alias and top-level claims beside the list",
+			file:   "x-meta: &meta\n  vct_values: [urn:x]\n" + top + queryTop + "templates:\n  - id: t1\n    dcql:\n      credentials:\n        - id: q1\n          meta: *meta\n    enabled: notabool\n",
+			id:     "top",
+			scopes: []string{"stop"},
+			query:  `{"credentials":[{"id":"q0","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"claims":[{"path":["place_of_birth","locality"]}]}]}`,
+			fault:  "notabool",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			file := filepath.Join(dir, "templates.yaml")
+			require.NoError(t, os.WriteFile(file, []byte(tt.file), 0o600))
+			config, err := LoadPresentationRequests(t.Context(), dir)
+			require.NoError(t, err)
+
+			require.Len(t, config.Templates, 1)
+			template := config.Templates[0]
+			assert.Equal(t, tt.id, template.ID)
+			assert.Equal(t, tt.scopes, template.OIDCScopes)
+			assert.True(t, template.IsEnabled())
+			if tt.query == "" {
+				assert.Nil(t, template.DCQLQuery)
+			} else {
+				query, err := json.Marshal(template.DCQLQuery)
+				require.NoError(t, err)
+				assert.JSONEq(t, tt.query, string(query))
+			}
+
+			require.Len(t, config.Fallbacks, 1)
+			assert.Equal(t, file, config.Fallbacks[0].File)
+			assert.ErrorContains(t, config.Fallbacks[0], tt.fault)
+		})
+	}
+}
+
+// An empty path decodes where the earlier release read a list of strings,
+// so a service that reads no such field loads the file. A service that
+// reads the field sees an unset path, which its check refuses. The loader
+// warns of the path, and the converter leaves it as written.
+func TestEmptyPathDecodes(t *testing.T) {
+	const aux = "common:\n  credential_metadata:\n    nym_auth:\n      format: mso_mdoc\n      auxiliary_data:\n        %s:\n          - {type: hash_commitment, alg: sha-256, path: []}\n"
+	const preset = "verifier:\n  presets:\n    P:\n      credentials:\n        pid:\n          %s:\n            - %s\n"
+	scope := func(c *model.Cfg) *model.VerificationPresetScope { return c.Verifier.Presets["P"].Credentials["pid"] }
+	tests := []struct {
+		name, file string
+		path       func(*model.Cfg) claimpath.Pointer
+	}{
+		{
+			name: "a preset claim",
+			file: fmt.Sprintf(preset, "claims", "path: []"),
+			path: func(c *model.Cfg) claimpath.Pointer { return scope(c).Claims[0].Path },
+		},
+		{
+			name: "a preset's excluded claim",
+			file: fmt.Sprintf(preset, "exclude_claims", "path: []"),
+			path: func(c *model.Cfg) claimpath.Pointer { return scope(c).ExcludeClaims[0].Path },
+		},
+		{
+			name: "a preset's validation",
+			file: fmt.Sprintf(preset, "validations", "{rule: age_over, path: [], value: 18}"),
+			path: func(c *model.Cfg) claimpath.Pointer { return scope(c).Validations[0].Path },
+		},
+		{
+			name: "a to_wallet entry",
+			file: fmt.Sprintf(aux, "to_wallet"),
+			path: func(c *model.Cfg) claimpath.Pointer {
+				return c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToWallet[0].Path
+			},
+		},
+		{
+			name: "a to_issuer entry",
+			file: fmt.Sprintf(aux, "to_issuer"),
+			path: func(c *model.Cfg) claimpath.Pointer {
+				return c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer[0].Path
+			},
+		},
+		{
+			name: "a credential attribute",
+			file: "common:\n  credential_metadata:\n    pid:\n      format: dc+sd-jwt\n      attributes: {en-US: {Given name: []}}\n",
+			path: func(c *model.Cfg) claimpath.Pointer {
+				return c.Common.CredentialMetadata["pid"].Attributes["en-US"]["Given name"]
+			},
+		},
+		{
+			name: "a hash_commitment derivation",
+			file: "apigw:\n  data_sources:\n    presentation:\n      scopes:\n        nym_auth:\n          from:\n            pid:\n              derivations:\n                - hash_commitment: {path: []}\n",
+			path: func(c *model.Cfg) claimpath.Pointer {
+				return c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"].Derivations[0].HashCommitment.Path
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(file, []byte(tt.file), 0o600))
+			cfg, err := DecodeFile(t.Context(), file, nil)
+			require.NoError(t, err)
+			assert.True(t, tt.path(cfg).IsZero())
+			require.Len(t, cfg.Deprecations, 1)
+			assert.Equal(t, "[]", cfg.Deprecations[0].Old)
+			assert.NotEmpty(t, cfg.Deprecations[0].Note)
+
+			text, _, err := UpgradeFile(t.Context(), file, []byte(tt.file), nil)
+			require.NoError(t, err)
+			assert.Equal(t, tt.file, string(text))
+		})
+	}
 }
 
 // A string where the earlier release read an array, such as a DCQL claims

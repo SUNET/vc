@@ -246,6 +246,9 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	}
 
 	legacyclaims.Warn(c.log, config.Deprecations)
+	for _, fallback := range config.Fallbacks {
+		c.log.Warn(fallback.Error(), "file", fallback.File)
+	}
 
 	// Create presentation builder
 	c.presentationBuilder = openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
