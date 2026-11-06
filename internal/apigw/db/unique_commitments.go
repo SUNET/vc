@@ -26,12 +26,9 @@ type uniqueCommitmentBackend interface {
 	insertCommitment(ctx context.Context, row uniqueCommitmentRow) error
 	// record returns the row of key, or ErrNoDocuments.
 	record(ctx context.Context, key storedKey) (uniqueCommitmentRow, error)
-	// keepCommitment empties the releasable_by of the row of key that holds
-	// commitment, if there is one.
-	keepCommitment(ctx context.Context, key storedKey, commitment string) error
-	// takeOverCommitment sets the releasable_by of the row of key that holds
-	// commitment to call, if there is one and its releasable_by is not empty.
-	takeOverCommitment(ctx context.Context, key storedKey, commitment, call string) error
+	// keepCommitments empties, in one statement, the releasable_by of each
+	// row a key of rows holds with that row's commitment. rows is not empty.
+	keepCommitments(ctx context.Context, rows []uniqueCommitmentRow) error
 	// releaseCommitment removes the row of key whose releasable_by is call,
 	// if there is one.
 	releaseCommitment(ctx context.Context, key storedKey, call string) error
@@ -66,9 +63,9 @@ type uniqueCommitmentRow struct {
 	KeyHash    string    `bson:"key_hash" db:"key_hash"`
 	Commitment string    `bson:"commitment" db:"commitment"`
 	AcceptedAt time.Time `bson:"accepted_at" db:"accepted_at"`
-	// ReleasableBy names the unfinished Accept call that last stored or took
-	// over the row, which removes the row when it fails. It is empty once an
-	// Accept succeeded: the row then stays until a reset.
+	// ReleasableBy names the unfinished Accept call that stored the row, which
+	// removes the row when it fails. It is empty once an Accept succeeded: the
+	// row then stays until a reset.
 	ReleasableBy string `bson:"releasable_by" db:"releasable_by"`
 }
 
@@ -102,20 +99,22 @@ func (h *UniqueCommitments) Accept(ctx context.Context, commitments []UniqueComm
 	return err
 }
 
-// acceptRounds bounds the rounds of acceptRow. A row that another call
-// may still remove takes two rounds, and each concurrent removal of the
-// key's row one more.
+// acceptRounds bounds the rounds of acceptRow and of keep. Each concurrent
+// removal of a row takes one more.
 const acceptRounds = 4
 
-// errAcceptRounds is returned when concurrent removals of a key's row left
-// every round of acceptRow undecided.
+// errAcceptRounds is returned when concurrent removals of a row left every
+// round undecided.
 var errAcceptRounds = errors.New("the commitment on record changed during every round of the accept")
 
 // accept stores the commitments as releasable by a random call name, and
-// empties that name once it has accepted them all, so a row outlasts its
-// accepts only when one of them succeeds. On a failure it removes the rows
-// that name may still remove.
+// keeps them all once it has accepted them, so a row outlasts its accepts
+// only when one of them succeeds. On a failure it removes the rows that name
+// may still remove.
 func (h *UniqueCommitments) accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error {
+	if len(commitments) == 0 {
+		return nil
+	}
 	call := rand.Text()
 	rows := make([]uniqueCommitmentRow, 0, len(commitments))
 	for _, c := range commitments {
@@ -131,10 +130,12 @@ func (h *UniqueCommitments) accept(ctx context.Context, commitments []UniqueComm
 			return h.refuse(ctx, rows[:i+1], call, err)
 		}
 	}
-	for i, row := range rows {
-		if err := h.keepRow(ctx, row, i); err != nil {
-			return h.refuse(ctx, rows, call, err)
-		}
+	if err := ctx.Err(); err != nil {
+		return h.refuse(ctx, rows, call, err)
+	}
+	// The keep decides the batch, so a cancelled request cannot stop it.
+	if err := h.keep(context.WithoutCancel(ctx), rows); err != nil {
+		return h.refuse(ctx, rows, call, err)
 	}
 	return nil
 }
@@ -150,8 +151,7 @@ func (h *UniqueCommitments) refuse(ctx context.Context, rows []uniqueCommitmentR
 }
 
 // acceptRow stores row when its key holds no row, and accepts a row that
-// holds the same commitment. An unfinished call's row is taken over, so that
-// call's failure leaves what this call accepted.
+// holds the same commitment, whichever call stored it.
 func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentRow, index int) error {
 	for range acceptRounds {
 		if err := h.backend.insertCommitment(ctx, row); err != nil {
@@ -167,39 +167,50 @@ func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentR
 			return err
 		case stored.Commitment != row.Commitment:
 			return &UniqueCommitmentConflict{Index: index}
-		case stored.ReleasableBy == "" || stored.ReleasableBy == row.ReleasableBy:
-			return nil
 		}
-		if err := h.backend.takeOverCommitment(ctx, row.key(), row.Commitment, row.ReleasableBy); err != nil {
+		return nil
+	}
+	return errAcceptRounds
+}
+
+// keep makes the accepted rows stay, and returns once every row is kept. A
+// row that a failed call's release or a reset removed before the keep is
+// stored again. A different commitment in its place refuses the call, and the
+// rows already kept stay until a reset.
+func (h *UniqueCommitments) keep(ctx context.Context, rows []uniqueCommitmentRow) error {
+	for range acceptRounds {
+		if err := h.backend.keepCommitments(ctx, rows); err != nil {
+			return err
+		}
+		kept, err := h.allKept(ctx, rows)
+		if err != nil || kept {
 			return err
 		}
 	}
 	return errAcceptRounds
 }
 
-// keepRow makes an accepted row stay. A row a failed call took over and
-// removed is accepted again.
-func (h *UniqueCommitments) keepRow(ctx context.Context, row uniqueCommitmentRow, index int) error {
-	for range acceptRounds {
-		if err := h.backend.keepCommitment(ctx, row.key(), row.Commitment); err != nil {
-			return err
-		}
+// allKept reports whether each key holds its row with an empty releasable_by.
+// It stores again a row that was removed.
+func (h *UniqueCommitments) allKept(ctx context.Context, rows []uniqueCommitmentRow) (bool, error) {
+	kept := true
+	for i, row := range rows {
 		stored, err := h.backend.record(ctx, row.key())
 		switch {
 		case errors.Is(err, ErrNoDocuments):
-			if err := h.acceptRow(ctx, row, index); err != nil {
-				return err
+			if err := h.acceptRow(ctx, row, i); err != nil {
+				return false, err
 			}
-			continue
+			kept = false
 		case err != nil:
-			return err
+			return false, err
 		case stored.Commitment != row.Commitment:
-			return &UniqueCommitmentConflict{Index: index}
-		case stored.ReleasableBy == "":
-			return nil
+			return false, &UniqueCommitmentConflict{Index: i}
+		case stored.ReleasableBy != "":
+			kept = false
 		}
 	}
-	return errAcceptRounds
+	return kept, nil
 }
 
 // release removes the rows of rows' keys that call stored and may still

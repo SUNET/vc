@@ -56,15 +56,14 @@ func (m *mongoUniqueCommitments) record(ctx context.Context, key storedKey) (uni
 	return row, nil
 }
 
-func (m *mongoUniqueCommitments) keepCommitment(ctx context.Context, key storedKey, commitment string) error {
-	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "commitment": commitment}
-	_, err := m.records.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"releasable_by": ""}})
-	return err
-}
-
-func (m *mongoUniqueCommitments) takeOverCommitment(ctx context.Context, key storedKey, commitment, call string) error {
-	filter := bson.M{"scope": key.Scope, "path": key.Path, "key_hash": key.KeyHash, "commitment": commitment, "releasable_by": bson.M{"$ne": ""}}
-	_, err := m.records.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"releasable_by": call}})
+// keepCommitments writes each document atomically: a server failure during
+// the update can leave some rows kept.
+func (m *mongoUniqueCommitments) keepCommitments(ctx context.Context, rows []uniqueCommitmentRow) error {
+	match := make(bson.A, 0, len(rows))
+	for _, row := range rows {
+		match = append(match, bson.M{"scope": row.Scope, "path": row.Path, "key_hash": row.KeyHash, "commitment": row.Commitment})
+	}
+	_, err := m.records.UpdateMany(ctx, bson.M{"$or": match}, bson.M{"$set": bson.M{"releasable_by": ""}})
 	return err
 }
 

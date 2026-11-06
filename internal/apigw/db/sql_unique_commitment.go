@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/sqlstore"
 
@@ -40,15 +41,15 @@ func (s *sqlUniqueCommitments) record(ctx context.Context, key storedKey) (uniqu
 	return row, nil
 }
 
-func (s *sqlUniqueCommitments) keepCommitment(ctx context.Context, key storedKey, commitment string) error {
-	query := s.dialect.Rebind(`UPDATE unique_commitments SET releasable_by = '' WHERE scope = ? AND path = ? AND key_hash = ? AND commitment = ?`)
-	_, err := s.db.ExecContext(ctx, query, key.Scope, key.Path, key.KeyHash, commitment)
-	return err
-}
-
-func (s *sqlUniqueCommitments) takeOverCommitment(ctx context.Context, key storedKey, commitment, call string) error {
-	query := s.dialect.Rebind(`UPDATE unique_commitments SET releasable_by = ? WHERE scope = ? AND path = ? AND key_hash = ? AND commitment = ? AND releasable_by <> ''`)
-	_, err := s.db.ExecContext(ctx, query, call, key.Scope, key.Path, key.KeyHash, commitment)
+func (s *sqlUniqueCommitments) keepCommitments(ctx context.Context, rows []uniqueCommitmentRow) error {
+	match := make([]string, 0, len(rows))
+	args := make([]any, 0, 4*len(rows))
+	for _, row := range rows {
+		match = append(match, `(scope = ? AND path = ? AND key_hash = ? AND commitment = ?)`)
+		args = append(args, row.Scope, row.Path, row.KeyHash, row.Commitment)
+	}
+	query := s.dialect.Rebind(`UPDATE unique_commitments SET releasable_by = '' WHERE ` + strings.Join(match, ` OR `))
+	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
 }
 
