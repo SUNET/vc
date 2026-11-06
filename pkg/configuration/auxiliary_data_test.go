@@ -48,7 +48,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
 				DataSources: model.DataSources{Presentation: model.PresentationConfig{
 					Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{
-						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("personal_administrative_number")}, {Path: claimpath.Keys("nym_auth_opening")}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("personal_administrative_number")}}, {Path: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
 								SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16,
@@ -196,7 +196,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
 				DataSources: model.DataSources{Presentation: model.PresentationConfig{
 					Scopes: map[string]model.PresentationScope{"example": {From: map[string]model.PresentedCredential{
-						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("personal_administrative_number")}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("personal_administrative_number")}}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
 								SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16,
@@ -222,7 +222,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 
 	cfg = base()
 	cfg.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{
-		RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("nym_auth_opening")}}, Derivations: claimOpening("nym_auth_opening"),
+		RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}}}, Derivations: claimOpening("nym_auth_opening"),
 	}
 	require.NoError(t, checkAuxiliaryData(cfg, "apigw"), "a presentation's claim the VCTM leaves out stays out of the credential")
 

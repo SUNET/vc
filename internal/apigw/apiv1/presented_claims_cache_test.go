@@ -129,7 +129,7 @@ func TestFinalisePresentationVerificationStoresOnlyStorableClaims(t *testing.T) 
 
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"pid_mdoc": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date")}},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "birth_date")}}},
 		}},
 	}
 	// An mdoc element value, as fxamacker/cbor decodes it.
@@ -166,7 +166,7 @@ func TestTheUnrepresentableClaimRefusalCarriesNoClaimValue(t *testing.T) {
 	const secret = "9007199254740993"
 	pScope := model.PresentationScope{
 		From: map[string]model.PresentedCredential{"pid_mdoc": {
-			RequiredClaims: model.RequiredClaims{{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "personal_administrative_number")}},
+			RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("eu.europa.ec.eudi.pid.1", "personal_administrative_number")}}},
 		}},
 	}
 	presented := map[string]any{

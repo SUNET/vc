@@ -34,6 +34,16 @@ func (r Ref) Literal(claims map[string]any) (any, bool) {
 	return value, ok
 }
 
+// Get returns the claim the Ref names in claims, held in shape: the
+// top-level key of its dotted name when claims hold it, and the claim at
+// its pointer otherwise.
+func (r Ref) Get(shape Shape, claims map[string]any) (any, bool, error) {
+	if value, ok := r.Literal(claims); ok {
+		return value, true, nil
+	}
+	return shape.Get(claims, r.Path)
+}
+
 // IsZero reports whether the Ref is unset.
 func (r Ref) IsZero() bool { return r.Path.IsZero() }
 

@@ -101,8 +101,9 @@ func HashCommitmentFor(list []Derivation, path claimpath.Pointer) *HashCommitmen
 // hash_commitment derivations of list read as opening inputs. Each is a
 // deep copy of the claim at the input's leading keys, held where source
 // holds it, so a later write into source or a filter on it leaves them as
-// they were. An input upgraded from a dotted name takes the top-level key
-// of that name when source holds it. An input source lacks is left out.
+// they were. An input upgraded from a dotted name reads the top-level key
+// of that name first, and the result holds its claim under that key, as
+// the earlier release held it. An input source lacks is left out.
 func OpeningInputs(list []Derivation, source map[string]any, shape claimpath.Shape) (map[string]any, error) {
 	var out map[string]any
 	for _, d := range list {
@@ -133,14 +134,10 @@ func OpeningInputs(list []Derivation, source map[string]any, shape claimpath.Sha
 }
 
 // openingInput returns the claim of source an opening input reads, and
-// the location source holds it at: the top-level key of the input's
-// dotted name when source holds it, and the input's leading keys
-// otherwise.
+// where the result of OpeningInputs holds it: under the top-level key of
+// the input's dotted name, and otherwise where source holds the input's
+// leading keys.
 func openingInput(source map[string]any, shape claimpath.Shape, input claimpath.Ref) (claimpath.Pointer, any, bool, error) {
-	if value, ok := input.Literal(source); ok {
-		dotted, _ := input.Dotted()
-		return claimpath.Keys(dotted), value, true, nil
-	}
 	keys, ok := input.Path.KeyPrefix()
 	if !ok {
 		return claimpath.Pointer{}, nil, false, fmt.Errorf("opening input %s starts with no key", input)
@@ -148,6 +145,12 @@ func openingInput(source map[string]any, shape claimpath.Shape, input claimpath.
 	location, err := shape.LocateOne(keys)
 	if err != nil {
 		return claimpath.Pointer{}, nil, false, err
+	}
+	if dotted, ok := input.Dotted(); ok {
+		location = claimpath.Keys(dotted)
+	}
+	if value, ok := input.Literal(source); ok {
+		return location, value, true, nil
 	}
 	value, present, err := shape.Get(source, keys)
 	if errors.Is(err, claimpath.ErrMismatch) {
@@ -248,15 +251,11 @@ func (r lengthRange) check(n int) error {
 // upgraded from a dotted name reads the top-level key of that name when
 // the claims hold it.
 func inputClaim(claims map[string]any, source claimpath.Shape, input claimpath.Ref) (string, error) {
-	value, present := input.Literal(claims)
-	if !present {
-		var err error
-		value, present, err = source.Get(claims, input.Path)
-		if errors.Is(err, claimpath.ErrMismatch) {
-			value, present = nil, false
-		} else if err != nil {
-			return "", err
-		}
+	value, present, err := input.Get(source, claims)
+	if errors.Is(err, claimpath.ErrMismatch) {
+		value, present = nil, false
+	} else if err != nil {
+		return "", err
 	}
 	s, ok := value.(string)
 	if !present || !ok {

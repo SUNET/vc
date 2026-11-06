@@ -101,6 +101,9 @@ type listEntry struct {
 	keyField string
 	// key is the pointer the dotted key reads as.
 	key claimpath.Pointer
+	// dotted is set when the loader carries the dotted key beside key:
+	// it writes the mapping {dotted, path}, and records the pointer.
+	dotted string
 	// valueField names the field the value becomes, such as "values".
 	valueField string
 	// value replaces a scalar value when set.
@@ -173,18 +176,22 @@ func (d *Document) convertEntry(mapping *ast.MappingNode, mv *ast.MappingValueNo
 	}
 	oldKey := string(d.src[keyStart:colon])
 	head := item.keyField + ": " + keyText
+	written := head
+	if item.dotted != "" {
+		written = item.keyField + ": {dotted: " + scalarText(item.dotted) + ", path: " + keyText + "}"
+	}
 	empty, err := isEmptyList(mv.Value)
 	if err != nil {
 		return err
 	}
 	if item.omitEmpty && empty {
-		return d.convertBareEntry(mapping, mv, item, keyStart, strings.TrimSpace(oldKey), head)
+		return d.convertBareEntry(mapping, mv, item, keyStart, strings.TrimSpace(oldKey), written, head)
 	}
 	if mapping.IsFlowStyle {
-		d.replace(keyStart, colon+1, "{"+head+", "+item.valueField+":")
+		d.replace(keyStart, colon+1, "{"+written+", "+item.valueField+":")
 	} else {
 		column := mv.Key.GetToken().Position.Column
-		d.replace(keyStart, colon+1, "- "+head+"\n"+strings.Repeat(" ", column+1)+item.valueField+":")
+		d.replace(keyStart, colon+1, "- "+written+"\n"+strings.Repeat(" ", column+1)+item.valueField+":")
 		if keyLine := mv.Key.GetToken().Position.Line; !isNull(mv.Value) && lastLine(mv.Value) > keyLine {
 			d.indent(keyLine+1, lastLine(mv.Value), 2)
 		}
@@ -204,16 +211,17 @@ func (d *Document) convertEntry(mapping *ast.MappingNode, mv *ast.MappingValueNo
 }
 
 // convertBareEntry rewrites a map entry whose value is an empty list as a
-// list item without the value field.
-func (d *Document) convertBareEntry(mapping *ast.MappingNode, mv *ast.MappingValueNode, item listEntry, keyStart int, oldKey, head string) error {
+// list item without the value field: written in the text, and head in the
+// record.
+func (d *Document) convertBareEntry(mapping *ast.MappingNode, mv *ast.MappingValueNode, item listEntry, keyStart int, oldKey, written, head string) error {
 	end, err := d.valueEnd(mv)
 	if err != nil {
 		return err
 	}
 	if mapping.IsFlowStyle {
-		d.replace(keyStart, end, "{"+head+"}")
+		d.replace(keyStart, end, "{"+written+"}")
 	} else {
-		d.replace(keyStart, end, "- "+head)
+		d.replace(keyStart, end, "- "+written)
 	}
 	return d.record(mv, oldKey+": []", "{"+head+"}"+item.note)
 }

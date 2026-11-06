@@ -101,7 +101,7 @@ func TestLookupCredentialSources_Presentation(t *testing.T) {
 				"eduid_age_verification": {
 					AuthProvider: "openid4vp",
 					From: map[string]PresentedCredential{
-						"eduid": {RequiredClaims: RequiredClaims{{Path: claimpath.Keys("birthdate")}}},
+						"eduid": {RequiredClaims: RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("birthdate")}}}},
 					},
 				},
 			},

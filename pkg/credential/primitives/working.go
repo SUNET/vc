@@ -34,10 +34,7 @@ func NewWorking(claims map[string]any, shapes Shapes) *Working {
 // OpenID4VP 1.0 section 7.1 has a Wallet that processes a query refuse
 // such a pointer; a derivation reads the issuer's own source data.
 func (w *Working) Input(r claimpath.Ref) (any, bool, error) {
-	if value, ok := r.Literal(w.claims); ok {
-		return value, true, nil
-	}
-	value, present, err := w.InputShape(r.Path).Get(w.claims, r.Path)
+	value, present, err := r.Get(w.InputShape(r.Path), w.claims)
 	if errors.Is(err, claimpath.ErrMismatch) {
 		return nil, false, nil
 	}

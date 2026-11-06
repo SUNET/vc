@@ -35,7 +35,7 @@ func checkOpeningClaims(cfg *model.Cfg, src model.SourceScope, meta *model.Crede
 // and requires a presentation to require each input.
 func checkOpeningInputs(cfg *model.Cfg, src model.SourceScope, meta *model.CredentialMetadata, opening primitives.OpeningArgs, inputs []claimpath.Ref) error {
 	if opening.Claim != nil {
-		if err := checkClaimSecret(cfg, src, meta, opening.Claim.Input.Path); err != nil {
+		if err := checkClaimSecret(cfg, src, meta, opening.Claim.Input); err != nil {
 			return err
 		}
 	}
@@ -49,7 +49,7 @@ func checkInputsRequired(src model.SourceScope, inputs []claimpath.Ref) error {
 		return nil
 	}
 	for _, input := range inputs {
-		if !slices.ContainsFunc(src.RequiredClaims, func(r model.RequiredClaim) bool { return r.Path.Equal(input.Path) }) {
+		if !slices.ContainsFunc(src.RequiredClaims, func(r model.RequiredClaim) bool { return r.Path.Path.Equal(input.Path) }) {
 			return fmt.Errorf("input %s is the path of no required_claims entry", input)
 		}
 	}
@@ -57,20 +57,27 @@ func checkInputsRequired(src model.SourceScope, inputs []claimpath.Ref) error {
 }
 
 // checkClaimSecret refuses a claim that reaches the credential: the
-// credential carries it, or a derivation reads it.
-func checkClaimSecret(cfg *model.Cfg, src model.SourceScope, meta *model.CredentialMetadata, claim claimpath.Pointer) error {
+// credential carries it, or a derivation reads it. A claim upgraded from
+// a dotted name is read at the top-level key of that name too.
+func checkClaimSecret(cfg *model.Cfg, src model.SourceScope, meta *model.CredentialMetadata, claim claimpath.Ref) error {
 	shapes, err := cfg.DerivationShapes(src)
 	if err != nil {
 		return err
 	}
-	location, err := shapes.Source.Locate(claim)
+	location, err := shapes.Source.Locate(claim.Path)
 	if err != nil {
 		return fmt.Errorf("claim %s: %w", claim, err)
 	}
-	if err := checkClaimWithheld(meta, src.Source, claim, location); err != nil {
-		return err
+	locations := []claimpath.Pointer{location}
+	if dotted, ok := claim.Dotted(); ok {
+		locations = append(locations, claimpath.Keys(dotted))
 	}
-	return checkClaimUnread(src.Derivations, claim)
+	for _, location := range locations {
+		if err := checkClaimWithheld(meta, src.Source, claim.Path, location); err != nil {
+			return err
+		}
+	}
+	return checkClaimUnread(src.Derivations, claim.Path)
 }
 
 // checkClaimWithheld refuses a source claim the issued credential carries.
