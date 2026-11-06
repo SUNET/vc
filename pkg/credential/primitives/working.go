@@ -29,12 +29,14 @@ func NewWorking(claims map[string]any, shapes Shapes) *Working {
 	return &Working{claims: claims, shapes: shapes}
 }
 
-// Input implements Claims. A claim whose structure does not match the
-// pointer is the data's fault, so the error is ErrInvalidClaimInput.
+// Input implements Claims. A key on a null, a scalar or an array, and an
+// index on a non-array, select no claim, so the derivation skips it.
+// OpenID4VP 1.0 section 7.1 has a Wallet that processes a query refuse
+// such a pointer; a derivation reads the issuer's own source data.
 func (w *Working) Input(p claimpath.Pointer) (any, bool, error) {
 	value, present, err := w.InputShape(p).Get(w.claims, p)
 	if errors.Is(err, claimpath.ErrMismatch) {
-		return nil, false, fmt.Errorf("%w: %w", ErrInvalidClaimInput, err)
+		return nil, false, nil
 	}
 	return value, present, err
 }

@@ -19,6 +19,11 @@ An mdoc claim is `[namespace, element]`, such as
 - path: [eu.europa.ec.eudi.pid.1, birth_date]
 ```
 
+A derivation reads its input as absent when the pointer selects a key
+inside a null, a scalar or an array, or an index inside a value other
+than an array. It then skips, as it skips any absent input. The inputs
+of a `hash_commitment` opening read the same way.
+
 ## Fields
 
 | Field | Form |
