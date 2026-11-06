@@ -25,12 +25,14 @@ if [ "$(uname -s)" = Linux ]; then
     grant_acl=1
 fi
 
-# Grants the container user read access to key $1. A key left without the
-# grant is removed, so the next run generates it again.
+# Sets the access ACL of key $1 to owner read/write and container user read. It
+# replaces the whole ACL, so an entry inherited from a default ACL on the
+# directory stays off the key. A key left without the grant is removed, so the
+# next run generates it again.
 grant_container_read() {
     granted_key="$1"
     [ "$grant_acl" -eq 1 ] || return 0
-    if ! setfacl -m "u:${CONTAINER_UID}:r" "$granted_key"; then
+    if ! setfacl --set "u::rw-,g::---,o::---,u:${CONTAINER_UID}:r--,m::r--" "$granted_key"; then
         rm -f "$granted_key"
         echo "granting uid ${CONTAINER_UID} read access to $granted_key failed; removed it" >&2
         exit 1
