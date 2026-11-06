@@ -473,7 +473,17 @@
                                     <div>
                                         <template x-if="part.inputs">
                                             <div>
-                                                <template x-for="(label, j) in part.inputs" :key="hc.entry + '-' + k + '-' + j">
+                                                <template x-if="part.inputs.length > 1">
+                                                    <div class="mb-3">
+                                                        <label class="form-label" :for="'hc-inputs-' + k">Identified by</label>
+                                                        <select class="form-select" :id="'hc-inputs-' + k" x-model.number="hc.inputs[k]" @change="commitmentInputsSelected(k)">
+                                                            <template x-for="(inputs, i) in part.inputs" :key="i">
+                                                                <option :value="i" x-text="inputs.join(' + ')"></option>
+                                                            </template>
+                                                        </select>
+                                                    </div>
+                                                </template>
+                                                <template x-for="(label, j) in part.inputs[hc.inputs[k]]" :key="hc.entry + '-' + k + '-' + hc.inputs[k] + '-' + j">
                                                     <div class="mb-3">
                                                         <label class="form-label" :for="'hc-key-' + k + '-' + j" x-text="label"></label>
                                                         <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required autocomplete="off">

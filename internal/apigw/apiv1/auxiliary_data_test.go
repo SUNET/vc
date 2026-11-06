@@ -269,6 +269,26 @@ func TestUniqueCommitmentReset(t *testing.T) {
 
 // The key decides which issuances share a record: an empty key makes one
 // commitment for the entry, a composite key one per combination.
+// The reset form offers each number of identifiers the openings take.
+func TestResettableEntriesOfferEachNumberOfInputs(t *testing.T) {
+	c, derivations := nymAuthClient(t)
+	from := c.cfg.APIGW.DataSources.Presentation.Scopes["nym_auth"].From
+	sameCount := func(inputs ...string) []primitives.Derivation {
+		hc, hkdf := *derivations[0].HashCommitment, *derivations[0].HashCommitment.Opening.HKDF
+		hkdf.Inputs = inputs
+		hc.Opening = &primitives.OpeningArgs{HKDF: &hkdf}
+		return []primitives.Derivation{{HashCommitment: &hc}, derivations[1]}
+	}
+	from["pid_short"] = model.PresentedCredential{Derivations: sameCount("personal_administrative_number")}
+	from["pid_renamed"] = model.PresentedCredential{Derivations: sameCount("document_number")}
+
+	entries := ResettableEntries(c.cfg, []string{"nym_auth"})
+	require.Len(t, entries, 1)
+	lists := entries[0].Key[0].Inputs
+	require.Len(t, lists, 2, "the two sources with one input share a list")
+	assert.ElementsMatch(t, []int{2, 1}, []int{len(lists[0]), len(lists[1])})
+}
+
 func TestUniqueCommitmentKey(t *testing.T) {
 	ns := "eu.europa.ec.eudi.nym_auth.1"
 	type issuance struct {

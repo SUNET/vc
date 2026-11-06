@@ -76,7 +76,7 @@ window.adminApp = function () {
 
         // Commitment lookup and reset. generation counts the lookups and the
         // edits of the form.
-        hc: { entry: 0, values: [], evidence: '', busy: false, found: null, message: null, generation: 0 },
+        hc: { entry: 0, inputs: [], values: [], evidence: '', busy: false, found: null, message: null, generation: 0 },
 
         // Datastore state
         ds: {
@@ -236,11 +236,19 @@ window.adminApp = function () {
         /** Empty the commitment form for the selected entry: a list per part derived from identifiers, a string per other part. */
         clearCommitmentForm() {
             const entry = this.uniqueCommitmentEntries[this.hc.entry];
-            this.hc.values = entry ? entry.key.map(part => part.inputs ? part.inputs.map(() => '') : '') : [];
+            this.hc.inputs = entry ? entry.key.map(() => 0) : [];
+            this.hc.values = entry ? entry.key.map(part => part.inputs ? part.inputs[0].map(() => '') : '') : [];
             this.hc.evidence = '';
             this.hc.found = null;
             this.hc.message = null;
             this.hc.generation++;
+        },
+
+        /** Another list of identifiers was selected for key part k, so its values start empty. */
+        commitmentInputsSelected(k) {
+            const part = this.uniqueCommitmentEntries[this.hc.entry].key[k];
+            this.hc.values[k] = part.inputs[this.hc.inputs[k]].map(() => '');
+            this.commitmentEdited();
         },
 
         /** The values changed, so what was found no longer applies. */
