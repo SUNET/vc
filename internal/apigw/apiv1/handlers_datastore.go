@@ -573,6 +573,9 @@ type DatastorePreAuthOfferReply struct {
 	// token endpoint. Only set when apigw.auth_providers.preauth.enable_pin
 	// is true; must be delivered to the end user out-of-band.
 	TXCode string `json:"tx_code,omitempty"`
+
+	// IssuanceID is what the caller polls at GET /api/v1/issuance/status.
+	IssuanceID string `json:"issuance_id"`
 }
 
 // DatastorePreAuthOffer generates a pre-authorized credential offer for a specific
@@ -649,8 +652,14 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	// which per OID4VCI spec forces the wallet to use credential_identifier
 	// (not credential_configuration_id) in the credential request. Most wallets
 	// use credential_configuration_id for pre-auth flows, so we keep it simple.
+	issuanceID, err := newIssuanceID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate issuance_id: %w", err)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:     preAuthCode,
+		IssuanceID:    issuanceID,
 		Code:          preAuthCode,
 		Status:        "code_issued",
 		CreatedAt:     time.Now(),
@@ -664,6 +673,9 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	}
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
+	}
+	if err := c.createIssuanceStatus(ctx, issuanceID, req.Scope, req.AuthenticSource, authCtx.ExpiresAt); err != nil {
+		return nil, err
 	}
 
 	// Store the document data so the credential endpoint can issue the
@@ -684,6 +696,7 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		CredentialOffer:    credentialOffer,
 		CredentialOfferURL: credentialOfferURL,
 		TXCode:             pin,
+		IssuanceID:         issuanceID,
 	}
 
 	c.log.Info("Pre-authorized credential offer created for datastore document",

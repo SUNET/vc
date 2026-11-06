@@ -349,6 +349,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// already authenticated the user prepares an issuance and says who
 	// may complete it.
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodGet, "/issuance/status", http.StatusOK, s.endpointIssuanceStatus)
 
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")

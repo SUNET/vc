@@ -990,6 +990,32 @@ func TestDatastorePreAuthOffer_Success(t *testing.T) {
 	assert.Contains(t, reply.CredentialOfferURL, "credential_offer")
 }
 
+func TestDatastorePreAuthOffer_IssuanceStatusTracked(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+	client.cacheService.IssuanceStatus = cache.NewTestMemoryCache[*cache.IssuanceStatusRecord](time.Hour)
+
+	seedDoc(t, datastore, "SUNET", "pid", "doc-1", []string{"person-1"}, map[string]any{"family_name": "Doe"})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "pid",
+		DocumentID:      "doc-1",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, reply.IssuanceID)
+	assert.NotEqual(t, reply.CredentialOffer.ID, reply.IssuanceID, "the pre-authorized code is a bearer secret and must not double as the status handle")
+
+	authCtx, err := client.cacheService.AuthContext.GetByID(t.Context(), reply.CredentialOffer.ID)
+	require.NoError(t, err)
+	assert.Equal(t, reply.IssuanceID, authCtx.IssuanceID)
+
+	status, err := client.IssuanceStatus(t.Context(), &IssuanceStatusRequest{
+		IssuanceID: reply.IssuanceID, AuthenticSource: "SUNET", Scope: "pid",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, IssuanceStatusOfferCreated, status.Status)
+}
+
 func TestDatastorePreAuthOffer_DocumentNotFound(t *testing.T) {
 	client, _ := newPreAuthOfferTestClient(t)
 

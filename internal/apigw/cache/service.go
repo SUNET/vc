@@ -37,6 +37,11 @@ func NewTestMemoryCache[V any](ttl time.Duration) *pkgcache.MemoryCache[V] {
 	return pkgcache.NewMemoryCache[V](ttl)
 }
 
+// NewTestFixedLifetimeMemoryCache returns an in-memory fixed-lifetime Cache for use in tests only.
+func NewTestFixedLifetimeMemoryCache[V any](ttl time.Duration) *pkgcache.MemoryCache[V] {
+	return pkgcache.NewFixedLifetimeMemoryCache[V](ttl)
+}
+
 // Service holds all caches used by the apigw service.
 type Service struct {
 	cfg    *model.Cfg
@@ -52,6 +57,12 @@ type Service struct {
 	// VCINonce caches c_nonce values issued by the nonce endpoint and the token response.
 	// Key is the nonce value; value is true. TTL matches c_nonce_expires_in.
 	VCINonce Cache[bool]
+
+	// IssuanceStatus holds the customer-visible state of an issuance, keyed by issuance_id.
+	IssuanceStatus Cache[*IssuanceStatusRecord]
+
+	// NotificationBinding maps a notification_id to the issuance_id it belongs to.
+	NotificationBinding Cache[string]
 
 	// JWKS caches the raw JWKS JSON fetched from an identity provider's JWKS URL.
 	// The key is the JWKS URL; the value is the raw JSON response ([]byte).
@@ -105,6 +116,9 @@ type Service struct {
 // TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the sums to it.
 const AuthContextTTL = 15 * time.Minute
 
+// IssuanceStatusTTL is how long a customer service can poll an issuance after it was created.
+const IssuanceStatusTTL = 24 * time.Hour
+
 // New creates the apigw cache service and initialises all caches.
 func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
 	s := &Service{
@@ -137,6 +151,14 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.VCINonce, err = pkgcache.NewGenericCache[bool](cs, ctx, "apigw_vci_nonce", 1*time.Hour); err != nil {
 		return nil, fmt.Errorf("cache: vci_nonce: %w", err)
+	}
+
+	if s.IssuanceStatus, err = pkgcache.NewFixedLifetimeCache[*IssuanceStatusRecord](cs, ctx, "apigw_issuance_status", IssuanceStatusTTL); err != nil {
+		return nil, fmt.Errorf("cache: issuance_status: %w", err)
+	}
+
+	if s.NotificationBinding, err = pkgcache.NewFixedLifetimeCache[string](cs, ctx, "apigw_notification_ids", IssuanceStatusTTL); err != nil {
+		return nil, fmt.Errorf("cache: notification_ids: %w", err)
 	}
 
 	if s.JWKS, err = pkgcache.NewGenericCache[[]byte](cs, ctx, "apigw_jwks", 15*time.Minute); err != nil {
