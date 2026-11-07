@@ -50,9 +50,10 @@ func readBootstrapFile(path string) ([]byte, error) {
 }
 
 // RunDocuments imports JSON fixture data from the configured file paths into the datastore.
-// Each document is imported only if one with the same natural key is not already
-// present, so adding a new fixture (or a whole new scope) to an existing
-// deployment imports just the missing documents instead of being skipped.
+// Each document whose natural key is absent is inserted, so adding a new fixture
+// (or a whole new scope) to an existing deployment imports the missing documents.
+// A document already present is left untouched, or overwritten when
+// cfg.ReplaceExisting is true.
 func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
 
