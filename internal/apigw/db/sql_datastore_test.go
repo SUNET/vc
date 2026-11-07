@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -115,13 +116,29 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
-	// Replace
-	replaced := mkDoc("SUNET", "pid", "doc-1", []string{"identity-9"}, map[string]any{"family_name": "Replaced"})
-	require.NoError(t, store.Replace(ctx, replaced))
+	// Replace takes the request's data and keeps the stored created_at.
 	full, err = store.GetByKey(ctx, "SUNET", "pid", "doc-1")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"identity-9"}, full.IdentityMappingIDs)
-	assert.Equal(t, "Replaced", full.DocumentData["family_name"])
+	storedCreatedAt := full.Meta.CreatedAt
+	for _, request := range []struct {
+		createdAt  time.Time
+		familyName string
+	}{
+		{time.Time{}, "Replaced with zero created_at"},
+		{time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC), "Replaced with chosen created_at"},
+	} {
+		replaced := mkDoc("SUNET", "pid", "doc-1", []string{"identity-9"}, map[string]any{"family_name": request.familyName, "marker": "$meta.scope"})
+		replaced.Meta.CreatedAt = request.createdAt
+		replaced.Meta.DocumentDataValidationRef = "$meta.scope"
+		require.NoError(t, store.Replace(ctx, replaced))
+		full, err = store.GetByKey(ctx, "SUNET", "pid", "doc-1")
+		require.NoError(t, err)
+		assert.Truef(t, full.Meta.CreatedAt.Equal(storedCreatedAt), "created_at: stored %s, read back %s", storedCreatedAt, full.Meta.CreatedAt)
+		assert.Equal(t, []string{"identity-9"}, full.IdentityMappingIDs)
+		assert.Equal(t, request.familyName, full.DocumentData["family_name"])
+		assert.Equal(t, "$meta.scope", full.DocumentData["marker"])
+		assert.Equal(t, "$meta.scope", full.Meta.DocumentDataValidationRef)
+	}
 
 	// Replace on a nonexistent document is a silent no-op.
 	require.NoError(t, store.Replace(ctx, mkDoc("NOPE", "x", "y", []string{"identity-x"}, map[string]any{"family_name": "Ghost"})))

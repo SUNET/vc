@@ -77,7 +77,7 @@ type MetaData struct {
 	// format: string
 	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation" validate:"omitempty,max=128,printascii"`
 
-	// CreatedAt is the timestamp when the document was created
+	// CreatedAt is assigned by the store at first save and never changes. A value in a request is ignored.
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
 
 	// ValidNotAfter is an optional expiration timestamp for administrative purposes.

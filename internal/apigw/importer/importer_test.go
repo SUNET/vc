@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -222,27 +221,6 @@ func TestImportDocuments_SaveErrorPropagates(t *testing.T) {
 	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, boom)
-}
-
-func TestImportDocuments_ReplacePreservesCreatedAt(t *testing.T) {
-	created := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
-	path := writeDocsFile(t, map[string]*model.CompleteDocument{"100": doc("100")})
-	store := &fakeDatastore{
-		getByKey: func(authenticSource, scope, documentID string) (*model.CompleteDocument, error) {
-			return &model.CompleteDocument{Meta: &model.MetaData{
-				AuthenticSource: authenticSource,
-				Scope:           scope,
-				DocumentID:      documentID,
-				CreatedAt:       created,
-			}}, nil
-		},
-	}
-
-	err := importDocuments(context.Background(), path, "microcredential", nil, true, store, logger.NewSimple("test"))
-	require.NoError(t, err)
-	require.Len(t, store.replaced, 1)
-	// The zero created_at in the fixture must not overwrite the stored value.
-	assert.Equal(t, created, store.replaced[0].Meta.CreatedAt)
 }
 
 // fakeMappingStore is a minimal identityMappingStore recording the mappings

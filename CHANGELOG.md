@@ -65,6 +65,13 @@
 
 ### Fixed
 
+- **`Replace` keeps a document's `created_at`**: the store assigns `created_at`
+  at first save and it never changes afterwards, on MongoDB, Postgres and
+  MariaDB. `PUT /api/v1/datastore` ignores `created_at` in the request and
+  keeps the stored value. Documents already stored with a zero `created_at`
+  keep it. A MongoDB document stored without one reads as zero and stores zero
+  at its next `Replace`.
+
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

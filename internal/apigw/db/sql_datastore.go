@@ -474,8 +474,8 @@ func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model
 }
 
 // Replace replaces one document, including its full set of identity
-// mappings, matching by natural key. Mirrors Mongo's ReplaceOne: silently
-// does nothing if no document matches.
+// mappings, matching by natural key. It keeps the stored created_at and does
+// nothing when no document matches.
 func (c *SQLDatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:datastore:replace")
 	defer span.End()
@@ -506,10 +506,10 @@ func (c *SQLDatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocum
 	if doc.Meta.ValidNotAfter != nil {
 		validNotAfter = sql.NullTime{Time: *doc.Meta.ValidNotAfter, Valid: true}
 	}
-	updateQuery := c.dialect.Rebind(`UPDATE datastore SET document_data_validation = ?, document_data = ?, valid_not_after = ?, created_at = ?
+	updateQuery := c.dialect.Rebind(`UPDATE datastore SET document_data_validation = ?, document_data = ?, valid_not_after = ?
 		WHERE authentic_source = ? AND scope = ? AND document_id = ?`)
 	if _, err := tx.ExecContext(ctx, updateQuery,
-		doc.Meta.DocumentDataValidationRef, sqlstore.JSON[map[string]any]{V: doc.DocumentData}, validNotAfter, doc.Meta.CreatedAt,
+		doc.Meta.DocumentDataValidationRef, sqlstore.JSON[map[string]any]{V: doc.DocumentData}, validNotAfter,
 		doc.Meta.AuthenticSource, doc.Meta.Scope, doc.Meta.DocumentID,
 	); err != nil {
 		span.SetStatus(codes.Error, err.Error())

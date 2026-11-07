@@ -274,7 +274,8 @@ func (c *DatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.Do
 	return res, nil
 }
 
-// Replace replaces one document
+// Replace replaces one document, matching by natural key. It keeps the stored
+// created_at and does nothing when no document matches.
 func (c *DatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:replace")
 	defer span.End()
@@ -291,7 +292,20 @@ func (c *DatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument
 		"meta.scope":            bson.M{"$eq": doc.Meta.Scope},
 	}
 
-	_, err := c.Coll.ReplaceOne(ctx, filter, doc)
+	// $literal stops the server evaluating caller strings such as "$meta.scope"
+	// as field paths. The request's created_at is cleared because a stored
+	// document without one leaves the literal's value in place.
+	meta := *doc.Meta
+	meta.CreatedAt = time.Time{}
+	update := mongo.Pipeline{{{Key: "$replaceWith", Value: bson.M{"$mergeObjects": bson.A{
+		bson.M{"$literal": doc},
+		bson.M{"meta": bson.M{"$mergeObjects": bson.A{
+			bson.M{"$literal": meta},
+			bson.M{"created_at": "$meta.created_at"},
+		}}},
+	}}}}}
+
+	_, err := c.Coll.UpdateOne(ctx, filter, update)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
