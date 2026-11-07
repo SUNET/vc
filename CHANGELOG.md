@@ -114,7 +114,8 @@
   them. A failed or interrupted generation, certificate step included, removes
   the file, and so does a generator that writes nothing, so the next run
   generates that key and its certificate. The EC signing key leaves no
-  intermediate file.
+  intermediate file. The CA serial file stays in the PKI directory under
+  LibreSSL too; a leftover `developer_tools/scripts/.srl` can be deleted.
 - **The Linux dev stack can read its keys**: OpenSSL 1.1 and later write
   private keys 0600, and the script wrote the nym_auth seed 0600, so the
   containers (uid 65532) could not read the keys they mount. On Linux the
