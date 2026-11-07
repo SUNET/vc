@@ -85,6 +85,8 @@
   still reach Fly, so from the set until the rename the script keeps the temp
   file on any stop, and names its path and how to settle it. `launch` stops
   until the operator settles it. A symlinked secrets file stays a symlink.
+  A value reaches `yq` as data, and the script stops before the set when the
+  edited file does not hold it.
   The MongoDB URI goes to `common.mongo.uri`, so a file with
   no `uri:` line receives it and other `uri` keys stay. A secrets file that is
   missing or read-only, or a directory that refuses the temp file, stops the

@@ -262,6 +262,19 @@ profile_dir() {
     esac
 }
 
+# Prints secrets file $1 with key $2 set to value $3. The value reaches yq as data,
+# so any text survives byte for byte. Stops unless the result holds the value: yq
+# exits 0 and changes nothing when a parent of the key is a scalar, and a secret
+# sent after that edit has no local copy.
+secrets_file_with() {
+    local _file="$1" _key="$2" _value="$3" _content
+    _content="$(SECRET_VALUE="$_value" yq "$_key = strenv(SECRET_VALUE)" "$_file")" \
+        || die "$_file refuses a value at $_key"
+    [[ "$(yq -r "$_key // \"\"" <<<"$_content")" == "$_value" ]] \
+        || die "$_file cannot hold one value at $_key: a parent of the key is not a mapping, or the file holds several documents"
+    printf '%s\n' "$_content"
+}
+
 # Prints the MongoDB URI that authenticates with password $1 on app $2.
 mongo_uri_for() {
     local _pass="$1" _app="$2"
@@ -368,7 +381,7 @@ cmd_launch() {
         if secrets_file_can_record "$secrets_file" "$mongo_app" "the MongoDB password"; then
             local generated_mongo_uri mongo_secrets_content
             generated_mongo_uri="$(mongo_uri_for "$mongo_pass" "$mongo_app")"
-            mongo_secrets_content="$(yq ".common.mongo.uri = \"$generated_mongo_uri\"" "$secrets_file")"
+            mongo_secrets_content="$(secrets_file_with "$secrets_file" .common.mongo.uri "$generated_mongo_uri")"
             write_secrets_candidate "$mongo_secrets_content"
 
             if send_recorded_secrets "$mongo_app" MONGO_INITDB_ROOT_PASSWORD \
@@ -408,7 +421,7 @@ cmd_launch() {
             # failed set leaves the file unchanged, so apigw never ships a secret
             # Keycloak lacks.
             local oidc_secrets_content
-            oidc_secrets_content="$(yq ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file")"
+            oidc_secrets_content="$(secrets_file_with "$secrets_file" .apigw.auth_providers.oidc.registration.preconfigured.client_secret "$apigw_client_secret")"
             write_secrets_candidate "$oidc_secrets_content"
 
             if send_recorded_secrets "$oidc_app" APIGW_OIDC_CLIENT_SECRET \
@@ -438,7 +451,7 @@ cmd_launch() {
                 echo "    ($secrets_file sits in a directory that refuses a temp file; apigw.api_server.api_auth.oidc.client_secret left as is)"
             else
                 local reconciled_secrets_content
-                reconciled_secrets_content="$(yq ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file")"
+                reconciled_secrets_content="$(secrets_file_with "$secrets_file" .apigw.api_server.api_auth.oidc.client_secret "$existing_client_secret")"
                 write_secrets_candidate "$reconciled_secrets_content"
                 record_secrets_candidate
                 echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
