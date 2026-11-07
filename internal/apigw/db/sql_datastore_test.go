@@ -1,6 +1,7 @@
 package db
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/helpers"
@@ -157,6 +158,69 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	count, err = store.Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
+
+	testDatastoreExactIdentifiers(t, store)
+}
+
+// exactVariants are spellings of "Exact" that a folding collation equates with it.
+// Validation refuses "Exáct" as a datastore key on Save and Replace.
+var (
+	exactASCIIVariants = []string{"exact", "Exact "}
+	exactVariants      = append([]string{"Exáct"}, exactASCIIVariants...)
+)
+
+// testDatastoreExactIdentifiers requires a variant spelling of any key column to
+// name another document on every backend, and search to fold case only. A subject
+// allowed one spelling must not reach the document stored under another.
+func testDatastoreExactIdentifiers(t *testing.T, store DatastoreStore) {
+	t.Helper()
+	ctx := t.Context()
+
+	const exact = "Exact"
+	require.NoError(t, store.Save(ctx, mkDoc(exact, exact, exact, []string{exact}, map[string]any{"family_name": "Owner"})))
+
+	for _, v := range exactVariants {
+		for _, key := range [][3]string{{v, exact, exact}, {exact, v, exact}, {exact, exact, v}} {
+			source, scope, documentID := key[0], key[1], key[2]
+
+			_, err := store.Get(ctx, &model.MetaData{AuthenticSource: source, Scope: scope, DocumentID: documentID})
+			assert.Errorf(t, err, "Get %q", key)
+			_, err = store.GetByKey(ctx, source, scope, documentID)
+			assert.Errorf(t, err, "GetByKey %q", key)
+			assert.ErrorIsf(t, store.AddIdentity(ctx, &AddIdentityQuery{
+				AuthenticSource: source, Scope: scope, DocumentID: documentID, IdentityMappingIDs: []string{"intruder"},
+			}), helpers.ErrNoDocumentFound, "AddIdentity %q", key)
+			assert.ErrorIsf(t, store.DeleteIdentity(ctx, &DeleteIdentityQuery{
+				AuthenticSource: source, Scope: scope, DocumentID: documentID, AuthenticSourcePersonID: exact,
+			}), helpers.ErrNoDocumentFound, "DeleteIdentity %q", key)
+			assert.ErrorIsf(t, store.DeleteByKey(ctx, source, scope, documentID), helpers.ErrNoDocumentFound, "DeleteByKey %q", key)
+
+			if slices.Contains(exactASCIIVariants, v) {
+				assert.NoErrorf(t, store.Replace(ctx, mkDoc(source, scope, documentID, []string{"intruder"}, map[string]any{"family_name": "Intruder"})), "Replace %q", key)
+				require.NoErrorf(t, store.Save(ctx, mkDoc(source, scope, documentID, []string{"beside"}, map[string]any{"family_name": "Beside"})), "Save %q", key)
+				require.NoErrorf(t, store.DeleteByKey(ctx, source, scope, documentID), "delete %q", key)
+			}
+		}
+
+		byIdentity, err := store.GetByIdentity(ctx, exact, v)
+		require.NoError(t, err)
+		assert.Emptyf(t, byIdentity, "GetByIdentity identity %q", v)
+		byIdentity, err = store.GetByIdentity(ctx, v, exact)
+		require.NoError(t, err)
+		assert.Emptyf(t, byIdentity, "GetByIdentity scope %q", v)
+	}
+
+	full, err := store.GetByKey(ctx, exact, exact, exact)
+	require.NoError(t, err)
+	assert.Equal(t, "Owner", full.DocumentData["family_name"])
+	assert.Equal(t, []string{exact}, full.IdentityMappingIDs)
+
+	// "owner" reaches a JSON field and "exact" a key column.
+	for term, want := range map[string]int{"OWNER": 1, "owner": 1, "EXACT": 1, "exact": 1, "Ówner": 0, "Exáct": 0, "Owner ": 0} {
+		results, err := store.Search(ctx, &SearchDocumentsQuery{Search: term})
+		require.NoError(t, err)
+		assert.Lenf(t, results, want, "Search %q", term)
+	}
 }
 
 func TestSQLDatastoreColl_Postgres(t *testing.T) {
