@@ -45,6 +45,7 @@ FLY_ORG="${FLY_ORG:-sirosfoundation}"
 PROFILE=""
 CONFIRM=""
 TARGET_SERVICE=""
+MONGO_ADMIN_USER="admin"
 
 usage() {
     sed -n '2,/^$/s/^# //p' "$0"
@@ -52,6 +53,169 @@ usage() {
 }
 
 die() { echo "Error: $*" >&2; exit 1; }
+
+# Runs `fly $3..`, storing its stdout in the variable named $1 and its stderr
+# in the variable named $2. Returns fly's exit status.
+fly_capture() {
+    local _out_var="$1" _err_var="$2" _err_file _out _status=0
+    shift 2
+    _err_file="$(mktemp)"
+    _out="$(fly "$@" 2>"$_err_file")" || _status=$?
+    printf -v "$_err_var" '%s' "$(cat "$_err_file")"
+    rm -f "$_err_file"
+    printf -v "$_out_var" '%s' "$_out"
+    return "$_status"
+}
+
+# Returns 0 when `fly apps list` shows app $1 and 1 when it does not. A failed
+# listing stops the script with $2 and fly's error.
+app_listed() {
+    local _app="$1" _context="$2" _apps _err
+    fly_capture _apps _err apps list --json || die "$_context: $_err"
+    grep -q "\"$_app\"" <<<"$_apps"
+}
+
+# Returns when Fly app $1 is absent, and stops with fly's error $3 when it
+# exists. $2 names the failed call. `launch --service <name>` provisions apps
+# it did not create, so a failure on an absent app is expected; any other
+# failure would read as "nothing there" and replace live state.
+require_app_absent() {
+    local _app="$1" _call="$2" _call_err="$3"
+    if app_listed "$_app" "$_call of $_app failed, and so did listing the apps"; then
+        die "$_call of $_app failed: $_call_err"
+    fi
+}
+
+# Stores the secrets of Fly app $1, as JSON, in the variable named $2. An
+# absent app stores "[]".
+read_app_secrets() {
+    local _app="$1" _secrets_var="$2" _json _err
+    if fly_capture _json _err secrets list --app "$_app" --json; then
+        printf -v "$_secrets_var" '%s' "$_json"
+        return 0
+    fi
+    require_app_absent "$_app" "listing the secrets" "$_err"
+    printf -v "$_secrets_var" '%s' '[]'
+}
+
+# Sets the secrets $2.. on Fly app $1. Returns 1 after an "app missing" note
+# when the app is absent.
+set_app_secrets() {
+    local _app="$1" _err
+    shift
+    if { _err="$(fly secrets set --app "$_app" "$@" 2>&1 1>&3 3>&-)"; } 3>&1; then
+        return 0
+    fi
+    require_app_absent "$_app" "setting secrets" "$_err"
+    echo "    ($_app missing; secrets left unset)"
+    return 1
+}
+
+# The next content of the secrets file, named <target>.candidate.<purpose>.<random>
+# beside the file a symlink resolves to. Fly secrets are write-only and a failed
+# write can destroy the file, so a new value reaches the file by rename.
+secrets_candidate=""
+# How to settle the candidate once Fly may hold a value only the candidate records.
+secrets_candidate_note=""
+
+remove_secrets_candidate() {
+    [[ -z "$secrets_candidate" ]] || rm -f "$secrets_candidate"
+    secrets_candidate=""
+    secrets_candidate_note=""
+}
+
+# Exit keeps and names a candidate with a note, and removes any other.
+settle_secrets_candidate() {
+    if [[ -n "$secrets_candidate_note" ]]; then
+        echo "Error: $secrets_candidate_note" >&2
+    else
+        remove_secrets_candidate
+    fi
+}
+trap settle_secrets_candidate EXIT
+
+# Creates the candidate for secrets file $1. Its purpose $2 is the Fly app it
+# provisions, or reconcile. Returns 1 when the directory refuses it.
+open_secrets_candidate() {
+    local _file="$1" _purpose="$2" _target
+    _target="$(readlink -f "$_file")" || die "resolving $_file failed"
+    secrets_candidate="$(mktemp "$_target.candidate.$_purpose.XXXXXX" 2>/dev/null)"
+}
+
+# Writes $1 to the candidate, with the mode of the file it replaces. A failure
+# stops the script.
+write_secrets_candidate() {
+    local _content="$1"
+    if ! cp -p "${secrets_candidate%.candidate.*}" "$secrets_candidate" ||
+        ! printf '%s\n' "$_content" > "$secrets_candidate"; then
+        die "writing $secrets_candidate failed"
+    fi
+}
+
+# Renames the candidate over the file it replaces. A failure stops the script.
+record_secrets_candidate() {
+    mv -f "$secrets_candidate" "${secrets_candidate%.candidate.*}" \
+        || die "replacing ${secrets_candidate%.candidate.*} failed"
+    secrets_candidate=""
+    secrets_candidate_note=""
+}
+
+# Prints how to settle candidate $1, which holds $4 for Fly app $2. $3 is the secret
+# that `fly secrets list` shows once Fly holds the candidate's value.
+candidate_settling_note() {
+    local _candidate="$1" _app="$2" _listed="$3" _holds="$4"
+    echo "$_candidate holds $_holds. If fly secrets list --app $_app shows $_listed, move this file over ${_candidate%.candidate.*}. Otherwise delete it."
+}
+
+# Stops when a candidate of Fly app $2 waits beside secrets file $1. A candidate
+# replaces the whole file, and Fly's digest is keyed, so the secret's name is the only
+# sign of what Fly holds. Until the operator settles the candidate, the file may not
+# change and Fly may not receive another value. $3 and $4 are as in
+# candidate_settling_note. A path that does not resolve has no candidate beside it.
+require_settled_candidate() {
+    local _file="$1" _app="$2" _listed="$3" _holds="$4" _target _waiting
+    _target="$(readlink -f "$_file")" || return 0
+    for _waiting in "$_target.candidate.$_app".*; do
+        [[ ! -e "$_waiting" ]] || die "$(candidate_settling_note "$_waiting" "$_app" "$_listed" "$_holds")"
+    done
+}
+
+# Sends secrets $4.. to Fly app $1, with the candidate holding $3. A failed or
+# interrupted send can still reach Fly, so from here the candidate stays until the
+# rename. $2 is the secret that `fly secrets list` shows once Fly holds the values.
+# Returns 1 with the candidate removed when the app is absent.
+send_recorded_secrets() {
+    local _app="$1" _listed="$2" _holds="$3"
+    shift 3
+    secrets_candidate_note="$(candidate_settling_note "$secrets_candidate" "$_app" "$_listed" "$_holds")"
+    set_app_secrets "$_app" "$@" || {
+        remove_secrets_candidate
+        return 1
+    }
+}
+
+# Decides whether a secret generated for Fly app $2 may be sent. Secrets file $1
+# must be able to receive secret $3 first. Returns 0 with the candidate open when
+# the file is writable and its directory accepts the candidate. Otherwise returns
+# 1 after an "app missing" note when the app is absent, and stops when it exists.
+secrets_file_can_record() {
+    local _file="$1" _app="$2" _secret="$3" _problem="is missing or read-only"
+    if [[ -f "$_file" && -w "$_file" ]]; then
+        open_secrets_candidate "$_file" "$_app" && return 0
+        _problem="sits in a directory that refuses a temp file"
+    fi
+    if app_listed "$_app" "$_file $_problem, and listing the apps failed"; then
+        die "$_file $_problem; it must receive $_secret before $_app does"
+    fi
+    echo "    ($_app missing; secrets left unset)"
+    return 1
+}
+
+# Stops when openssl generated nothing for secret $1 in value $2. LibreSSL exits 0
+# and prints nothing on a config file it refuses.
+require_generated() {
+    [[ -n "$2" ]] || die "openssl generated no $1; check its config file"
+}
 
 require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
@@ -104,10 +268,62 @@ profile_dir() {
     esac
 }
 
+# Prints secrets file $1 with key $2 set to value $3. The value reaches yq as data,
+# so any text survives byte for byte. Stops unless the result holds the value: yq
+# exits 0 and changes nothing when a parent of the key is a scalar, and a secret
+# sent after that edit has no local copy.
+secrets_file_with() {
+    local _file="$1" _key="$2" _value="$3" _content
+    _content="$(SECRET_VALUE="$_value" yq "$_key = strenv(SECRET_VALUE)" "$_file")" \
+        || die "$_file refuses a value at $_key"
+    [[ "$(yq -r "$_key // \"\"" <<<"$_content")" == "$_value" ]] \
+        || die "$_file cannot hold one value at $_key: a parent of the key is not a mapping, or the file holds several documents"
+    printf '%s\n' "$_content"
+}
+
+# Prints the MongoDB URI that authenticates with password $1 on app $2.
+mongo_uri_for() {
+    local _pass="$1" _app="$2"
+    printf '%s\n' "mongodb://${MONGO_ADMIN_USER}:${_pass}@${_app}.internal:27017/?authSource=admin"
+}
+
+# Prints the MongoDB URI that launch generated for app $2, read from secrets
+# file $1. Returns 1 when the file is absent or holds another URI, such as the
+# example placeholder.
+local_mongo_uri() {
+    local _file="$1" _app="$2" _uri _pass
+    [[ -f "$_file" ]] || return 1
+    _uri="$(yq -r '.common.mongo.uri // ""' "$_file")"
+    _pass="${_uri#mongodb://"$MONGO_ADMIN_USER":}"
+    _pass="${_pass%%@*}"
+    [[ "$_pass" =~ ^[0-9a-f]{48}$ ]] || return 1
+    [[ "$_uri" == "$(mongo_uri_for "$_pass" "$_app")" ]] || return 1
+    printf '%s\n' "$_uri"
+}
+
+# Sets WALLET_STORAGE_MONGODB_URI to $2 on wallet-backend app $1.
+set_wallet_backend_mongo_uri() {
+    local _app="$1" _uri="$2"
+    echo "==> Setting Mongo URI for $_app"
+    if set_app_secrets "$_app" WALLET_STORAGE_MONGODB_URI="$_uri"; then
+        echo "    Mongo URI set"
+    fi
+}
+
 cmd_launch() {
     require_flyctl
     require_yq
     require_profile_vars
+
+    local secrets_file mongo_app oidc_app
+    secrets_file="$(secrets_file_path)"
+    mongo_app="$(app_name "mongodb")"
+    oidc_app="$(app_name "oidc")"
+    local mongo_candidate_holds="the MongoDB URI for $mongo_app"
+    local oidc_candidate_holds="the OIDC client_secret for $oidc_app"
+    require_settled_candidate "$secrets_file" "$mongo_app" MONGO_INITDB_ROOT_PASSWORD "$mongo_candidate_holds"
+    require_settled_candidate "$secrets_file" "$oidc_app" APIGW_OIDC_CLIENT_SECRET "$oidc_candidate_holds"
+
     echo "==> Launching Fly apps (prefix=${ENV_PREFIX}, tag=${VC_IMAGE_TAG}, region=${REGION})"
     echo ""
     for service in "${SERVICES[@]}"; do
@@ -127,70 +343,80 @@ cmd_launch() {
     # `fly launch`-style deploy or an explicit allocation. Do it here so the
     # first `deploy` is enough to make the app reachable.
     echo "==> Ensuring public IPs for all apps"
-    local ips_json
+    local ips_json ips_err
     for service in "${SERVICES[@]}"; do
         local app
         app="$(app_name "$service")"
-        ips_json="$(fly ips list --app "$app" --json 2>/dev/null || echo '[]')"
-        if ! echo "$ips_json" | grep -qE '"Type":\s*"(shared_v4|v4)"'; then
+        if ! fly_capture ips_json ips_err ips list --app "$app" --json; then
+            require_app_absent "$app" "listing the IPs" "$ips_err"
+            echo "  ($app missing; IPs left unallocated)"
+            continue
+        fi
+        if ! grep -qE '"Type":\s*"(shared_v4|v4)"' <<<"$ips_json"; then
             echo "  [ipv4] $app"
             fly ips allocate-v4 --shared --app "$app" 2>/dev/null || echo "    (failed; check manually)"
         fi
-        if ! echo "$ips_json" | grep -q '"Type":\s*"v6"'; then
+        if ! grep -q '"Type":\s*"v6"' <<<"$ips_json"; then
             echo "  [ipv6] $app"
             fly ips allocate-v6 --app "$app" 2>/dev/null || echo "    (failed; check manually)"
         fi
     done
     echo ""
 
-    local secrets_file
-    secrets_file="$(secrets_file_path)"
-
-    local mongo_app mongo_pass mongo_user mongo_uri
-    mongo_app="$(app_name "mongodb")"
-    mongo_user="admin"
+    local mongo_pass mongo_uri="" mongo_secrets mongo_creds_set=0
 
     # Idempotent: if MongoDB already has creds, keep them. Rotating
     # MONGO_INITDB_ROOT_PASSWORD after the data dir is initialised does NOT
     # change the on-disk user — it desyncs the whole stack (apigw/wallet-backend
     # end up with a URI that no longer authenticates). Only generate + set on
     # first launch.
-    if fly secrets list --app "$mongo_app" --json 2>/dev/null | grep -q '"MONGO_INITDB_ROOT_PASSWORD"'; then
+    read_app_secrets "$mongo_app" mongo_secrets
+    if grep -q '"MONGO_INITDB_ROOT_PASSWORD"' <<<"$mongo_secrets"; then
         echo "==> MongoDB secrets already set for $mongo_app (skipping)"
-        mongo_pass=""
-        mongo_uri=""
+        mongo_creds_set=1
     else
         # hex, not base64: password is embedded in a URI, must be URL-safe.
         mongo_pass="$(openssl rand -hex 24)"
-        mongo_uri="mongodb://${mongo_user}:${mongo_pass}@${mongo_app}.internal:27017/?authSource=admin"
-
-        echo "==> Setting MongoDB secrets for $mongo_app"
-        fly secrets set --app "$mongo_app" \
-            MONGO_INITDB_ROOT_USERNAME="$mongo_user" \
-            MONGO_INITDB_ROOT_PASSWORD="$mongo_pass" \
-            2>/dev/null && echo "    MongoDB secrets set" || echo "    (failed to set MongoDB secrets)"
+        require_generated "MongoDB password" "$mongo_pass"
 
         if [[ ! -f "$secrets_file" ]]; then
             cp "${ROOT_DIR}/secrets.example.yaml" "$secrets_file"
             echo "    Created $secrets_file from secrets.example.yaml"
         fi
-        sed -i "s|uri:.*|uri: \"${mongo_uri}\"|" "$secrets_file"
-        echo "    Updated $secrets_file with MongoDB URI"
+
+        echo "==> Setting MongoDB secrets for $mongo_app"
+        if secrets_file_can_record "$secrets_file" "$mongo_app" "the MongoDB password"; then
+            local generated_mongo_uri mongo_secrets_content
+            generated_mongo_uri="$(mongo_uri_for "$mongo_pass" "$mongo_app")"
+            mongo_secrets_content="$(secrets_file_with "$secrets_file" .common.mongo.uri "$generated_mongo_uri")"
+            write_secrets_candidate "$mongo_secrets_content"
+
+            if send_recorded_secrets "$mongo_app" MONGO_INITDB_ROOT_PASSWORD \
+                "$mongo_candidate_holds" \
+                MONGO_INITDB_ROOT_USERNAME="$MONGO_ADMIN_USER" \
+                MONGO_INITDB_ROOT_PASSWORD="$mongo_pass"; then
+                record_secrets_candidate
+                echo "    MongoDB secrets set"
+                echo "    Updated $secrets_file with MongoDB URI"
+                mongo_uri="$generated_mongo_uri"
+            fi
+        fi
     fi
 
-    local oidc_app apigw_client_secret demo_user_password oidc_first_launch
-    oidc_app="$(app_name "oidc")"
+    local apigw_client_secret demo_user_password oidc_first_launch oidc_secrets
     oidc_first_launch=0
 
     # Idempotent: Keycloak's realm import runs once on first boot and stores
     # the client_secret + user password hashes in its H2 DB. Rotating these
     # env vars later does NOT change what's in the DB — it desyncs apigw's
     # secrets file from Keycloak. Only set on first launch.
-    if fly secrets list --app "$oidc_app" --json 2>/dev/null | grep -q '"APIGW_OIDC_CLIENT_SECRET"'; then
+    read_app_secrets "$oidc_app" oidc_secrets
+    if grep -q '"APIGW_OIDC_CLIENT_SECRET"' <<<"$oidc_secrets"; then
         echo "==> OIDC secrets already set for $oidc_app (skipping)"
     else
         oidc_first_launch=1
         apigw_client_secret="$(openssl rand -hex 24)"
+        require_generated "OIDC client_secret" "$apigw_client_secret"
         # 4 chars for live demos: 3 lowercase letters + 1 trailing digit.
         # Shared by every realm user (including admin@sunet.se) — an accepted
         # demo tradeoff: these environments are throwaway and rebuilt often,
@@ -198,20 +424,24 @@ cmd_launch() {
         demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
 
         echo "==> Setting OIDC secrets for $oidc_app"
-        # Abort on failure: if fly rejects the secrets, we must NOT write the
-        # generated client_secret into the local secrets file. Otherwise apigw
-        # ships with a secret Keycloak never received and every OIDC login
-        # fails.
-        if ! fly secrets set --app "$oidc_app" \
-            APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
-            DEMO_USER_PASSWORD="$demo_user_password"; then
-            die "Failed to set OIDC secrets for $oidc_app; refusing to write local client_secret"
-        fi
-        echo "    OIDC secrets set"
+        if secrets_file_can_record "$secrets_file" "$oidc_app" "apigw's OIDC client_secret"; then
+            # The local file and Keycloak must hold the same client_secret. A
+            # failed set leaves the file unchanged, so apigw never ships a secret
+            # Keycloak lacks.
+            local oidc_secrets_content
+            oidc_secrets_content="$(secrets_file_with "$secrets_file" .apigw.auth_providers.oidc.registration.preconfigured.client_secret "$apigw_client_secret")"
+            write_secrets_candidate "$oidc_secrets_content"
 
-        yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
-        echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
-        echo "    Demo user password (Keycloak realm users): $demo_user_password"
+            if send_recorded_secrets "$oidc_app" APIGW_OIDC_CLIENT_SECRET \
+                "$oidc_candidate_holds. The demo user password sent with it is $demo_user_password" \
+                APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
+                DEMO_USER_PASSWORD="$demo_user_password"; then
+                record_secrets_candidate
+                echo "    OIDC secrets set"
+                echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
+                echo "    Demo user password (Keycloak realm users): $demo_user_password"
+            fi
+        fi
     fi
 
     # api_auth.oidc.client_secret mirrors the preconfigured client_secret.
@@ -223,8 +453,17 @@ cmd_launch() {
         local existing_client_secret
         existing_client_secret="$(yq -r '.apigw.auth_providers.oidc.registration.preconfigured.client_secret // ""' "$secrets_file")"
         if [[ -n "$existing_client_secret" && "$existing_client_secret" != "null" ]]; then
-            yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file"
-            echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
+            if [[ ! -w "$secrets_file" ]]; then
+                echo "    ($secrets_file is read-only; apigw.api_server.api_auth.oidc.client_secret left as is)"
+            elif ! open_secrets_candidate "$secrets_file" reconcile; then
+                echo "    ($secrets_file sits in a directory that refuses a temp file; apigw.api_server.api_auth.oidc.client_secret left as is)"
+            else
+                local reconciled_secrets_content
+                reconciled_secrets_content="$(secrets_file_with "$secrets_file" .apigw.api_server.api_auth.oidc.client_secret "$existing_client_secret")"
+                write_secrets_candidate "$reconciled_secrets_content"
+                record_secrets_candidate
+                echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
+            fi
         fi
     fi
 
@@ -240,27 +479,41 @@ cmd_launch() {
         echo "          the realm, or 'fly apps destroy $oidc_app' and re-launch."
     fi
 
-    local wallet_backend_app as_key_pem as_key_b64
+    local wallet_backend_app as_key_pem as_key_b64 wallet_backend_secrets
     wallet_backend_app="$(app_name "wallet-backend")"
     echo "==> Setting AS signing key for $wallet_backend_app"
-    if fly secrets list --app "$wallet_backend_app" --json 2>/dev/null | grep -q '"AS_SIGNING_KEY_PEM"'; then
+    read_app_secrets "$wallet_backend_app" wallet_backend_secrets
+    if grep -q '"AS_SIGNING_KEY_PEM"' <<<"$wallet_backend_secrets"; then
         echo "    (AS_SIGNING_KEY_PEM already set, leaving in place)"
     else
         as_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout)"
+        require_generated "AS signing key" "$as_key_pem"
         as_key_b64="$(printf '%s' "$as_key_pem" | base64 | tr -d '\n')"
-        fly secrets set --app "$wallet_backend_app" \
-            AS_SIGNING_KEY_PEM="$as_key_b64" \
-            2>/dev/null && echo "    AS signing key set" || echo "    (failed to set AS_SIGNING_KEY_PEM; app missing?)"
+        if set_app_secrets "$wallet_backend_app" AS_SIGNING_KEY_PEM="$as_key_b64"; then
+            echo "    AS signing key set"
+        fi
     fi
 
-    # Idempotent: only push the URI if we generated a fresh one above.
+    # A freshly generated URI replaces wallet-backend's. With MongoDB's
+    # credentials already set, a missing URI comes back from the local file:
+    # Fly secrets are write-only, so the file is its only copy. An absent
+    # wallet-backend waits for `launch --service wallet-backend`, which reaches
+    # this check again. read_app_secrets stores "[]" for an absent app, so only
+    # that listing needs `fly apps list`. An empty $mongo_uri with
+    # $mongo_creds_set at 0 means the MongoDB app is absent.
     if [[ -n "$mongo_uri" ]]; then
-        echo "==> Setting Mongo URI for $wallet_backend_app"
-        fly secrets set --app "$wallet_backend_app" \
-            WALLET_STORAGE_MONGODB_URI="$mongo_uri" \
-            2>/dev/null && echo "    Mongo URI set" || echo "    (failed to set WALLET_STORAGE_MONGODB_URI; app missing?)"
-    else
+        set_wallet_backend_mongo_uri "$wallet_backend_app" "$mongo_uri"
+    elif [[ "$mongo_creds_set" -eq 0 ]]; then
+        echo "    ($mongo_app missing; Mongo URI on $wallet_backend_app unchanged)"
+    elif grep -q '"WALLET_STORAGE_MONGODB_URI"' <<<"$wallet_backend_secrets"; then
         echo "==> Mongo URI on $wallet_backend_app left in place (MongoDB creds unchanged)"
+    elif [[ "$wallet_backend_secrets" == "[]" ]] \
+        && ! app_listed "$wallet_backend_app" "$wallet_backend_app lacks WALLET_STORAGE_MONGODB_URI, and listing the apps failed"; then
+        echo "    ($wallet_backend_app missing; Mongo URI left unset)"
+    else
+        mongo_uri="$(local_mongo_uri "$secrets_file" "$mongo_app")" \
+            || die "$wallet_backend_app lacks WALLET_STORAGE_MONGODB_URI, and $secrets_file holds no generated URI for $mongo_app. Restore $secrets_file, or reset $mongo_app's credentials: destroy it with its volume and run launch again."
+        set_wallet_backend_mongo_uri "$wallet_backend_app" "$mongo_uri"
     fi
 
     # Signing key material shared across apigw/issuer/verifier/registry.
@@ -273,16 +526,18 @@ cmd_launch() {
         signing_key_b64="$(base64 < "${pki_dir}/signing_ec_private.pem" | tr -d '\n')"
         signing_chain_b64="$(base64 < "${pki_dir}/signing_ec_chain.pem" | tr -d '\n')"
         for svc in apigw issuer verifier registry; do
-            local svc_app
+            local svc_app svc_secrets
             svc_app="$(app_name "$svc")"
             echo "==> Setting signing secrets for $svc_app"
-            if fly secrets list --app "$svc_app" --json 2>/dev/null | grep -q '"SIGNING_EC_PRIVATE_KEY"'; then
+            read_app_secrets "$svc_app" svc_secrets
+            if grep -q '"SIGNING_EC_PRIVATE_KEY"' <<<"$svc_secrets"; then
                 echo "    (SIGNING_EC_PRIVATE_KEY already set, leaving in place)"
             else
-                fly secrets set --app "$svc_app" \
+                if set_app_secrets "$svc_app" \
                     SIGNING_EC_PRIVATE_KEY="$signing_key_b64" \
-                    SIGNING_EC_CHAIN="$signing_chain_b64" \
-                    2>/dev/null && echo "    Signing secrets set" || echo "    (failed to set signing secrets; app missing?)"
+                    SIGNING_EC_CHAIN="$signing_chain_b64"; then
+                    echo "    Signing secrets set"
+                fi
             fi
         done
     else
@@ -311,9 +566,9 @@ provision_apigw_saml_sp_keypair() {
     # Skip only when BOTH secrets exist. A partial rotation that leaves only
     # the cert would otherwise pass this guard and apigw would fail to load
     # the mounted keypair on startup.
-    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null || echo '[]')"
-    if printf '%s' "$secrets_json" | grep -q '"SAML_SP_CERT"' \
-        && printf '%s' "$secrets_json" | grep -q '"SAML_SP_KEY"'; then
+    read_app_secrets "$apigw_app" secrets_json
+    if grep -q '"SAML_SP_CERT"' <<<"$secrets_json" \
+        && grep -q '"SAML_SP_KEY"' <<<"$secrets_json"; then
         echo "==> SAML SP secrets already set for $apigw_app (skipping)"
         return 0
     fi
@@ -329,11 +584,11 @@ provision_apigw_saml_sp_keypair() {
             >/dev/null 2>&1; then
         saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
         saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
-        fly secrets set --app "$apigw_app" \
+        if set_app_secrets "$apigw_app" \
             SAML_SP_CERT="$saml_cert_b64" \
-            SAML_SP_KEY="$saml_key_b64" \
-            2>/dev/null && echo "    SAML SP keypair set" \
-            || echo "    (failed to set SAML SP keypair; app missing?)"
+            SAML_SP_KEY="$saml_key_b64"; then
+            echo "    SAML SP keypair set"
+        fi
     else
         echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
     fi
@@ -346,25 +601,26 @@ provision_apigw_saml_sp_keypair() {
 provision_apigw_nym_auth_secrets() {
     local apigw_app secrets_json value
     apigw_app="$(app_name "apigw")"
-    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null)" \
-        || die "listing the secrets of $apigw_app failed; provisioning would replace an existing NYM_AUTH_SEED"
-    if printf '%s' "$secrets_json" | grep -q '"CREDENTIAL_ENCRYPTION_KEY"'; then
+    read_app_secrets "$apigw_app" secrets_json
+    if grep -q '"CREDENTIAL_ENCRYPTION_KEY"' <<<"$secrets_json"; then
         echo "==> CREDENTIAL_ENCRYPTION_KEY already set for $apigw_app (skipping)"
     else
         echo "==> Provisioning CREDENTIAL_ENCRYPTION_KEY for $apigw_app"
         value="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')"
-        fly secrets set --app "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value" \
-            2>/dev/null && echo "    CREDENTIAL_ENCRYPTION_KEY set" \
-            || echo "    (failed to set CREDENTIAL_ENCRYPTION_KEY; app missing?)"
+        require_generated CREDENTIAL_ENCRYPTION_KEY "$value"
+        if set_app_secrets "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value"; then
+            echo "    CREDENTIAL_ENCRYPTION_KEY set"
+        fi
     fi
-    if printf '%s' "$secrets_json" | grep -q '"NYM_AUTH_SEED"'; then
+    if grep -q '"NYM_AUTH_SEED"' <<<"$secrets_json"; then
         echo "==> NYM_AUTH_SEED already set for $apigw_app (skipping)"
     else
         echo "==> Provisioning NYM_AUTH_SEED for $apigw_app"
         value="$(openssl rand 32 | basenc --base64url | tr -d '=' | base64 | tr -d '\n')"
-        fly secrets set --app "$apigw_app" NYM_AUTH_SEED="$value" \
-            2>/dev/null && echo "    NYM_AUTH_SEED set" \
-            || echo "    (failed to set NYM_AUTH_SEED; app missing?)"
+        require_generated NYM_AUTH_SEED "$value"
+        if set_app_secrets "$apigw_app" NYM_AUTH_SEED="$value"; then
+            echo "    NYM_AUTH_SEED set"
+        fi
     fi
 }
 
@@ -416,6 +672,7 @@ register_apigw_issuer_on_wallet_backend() {
     echo "    Registering ${apigw_url} as issuer on ${wb_app} (default tenant)"
 
     admin_token="$(openssl rand -hex 32)"
+    require_generated "wallet-backend admin token" "$admin_token"
     if ! fly secrets set --app "$wb_app" WALLET_SERVER_ADMIN_TOKEN="$admin_token" >/dev/null 2>&1; then
         echo "    (failed to rotate admin token; skipping issuer registration)"
         return 0
@@ -440,18 +697,46 @@ register_apigw_issuer_on_wallet_backend() {
     done
     if [[ -z "$ready" ]]; then
         echo "    (wallet-backend admin API did not become ready; skipping issuer registration)"
-        kill "$proxy_pid" 2>/dev/null
-        wait "$proxy_pid" 2>/dev/null || true
+        stop_proxy "$proxy_pid"
         return 0
     fi
     body_file="/tmp/issuer_reg_body.$$"
     local payload='{"credential_issuer_identifier":"'"$apigw_url"'","client_id":"fly-wallet","visible":true}'
 
-    local list existing_id method path code
-    list="$(curl -sS -H "Authorization: Bearer $admin_token" \
-        http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null || echo '{}')"
-    existing_id="$(printf '%s' "$list" | jq -r --arg url "$apigw_url" \
-        '.issuers[]? | select(.credential_issuer_identifier == $url) | .id' 2>/dev/null | head -n 1)"
+    # The PUT-or-POST choice needs the current issuer list. Without a readable
+    # list, a POST would register a duplicate issuer.
+    local list_code existing_id method path code
+    if ! list_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+        -H "Authorization: Bearer $admin_token" \
+        http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null)"; then
+        echo "    (listing the issuers failed; skipping issuer registration)"
+        stop_proxy "$proxy_pid"
+        rm -f "$body_file"
+        return 0
+    fi
+    if [[ "$list_code" != 2?? ]]; then
+        echo "    (listing the issuers answered HTTP $list_code; skipping issuer registration)"
+        stop_proxy "$proxy_pid"
+        rm -f "$body_file"
+        return 0
+    fi
+    # -s reads the whole body, so text after the first value fails. The list must
+    # be one object holding an issuers array, each entry with a string identifier.
+    # A match's id goes into the PUT path, so it must be a number or a URL-safe
+    # string. An empty result means no entry matches.
+    if ! existing_id="$(jq -s -r --arg url "$apigw_url" '
+        if length == 1 and (.[0].issuers | type == "array") then .[0].issuers else error("no issuer list") end
+        | if all(.[]; .credential_issuer_identifier | type == "string") then . else error("entry without identifier") end
+        | map(select(.credential_issuer_identifier == $url))
+        | if length == 0 then ""
+          elif (.[0].id | (type == "number" or type == "string") and (tostring | test("^[A-Za-z0-9._~-]+$"))) then .[0].id
+          else error("no usable issuer id") end' \
+        "$body_file" 2>/dev/null)"; then
+        echo "    (the issuer list is unreadable; skipping issuer registration)"
+        stop_proxy "$proxy_pid"
+        rm -f "$body_file"
+        return 0
+    fi
 
     if [[ -n "$existing_id" ]]; then
         method="PUT"
@@ -484,9 +769,16 @@ register_apigw_issuer_on_wallet_backend() {
         *)   echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
     esac
 
-    kill "$proxy_pid" 2>/dev/null
-    wait "$proxy_pid" 2>/dev/null || true
+    stop_proxy "$proxy_pid"
     rm -f "$body_file"
+}
+
+# Stops the `fly proxy` with pid $1. A proxy that already exited leaves
+# nothing to stop.
+stop_proxy() {
+    local _pid="$1"
+    kill "$_pid" 2>/dev/null || true
+    wait "$_pid" 2>/dev/null || true
 }
 
 cmd_deploy() {
@@ -561,7 +853,13 @@ cmd_status() {
         local app
         app="$(app_name "$service")"
         echo "  [$app]"
-        fly status --app "$app" 2>/dev/null || echo "    (not deployed)"
+        local status_out status_err
+        if fly_capture status_out status_err status --app "$app"; then
+            [[ -z "$status_out" ]] || printf '%s\n' "$status_out"
+        else
+            require_app_absent "$app" "reading the status" "$status_err"
+            echo "    (not deployed)"
+        fi
         echo ""
     done
 }
@@ -584,7 +882,13 @@ cmd_destroy() {
         local app
         app="$(app_name "$service")"
         echo "  [destroy] $app"
-        fly apps destroy "$app" --yes 2>/dev/null || echo "    (already gone)"
+        local destroy_out destroy_err
+        if fly_capture destroy_out destroy_err apps destroy "$app" --yes; then
+            [[ -z "$destroy_out" ]] || printf '%s\n' "$destroy_out"
+        else
+            require_app_absent "$app" "destroying" "$destroy_err"
+            echo "    (already gone)"
+        fi
     done
 }
 

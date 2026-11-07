@@ -65,6 +65,64 @@
 
 ### Fixed
 
+- **`fly/deploy.sh` stops when a `fly` call on an existing app fails**: the
+  checks for the MongoDB credentials, OIDC secrets, AS signing key, service
+  signing keys and SAML SP keypair read a failed listing as "secret absent",
+  then generated and set new values over the live ones. A failed `ips list`
+  allocated more IPs, and failed `secrets set`, `status` and `apps destroy`
+  calls read as "app missing", "not deployed" and "already gone". Each of
+  these calls now stops the script with the app's name and fly's error. A
+  call on an app that `fly apps list` does not show is reported as missing,
+  so `launch --service <name>` still continues past apps it did not create.
+  The app and secret checks read listings of any size.
+- **`fly/deploy.sh` keeps the local secrets file in step with Fly**: the
+  generated MongoDB URI was written locally after a failed `secrets set`, and
+  the OIDC `client_secret` reached Keycloak before a local write that could
+  still fail. Each write to the file goes to a temp file beside it first,
+  and a rename replaces the file. For a secret, the temp file is written
+  before the set, and the rename follows a successful set. A failed write
+  stops before Fly receives anything. A set that fails or is interrupted can
+  still reach Fly, so from the set until the rename the script keeps the temp
+  file on any stop, and names its path and how to settle it. `launch` stops
+  until the operator settles it. A symlinked secrets file stays a symlink.
+  A value reaches `yq` as data, and the script stops before the set when the
+  edited file does not hold it. A generated secret that comes out empty stops
+  the script: LibreSSL exits 0 and prints nothing on a config file it refuses.
+  The MongoDB URI goes to `common.mongo.uri`, so a file with
+  no `uri:` line receives it and other `uri` keys stay. A secrets file that is
+  missing or read-only, or a directory that refuses the temp file, stops the
+  MongoDB or OIDC step before Fly receives anything when the app exists; an
+  absent app gets a "missing" note and `launch` continues. When MongoDB's
+  credentials exist and wallet-backend lacks `WALLET_STORAGE_MONGODB_URI`,
+  `launch` now sets the URI from the local secrets file. When the file holds
+  no generated URI, `launch` stops and names
+  the two ways out: restore the file, or reset MongoDB's credentials. An
+  absent wallet-backend gets a "missing" note and `launch` continues;
+  `launch --service wallet-backend` applies this rule once the app exists.
+- **`fly/deploy.sh` registers no duplicate issuer on wallet-backend**: a
+  failed issuer listing, an HTTP error, an unparseable body or a body without
+  an `issuers` array read as "no issuers", and the registration POSTed a second
+  issuer. A non-JSON body
+  ended the deploy with no message. Each case now skips the registration
+  with a message. A `fly proxy` that had already exited ended the deploy
+  after the registration; it now counts as stopped.
+- **`create_pki.sh` creates private keys owner-only before writing them**:
+  LibreSSL's `openssl`, the one macOS ships, honours the umask, so under the
+  usual umask 022 the keys were world-readable. A default ACL on the PKI
+  directory overrides the umask, so with LibreSSL on Linux its named user could
+  read every key and the seed. Each key file and the nym_auth seed start empty,
+  with mode 600 and no inherited ACL entry, before any key material reaches
+  them. A failed or interrupted generation, certificate step included, removes
+  the file, and so does a generator that writes nothing, so the next run
+  generates that key and its certificate. The EC signing key leaves no
+  intermediate file. The CA serial file stays in the PKI directory under
+  LibreSSL too; a leftover `developer_tools/scripts/.srl` can be deleted.
+- **The Linux dev stack can read its keys**: OpenSSL 1.1 and later write
+  private keys 0600, and the script wrote the nym_auth seed 0600, so the
+  containers (uid 65532) could not read the keys they mount. On Linux the
+  script now grants uid 65532 read access through an ACL entry, and stops
+  when `setfacl` is missing or fails. Keys generated earlier keep their
+  modes; `make pki-clean pki` regenerates them.
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only
