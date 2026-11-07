@@ -1,7 +1,7 @@
 -- Restores the database's default character set and collation on string columns
 -- and JSON's own collation on JSON columns. Every table is rebuilt.
 --
--- The run fails in two cases. Fix the data first, because a failure leaves
+-- The run fails in three cases. Fix the data first, because a failure leaves
 -- schema_migrations dirty at this version with the foreign key dropped.
 -- - The exact comparison lets rows exist side by side whose keys differ only in
 --   case, accent or trailing spaces. The default collation folds them into one
@@ -9,6 +9,9 @@
 -- - A string column holds a character the default character set lacks, such as
 --   Chinese on a latin1 database, which gives "Incorrect string value". Strict
 --   mode turns the replacement of that character with "?" into this error.
+-- - A column that up widened to MEDIUMTEXT holds more than TEXT's 65,535 bytes,
+--   which gives "Data too long".
+SET @session_sql_mode = @@SESSION.sql_mode;
 SET SESSION sql_mode = CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'STRICT_ALL_TABLES');
 
 SET @restore = CONCAT(' CONVERT TO CHARACTER SET ', @@character_set_database, ' COLLATE ', @@collation_database);
@@ -103,3 +106,5 @@ ALTER TABLE cache_entries MODIFY json_value JSON NOT NULL;
 ALTER TABLE datastore_identity_mapping
     ADD CONSTRAINT datastore_identity_mapping_ibfk_1 FOREIGN KEY (authentic_source, scope, document_id)
         REFERENCES datastore (authentic_source, scope, document_id) ON DELETE CASCADE;
+
+SET SESSION sql_mode = @session_sql_mode;
