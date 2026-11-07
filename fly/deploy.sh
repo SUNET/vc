@@ -720,14 +720,14 @@ register_apigw_issuer_on_wallet_backend() {
         rm -f "$body_file"
         return 0
     fi
-    # `input` fails on an empty body, and the type check on any JSON other
-    # than an object.
-    if ! existing_id="$(jq -n -r --arg url "$apigw_url" '
-        input
-        | if type == "object" then . else error("not an object") end
-        | first(.issuers[]? | select(.credential_issuer_identifier == $url) | .id) // ""' \
+    # -s reads the whole body, so text after the first value fails. The list must
+    # be one object holding an issuers array, and a match must carry an id.
+    if ! existing_id="$(jq -s -r --arg url "$apigw_url" '
+        if length == 1 and (.[0].issuers | type == "array") then .[0].issuers else error("no issuer list") end
+        | map(select(.credential_issuer_identifier == $url))
+        | if length == 0 then "" else .[0].id // error("no issuer id") end' \
         "$body_file" 2>/dev/null)"; then
-        echo "    (the issuer list is not a JSON object; skipping issuer registration)"
+        echo "    (the issuer list is unreadable; skipping issuer registration)"
         stop_proxy "$proxy_pid"
         rm -f "$body_file"
         return 0

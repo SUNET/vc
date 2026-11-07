@@ -100,8 +100,9 @@
   absent wallet-backend gets a "missing" note and `launch` continues;
   `launch --service wallet-backend` applies this rule once the app exists.
 - **`fly/deploy.sh` registers no duplicate issuer on wallet-backend**: a
-  failed issuer listing, an HTTP error or an unparseable body read as "no
-  issuers", and the registration POSTed a second issuer. A non-JSON body
+  failed issuer listing, an HTTP error, an unparseable body or a body without
+  an `issuers` array read as "no issuers", and the registration POSTed a second
+  issuer. A non-JSON body
   ended the deploy with no message. Each case now skips the registration
   with a message. A `fly proxy` that had already exited ended the deploy
   after the registration; it now counts as stopped.
