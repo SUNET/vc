@@ -90,16 +90,15 @@ func (r Reach) Everything() bool {
 // Pairs returns the distinct pairs a store can filter on. No pair means the
 // store returns no document.
 func (r Reach) Pairs() []Pair {
-	pairs := []Pair{}
+	pairs := make([]Pair, 0, len(r.grants))
 	for _, g := range r.grants {
 		source, sourceOK := resourceValueOf(g.source)
 		scope, scopeOK := resourceValueOf(g.scope)
-		pair := Pair{AuthenticSource: source, Scope: scope}
-		if sourceOK && scopeOK && !slices.Contains(pairs, pair) {
-			pairs = append(pairs, pair)
+		if sourceOK && scopeOK {
+			pairs = append(pairs, Pair{AuthenticSource: source, Scope: scope})
 		}
 	}
-	return pairs
+	return distinct(pairs)
 }
 
 // Selecting returns the reach within the values a request names. An empty value
@@ -130,33 +129,41 @@ func (r Reach) SourcesForScope(scope string) (sources []string, everySource bool
 		if isWildcard(g.source) {
 			return nil, true
 		}
-		if source, ok := g.source.(*sexp.Atom); ok && !slices.Contains(sources, source.Value) {
+		if source, ok := g.source.(*sexp.Atom); ok {
 			sources = append(sources, source.Value)
 		}
 	}
-	return sources, false
+	return distinct(sources), false
 }
 
 // SourcesAmong returns the exact sources of the reach, followed by each member
 // of known that a rule accepts.
 func (r Reach) SourcesAmong(known []string) []string {
 	sources := []string{}
-	add := func(source string) {
-		if !slices.Contains(sources, source) {
-			sources = append(sources, source)
-		}
-	}
 	for _, g := range r.grants {
 		if source, ok := g.source.(*sexp.Atom); ok {
-			add(source.Value)
+			sources = append(sources, source.Value)
 		}
 	}
 	for _, source := range known {
 		if !r.Selecting(source, "").Nothing() {
-			add(source)
+			sources = append(sources, source)
 		}
 	}
-	return sources
+	return distinct(sources)
+}
+
+// distinct returns the first occurrence of each value, in order.
+func distinct[T comparable](values []T) []T {
+	seen := make(map[T]struct{}, len(values))
+	kept := make([]T, 0, len(values))
+	for _, value := range values {
+		if _, repeated := seen[value]; !repeated {
+			seen[value] = struct{}{}
+			kept = append(kept, value)
+		}
+	}
+	return kept
 }
 
 func selectTerm(term sexp.Element, value string) (sexp.Element, bool) {
