@@ -17,13 +17,13 @@
 
   On a Galera cluster the lock holds only on the node running the migration, so stop writers on every other node first. A write from another node stalls replication on the migrating node and throttles writes across the cluster, other databases included. `KILL` leaves the stall in place. Restarting the node clears it, and the run has then failed partway: restore the backup.
 
-  A document now reaches an identity only when its `identity_mapping_ids` entry spells the identity's `authentic_source_person_id` exactly. The migration leaves links that relied on folding as they are, because a variant can be another person. Before upgrading, this query lists them:
+  A document now reaches an identity only when its `identity_mapping_ids` entry spells the identity's `authentic_source_person_id` exactly. The migration leaves links that relied on folding as they are, because a variant can be another person. Before upgrading, this query lists them. It spans authentic sources, as the lookup by identity does:
 
   ```sql
-  SELECT m.authentic_source, m.scope, m.document_id, m.identity_mapping_id, i.authentic_source_person_id
+  SELECT m.authentic_source, m.scope, m.document_id, m.identity_mapping_id,
+         i.authentic_source AS identity_source, i.authentic_source_person_id
   FROM datastore_identity_mapping m
-  JOIN identity_mappings i
-    ON m.authentic_source = i.authentic_source AND m.identity_mapping_id = i.authentic_source_person_id
+  JOIN identity_mappings i ON m.identity_mapping_id = i.authentic_source_person_id
   WHERE BINARY m.identity_mapping_id <> BINARY i.authentic_source_person_id;
   ```
 
