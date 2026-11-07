@@ -196,7 +196,7 @@ EOF
     fi
 
     generate_container_key "${PKI_DIR}/tls_${service_name}.key" openssl req -new -sha256 -nodes -out ${service_name}.csr -newkey rsa:2048 -keyout "${PKI_DIR}/tls_${service_name}.key" -config ${service_name}.conf
-    openssl x509 -req -in ${service_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/tls_${service_name}.crt" -days 730 -sha256 -extfile ${service_name}.ext
+    openssl x509 -req -in ${service_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -CAserial "${PKI_DIR}/rootCA.srl" -out "${PKI_DIR}/tls_${service_name}.crt" -days 730 -sha256 -extfile ${service_name}.ext
 
     # Create combined PEM file (cert + CA chain, no private key)
     cat "${PKI_DIR}/tls_${service_name}.crt" "${PKI_DIR}/rootCA.crt" > "${PKI_DIR}/tls_${service_name}_chain.pem"
@@ -253,7 +253,7 @@ EOF
 
         # Generate CSR and sign with rootCA
         openssl req -new -key "${PKI_DIR}/signing_rsa_private.pem" -out signing_rsa.csr -config signing_rsa.conf
-        openssl x509 -req -in signing_rsa.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/signing_rsa.crt" -days 730 -sha256 -extfile signing_rsa.ext
+        openssl x509 -req -in signing_rsa.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -CAserial "${PKI_DIR}/rootCA.srl" -out "${PKI_DIR}/signing_rsa.crt" -days 730 -sha256 -extfile signing_rsa.ext
         
         # Create certificate chain PEM (cert + CA)
         cat "${PKI_DIR}/signing_rsa.crt" "${PKI_DIR}/rootCA.crt" > "${PKI_DIR}/signing_rsa_chain.pem"
@@ -301,7 +301,7 @@ EOF
 
         # Generate CSR and sign with rootCA
         openssl req -new -key "${PKI_DIR}/signing_ec_private.pem" -out signing_ec.csr -config signing_ec.conf
-        openssl x509 -req -in signing_ec.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/signing_ec.crt" -days 730 -sha256 -extfile signing_ec.ext
+        openssl x509 -req -in signing_ec.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -CAserial "${PKI_DIR}/rootCA.srl" -out "${PKI_DIR}/signing_ec.crt" -days 730 -sha256 -extfile signing_ec.ext
         
         # Create certificate chain PEM (cert + CA)
         cat "${PKI_DIR}/signing_ec.crt" "${PKI_DIR}/rootCA.crt" > "${PKI_DIR}/signing_ec_chain.pem"
@@ -373,7 +373,7 @@ EOF
         # Generate key, CSR and sign with rootCA
         generate_key "${PKI_DIR}/client_cert_${client_name}.key" openssl genrsa -out "${PKI_DIR}/client_cert_${client_name}.key" 2048
         openssl req -new -key "${PKI_DIR}/client_cert_${client_name}.key" -out ${client_name}.csr -config ${client_name}.conf
-        openssl x509 -req -in ${client_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -out "${PKI_DIR}/client_cert_${client_name}.crt" -days 730 -sha256 -extfile ${client_name}.ext
+        openssl x509 -req -in ${client_name}.csr -CA "${PKI_DIR}/rootCA.crt" -CAkey "${PKI_DIR}/rootCA.key" -CAcreateserial -CAserial "${PKI_DIR}/rootCA.srl" -out "${PKI_DIR}/client_cert_${client_name}.crt" -days 730 -sha256 -extfile ${client_name}.ext
         
         # Create combined PEM file (cert + CA chain, no private key)
         cat "${PKI_DIR}/client_cert_${client_name}.crt" "${PKI_DIR}/rootCA.crt" > "${PKI_DIR}/client_cert_${client_name}_chain.pem"
