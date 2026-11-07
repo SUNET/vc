@@ -63,7 +63,7 @@ func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMapping
 
 // IdentityMappingBulkCreateRequest is the request for bulk creating identity mappings
 type IdentityMappingBulkCreateRequest struct {
-	Mappings map[string]*IdentityMappingCreateRequest `json:"mappings" validate:"required,min=1,dive"`
+	Mappings map[string]*IdentityMappingCreateRequest `json:"mappings" validate:"required,min=1,dive,required"`
 }
 
 // IdentityMappingBulkCreateReply is the reply for a bulk identity mapping creation
