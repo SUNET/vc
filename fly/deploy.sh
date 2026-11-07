@@ -721,11 +721,16 @@ register_apigw_issuer_on_wallet_backend() {
         return 0
     fi
     # -s reads the whole body, so text after the first value fails. The list must
-    # be one object holding an issuers array, and a match must carry an id.
+    # be one object holding an issuers array, each entry with a string identifier.
+    # A match's id goes into the PUT path, so it must be a number or a URL-safe
+    # string. An empty result means no entry matches.
     if ! existing_id="$(jq -s -r --arg url "$apigw_url" '
         if length == 1 and (.[0].issuers | type == "array") then .[0].issuers else error("no issuer list") end
+        | if all(.[]; .credential_issuer_identifier | type == "string") then . else error("entry without identifier") end
         | map(select(.credential_issuer_identifier == $url))
-        | if length == 0 then "" else .[0].id // error("no issuer id") end' \
+        | if length == 0 then ""
+          elif (.[0].id | (type == "number" or type == "string") and (tostring | test("^[A-Za-z0-9._~-]+$"))) then .[0].id
+          else error("no usable issuer id") end' \
         "$body_file" 2>/dev/null)"; then
         echo "    (the issuer list is unreadable; skipping issuer registration)"
         stop_proxy "$proxy_pid"
