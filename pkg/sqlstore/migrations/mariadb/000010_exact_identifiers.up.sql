@@ -20,14 +20,29 @@ SET @convert = CONCAT(' CONVERT TO CHARACTER SET utf8mb4 COLLATE ', @exact_colla
 
 SET @s = CONCAT('DO _utf8mb4 ''x'' COLLATE ', @exact_collation); PREPARE s FROM @s; DEALLOCATE PREPARE s;
 
+-- ApplySchema runs at service start, so replicas of the old version can be
+-- writing. Deleting a parent while the foreign key is dropped would orphan its
+-- children, and adding the key back would then fail. Reads and writes on these
+-- tables wait until the end of this file.
+-- The lock holds on this node only. On a Galera cluster, a write from another
+-- node stalls replication here until this node restarts, so writers on other
+-- nodes must stop first.
+LOCK TABLES datastore WRITE, datastore_identity_mapping WRITE, identity_mappings WRITE,
+    credential_offer WRITE, oidc_dynamic_registration WRITE, clients WRITE, token_status_list WRITE,
+    token_status_list_metadata WRITE, credential_subjects WRITE, cache_entries WRITE;
+
 -- The foreign key accepted a child row spelt differently from its parent while
 -- the columns folded, and AddIdentity and Replace wrote such rows. Each takes
 -- its parent's spelling, which keeps it attached under the exact comparison.
 -- The child primary key was unique under the folding, so no two rows collide.
-UPDATE datastore_identity_mapping m
-JOIN datastore d
-    ON m.authentic_source = d.authentic_source AND m.scope = d.scope AND m.document_id = d.document_id
-SET m.authentic_source = d.authentic_source, m.scope = d.scope, m.document_id = d.document_id;
+UPDATE datastore_identity_mapping
+JOIN datastore
+    ON datastore_identity_mapping.authentic_source = datastore.authentic_source
+    AND datastore_identity_mapping.scope = datastore.scope
+    AND datastore_identity_mapping.document_id = datastore.document_id
+SET datastore_identity_mapping.authentic_source = datastore.authentic_source,
+    datastore_identity_mapping.scope = datastore.scope,
+    datastore_identity_mapping.document_id = datastore.document_id;
 
 -- MariaDB and MySQL both refuse to change the collation of a column in a foreign
 -- key, with foreign_key_checks off as well. Adding the key back checks every
@@ -48,3 +63,5 @@ SET @s = CONCAT('ALTER TABLE cache_entries', @convert); PREPARE s FROM @s; EXECU
 ALTER TABLE datastore_identity_mapping
     ADD CONSTRAINT datastore_identity_mapping_ibfk_1 FOREIGN KEY (authentic_source, scope, document_id)
         REFERENCES datastore (authentic_source, scope, document_id) ON DELETE CASCADE;
+
+UNLOCK TABLES;

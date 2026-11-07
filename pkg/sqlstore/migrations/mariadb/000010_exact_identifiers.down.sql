@@ -16,6 +16,16 @@ SET SESSION sql_mode = CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'STRICT_ALL_TABLES
 
 SET @restore = CONCAT(' CONVERT TO CHARACTER SET ', @@character_set_database, ' COLLATE ', @@collation_database);
 
+-- Deleting a parent while the foreign key is dropped would orphan its children,
+-- and adding the key back would then fail. Reads and writes on these tables wait
+-- until the end of this file.
+-- The lock holds on this node only. On a Galera cluster, a write from another
+-- node stalls replication here until this node restarts, so writers on other
+-- nodes must stop first.
+LOCK TABLES datastore WRITE, datastore_identity_mapping WRITE, identity_mappings WRITE,
+    credential_offer WRITE, oidc_dynamic_registration WRITE, clients WRITE, token_status_list WRITE,
+    token_status_list_metadata WRITE, credential_subjects WRITE, cache_entries WRITE;
+
 ALTER TABLE datastore_identity_mapping DROP FOREIGN KEY datastore_identity_mapping_ibfk_1;
 
 -- CONVERT TO transcodes MariaDB's JSON columns, which are LONGTEXT, and JSON holds
@@ -106,5 +116,7 @@ ALTER TABLE cache_entries MODIFY json_value JSON NOT NULL;
 ALTER TABLE datastore_identity_mapping
     ADD CONSTRAINT datastore_identity_mapping_ibfk_1 FOREIGN KEY (authentic_source, scope, document_id)
         REFERENCES datastore (authentic_source, scope, document_id) ON DELETE CASCADE;
+
+UNLOCK TABLES;
 
 SET SESSION sql_mode = @session_sql_mode;
