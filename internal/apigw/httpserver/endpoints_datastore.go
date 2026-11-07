@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
 
@@ -157,6 +158,14 @@ func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (an
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	reach, err := httphelpers.SelectedResourceReach(c, request.AuthenticSource, request.Scope)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	request.Reach = reach
+
 	reply, err := s.apiv1.DatastoreList(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -175,17 +184,12 @@ func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
-	// Apply SPOCP-derived authentic_source and scope filters for DB queries.
-	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
-		if sources, ok := allowed.([]string); ok {
-			request.AllowedAuthenticSources = sources
-		}
+	reach, err := httphelpers.SelectedResourceReach(c, request.AuthenticSource, request.Scope)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
-	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
-		if scopes, ok := allowed.([]string); ok {
-			request.AllowedScopes = scopes
-		}
-	}
+	request.Reach = reach
 
 	s.log.Info("datastore search",
 		"search", request.Search, "authentic_source", request.AuthenticSource)
@@ -220,20 +224,6 @@ func (s *Service) endpointDatastoreBulkUpload(ctx context.Context, c *gin.Contex
 func (s *Service) endpointDatastorePreAuthOffer(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastorePreAuthOffer")
 	defer span.End()
-
-	// Refused before binding, because binding is where the two readings of
-	// this body diverge: encoding/json matches members case-INSENSITIVELY
-	// and lets a later one win, so {"scope":"a","Scope":"b"} binds "b"
-	// while the authorization middleware reads the exact key "scope" and
-	// sees "a". One request authorized for one scope, acted on for
-	// another - and allow_preauth_offer is what makes the second scope
-	// worth reaching. Same guard, same reasoning, as
-	// endpointPrepareIssuance.
-	if err := requireCanonicalJSONBody(c, "scope", "authentic_source", "document_id"); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "ambiguous request body")
-		return nil, err
-	}
 
 	request := &apiv1.DatastorePreAuthOfferRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {

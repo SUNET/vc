@@ -65,6 +65,42 @@
 
 ### Fixed
 
+- **SPOCP resource rules hold for the selector a handler receives**: the
+  authorization middleware and `Binding.Request` could read different
+  `authentic_source` or `scope` values from one `/api/v1` request. Every
+  selector `Binding.Request` binds now passes the same SPOCP check, and a denied
+  one answers 403 with the title `insufficient_permissions`.
+- **`POST /api/v1/datastore/list` honours the SPOCP rules**: a session limited
+  to one authentic source could list the document metadata of every source for
+  an identity mapping id it knew, by naming no selector. The route and both
+  stores apply the rules as `GET /api/v1/datastore/search` does. Nothing in
+  request headers reaches that filter.
+- **SPOCP rules govern a session request that names no selector**: on
+  `POST /api/v1/datastore/list`, `GET /api/v1/datastore/search` and every other
+  `/api/v1` route, a session whose subject no rule matches passed, and list and
+  search returned the documents of every source. Such a session answers 403
+  `insufficient permissions`, as a token does.
+
+  - A rule counts for a request when its service, method, path and subject
+    positions accept the request, with the comparison the engine uses. A wildcard
+    rule on another service or path leaves the subject without access here.
+  - List, search and identity mapping search filter by the pairs the rules grant.
+    Rules for (A, X) and (B, Y) return no document of (A, Y).
+  - A prefix or suffix form in the `authentic_source` or `scope` position stays out
+    of the filter for a request that names no selector. The request receives fewer
+    documents than the rule allows. A request naming the value receives its document.
+  - MariaDB filters compare bytes, so a rule for `A` returns no document of `a`.
+  - `/ui/status` offers a subject no rule matches no source and no scope.
+
+  **Migration:** a deployment with rules, the admin UI on and no OIDC grants a
+  session with subject `anonymous`. That session answers 403 unless a rule names
+  `anonymous` or a wildcard subject, so it loses the read of every document through
+  list and search. To keep the access, add a rule such as:
+
+  ```
+  (vc (service apigw)(method *)(path /api/v1/*)(subject anonymous)(authentic_source *)(scope *))
+  ```
+
 - **MongoDB database names are configurable**: apigw, verifier and registry
   always used the fixed databases `vc`, `verifier` and `vc_registry`. A
   database in `common.mongo.uri` (e.g. `mongodb://host/tenant_a`) only

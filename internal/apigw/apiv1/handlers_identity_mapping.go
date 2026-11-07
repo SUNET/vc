@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"github.com/google/uuid"
 )
@@ -194,10 +195,12 @@ func (c *Client) IdentityMappingDelete(ctx context.Context, req *IdentityMapping
 
 // IdentityMappingSearchRequest is the request for searching identity mappings
 type IdentityMappingSearchRequest struct {
-	Search                  string   `json:"search" form:"search"`
-	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
-	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-"`
+	Search          string `json:"search" form:"search"`
+	AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	Limit           int64  `json:"limit" form:"limit"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // IdentityMappingSearchReply is the reply for searching identity mappings
@@ -224,10 +227,10 @@ func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMapping
 		limit = 50
 	}
 	mappings, err := c.identityMappingStore.SearchMappings(ctx, &db.SearchMappingsQuery{
-		Search:                  req.Search,
-		AuthenticSource:         req.AuthenticSource,
-		Limit:                   limit,
-		AllowedAuthenticSources: req.AllowedAuthenticSources,
+		Search:          req.Search,
+		AuthenticSource: req.AuthenticSource,
+		Limit:           limit,
+		Reach:           req.Reach,
 	})
 	if err != nil {
 		return nil, err

@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/sqlstore"
 
 	"github.com/jmoiron/sqlx"
@@ -434,22 +434,64 @@ func (c *SQLDatastoreColl) GetByIdentity(ctx context.Context, scope, identityMap
 	return docs, nil
 }
 
+// sqlWhere collects WHERE conditions with their positional arguments.
+type sqlWhere struct {
+	conditions []string
+	args       []any
+}
+
+// selected adds the equality condition of a selected value.
+func (w *sqlWhere) selected(dialect sqlstore.Dialect, column, value string) {
+	if value != "" {
+		w.conditions = append(w.conditions, dialect.ExactEquals(column))
+		w.args = append(w.args, value)
+	}
+}
+
+// withinReach adds the pair condition of reach. It returns false when reach
+// matches no document.
+func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach resourcereach.Reach, sourceColumn, scopeColumn string) bool {
+	if reach.Everything() {
+		return true
+	}
+	pairs := reach.Pairs()
+	if len(pairs) == 0 {
+		return false
+	}
+	anyPair := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		var clause []string
+		if value, exact := pair.AuthenticSource.Exact(); exact {
+			clause = append(clause, dialect.ExactEquals(sourceColumn))
+			w.args = append(w.args, value)
+		}
+		if value, exact := pair.Scope.Exact(); exact {
+			clause = append(clause, dialect.ExactEquals(scopeColumn))
+			w.args = append(w.args, value)
+		}
+		anyPair = append(anyPair, "("+strings.Join(clause, " AND ")+")")
+	}
+	w.conditions = append(w.conditions, "("+strings.Join(anyPair, " OR ")+")")
+	return true
+}
+
+// datastoreWhere adds the conditions of the selected values and the reach.
+func (c *SQLDatastoreColl) datastoreWhere(where *sqlWhere, source, scope string, reach resourcereach.Reach) bool {
+	where.selected(c.dialect, "d.authentic_source", source)
+	where.selected(c.dialect, "d.scope", scope)
+	return where.withinReach(c.dialect, reach, "d.authentic_source", "d.scope")
+}
+
 // List returns matching document metadata, filtered by identity mapping and
-// optionally authentic_source/scope.
+// optionally authentic_source/scope, within the reach.
 func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error) {
 	if err := helpers.Check(ctx, c.Service.cfg, query, c.Service.log); err != nil {
 		return nil, err
 	}
 
-	conditions := []string{"m.identity_mapping_id = ?"}
-	args := []any{query.IdentityMappingID}
-	if query.AuthenticSource != "" {
-		conditions = append(conditions, "d.authentic_source = ?")
-		args = append(args, query.AuthenticSource)
-	}
-	if query.Scope != "" {
-		conditions = append(conditions, "d.scope = ?")
-		args = append(args, query.Scope)
+	where := sqlWhere{conditions: []string{"m.identity_mapping_id = ?"}, args: []any{query.IdentityMappingID}}
+	if !c.datastoreWhere(&where, query.AuthenticSource, query.Scope, query.Reach) {
+		return []*model.DocumentList{}, nil
 	}
 
 	sqlQuery := c.dialect.Rebind(fmt.Sprintf(
@@ -458,11 +500,11 @@ func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model
 		 JOIN datastore_identity_mapping m
 			ON d.authentic_source = m.authentic_source AND d.scope = m.scope AND d.document_id = m.document_id
 		 WHERE %s`,
-		strings.Join(conditions, " AND "),
+		strings.Join(where.conditions, " AND "),
 	))
 
 	var rows []datastoreMetaRow
-	if err := c.db.SelectContext(ctx, &rows, sqlQuery, args...); err != nil {
+	if err := c.db.SelectContext(ctx, &rows, sqlQuery, where.args...); err != nil {
 		return nil, err
 	}
 
@@ -580,38 +622,11 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:datastore:searchDocuments")
 	defer span.End()
 
-	conditions := []string{}
-	args := []any{}
-
-	if query.AuthenticSource != "" {
-		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
-			return []*model.CompleteDocument{}, nil
-		}
-		conditions = append(conditions, "d.authentic_source = ?")
-		args = append(args, query.AuthenticSource)
-	} else if len(query.AllowedAuthenticSources) > 0 {
-		placeholders := make([]string, len(query.AllowedAuthenticSources))
-		for i, src := range query.AllowedAuthenticSources {
-			placeholders[i] = "?"
-			args = append(args, src)
-		}
-		conditions = append(conditions, fmt.Sprintf("d.authentic_source IN (%s)", strings.Join(placeholders, ", ")))
+	where := sqlWhere{}
+	if !c.datastoreWhere(&where, query.AuthenticSource, query.Scope, query.Reach) {
+		return []*model.CompleteDocument{}, nil
 	}
-
-	if query.Scope != "" {
-		if len(query.AllowedScopes) > 0 && !slices.Contains(query.AllowedScopes, query.Scope) {
-			return []*model.CompleteDocument{}, nil
-		}
-		conditions = append(conditions, "d.scope = ?")
-		args = append(args, query.Scope)
-	} else if len(query.AllowedScopes) > 0 {
-		placeholders := make([]string, len(query.AllowedScopes))
-		for i, scope := range query.AllowedScopes {
-			placeholders[i] = "?"
-			args = append(args, scope)
-		}
-		conditions = append(conditions, fmt.Sprintf("d.scope IN (%s)", strings.Join(placeholders, ", ")))
-	}
+	conditions, args := where.conditions, where.args
 
 	if query.Search != "" {
 		term := "%" + escapeLike(query.Search) + "%"

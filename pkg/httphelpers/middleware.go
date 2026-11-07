@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -209,8 +208,8 @@ func newCookieStore(authKey, encKey string, opts sessions.Options) sessions.Stor
 
 // SessionOrAPIAuth returns middleware that accepts either a valid session (identified by sessionKey)
 // or falls through to the provided API auth middleware. When a session is present and a SPOCP
-// engine is provided, the middleware runs the same method+path+subject authorization check that
-// API clients go through, so one set of rules governs both paths.
+// engine is provided, one set of rules governs both paths: a session no rule accepts on this
+// request answers 403, and a request naming no pair reads through the store's reach filter.
 func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.HandlerFunc, engine *SafeEngine, service string) gin.HandlerFunc {
 	log := m.log.New("session_or_api_auth")
 	return func(c *gin.Context) {
@@ -224,31 +223,30 @@ func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.Hand
 		subject, _ := session.Get("admin_subject").(string)
 
 		// SPOCP authorization check.
+		if engine != nil && subject == "" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "session missing subject"})
+			return
+		}
+		reach, ok := bindResourceReach(c, engine, service, subject, log)
+		if !ok {
+			return
+		}
 		if engine != nil {
-			if subject == "" {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "session missing subject"})
+			// A pair the engine allows has a rule accepting this request, so
+			// no accepting rule refuses a named pair as well.
+			if reach.Nothing() {
+				log.Info("spocp_denied", "subject", subject, "service", service, "method", c.Request.Method, "path", c.FullPath(),
+					"req_id", c.GetString("req_id"))
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 				return
 			}
 
-			// Store allowedAuthenticSources authentic sources and scopes for downstream handlers (DB filtering).
-			allowedAuthenticSources := AllowedAuthenticSources(engine, subject)
-			c.Set("spocp_allowed_authentic_sources", allowedAuthenticSources)
-			allowedScopes := AllowedScopes(engine, subject)
-			c.Set("spocp_allowed_scopes", allowedScopes)
-
-			// For session users, resource-level SPOCP checks only apply when
-			// the request carries explicit resource pairs. Search/list endpoints
-			// without resource params rely on DB-level filtering via the allowed
-			// lists above.
-			pairs := extractResourcePairs(c)
-			for _, p := range pairs {
-				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), subject, p.authenticSource, p.scope)
-				if !engine.QueryElement(query) {
-					log.Info("spocp_denied", "subject", subject, "service", service, "method", c.Request.Method, "path", c.FullPath(),
-						"authentic_source", p.authenticSource, "scope", p.scope)
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-					return
-				}
+			// A request naming no pair is answered by the store, filtered by the reach.
+			guard := resourceGuard{engine: engine, service: service, subject: subject, log: log}
+			c.Set(resourceGuardKey, guard)
+			if !guard.allows(c, extractResourcePairs(c)) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+				return
 			}
 		}
 
@@ -284,17 +282,7 @@ func extractResourcePairs(c *gin.Context) []resourcePair {
 		}
 	}
 
-	// Inject synthetic scope for identity mapping endpoints — these have
-	// authentic_source but no scope in the document model.
-	if strings.Contains(c.FullPath(), "/identity/mapping") {
-		for i := range pairs {
-			if pairs[i].authenticSource != "" && pairs[i].scope == "" {
-				pairs[i].scope = "identity_mapping"
-			}
-		}
-	}
-
-	return deduplicatePairs(pairs)
+	return normalizeResourcePairs(c, pairs)
 }
 
 // extractBodyResourcePairs parses a JSON body and returns all
