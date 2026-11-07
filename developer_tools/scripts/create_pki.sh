@@ -61,6 +61,16 @@ grant_container_read() {
     fi
 }
 
+# Stops when the generator left key file $1 empty. LibreSSL exits 0 and writes
+# nothing on a config file it refuses, and an empty key would skip its block on
+# every later run.
+require_key_written() {
+    if [ ! -s "$1" ]; then
+        echo "generating $1 wrote nothing; check the openssl config file" >&2
+        exit 1
+    fi
+}
+
 # Runs command $2.. to write key file $1, readable by the owner alone. Call it
 # outside any condition: `set -e` must end the script when the command fails.
 generate_key() {
@@ -68,6 +78,7 @@ generate_key() {
     shift
     create_key_file "$owner_key"
     "$@"
+    require_key_written "$owner_key"
 }
 
 # Runs command $2.. to write key file $1, readable by the owner and the container
@@ -78,6 +89,7 @@ generate_container_key() {
     create_key_file "$container_key"
     grant_container_read "$container_key"
     "$@"
+    require_key_written "$container_key"
 }
 
 # Ends the block of the key generated last, which a later run may skip.

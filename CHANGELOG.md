@@ -108,11 +108,11 @@
 - **`create_pki.sh` creates private keys owner-only before writing them**:
   LibreSSL's `openssl`, the one macOS ships, honours the umask, so under the
   usual umask 022 the keys were world-readable. A default ACL on the PKI
-  directory overrides the umask, so with LibreSSL on Linux another user could
-  read `rootCA.key`, `signing_rsa_private.pem` and the client keys. Each key
-  file and the nym_auth seed start empty, with mode 600 and no inherited
-  ACL entry, before any key material reaches them. A failed or interrupted
-  generation, certificate step included, removes the file, so the next run
+  directory overrides the umask, so with LibreSSL on Linux its named user could
+  read every key and the seed. Each key file and the nym_auth seed start empty,
+  with mode 600 and no inherited ACL entry, before any key material reaches
+  them. A failed or interrupted generation, certificate step included, removes
+  the file, and so does a generator that writes nothing, so the next run
   generates that key and its certificate. The EC signing key leaves no
   intermediate file.
 - **The Linux dev stack can read its keys**: OpenSSL 1.1 and later write
