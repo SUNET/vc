@@ -86,7 +86,8 @@
   file on any stop, and names its path and how to settle it. `launch` stops
   until the operator settles it. A symlinked secrets file stays a symlink.
   A value reaches `yq` as data, and the script stops before the set when the
-  edited file does not hold it.
+  edited file does not hold it. A generated secret that comes out empty stops
+  the script: LibreSSL exits 0 and prints nothing on a config file it refuses.
   The MongoDB URI goes to `common.mongo.uri`, so a file with
   no `uri:` line receives it and other `uri` keys stay. A secrets file that is
   missing or read-only, or a directory that refuses the temp file, stops the

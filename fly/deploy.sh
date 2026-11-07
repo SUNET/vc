@@ -211,6 +211,12 @@ secrets_file_can_record() {
     return 1
 }
 
+# Stops when openssl generated nothing for secret $1 in value $2. LibreSSL exits 0
+# and prints nothing on a config file it refuses.
+require_generated() {
+    [[ -n "$2" ]] || die "openssl generated no $1; check its config file"
+}
+
 require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
 }
@@ -371,6 +377,7 @@ cmd_launch() {
     else
         # hex, not base64: password is embedded in a URI, must be URL-safe.
         mongo_pass="$(openssl rand -hex 24)"
+        require_generated "MongoDB password" "$mongo_pass"
 
         if [[ ! -f "$secrets_file" ]]; then
             cp "${ROOT_DIR}/secrets.example.yaml" "$secrets_file"
@@ -409,6 +416,7 @@ cmd_launch() {
     else
         oidc_first_launch=1
         apigw_client_secret="$(openssl rand -hex 24)"
+        require_generated "OIDC client_secret" "$apigw_client_secret"
         # 4 chars for live demos: 3 lowercase letters + 1 trailing digit.
         # Shared by every realm user (including admin@sunet.se) — an accepted
         # demo tradeoff: these environments are throwaway and rebuilt often,
@@ -479,6 +487,7 @@ cmd_launch() {
         echo "    (AS_SIGNING_KEY_PEM already set, leaving in place)"
     else
         as_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout)"
+        require_generated "AS signing key" "$as_key_pem"
         as_key_b64="$(printf '%s' "$as_key_pem" | base64 | tr -d '\n')"
         if set_app_secrets "$wallet_backend_app" AS_SIGNING_KEY_PEM="$as_key_b64"; then
             echo "    AS signing key set"
@@ -598,6 +607,7 @@ provision_apigw_nym_auth_secrets() {
     else
         echo "==> Provisioning CREDENTIAL_ENCRYPTION_KEY for $apigw_app"
         value="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')"
+        require_generated CREDENTIAL_ENCRYPTION_KEY "$value"
         if set_app_secrets "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value"; then
             echo "    CREDENTIAL_ENCRYPTION_KEY set"
         fi
@@ -607,6 +617,7 @@ provision_apigw_nym_auth_secrets() {
     else
         echo "==> Provisioning NYM_AUTH_SEED for $apigw_app"
         value="$(openssl rand 32 | basenc --base64url | tr -d '=' | base64 | tr -d '\n')"
+        require_generated NYM_AUTH_SEED "$value"
         if set_app_secrets "$apigw_app" NYM_AUTH_SEED="$value"; then
             echo "    NYM_AUTH_SEED set"
         fi
@@ -661,6 +672,7 @@ register_apigw_issuer_on_wallet_backend() {
     echo "    Registering ${apigw_url} as issuer on ${wb_app} (default tenant)"
 
     admin_token="$(openssl rand -hex 32)"
+    require_generated "wallet-backend admin token" "$admin_token"
     if ! fly secrets set --app "$wb_app" WALLET_SERVER_ADMIN_TOKEN="$admin_token" >/dev/null 2>&1; then
         echo "    (failed to rotate admin token; skipping issuer registration)"
         return 0
