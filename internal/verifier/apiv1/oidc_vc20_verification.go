@@ -317,7 +317,7 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, resolver trust.KeyRes
 // closed: binding is REQUIRED, which is the OpenID4VP default.
 func (c *Client) vc20HandlerForOIDC(resolver trust.KeyResolver, session *cache.AuthorizationContext, scope string) (*openid4vp.VC20Handler, error) {
 	opts := []openid4vp.VC20HandlerOption{
-		openid4vp.WithVC20KeyResolver(resolver),
+		openid4vp.WithVC20KeyResolver(newIssuerKeyResolver(resolver)),
 		openid4vp.WithVC20HolderKeyResolver(newHolderKeyResolver(resolver)),
 	}
 
@@ -435,9 +435,32 @@ func (r *holderKeyResolver) ResolveKey(ctx context.Context, verificationMethod s
 	if strings.HasPrefix(verificationMethod, "did:key:") || strings.HasPrefix(verificationMethod, "did:jwk:") {
 		return r.local.ResolveKey(ctx, verificationMethod)
 	}
-	resolver, ok := r.fallback.(trust.RelationshipKeyResolver)
+	return resolveKeyFor(ctx, r.fallback, verificationMethod, trust.RelationshipAuthentication)
+}
+
+// issuerKeyResolver resolves the key that signed a credential. The trust resolver has to
+// confirm that the issuer's DID document authorizes the method for assertionMethod and
+// names the DID as its controller; a resolver that cannot confirm that is refused, so a
+// key listed only under keyAgreement or verificationMethod does not verify a credential.
+type issuerKeyResolver struct {
+	trust trust.KeyResolver
+}
+
+func newIssuerKeyResolver(resolver trust.KeyResolver) *issuerKeyResolver {
+	return &issuerKeyResolver{trust: resolver}
+}
+
+func (r *issuerKeyResolver) ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error) {
+	return resolveKeyFor(ctx, r.trust, verificationMethod, trust.RelationshipAssertionMethod)
+}
+
+// resolveKeyFor asks a trust resolver for a key under a verification relationship, and
+// refuses a resolver that cannot report relationships rather than falling back to a
+// plain lookup.
+func resolveKeyFor(ctx context.Context, resolver trust.KeyResolver, verificationMethod, relationship string) (crypto.PublicKey, error) {
+	relResolver, ok := resolver.(trust.RelationshipKeyResolver)
 	if !ok {
-		return nil, fmt.Errorf("cannot confirm that %s may authenticate: the trust resolver does not report verification relationships", verificationMethod)
+		return nil, fmt.Errorf("cannot confirm that %s may be used for %s: the trust resolver does not report verification relationships", verificationMethod, relationship)
 	}
-	return resolver.ResolveKeyFor(ctx, verificationMethod, trust.RelationshipAuthentication)
+	return relResolver.ResolveKeyFor(ctx, verificationMethod, relationship)
 }

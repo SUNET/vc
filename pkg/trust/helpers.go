@@ -210,42 +210,18 @@ func extractKeyForRelationship(metadata any, verificationMethod, relationship st
 	did, _, _ := strings.Cut(verificationMethod, "#")
 	docID, _ := doc["id"].(string)
 	if docID == "" {
-		docID = did
+		return nil, fmt.Errorf("DID document for %q has no id", did)
 	}
 	if docID != did {
 		return nil, fmt.Errorf("DID document is for %q, not %q", docID, did)
 	}
 
-	var vmMap map[string]any
-	authorized := false
-	entries, _ := doc[relationship].([]any)
-	for _, entry := range entries {
-		switch e := entry.(type) {
-		case string:
-			authorized = authorized || absoluteRef(e, docID) == verificationMethod
-		case map[string]any:
-			if id, _ := e["id"].(string); absoluteRef(id, docID) == verificationMethod {
-				authorized = true
-				vmMap = e
-			}
-		}
-	}
+	authorized, vmMap := authorizedMethod(doc, docID, verificationMethod, relationship)
 	if !authorized {
 		return nil, fmt.Errorf("verification method %s is not authorized for %s", verificationMethod, relationship)
 	}
-
 	if vmMap == nil {
-		vms, _ := doc["verificationMethod"].([]any)
-		for _, vm := range vms {
-			m, ok := vm.(map[string]any)
-			if !ok {
-				continue
-			}
-			if id, _ := m["id"].(string); absoluteRef(id, docID) == verificationMethod {
-				vmMap = m
-				break
-			}
-		}
+		vmMap = listedMethod(doc, docID, verificationMethod)
 	}
 	if vmMap == nil {
 		return nil, fmt.Errorf("verification method not found in metadata: %s", verificationMethod)
@@ -260,6 +236,41 @@ func extractKeyForRelationship(metadata any, verificationMethod, relationship st
 		return nil, fmt.Errorf("verification method not found in metadata: %s", verificationMethod)
 	}
 	return key, err
+}
+
+// authorizedMethod reports whether the document lists the method under the relationship,
+// and returns the method when the relationship embeds it rather than referring to it.
+func authorizedMethod(doc map[string]any, docID, verificationMethod, relationship string) (bool, map[string]any) {
+	authorized := false
+	var embedded map[string]any
+	entries, _ := doc[relationship].([]any)
+	for _, entry := range entries {
+		switch e := entry.(type) {
+		case string:
+			authorized = authorized || absoluteRef(e, docID) == verificationMethod
+		case map[string]any:
+			if id, _ := e["id"].(string); absoluteRef(id, docID) == verificationMethod {
+				authorized = true
+				embedded = e
+			}
+		}
+	}
+	return authorized, embedded
+}
+
+// listedMethod finds the method in the document's verificationMethod list.
+func listedMethod(doc map[string]any, docID, verificationMethod string) map[string]any {
+	vms, _ := doc["verificationMethod"].([]any)
+	for _, vm := range vms {
+		m, ok := vm.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := m["id"].(string); absoluteRef(id, docID) == verificationMethod {
+			return m
+		}
+	}
+	return nil
 }
 
 // absoluteRef resolves a DID document's relative reference ("#key-1") against its id.

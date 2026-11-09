@@ -628,28 +628,37 @@ const verifiableCredentialIRI = "https://www.w3.org/2018/credentials#verifiableC
 // which names a graph the document defines elsewhere - what CredentialWithoutProofForTypes
 // produces through FromRDF. A literal's content, a JSON value included, is never entered.
 func wrapEmbeddedCredentialsInGraphs(node any) bool {
-	changed := false
 	switch n := node.(type) {
 	case map[string]any:
-		if _, literal := n["@value"]; literal {
-			return false
-		}
-		for key, child := range n {
-			if key == verifiableCredentialIRI {
-				if list, ok := child.([]any); ok && wrapCredentialList(list) {
-					changed = true
-				}
-			}
-			if wrapEmbeddedCredentialsInGraphs(child) {
-				changed = true
-			}
-		}
+		return wrapInNode(n)
 	case []any:
-		for _, item := range n {
-			if wrapEmbeddedCredentialsInGraphs(item) {
-				changed = true
+		return wrapInItems(n)
+	}
+	return false
+}
+
+// wrapInNode wraps the credentials held by one node object, and by everything below it.
+func wrapInNode(n map[string]any) bool {
+	if _, literal := n["@value"]; literal {
+		return false
+	}
+	changed := false
+	for key, child := range n {
+		if key == verifiableCredentialIRI {
+			if list, ok := child.([]any); ok {
+				changed = wrapCredentialList(list) || changed
 			}
 		}
+		changed = wrapEmbeddedCredentialsInGraphs(child) || changed
+	}
+	return changed
+}
+
+// wrapInItems wraps the credentials below each item of a list.
+func wrapInItems(items []any) bool {
+	changed := false
+	for _, item := range items {
+		changed = wrapEmbeddedCredentialsInGraphs(item) || changed
 	}
 	return changed
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
-	"github.com/SUNET/vc/pkg/vc20/credential"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 
 	"github.com/stretchr/testify/require"
@@ -272,32 +271,9 @@ func TestCheckVC20AnswersTheRequest(t *testing.T) {
 // can resolve both keys.
 func w3cOIDCFixture(t *testing.T) (*Client, []byte, func(t *testing.T, nonce, domain string) string) {
 	t.Helper()
-	ctx := t.Context()
 
-	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
+	issuerKey, created := mintDegreeCredential(t)
 	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	const degreeContext = "https://example.org/degree"
-	credential.GetGlobalLoader().AddContext(degreeContext,
-		`{"@context":{"UniversityDegreeCredential":"https://example.org/degree#UniversityDegreeCredential"}}`)
-
-	issuerHandler, err := openid4vp.NewVC20Handler(
-		openid4vp.WithVC20SignerConfig(&openid4vp.VC20SignerConfig{
-			PrivateKey:         issuerKey,
-			IssuerID:           "did:example:issuer",
-			VerificationMethod: "did:example:issuer#key-1",
-			Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
-		}),
-	)
-	require.NoError(t, err)
-
-	created, err := issuerHandler.CreateCredential(ctx, &openid4vp.VC20CreateRequest{
-		Types:              []string{"UniversityDegreeCredential"},
-		AdditionalContexts: []string{degreeContext},
-		Subject:            map[string]any{"id": "did:example:holder", "degree": "Master of Science"},
-	})
 	require.NoError(t, err)
 
 	client, _ := CreateTestClientWithMock(t, nil)
@@ -344,6 +320,19 @@ func w3cOIDCSession(holderBinding *bool) *cache.AuthorizationContext {
 		}}},
 		ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
 	}
+}
+
+// w3cOIDCSessionWithEhic adds an SD-JWT request under scope "ehic" to w3cOIDCSession.
+func w3cOIDCSessionWithEhic() *cache.AuthorizationContext {
+	session := w3cOIDCSession(nil)
+	session.Scopes = append(session.Scopes, "ehic")
+	session.DCQLQuery.Credentials = append(session.DCQLQuery.Credentials, openid4vp.CredentialQuery{
+		ID:     "eudi_ehic",
+		Format: openid4vp.FormatSDJWTVC,
+		Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}},
+	})
+	session.ScopeQueryIDs["ehic"] = "eudi_ehic"
+	return session
 }
 
 func envelope(queryID, token string) string {
@@ -458,6 +447,26 @@ func TestVerifyVC20ForOIDCHonoursPerQueryHolderBinding(t *testing.T) {
 	})
 }
 
+// TestVerifyVC20ForOIDCRefusesAnIssuerKeyWithoutAssertionMethod: a key the issuer's DID
+// document lists only for another relationship is a key of the DID, but not one that may
+// sign credentials as it.
+func TestVerifyVC20ForOIDCRefusesAnIssuerKeyWithoutAssertionMethod(t *testing.T) {
+	client, _, present := w3cOIDCFixture(t)
+	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
+	require.NoError(t, err)
+	session := w3cOIDCSession(nil)
+	token := envelope("eudi_pid", present(t, session.RequestObjectNonce, domain))
+
+	require.NoError(t, client.verifyVC20ForOIDC(t.Context(), session, token))
+
+	client.trustEvaluator.(*staticKeyEvaluator).authorizedFor = map[string][]string{
+		"did:example:issuer#key-1": {trust.RelationshipAuthentication},
+	}
+	err = client.verifyVC20ForOIDC(t.Context(), session, token)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not authorized for assertionMethod")
+}
+
 // TestRefuseNonW3CAnswerToAW3CQuery: returning early when no W3C document is
 // in the response let a wallet answer an ldp_vc query with an SD-JWT. Nothing
 // else on this path compares the returned format against the requested one,
@@ -546,14 +555,7 @@ func TestVerifyVC20ForOIDCRefusesAMixedResponse(t *testing.T) {
 	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
 	require.NoError(t, err)
 
-	session := w3cOIDCSession(nil)
-	session.Scopes = append(session.Scopes, "ehic")
-	session.DCQLQuery.Credentials = append(session.DCQLQuery.Credentials, openid4vp.CredentialQuery{
-		ID:     "eudi_ehic",
-		Format: openid4vp.FormatSDJWTVC,
-		Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}},
-	})
-	session.ScopeQueryIDs["ehic"] = "eudi_ehic"
+	session := w3cOIDCSessionWithEhic()
 
 	mixed, err := json.Marshal(map[string][]string{
 		"eudi_pid":  {present(t, session.RequestObjectNonce, domain)},
@@ -659,14 +661,7 @@ func TestVerifyVC20ForOIDCRefusesAnUnansweredScope(t *testing.T) {
 	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
 	require.NoError(t, err)
 
-	session := w3cOIDCSession(nil)
-	session.Scopes = append(session.Scopes, "ehic")
-	session.DCQLQuery.Credentials = append(session.DCQLQuery.Credentials, openid4vp.CredentialQuery{
-		ID:     "eudi_ehic",
-		Format: openid4vp.FormatSDJWTVC,
-		Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}},
-	})
-	session.ScopeQueryIDs["ehic"] = "eudi_ehic"
+	session := w3cOIDCSessionWithEhic()
 
 	onlyW3C, err := json.Marshal(map[string][]string{
 		"eudi_pid": {present(t, session.RequestObjectNonce, domain)},

@@ -148,54 +148,45 @@ func TestNormalizeFollowsTheActiveContext(t *testing.T) {
 	}
 }
 
+// requireNormalizeLeavesAlone fails the test when normalizing the document's embedded
+// credential graphs changes its dataset, and returns the credential for further checks.
+func requireNormalizeLeavesAlone(t *testing.T, doc, message string) *RDFCredential {
+	t.Helper()
+	cred, err := NewRDFCredentialFromJSON([]byte(doc), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := cred.NQuads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := cred.NQuads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Errorf("%s:\n--- before ---\n%s\n--- after ---\n%s", message, before, after)
+	}
+	return cred
+}
+
 // TestNormalizeLeavesJSONLiteralsAlone: a JSON literal that happens to hold a
 // verifiableCredential property is signed data, not a credential.
 func TestNormalizeLeavesJSONLiteralsAlone(t *testing.T) {
 	doc := `{"@context":"https://www.w3.org/ns/credentials/v2","type":"VerifiableCredential","issuer":"did:example:i",
 	"credentialSubject":{"id":"did:example:s"},
 	"credentialSchema":{"id":"https://example.org/schema","type":"JsonSchema","jsonSchema":{"properties":{"verifiableCredential":{"type":"object","id":"urn:x"}}}}}`
-	cred, err := NewRDFCredentialFromJSON([]byte(doc), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, err := cred.NQuads()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
-		t.Fatal(err)
-	}
-	after, err := cred.NQuads()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before != after {
-		t.Errorf("a JSON literal was rewritten:\n--- before ---\n%s\n--- after ---\n%s", before, after)
-	}
+	requireNormalizeLeavesAlone(t, doc, "a JSON literal was rewritten")
 }
 
 // TestNormalizeLeavesAppliedContainersAlone: the VC v1 context makes json-gold put the
 // credential in its graph itself, so wrapping it again would change the dataset.
 func TestNormalizeLeavesAppliedContainersAlone(t *testing.T) {
 	doc := `{"@context":"https://www.w3.org/2018/credentials/v1","type":"VerifiablePresentation","verifiableCredential":{"@context":"https://www.w3.org/2018/credentials/v1","type":"VerifiableCredential","issuer":"did:example:i","credentialSubject":{"id":"did:example:s"}}}`
-	cred, err := NewRDFCredentialFromJSON([]byte(doc), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, err := cred.NQuads()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
-		t.Fatal(err)
-	}
-	after, err := cred.NQuads()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before != after {
-		t.Errorf("a v1 presentation changed:\n--- before ---\n%s\n--- after ---\n%s", before, after)
-	}
+	cred := requireNormalizeLeavesAlone(t, doc, "a v1 presentation changed")
 	if got := len(cred.dataset.Graphs) - 1; got != 1 {
 		t.Errorf("want 1 named graph, got %d", got)
 	}

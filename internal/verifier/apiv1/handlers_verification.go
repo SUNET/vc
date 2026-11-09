@@ -656,7 +656,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// and it resolves it the same way. The issuer's key still always
 			// comes from the trust resolver.
 			vc20Opts := []openid4vp.VC20HandlerOption{
-				openid4vp.WithVC20KeyResolver(resolver),
+				openid4vp.WithVC20KeyResolver(newIssuerKeyResolver(resolver)),
 				openid4vp.WithVC20HolderKeyResolver(newHolderKeyResolver(resolver)),
 			}
 

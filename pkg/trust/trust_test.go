@@ -1013,6 +1013,11 @@ func TestExtractKeyForRelationship(t *testing.T) {
 			vm:      vmID,
 			wantErr: "not found",
 		},
+		"a document with no id": {
+			doc:     map[string]any{"verificationMethod": []any{method(did)}, "authentication": []any{"#key-1"}},
+			vm:      vmID,
+			wantErr: "has no id",
+		},
 		"a document for another DID": {
 			doc:     didDocument("did:web:other.example", []any{method(did)}, map[string]any{"authentication": []any{vmID}}),
 			vm:      vmID,

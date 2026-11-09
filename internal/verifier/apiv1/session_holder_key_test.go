@@ -48,6 +48,11 @@ func (e *denyingEvaluator) ResolveKey(_ context.Context, verificationMethod stri
 	return nil, fmt.Errorf("resolution denied for %s: no registry returned positive match", verificationMethod)
 }
 
+// ResolveKeyFor answers the way ResolveKey does: this PDP does not tell relationships apart.
+func (e *denyingEvaluator) ResolveKeyFor(ctx context.Context, verificationMethod, _ string) (crypto.PublicKey, error) {
+	return e.ResolveKey(ctx, verificationMethod)
+}
+
 // sessionPresentation is one session-path exchange ready to post: a credential
 // from issuerDID held by a did:key holder, presented with this session's nonce
 // and this verifier's client id.

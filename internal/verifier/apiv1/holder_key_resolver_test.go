@@ -70,3 +70,23 @@ func TestHolderKeyResolverAsksForAuthentication(t *testing.T) {
 	assert.Equal(t, pub, got)
 	assert.Equal(t, []string{"authentication"}, stub.relationships)
 }
+
+// TestIssuerKeyResolverAsksForAssertionMethod: an issuer's key is the DID's to sign
+// credentials with only when the DID document lists it under assertionMethod, and a trust
+// resolver that cannot say so is refused rather than asked for a plain key.
+func TestIssuerKeyResolverAsksForAssertionMethod(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	stub := &relationshipStub{key: pub}
+
+	got, err := newIssuerKeyResolver(stub).ResolveKey(t.Context(), "did:web:issuer.example#key-1")
+	require.NoError(t, err)
+	assert.Equal(t, pub, got)
+	assert.Equal(t, []string{"assertionMethod"}, stub.relationships)
+
+	plain := &trustStub{}
+	_, err = newIssuerKeyResolver(plain).ResolveKey(t.Context(), "did:web:issuer.example#key-1")
+	require.Error(t, err)
+	assert.Empty(t, plain.calls, "a resolver that cannot report relationships is not asked for an issuer key")
+	assert.Contains(t, err.Error(), "verification relationships")
+}
