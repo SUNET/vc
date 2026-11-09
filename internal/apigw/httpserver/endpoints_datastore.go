@@ -221,20 +221,6 @@ func (s *Service) endpointDatastorePreAuthOffer(ctx context.Context, c *gin.Cont
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastorePreAuthOffer")
 	defer span.End()
 
-	// Refused before binding, because binding is where the two readings of
-	// this body diverge: encoding/json matches members case-INSENSITIVELY
-	// and lets a later one win, so {"scope":"a","Scope":"b"} binds "b"
-	// while the authorization middleware reads the exact key "scope" and
-	// sees "a". One request authorized for one scope, acted on for
-	// another - and allow_preauth_offer is what makes the second scope
-	// worth reaching. Same guard, same reasoning, as
-	// endpointPrepareIssuance.
-	if err := requireCanonicalJSONBody(c, "scope", "authentic_source", "document_id"); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "ambiguous request body")
-		return nil, err
-	}
-
 	request := &apiv1.DatastorePreAuthOfferRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
