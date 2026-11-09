@@ -23,6 +23,21 @@ primary_region = "arn"
   guest_path = "/pki/signing_ec_chain.pem"
   secret_name = "SIGNING_EC_CHAIN"
 
+# WeBuild WRPAC. Needs `./fly/deploy.sh wrpac --profile dev --service verifier` first;
+# a missing secret makes the machine fail to start.
+[[files]]
+  guest_path = "/pki/wrpac_private.pem"
+  secret_name = "WRPAC_PRIVATE_KEY"
+
+[[files]]
+  guest_path = "/pki/wrpac_chain.pem"
+  secret_name = "WRPAC_CHAIN"
+
+# WRPRC: add once issued (the wrpac command stages WRPRC_JWT when verifier-wrprc.jwt exists).
+# [[files]]
+#   guest_path = "/pki/wrprc.jwt"
+#   secret_name = "WRPRC_JWT"
+
 [http_service]
   internal_port = 8080
   force_https = true

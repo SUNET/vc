@@ -1,0 +1,19 @@
+server:
+  host: "0.0.0.0"
+  port: "6001"
+
+logging:
+  level: "info"
+  format: "text"
+
+# Lists are loaded unverified until go-trust#238 and #239 are fixed.
+registries:
+  lote:
+    enabled: true
+    name: "webuild-lote"
+    description: "WE BUILD List of Trusted Lists"
+    lotl_sources:
+      - "https://webuild-consortium.github.io/wp4-trust-group/list_of_trusted_lists.json"
+    max_dereference_depth: 2
+    fetch_timeout: "30s"
+    refresh_interval: "1h"

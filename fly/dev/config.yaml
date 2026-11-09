@@ -62,8 +62,14 @@ issuer:
   registry_client:
     addr: sunet-vc-registry.internal:8090
   key_config:
-    private_key_path: "/pki/signing_ec_private.pem"
-    chain_path: "/pki/signing_ec_chain.pem"
+    private_key_path: "/pki/issuer_signing_private.pem"
+    chain_path: "/pki/issuer_signing_chain.pem"
+  # WeBuild access certificate; enable together with the issuer fly.toml mounts.
+  # access_certificate:
+  #   validate: true
+  #   key_config:
+  #     private_key_path: "/pki/wrpac_private.pem"
+  #     chain_path: "/pki/wrpac_chain.pem"
   jwt_attribute:
     issuer: https://sunet-vc-apigw.fly.dev
     enable_not_before: true
@@ -71,7 +77,7 @@ issuer:
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
   pseudonym_seed: true
   mdoc:
-    certificate_chain_path: "/pki/signing_ec_chain.pem"
+    certificate_chain_path: "/pki/issuer_signing_chain.pem"
   #  default_validity: "8760h"
   #  digest_algorithm: "SHA-256"
 
@@ -88,8 +94,12 @@ verifier:
   supported_wallets:
     "Fly Wallet": "https://sunet-vc-wallet.fly.dev/cb"
   key_config:
-    private_key_path: "/pki/signing_ec_private.pem"
-    chain_path: "/pki/signing_ec_chain.pem"
+    private_key_path: "/pki/wrpac_private.pem"
+    chain_path: "/pki/wrpac_chain.pem"
+  access_certificate:
+    validate: true
+  # registration_certificate:   # only once a WRPRC is issued
+  #   file_path: "/pki/wrprc.jwt"
   outbound:
     oidc_provider:
       issuer: "https://sunet-vc-verifier.fly.dev"

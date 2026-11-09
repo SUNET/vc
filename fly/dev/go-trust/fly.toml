@@ -9,11 +9,11 @@ primary_region = "arn"
   GT_PORT = "6001"
 
 [[files]]
-  guest_path = "/whitelist.yaml"
-  local_path = "fly/dev/go-trust/whitelist.yaml"
+  guest_path = "/config.yaml"
+  local_path = "fly/dev/go-trust/config.yaml"
 
 [experimental]
-  cmd = ["--registry", "whitelist", "--whitelist", "/whitelist.yaml"]
+  cmd = ["--config", "/config.yaml"]
 
 [http_service]
   internal_port = 6001
