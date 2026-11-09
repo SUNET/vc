@@ -8,6 +8,8 @@ const (
 
 	// ProofTypeDataIntegrity is the type for Data Integrity Proofs
 	ProofTypeDataIntegrity = "DataIntegrityProof"
+
+	jsonLDContextKey = "@context"
 )
 
 // NewJSONLDOptions creates a new JsonLdOptions with the global document loader configured

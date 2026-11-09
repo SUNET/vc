@@ -17,6 +17,11 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
+const (
+	datastoreSourceColumn = "d.authentic_source"
+	datastoreScopeColumn  = "d.scope"
+)
+
 // SQLDatastoreColl is a SQL-backed implementation of DatastoreStore.
 type SQLDatastoreColl struct {
 	Service *Service
@@ -632,8 +637,8 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 		term := "%" + escapeLike(query.Search) + "%"
 		searchCols := []string{
 			"d.document_id",
-			"d.authentic_source",
-			"d.scope",
+			datastoreSourceColumn,
+			datastoreScopeColumn,
 			c.dialect.JSONTextExtract("d.document_data", "family_name"),
 			c.dialect.JSONTextExtract("d.document_data", "given_name"),
 			c.dialect.JSONTextExtract("d.document_data", "email"),

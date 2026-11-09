@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,12 +62,15 @@ func (r *StaticVC20KeyResolver) ResolveKey(ctx context.Context, verificationMeth
 
 // VC20Handler handles W3C VC 2.0 Data Integrity credentials in OpenID4VP flows.
 type VC20Handler struct {
-	keyResolver     VC20KeyResolver
-	trustedIssuers  map[string]bool
-	checkRevocation bool
-	clock           func() time.Time
-	allowedSkew     time.Duration
-	signerConfig    *VC20SignerConfig
+	keyResolver VC20KeyResolver
+	// holderKeyResolver resolves the key of a presentation's own proof. Unset,
+	// keyResolver does.
+	holderKeyResolver VC20KeyResolver
+	trustedIssuers    map[string]bool
+	checkRevocation   bool
+	clock             func() time.Time
+	allowedSkew       time.Duration
+	signerConfig      *VC20SignerConfig
 
 	// Presentation binding. A W3C VP proves holder binding with a proof over
 	// the presentation carrying the verifier's challenge and domain; without
@@ -83,6 +87,20 @@ type VC20HandlerOption func(*VC20Handler)
 func WithVC20KeyResolver(resolver VC20KeyResolver) VC20HandlerOption {
 	return func(h *VC20Handler) {
 		h.keyResolver = resolver
+	}
+}
+
+// WithVC20HolderKeyResolver sets the resolver for the key that signed a
+// presentation, apart from the resolver for the issuer's key.
+//
+// The two questions differ. The issuer's key is trusted or it is not, and a
+// trust service answers that. The holder's key only has to be the one that
+// signed this exchange: nobody vouches for a holder, and a self-certifying
+// identifier such as a did:key carries its key in itself. Sending it to a
+// trust registry makes every holder fail, because no registry lists one.
+func WithVC20HolderKeyResolver(resolver VC20KeyResolver) VC20HandlerOption {
+	return func(h *VC20Handler) {
+		h.holderKeyResolver = resolver
 	}
 }
 
@@ -255,12 +273,10 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	// after unwrapping there is nothing left tying the credential to this
 	// session.
 	isPresentation := false
-	if types, ok := credMap["type"].([]any); ok {
-		for _, t := range types {
-			if t == "VerifiablePresentation" {
-				isPresentation = true
-				break
-			}
+	for _, t := range compactTypeNames(credMap["type"]) {
+		if t == "VerifiablePresentation" {
+			isPresentation = true
+			break
 		}
 	}
 
@@ -275,6 +291,13 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		credBytes, credMap, err = h.extractCredentialFromVP(credMap)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract credential from VP: %w", err)
+		}
+		// The signature shows who signed this exchange. Binding means the
+		// signer is who the credential was issued to.
+		if h.requireHolderBinding {
+			if err := checkSubjectBinding(credMap, holder); err != nil {
+				return nil, fmt.Errorf("presentation is not bound to the credential's subject: %w", err)
+			}
 		}
 	} else if h.requireHolderBinding {
 		// A bare credential proves issuance, not presentation. Accepting one
@@ -783,10 +806,14 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 	if vm == "" {
 		return "", errors.New("presentation proof has no verificationMethod")
 	}
-	if h.keyResolver == nil {
+	resolver := h.holderKeyResolver
+	if resolver == nil {
+		resolver = h.keyResolver
+	}
+	if resolver == nil {
 		return "", errors.New("no key resolver configured for presentation verification")
 	}
-	holderKey, err := h.keyResolver.ResolveKey(ctx, vm)
+	holderKey, err := resolver.ResolveKey(ctx, vm)
 	if err != nil {
 		return "", fmt.Errorf("resolving holder key %q: %w", vm, err)
 	}
@@ -836,8 +863,96 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 		return "", fmt.Errorf("unsupported cryptosuite %q for a presentation proof", cryptosuite)
 	}
 
-	holder, _ := vpMap["holder"].(string)
-	return holder, nil
+	// What is returned is the identifier the signature was verified under, not
+	// the presentation's own "holder" member, which the presenter writes. A
+	// presenter who signs with one key and names another as holder is refused.
+	signer := didOf(vm)
+	if claimed := holderIDOf(vpMap["holder"]); claimed != "" && didOf(claimed) != signer {
+		return "", fmt.Errorf("presentation names holder %q but is signed by %q", claimed, signer)
+	}
+	return signer, nil
+}
+
+// holderIDOf is the identifier a presentation's holder member names: the string itself,
+// or the "id" of the object form.
+func holderIDOf(holder any) string {
+	switch h := holder.(type) {
+	case string:
+		return h
+	case map[string]any:
+		id, _ := h["id"].(string)
+		return id
+	}
+	return ""
+}
+
+// didOf is a verification method or DID URL without its fragment.
+func didOf(id string) string {
+	did, _, _ := strings.Cut(id, "#")
+	return did
+}
+
+// subjectIdentifiersOf is what signing as this DID shows control of: the DID itself,
+// and - where the method's verification method identifier follows from the DID alone -
+// that identifier too.
+//
+// Derived from the signer's DID and never from what the presenter wrote. The
+// verification method in a proof is the presenter's to choose, and the local resolver
+// reads a did:key or did:jwk key out of the identifier without looking at the fragment,
+// so a presenter could otherwise sign with their own key under
+// "did:key:<theirs>#anything" and have that string accepted as the subject the issuer
+// named.
+//
+// did:key's verification method is did:key:<multikey>#<multikey> and did:jwk's is
+// did:jwk:<jwk>#0, both settled by the identifier. Every other method is a DID document
+// whose fragments this cannot resolve, so only the bare DID counts there: a subject id
+// of did:web:example.com#alice is refused rather than read as the DID, because a DID
+// document's verification methods may name different controllers and #alice is exactly
+// what tells that subject from #bob.
+func subjectIdentifiersOf(signer string) []string {
+	ids := []string{signer}
+	switch {
+	case strings.HasPrefix(signer, "did:key:"):
+		ids = append(ids, signer+"#"+strings.TrimPrefix(signer, "did:key:"))
+	case strings.HasPrefix(signer, "did:jwk:"):
+		ids = append(ids, signer+"#0")
+	}
+	return ids
+}
+
+// checkSubjectBinding requires the signer of a presentation to be a subject of the
+// credential it carries: credentialSubject.id (or one of several) is one of the
+// identifiers signing as that DID shows control of (subjectIdentifiersOf).
+//
+// A credential that names no subject has nothing to bind to, and is refused: otherwise
+// anyone holding a copy could present it under a key of their own. A deployment that
+// means to accept such a credential turns holder binding off for that query
+// (require_cryptographic_holder_binding), which is the question this answers, rather
+// than having this answer it for every query at once.
+func checkSubjectBinding(credMap map[string]any, signer string) error {
+	var subjects []any
+	switch cs := credMap["credentialSubject"].(type) {
+	case map[string]any:
+		subjects = []any{cs}
+	case []any:
+		subjects = cs
+	}
+	named := false
+	for _, sub := range subjects {
+		m, _ := sub.(map[string]any)
+		id, _ := m["id"].(string)
+		if id == "" {
+			continue
+		}
+		named = true
+		if slices.Contains(subjectIdentifiersOf(signer), id) {
+			return nil
+		}
+	}
+	if !named {
+		return errors.New("the credential names no subject (credentialSubject.id) to bind the presenter to")
+	}
+	return fmt.Errorf("the presentation is signed by %q, which is not a subject of the credential", signer)
 }
 
 // verifyECDSA2019 verifies a credential with ecdsa-rdfc-2019 cryptosuite.
@@ -981,13 +1096,7 @@ func (h *VC20Handler) buildResult(
 	}
 
 	// Extract types
-	if types, ok := credMap["type"].([]any); ok {
-		for _, t := range types {
-			if ts, ok := t.(string); ok {
-				result.Types = append(result.Types, ts)
-			}
-		}
-	}
+	result.Types = append(result.Types, compactTypeNames(credMap["type"])...)
 
 	// Extract credential subject
 	if cs, ok := credMap["credentialSubject"].(map[string]any); ok {
@@ -1316,6 +1425,27 @@ func (h *VC20Handler) checkPresentationBinding(proof map[string]any) error {
 	}
 	if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
 		return errors.New("presentation proof domain does not name this verifier")
+	}
+	return nil
+}
+
+// compactTypeNames reads the "type" member of a compacted JSON-LD document. It
+// is a single string or an array of strings: a document with one type may
+// spell it either way (VC Data Model 2.0, section 4.4), and the Accredify
+// wallet sends "type": "VerifiablePresentation". Anything else yields no
+// names, so a malformed member is never read as a presentation.
+func compactTypeNames(v any) []string {
+	switch t := v.(type) {
+	case string:
+		return []string{t}
+	case []any:
+		names := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				names = append(names, s)
+			}
+		}
+		return names
 	}
 	return nil
 }
