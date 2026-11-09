@@ -556,20 +556,17 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 // DatastorePreAuthOfferRequest is the request for generating a pre-authorized credential offer
 // for a specific document in the datastore.
 type DatastorePreAuthOfferRequest struct {
-	// header:"-" on every field: gin binds headers by field name when there is no
-	// header tag, and the SPOCP middleware never reads headers (see PrepareIssuanceRequest).
-
 	// required: true
 	// example: SUNET
-	AuthenticSource string `json:"authentic_source" header:"-" validate:"required,max=128,printascii"`
+	AuthenticSource string `json:"authentic_source" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: pid
-	Scope string `json:"scope" header:"-" validate:"required,max=128,printascii"`
+	Scope string `json:"scope" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
-	DocumentID string `json:"document_id" header:"-" validate:"required,max=128,printascii"`
+	DocumentID string `json:"document_id" validate:"required,max=128,printascii"`
 }
 
 // DatastorePreAuthOfferReply is the reply containing a credential offer

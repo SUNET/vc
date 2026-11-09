@@ -604,14 +604,12 @@ func TestFullEApostilleVerification(t *testing.T) {
 	suite := NewSdSuite()
 
 	err = suite.Verify(cred, issuerKey)
+	// Singapore's credential was signed by another implementation, with mandatory quads, so this is the
+	// test that says whether the derived-proof verification agrees with everyone else's.
 	if err != nil {
-		t.Logf("Verification failed: %v", err)
-		t.Logf("Note: This may be due to differences in mandatory hash calculation or N-Quad ordering")
-		// Don't fail the test yet - we're still debugging
-		// t.Fatalf("Verification failed: %v", err)
-	} else {
-		t.Log("=== FULL CRYPTOGRAPHIC VERIFICATION SUCCESSFUL ===")
+		t.Fatalf("Verification failed: %v", err)
 	}
+	t.Log("=== FULL CRYPTOGRAPHIC VERIFICATION SUCCESSFUL ===")
 }
 
 // TestEApostilleDebugVerification provides detailed debugging info for verification

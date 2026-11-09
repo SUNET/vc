@@ -146,6 +146,20 @@ type KeyResolver interface {
 	ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error)
 }
 
+// DID document verification relationships a key can be authorized for.
+const (
+	RelationshipAuthentication  = "authentication"
+	RelationshipAssertionMethod = "assertionMethod"
+)
+
+// RelationshipKeyResolver is a KeyResolver that can also say whether the DID document
+// authorizes the verification method for a relationship, and names the method's own DID
+// as its controller. Resolving a key is not that: a method listed in a document without
+// the relationship may still be a key of the DID, but not one that may authenticate as it.
+type RelationshipKeyResolver interface {
+	ResolveKeyFor(ctx context.Context, verificationMethod, relationship string) (crypto.PublicKey, error)
+}
+
 // CombinedTrustService combines evaluation and resolution capabilities.
 // This is the full interface for trust management across all credential formats.
 type CombinedTrustService interface {
