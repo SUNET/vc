@@ -308,6 +308,11 @@ type DatastoreListRequest struct {
 	Scope             string `json:"scope"`
 	ValidFrom         int64  `json:"valid_from"`
 	ValidTo           int64  `json:"valid_to"`
+
+	// AllowedAuthenticSources and AllowedScopes come from the SPOCP context.
+	// Every binder ignores them.
+	AllowedAuthenticSources []string `json:"-" form:"-" header:"-"`
+	AllowedScopes           []string `json:"-" form:"-" header:"-"`
 }
 
 // DatastoreListReply is the reply for a list of documents
@@ -329,11 +334,13 @@ type DatastoreListReply struct {
 //	@Router			/api/v1/datastore/list [post]
 func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
 	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
-		AuthenticSource:   req.AuthenticSource,
-		IdentityMappingID: req.IdentityMappingID,
-		Scope:             req.Scope,
-		ValidFrom:         req.ValidFrom,
-		ValidTo:           req.ValidTo,
+		AuthenticSource:         req.AuthenticSource,
+		IdentityMappingID:       req.IdentityMappingID,
+		Scope:                   req.Scope,
+		ValidFrom:               req.ValidFrom,
+		ValidTo:                 req.ValidTo,
+		AllowedAuthenticSources: req.AllowedAuthenticSources,
+		AllowedScopes:           req.AllowedScopes,
 	})
 	if err != nil {
 		return nil, err
@@ -497,8 +504,8 @@ type DatastoreSearchRequest struct {
 	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
 	Scope                   string   `json:"scope" form:"scope"`
 	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-"`
-	AllowedScopes           []string `json:"-" form:"-"`
+	AllowedAuthenticSources []string `json:"-" form:"-" header:"-"`
+	AllowedScopes           []string `json:"-" form:"-" header:"-"`
 }
 
 // DatastoreSearchReply is the reply for searching documents

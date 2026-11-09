@@ -65,6 +65,13 @@
 
 ### Fixed
 
+- **`POST /api/v1/datastore/list` honours the SPOCP allowed lists**: a session
+  limited to one authentic source could list the document metadata of every
+  source for an identity mapping id it knew, by naming no selector. The route
+  and both stores apply `spocp_allowed_authentic_sources` and
+  `spocp_allowed_scopes` as `GET /api/v1/datastore/search` does. The allowed
+  lists on the list and search requests are unreachable from request headers.
+
 - **SPOCP resource rules hold for the selector a handler receives**: the
   authorization middleware and `Binding.Request` could read different
   `authentic_source` or `scope` values from one `/api/v1` request. Every
