@@ -17,6 +17,11 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
+const (
+	datastoreSourceColumn = "d.authentic_source"
+	datastoreScopeColumn  = "d.scope"
+)
+
 // SQLDatastoreColl is a SQL-backed implementation of DatastoreStore.
 type SQLDatastoreColl struct {
 	Service *Service
@@ -471,8 +476,8 @@ func (c *SQLDatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model
 	}
 
 	where := sqlWhere{conditions: []string{"m.identity_mapping_id = ?"}, args: []any{query.IdentityMappingID}}
-	if !where.selectWithinAllowed("d.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
-		!where.selectWithinAllowed("d.scope", query.Scope, query.AllowedScopes) {
+	if !where.selectWithinAllowed(datastoreSourceColumn, query.AuthenticSource, query.AllowedAuthenticSources) ||
+		!where.selectWithinAllowed(datastoreScopeColumn, query.Scope, query.AllowedScopes) {
 		return []*model.DocumentList{}, nil
 	}
 
@@ -605,8 +610,8 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 	defer span.End()
 
 	where := sqlWhere{}
-	if !where.selectWithinAllowed("d.authentic_source", query.AuthenticSource, query.AllowedAuthenticSources) ||
-		!where.selectWithinAllowed("d.scope", query.Scope, query.AllowedScopes) {
+	if !where.selectWithinAllowed(datastoreSourceColumn, query.AuthenticSource, query.AllowedAuthenticSources) ||
+		!where.selectWithinAllowed(datastoreScopeColumn, query.Scope, query.AllowedScopes) {
 		return []*model.CompleteDocument{}, nil
 	}
 	conditions, args := where.conditions, where.args
@@ -615,8 +620,8 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 		term := "%" + escapeLike(query.Search) + "%"
 		searchCols := []string{
 			"d.document_id",
-			"d.authentic_source",
-			"d.scope",
+			datastoreSourceColumn,
+			datastoreScopeColumn,
 			c.dialect.JSONTextExtract("d.document_data", "family_name"),
 			c.dialect.JSONTextExtract("d.document_data", "given_name"),
 			c.dialect.JSONTextExtract("d.document_data", "email"),
