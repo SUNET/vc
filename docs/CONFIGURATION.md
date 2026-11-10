@@ -402,8 +402,9 @@ selector.
 An atom, a set of atoms and a wildcard enter the filter. A prefix or suffix form
 in the authentic_source or scope position stays out of it: the request receives
 no document through that form until it names the value. Naming the value receives
-the document the engine allows. /ui/status offers the sources and scopes the rules
-grant on any route of the service.
+the document the engine allows. To let a request that names no value list every
+document a rule grants, write the position as an atom, a set of atoms or a wildcard.
+/ui/status offers the sources and scopes the rules grant on any route of the service.
 
 | Field        | Type       | Description                                                                                                                                                                                                                                                                                    | Example                                                                                                          | Default | Required |
 | ------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------- | -------- |
