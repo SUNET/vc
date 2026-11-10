@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/sqlstore"
 
 	"github.com/jmoiron/sqlx"
@@ -228,23 +228,21 @@ func (c *SQLIdentityMappingsColl) SearchMappings(ctx context.Context, query *Sea
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:identities:searchMappings")
 	defer span.End()
 
-	conditions := []string{}
-	args := []any{}
-
-	if query.AuthenticSource != "" {
-		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
+	where := sqlWhere{}
+	where.selected(c.dialect, "authentic_source", query.AuthenticSource)
+	sources, everySource := query.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
+	if !everySource {
+		if len(sources) == 0 {
 			return []*model.IdentityMapping{}, nil
 		}
-		conditions = append(conditions, "authentic_source = ?")
-		args = append(args, query.AuthenticSource)
-	} else if len(query.AllowedAuthenticSources) > 0 {
-		placeholders := make([]string, len(query.AllowedAuthenticSources))
-		for i, src := range query.AllowedAuthenticSources {
-			placeholders[i] = "?"
-			args = append(args, src)
+		anySource := make([]string, len(sources))
+		for i, source := range sources {
+			anySource[i] = c.dialect.ExactEquals("authentic_source")
+			where.args = append(where.args, source)
 		}
-		conditions = append(conditions, fmt.Sprintf("authentic_source IN (%s)", strings.Join(placeholders, ", ")))
+		where.conditions = append(where.conditions, "("+strings.Join(anySource, " OR ")+")")
 	}
+	conditions, args := where.conditions, where.args
 
 	if query.Search != "" {
 		term := "%" + escapeLike(query.Search) + "%"

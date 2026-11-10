@@ -1662,6 +1662,28 @@ type SupportedCredentialConfig struct {
 // registration time. When two services share endpoints, rules for one
 // service do not grant access to the other.
 // When no rules are configured, any valid Bearer JWT grants access.
+//
+// An admin session follows the same rules: its subject takes the place of the
+// JWT subject. A session or token whose subject no rule accepts on the request's
+// service, method and path answers 403. On a deployment with rules, the admin UI
+// on and no OIDC, /ui/login grants a session with subject anonymous, which needs
+// its own rule:
+//
+//	(vc (service apigw)(method *)(path /api/v1/*)(subject anonymous)(authentic_source *)(scope *))
+//
+// A request naming no authentic_source or scope is filtered by the pairs the
+// rules grant. This covers POST /api/v1/datastore/list, GET /api/v1/datastore/search
+// and GET /api/v1/identity/mapping/search, whose pairs are those with scope
+// identity_mapping or a wildcard scope. Rules for (A, X) and (B, Y) return no
+// document of (A, Y). A token still needs a wildcard source and scope to name no
+// selector.
+//
+// An atom, a set of atoms and a wildcard enter the filter. A prefix or suffix form
+// in the authentic_source or scope position stays out of it: the request receives
+// no document through that form until it names the value. Naming the value receives
+// the document the engine allows. To let a request that names no value list every
+// document a rule grants, write the position as an atom, a set of atoms or a wildcard.
+// /ui/status offers the sources and scopes the rules grant on any route of the service.
 type APIAuth struct {
 	// JWKS holds the static JWKS Bearer token authentication configuration
 	// When enabled, requests are validated against a manually configured JWKS URL

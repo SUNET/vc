@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -290,7 +289,7 @@ func TestAdminStatus_NoRules_NoEngine(t *testing.T) {
 
 	assert.Equal(t, true, result["authenticated"])
 
-	// No SPOCP engine → AllowedAuthenticSources returns nil → fetch from DB
+	// No SPOCP engine → every stored source
 	sources, ok := result["allowed_authentic_sources"].([]any)
 	require.True(t, ok)
 	assert.ElementsMatch(t, []any{"SUNET", "LADOK"}, sources,
@@ -392,17 +391,13 @@ func TestAdminStatus_EmptyDB_WildcardRule(t *testing.T) {
 	cookies := loginAndGetCookies(t, engine)
 	result := getStatus(t, engine, cookies)
 
-	// DB returns empty → allowedSources stays nil → JSON null
-	// This is acceptable — the UI should handle empty/null gracefully
 	assert.Equal(t, true, result["authenticated"])
 }
 
-// TestAdminStatus_UserNotInRules verifies that a user with no matching SPOCP
-// rules gets no sources and no scopes in the UI.
-func TestAdminStatus_UserNotInRules(t *testing.T) {
-	mock := &adminStatusMock{
-		authenticSources: []string{"SUNET", "LADOK"},
-	}
+// TestAdminStatus_ShowsWhatTheRulesGrant holds the guarantee of the status page:
+// it offers a source or scope only when a rule of this service accepts it for
+// this subject on some route.
+func TestAdminStatus_ShowsWhatTheRulesGrant(t *testing.T) {
 	cfg := &model.Cfg{
 		Common: &model.Common{
 			CredentialMetadata: map[string]*model.CredentialMetadata{
@@ -411,31 +406,63 @@ func TestAdminStatus_UserNotInRules(t *testing.T) {
 			},
 		},
 	}
-	rules := []string{
-		// Only alice has rules — bob has none
-		`(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))`,
+	for _, row := range []struct {
+		name        string
+		rule        string
+		wantSources []any
+		wantScopes  []any
+		wantMapping bool
+	}{
+		{
+			name:        "stranger",
+			rule:        `(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))`,
+			wantSources: []any{},
+			wantScopes:  []any{},
+		},
+		{
+			name:        "rule of another service",
+			rule:        `(vc (service issuer)(method *)(path *)(subject bob@sunet.se)(authentic_source *)(scope *))`,
+			wantSources: []any{},
+			wantScopes:  []any{},
+		},
+		{
+			name:        "wildcard subject",
+			rule:        `(vc (service apigw)(method *)(path /api/v1/*)(subject *)(authentic_source *)(scope *))`,
+			wantSources: []any{"SUNET", "LADOK"},
+			wantScopes:  []any{"eduid", "pid"},
+			wantMapping: true,
+		},
+		{
+			name:        "limited subject, one route",
+			rule:        `(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject bob@sunet.se)(authentic_source NEW)(scope eduid))`,
+			wantSources: []any{"NEW"},
+			wantScopes:  []any{"eduid"},
+		},
+		{
+			name:        "identity mapping scope",
+			rule:        `(vc (service apigw)(method *)(path /api/v1/*)(subject bob@sunet.se)(authentic_source SUNET)(scope identity_mapping))`,
+			wantSources: []any{"SUNET"},
+			wantScopes:  []any{},
+			wantMapping: true,
+		},
+		{
+			name:        "prefix forms",
+			rule:        `(vc (service apigw)(method *)(path /api/v1/*)(subject bob@sunet.se)(authentic_source LAD*)(scope pi*))`,
+			wantSources: []any{"LADOK"},
+			wantScopes:  []any{"pid"},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			mock := &adminStatusMock{authenticSources: []string{"SUNET", "LADOK"}}
+			engine := testSetupAdminStatus(t, "bob@sunet.se", []string{row.rule}, cfg, mock)
+			result := getStatus(t, engine, loginAndGetCookies(t, engine))
+
+			assert.Equal(t, true, result["authenticated"])
+			assert.ElementsMatch(t, row.wantSources, result["allowed_authentic_sources"])
+			assert.ElementsMatch(t, row.wantScopes, result["scopes"])
+			assert.Equal(t, row.wantMapping, result["has_identity_mapping"])
+		})
 	}
-
-	// Login as bob — who has no SPOCP rules
-	engine := testSetupAdminStatus(t, "bob@sunet.se", rules, cfg, mock)
-	cookies := loginAndGetCookies(t, engine)
-	result := getStatus(t, engine, cookies)
-
-	assert.Equal(t, true, result["authenticated"])
-	assert.Equal(t, "bob@sunet.se", result["subject"])
-
-	// No matching rules → ResolveAllowedResources returns empty →
-	// filterAllowedScopes returns all scopes (no resource constraints)
-	// AllowedAuthenticSources returns nil → fetch from DB
-	sources, ok := result["allowed_authentic_sources"].([]any)
-	require.True(t, ok)
-	assert.ElementsMatch(t, []any{"SUNET", "LADOK"}, sources,
-		"user with no rules should get all DB sources (unrestricted)")
-
-	scopes, ok := result["scopes"].([]any)
-	require.True(t, ok)
-	assert.ElementsMatch(t, []any{"eduid", "pid"}, scopes,
-		"user with no rules should get all scopes (no resource constraints)")
 }
 
 // TestAdminStatus_ScopeTemplates_NestedPaths verifies that VCTM claims with
@@ -553,16 +580,12 @@ func (m *e2eMock) ListAuthenticSources(_ context.Context) ([]string, error) {
 
 func (m *e2eMock) DatastoreSearch(_ context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error) {
 	m.capturedSearch = req
-	// Simulate DB-level filtering: return only documents whose source+scope match the allowed lists.
+	// Simulate DB-level filtering: return only documents the reach accepts.
 	var filtered []*model.CompleteDocument
 	for _, doc := range m.documents {
-		if len(req.AllowedAuthenticSources) > 0 && !slices.Contains(req.AllowedAuthenticSources, doc.Meta.AuthenticSource) {
-			continue
+		if reachAccepts(req.Reach, doc.Meta.AuthenticSource, doc.Meta.Scope) {
+			filtered = append(filtered, doc)
 		}
-		if len(req.AllowedScopes) > 0 && !slices.Contains(req.AllowedScopes, doc.Meta.Scope) {
-			continue
-		}
-		filtered = append(filtered, doc)
 	}
 	return &apiv1.DatastoreSearchReply{Data: filtered}, nil
 }
@@ -708,15 +731,11 @@ func TestE2E_WildcardAdmin_SeesAllDocuments(t *testing.T) {
 	assert.ElementsMatch(t, []any{"SUNET", "LADOK", "CSN"}, status["allowed_authentic_sources"])
 	assert.ElementsMatch(t, []any{"eduid", "pid", "ehic"}, status["scopes"])
 
-	// Search should return all documents (wildcard = nil filters = no restriction)
+	// Search should return all documents
 	docs := e2eSearch(t, engine, cookies, "")
 	assert.Len(t, docs, 3, "wildcard admin should see all 3 documents")
 
-	// SPOCP filter fields should be nil (unrestricted)
-	assert.Nil(t, mock.capturedSearch.AllowedAuthenticSources,
-		"wildcard should pass nil AllowedAuthenticSources to DB")
-	assert.Nil(t, mock.capturedSearch.AllowedScopes,
-		"wildcard should pass nil AllowedScopes to DB")
+	assert.True(t, mock.capturedSearch.Reach.Everything())
 }
 
 // TestE2E_RestrictedUser_SeesOnlyAllowedDocuments verifies that a user with
@@ -758,10 +777,6 @@ func TestE2E_RestrictedUser_SeesOnlyAllowedDocuments(t *testing.T) {
 	assert.Equal(t, "SUNET", meta["authentic_source"])
 	assert.Equal(t, "eduid", meta["scope"])
 	assert.Equal(t, "doc-1", meta["document_id"])
-
-	// Verify the filter was passed to the search handler
-	assert.Equal(t, []string{"SUNET"}, mock.capturedSearch.AllowedAuthenticSources)
-	assert.Equal(t, []string{"eduid"}, mock.capturedSearch.AllowedScopes)
 }
 
 // TestE2E_SourceSet_FiltersToSetMembers verifies that a user with a set-style
@@ -817,8 +832,8 @@ func TestE2E_MultipleRules_AccumulateAccess(t *testing.T) {
 		documents: []*model.CompleteDocument{
 			mkDoc("SUNET", "eduid", "doc-1"),
 			mkDoc("LADOK", "pid", "doc-2"),
-			mkDoc("SUNET", "pid", "doc-3"),   // SUNET but pid (only LADOK/pid rule)
-			mkDoc("LADOK", "eduid", "doc-4"), // LADOK but eduid (only SUNET/eduid rule)
+			mkDoc("SUNET", "pid", "doc-3"),   // no rule pairs SUNET with pid
+			mkDoc("LADOK", "eduid", "doc-4"), // no rule pairs LADOK with eduid
 		},
 	}
 	cfg := &model.Cfg{
@@ -841,11 +856,12 @@ func TestE2E_MultipleRules_AccumulateAccess(t *testing.T) {
 	assert.ElementsMatch(t, []any{"SUNET", "LADOK"}, status["allowed_authentic_sources"])
 	assert.ElementsMatch(t, []any{"eduid", "pid"}, status["scopes"])
 
-	// Search: AllowedAuthenticSources=[SUNET,LADOK] + AllowedScopes=[eduid,pid]
-	// This means the DB filter uses $in for both — so all 4 docs pass the source
-	// and scope filters independently (not as pairs). This is the current behavior.
 	docs := e2eSearch(t, engine, cookies, "")
-	require.Len(t, docs, 4, "multiple rules accumulate independently (source $in + scope $in)")
+	var docIDs []any
+	for _, d := range docs {
+		docIDs = append(docIDs, d["meta"].(map[string]any)["document_id"])
+	}
+	assert.ElementsMatch(t, []any{"doc-1", "doc-2"}, docIDs, "the rules grant pairs")
 }
 
 // TestE2E_NoRules_UnrestrictedAccess verifies that when no SPOCP rules exist
@@ -877,8 +893,7 @@ func TestE2E_NoRules_UnrestrictedAccess(t *testing.T) {
 	// Search: no SPOCP engine → no session SPOCP filtering → no filters passed
 	docs := e2eSearch(t, engine, cookies, "")
 	assert.Len(t, docs, 2, "unrestricted user should see all documents")
-	assert.Nil(t, mock.capturedSearch.AllowedAuthenticSources)
-	assert.Nil(t, mock.capturedSearch.AllowedScopes)
+	assert.True(t, mock.capturedSearch.Reach.Everything())
 }
 
 // TestE2E_UnauthenticatedSearch_Rejected verifies that unauthenticated requests
@@ -936,8 +951,8 @@ func TestE2E_SearchWithQueryParam(t *testing.T) {
 
 	// Verify both the search term and SPOCP filters were passed
 	assert.Equal(t, "doc-matching", mock.capturedSearch.Search)
-	assert.Equal(t, []string{"SUNET"}, mock.capturedSearch.AllowedAuthenticSources)
-	assert.Equal(t, []string{"eduid"}, mock.capturedSearch.AllowedScopes)
+	assert.True(t, reachAccepts(mock.capturedSearch.Reach, "SUNET", "eduid"))
+	assert.False(t, reachAccepts(mock.capturedSearch.Reach, "SUNET", "pid"))
 }
 
 // TestE2E_EmptyDatastore_NoDocuments verifies that when the datastore is empty,

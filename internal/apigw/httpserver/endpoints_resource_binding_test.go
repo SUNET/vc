@@ -166,7 +166,7 @@ type bindingEndpoint = func(context.Context, *gin.Context) (any, error)
 type bindingRoute struct {
 	method, path string
 	shape        selectorShape
-	// filtered: the handler passes spocp_allowed_authentic_sources to its query.
+	// filtered: the handler passes the request's reach to its query.
 	filtered bool
 	// jsonRest holds the other required members in JSON. goRest holds them under
 	// the names gin form binding reads for this request type.

@@ -3,9 +3,10 @@ package httpserver
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"go.opentelemetry.io/otel/codes"
 
@@ -84,15 +85,13 @@ func (s *Service) endpointIdentityMappingSearch(ctx context.Context, c *gin.Cont
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIdentityMappingSearch")
 	defer span.End()
 
-	// Check that the user has the "identity_mapping" scope.
-	// A nil slice means unrestricted access (wildcard rule).
-	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
-		if scopes, ok := allowed.([]string); ok && scopes != nil {
-			hasScope := slices.Contains(scopes, "identity_mapping")
-			if !hasScope {
-				return nil, errForbidden
-			}
-		}
+	reach, err := httphelpers.ResourceReachOf(c)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	if !reach.ReachesScope(resourcereach.IdentityMappingScope) {
+		return nil, errForbidden
 	}
 
 	request := &apiv1.IdentityMappingSearchRequest{}
@@ -101,12 +100,7 @@ func (s *Service) endpointIdentityMappingSearch(ctx context.Context, c *gin.Cont
 		return nil, err
 	}
 
-	// Apply SPOCP-derived authentic_source filter for DB queries.
-	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
-		if sources, ok := allowed.([]string); ok {
-			request.AllowedAuthenticSources = sources
-		}
-	}
+	request.Reach = reach.Selecting(request.AuthenticSource, "")
 
 	reply, err := s.apiv1.IdentityMappingSearch(ctx, request)
 	if err != nil {

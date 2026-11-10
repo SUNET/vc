@@ -11,15 +11,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/spocputil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
-	"github.com/sirosfoundation/go-spocp/pkg/compare"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
-	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
 
 // JWKSCache is the generic cache interface used to store raw JWKS JSON.
@@ -332,10 +332,8 @@ func (p *oidcKeySetProvider) GetKeySet(ctx context.Context) (jwk.Set, error) {
 // internal/verifier.
 type SafeEngine = spocputil.Engine
 
-// apiAuthRuleDimensions lists the tagged sub-lists that every SPOCP endpoint
-// rule must contain, in positional order. All six parts are mandatory — use
-// * as wildcard for fields you don't want to restrict.
-var apiAuthRuleDimensions = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
+// apiAuthRuleDimensions lists the tagged sub-lists of an SPOCP endpoint rule.
+var apiAuthRuleDimensions = resourcereach.RuleDimensions()
 
 // BuildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
@@ -375,117 +373,33 @@ func BuildSPOCPQuery(service, method, path, subject, authenticSource, scope stri
 	})
 }
 
-// ResourcePair represents an allowed (authentic_source, scope) combination.
-type ResourcePair struct {
-	AuthenticSource string
-	Scope           string
-}
-
-// ResolveAllowedResources returns all (authentic_source, scope) pairs that the
-// given subject is authorized for, by inspecting the SPOCP rules directly.
-// A wildcard in the rule position means "any value" — represented as "*" in the result.
-// Returns nil when engine is nil (no authorization configured).
-func ResolveAllowedResources(engine *SafeEngine, subject string) []ResourcePair {
+// authorizeTokenSubject binds the reach of a validated token's subject and, when
+// rules are configured, runs the SPOCP check. A request naming no pair asks about
+// the empty pair, which only a wildcard source and scope accept. A failure aborts
+// the request and returns false.
+func authorizeTokenSubject(c *gin.Context, engine *SafeEngine, service, subject string, log *logger.Log) bool {
+	if engine != nil && subject == "" {
+		log.Info("jwt_missing_identity", "error", "token has no eppn or email claim", "req_id", c.GetString("req_id"))
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token missing eppn or email claim"})
+		return false
+	}
+	if _, ok := bindResourceReach(c, engine, service, subject, log); !ok {
+		return false
+	}
 	if engine == nil {
-		return nil
+		return true
 	}
-
-	subjectQuery := sexp.NewList("subject", sexp.NewAtom(subject))
-
-	rules := engine.ExportRules()
-
-	var pairs []ResourcePair
-	for _, rule := range rules {
-		ruleList, ok := rule.(*sexp.List)
-		if !ok || ruleList.Tag != "vc" || len(ruleList.Elements) < 6 {
-			continue
-		}
-		// Check if the subject element (position 3) matches.
-		subjectRule := ruleList.Elements[3]
-		if !compare.LessPermissive(subjectQuery, subjectRule) {
-			continue
-		}
-		// Extract authentic_source (position 4) and scope (position 5).
-		// Sets expand into multiple pairs.
-		sources := extractListValues(ruleList.Elements[4])
-		scopes := extractListValues(ruleList.Elements[5])
-		for _, as := range sources {
-			for _, sc := range scopes {
-				pairs = append(pairs, ResourcePair{AuthenticSource: as, Scope: sc})
-			}
-		}
-	}
-	return pairs
-}
-
-// extractListValues extracts string values from a list element like (authentic_source SUNET).
-// Returns ["*"] for wildcards. Expands sets into multiple values.
-func extractListValues(elem sexp.Element) []string {
-	list, ok := elem.(*sexp.List)
-	if !ok || len(list.Elements) == 0 {
-		return []string{"*"}
-	}
-	switch v := list.Elements[0].(type) {
-	case *sexp.Atom:
-		return []string{v.Value}
-	case *starform.Wildcard:
-		return []string{"*"}
-	case *starform.Set:
-		var values []string
-		for _, el := range v.Elements {
-			if a, ok := el.(*sexp.Atom); ok {
-				values = append(values, a.Value)
-			}
-		}
-		if len(values) == 0 {
-			return []string{"*"}
-		}
-		return values
-	default:
-		return []string{"*"}
-	}
-}
-
-// AllowedAuthenticSources returns the distinct authentic_source values the subject
-// is permitted to access. Returns nil for unrestricted access (wildcard rule or no resource rules).
-func AllowedAuthenticSources(engine *SafeEngine, subject string) []string {
-	pairs := ResolveAllowedResources(engine, subject)
+	guard := resourceGuard{engine: engine, service: service, subject: subject, log: log}
+	c.Set(resourceGuardKey, guard)
+	pairs := extractResourcePairs(c)
 	if len(pairs) == 0 {
-		return nil // no resource constraints — unrestricted
+		pairs = []resourcePair{{}}
 	}
-	seen := map[string]bool{}
-	var result []string
-	for _, p := range pairs {
-		if p.AuthenticSource == "*" {
-			return nil // unrestricted
-		}
-		if !seen[p.AuthenticSource] {
-			seen[p.AuthenticSource] = true
-			result = append(result, p.AuthenticSource)
-		}
+	if !guard.allows(c, pairs) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+		return false
 	}
-	return result
-}
-
-// AllowedScopes returns the distinct scope values the subject is permitted to
-// access. Returns nil for unrestricted access (wildcard rule or no resource rules).
-func AllowedScopes(engine *SafeEngine, subject string) []string {
-	pairs := ResolveAllowedResources(engine, subject)
-	if len(pairs) == 0 {
-		return nil // no resource constraints — unrestricted
-	}
-	seen := map[string]bool{}
-	var result []string
-	for _, p := range pairs {
-		if p.Scope == "*" {
-			return nil // unrestricted
-		}
-		if !seen[p.Scope] {
-			seen[p.Scope] = true
-			result = append(result, p.Scope)
-		}
-	}
-	return result
+	return true
 }
 
 // JWKSAuth returns a Gin middleware that validates Bearer JWT tokens and
@@ -577,31 +491,8 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 		}
 
 		sub := extractSPOCPSubject(token)
-
-		// SPOCP authorization check (only if rules are configured)
-		if engine != nil {
-			if sub == "" {
-				log.Info("jwt_missing_identity", "error", "token has no eppn or email claim", "req_id", c.GetString("req_id"))
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token missing eppn or email claim"})
-				return
-			}
-
-			// Store allowed authentic sources and scopes for downstream handlers (DB filtering).
-			allowed := AllowedAuthenticSources(engine, sub)
-			c.Set("spocp_allowed_authentic_sources", allowed)
-			allowedScopes := AllowedScopes(engine, sub)
-			c.Set("spocp_allowed_scopes", allowedScopes)
-
-			guard := resourceGuard{engine: engine, service: service, subject: sub, log: log}
-			c.Set(resourceGuardKey, guard)
-			pairs := extractResourcePairs(c)
-			if len(pairs) == 0 {
-				pairs = []resourcePair{{}}
-			}
-			if !guard.allows(c, pairs) {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-				return
-			}
+		if !authorizeTokenSubject(c, engine, service, sub, log) {
+			return
 		}
 
 		c.Set("jwt_claims", token)
@@ -652,29 +543,8 @@ func (m *middlewareHandler) JWKSAuthWithProvider(_ context.Context, service stri
 		}
 
 		sub := extractSPOCPSubject(token)
-
-		if engine != nil {
-			if sub == "" {
-				log.Info("jwt_missing_identity", "error", "token has no eppn or email claim", "req_id", c.GetString("req_id"))
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token missing eppn or email claim"})
-				return
-			}
-
-			allowed := AllowedAuthenticSources(engine, sub)
-			c.Set("spocp_allowed_authentic_sources", allowed)
-			allowedScopes := AllowedScopes(engine, sub)
-			c.Set("spocp_allowed_scopes", allowedScopes)
-
-			guard := resourceGuard{engine: engine, service: service, subject: sub, log: log}
-			c.Set(resourceGuardKey, guard)
-			pairs := extractResourcePairs(c)
-			if len(pairs) == 0 {
-				pairs = []resourcePair{{}}
-			}
-			if !guard.allows(c, pairs) {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-				return
-			}
+		if !authorizeTokenSubject(c, engine, service, sub, log) {
+			return
 		}
 
 		c.Set("jwt_claims", token)
@@ -748,6 +618,7 @@ func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth
 	default:
 		m.log.Info("api_auth_mode", "mode", "none")
 		return func(c *gin.Context) {
+			c.Set(resourceReachKey, resourcereach.Everything())
 			c.Next()
 		}, nil
 	}
