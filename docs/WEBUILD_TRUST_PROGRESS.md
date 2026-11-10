@@ -22,22 +22,22 @@ Status on 2026-11-09 for todo item 10 (access and registration certificates, Pub
 
 1. Does the issuer also need an access certificate (WRPAC) or a registration certificate (WRPRC), or is the trusted-list entry enough?
 2. Is it acceptable that the IDunion list CA is self-signed and sits in the x5c chain? This may conflict with HAIP.
-3. Should we load the lists unverified on Fly dev until #238 and #239 are fixed? go-trust currently trusts our services by a URL whitelist, not by the lists.
+3. Which signer certificates must `trust_anchor_bundle` hold so that go-trust loads the IDunion Pub-EAA list with verification on? go-trust 0.29.0 fixed #238 and #239, but a local run with only the two WP4 anchors loaded no entities.
 4. Wallet reading of trusted lists has not been started.
 
 ## Left to do
 
 1. Find why the wallet reports "Verifier is not trusted" (wallet-backend and go-trust logs, request object SAN, AuthZEN evaluation of the verifier chain).
 2. Get a registration certificate (WRPRC) for the verifier: needs the Raidiam sandbox back, a transport certificate, and a script for the registry API. Then enable `registration_certificate` and `trusted_roots_path` in `fly/dev/config.yaml`.
-3. Make go-trust read the WE BUILD lists on Fly dev: decide between unverified loading now and waiting for #238 and #239, then wire `fly/dev/go-trust/config.yaml` into `fly/dev/go-trust/fly.toml` (config and anchors as `[[files]]`, `--config`). Keep the whitelist active until the lists are proven.
+3. Make go-trust on Fly dev verify the WE BUILD lists. It already runs `fly/dev/go-trust/config.yaml` with no whitelist (release v75, 2026-11-10) and loads 12 lists, 96 entities, unverified. Add the signer anchors (`trust_anchor_bundle`, mounted as a `[[files]]` entry in `fly/dev/go-trust/fly.toml`), redeploy, and check the log shows no `signature verification failed` for the Pub-EAA list.
 4. Make the wallet read trusted lists (wallet-backend `WALLET_TRUST_DEFAULT_ENDPOINT`, `cmd/wallet`).
 5. Ask WP4 whether the issuer needs a WRPAC or WRPRC, and whether the self-signed list CA in x5c is acceptable under HAIP.
 6. Inspect the x5c chain of an issued credential.
 7. Decide on the script name: keep `create_wrprc.sh` for the IDunion CSR, or revert to `create_idunion_csr.sh` and reserve `create_wrprc.sh` for a real WRPRC request.
 8. Clean up: test containers `gt-test`, `gt-test2` and images `gt-local-test`, `gt-local-test2`, `gt-local-test3` on the Docker host; stale key files in `developer_tools/pki/webuild/` (`issuer-idunion.*`, `*-rejected.*`; keep `issuer-wrprc-idunion.key`).
 9. Update `todo.md` item 10 to match, and commit the uncommitted changes.
+10. write down the complete flow.
 
 ## Not changed on Fly
 
-- go-trust: the new `fly/dev/go-trust/config.yaml` is not deployed.
 - Credentials issued before the key swap no longer verify against the new `/jwks`.
