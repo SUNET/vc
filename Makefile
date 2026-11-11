@@ -143,6 +143,7 @@ comma                   := ,
 	release-check-issuer-jwks \
 	release-jwt-issuer build-jwt-issuer \
 	release-tsl-checker build-tsl-checker \
+	release-lol build-lol \
 	fly-launch-dev fly-launch-demo \
 	fly-deploy fly-deploy-dev fly-deploy-demo fly-deploy-dev-% fly-deploy-demo-% \
 	fly-status-dev fly-status-demo fly-status-dev-% fly-status-demo-% \
@@ -718,6 +719,46 @@ build-tsl-checker: bbs-native-lib-ensure ## Build tsl_checker developer tool
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(TSL_CHECKER_VERSION)" \
 		./developer_tools/scripts/tsl_checker/
 
+build-lol: ## Build lol (list of lists checker) developer tool
+	$(info Building lol)
+	$(eval LOL_VERSION := $(or $(shell git tag -l "lol-v*" --sort=-v:refname | head -n1 | sed 's/^lol-//'),dev))
+	CGO_ENABLED=0 GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		-o ./bin/lol -ldflags "-w -s -X main.version=$(LOL_VERSION)" \
+		./developer_tools/scripts/lol/
+
+release-lol: check_current_branch ## Tag and push a release for lol (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "lol-v*" --sort=-v:refname | grep -E '^lol-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing lol tags found, starting at lol-v0.0.0"; \
+		LATEST="lol-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^lol-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="lol-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed. GitHub Actions will build lol binaries."; \
+	echo ""
+
 release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
 	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
 		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
@@ -1212,6 +1253,7 @@ vscode: test-env gh-install ## Set up VS Code development environment
 		netcat-openbsd \
 		plantuml \
 		cmake \
+		poppler-utils \
 		pkg-config
 	$(info Installing yq)
 	sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\

@@ -1,0 +1,317 @@
+package signedxml
+
+import (
+	"crypto"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/beevik/etree"
+)
+
+var signingAlgorithms map[x509.SignatureAlgorithm]cryptoHash
+
+func init() {
+	signingAlgorithms = map[x509.SignatureAlgorithm]cryptoHash{
+		// MD2 not supported
+		// x509.MD2WithRSA: cryptoHash{algorithm: "rsa", hash: crypto.MD2},
+		x509.MD5WithRSA:    {algorithm: "rsa", hash: crypto.MD5},
+		x509.SHA1WithRSA:   {algorithm: "rsa", hash: crypto.SHA1},
+		x509.SHA256WithRSA: {algorithm: "rsa", hash: crypto.SHA256},
+		x509.SHA384WithRSA: {algorithm: "rsa", hash: crypto.SHA384},
+		x509.SHA512WithRSA: {algorithm: "rsa", hash: crypto.SHA512},
+		// RSA-PSS (RSASSA-PSS) algorithms
+		x509.SHA256WithRSAPSS: {algorithm: "rsa-pss", hash: crypto.SHA256},
+		x509.SHA384WithRSAPSS: {algorithm: "rsa-pss", hash: crypto.SHA384},
+		x509.SHA512WithRSAPSS: {algorithm: "rsa-pss", hash: crypto.SHA512},
+		// Ed25519 (EdDSA) - RFC 9231, eDelivery AS4 2.0
+		// Ed25519 is "pure" - it signs data directly without pre-hashing
+		x509.PureEd25519: {algorithm: "ed25519", hash: 0},
+		// DSA not supported
+		// x509.DSAWithSHA1:  cryptoHash{algorithm: "dsa", hash: crypto.SHA1},
+		// x509.DSAWithSHA256:cryptoHash{algorithm: "dsa", hash: crypto.SHA256},
+		// Golang ECDSA support is lacking, can't seem to load private keys
+		// x509.ECDSAWithSHA1:   cryptoHash{algorithm: "ecdsa", hash: crypto.SHA1},
+		// x509.ECDSAWithSHA256: cryptoHash{algorithm: "ecdsa", hash: crypto.SHA256},
+		// x509.ECDSAWithSHA384: cryptoHash{algorithm: "ecdsa", hash: crypto.SHA384},
+		// x509.ECDSAWithSHA512: cryptoHash{algorithm: "ecdsa", hash: crypto.SHA512},
+	}
+}
+
+type cryptoHash struct {
+	algorithm string
+	hash      crypto.Hash
+}
+
+// Signer provides options for signing an XML document
+type Signer struct {
+	signatureData
+	privateKey interface{}
+}
+
+// NewSigner returns a *Signer for the XML provided
+func NewSigner(xml string) (*Signer, error) {
+	doc, err := parseXML(xml)
+	if err != nil {
+		return nil, err
+	}
+	return NewSignerFromDoc(doc)
+}
+
+// NewSignerFromDoc returns a *Signer for the Document provided
+func NewSignerFromDoc(doc *etree.Document) (*Signer, error) {
+	s := &Signer{signatureData: signatureData{xml: doc}}
+	return s, nil
+}
+
+// Sign populates the XML digest and signature based on the parameters present and privateKey given
+func (s *Signer) Sign(privateKey interface{}) (string, error) {
+	s.privateKey = privateKey
+
+	if s.signature == nil {
+		if err := s.parseEnvelopedSignature(); err != nil {
+			return "", err
+		}
+	}
+	if err := s.parseSignedInfo(); err != nil {
+		return "", err
+	}
+	if err := s.parseSigAlgorithm(); err != nil {
+		return "", err
+	}
+	if err := s.parseCanonAlgorithm(); err != nil {
+		return "", err
+	}
+	if err := s.setDigest(); err != nil {
+		return "", err
+	}
+	if err := s.setSignature(); err != nil {
+		return "", err
+	}
+
+	xml, err := s.xml.WriteToString()
+	if err != nil {
+		return "", err
+	}
+	return xml, nil
+}
+
+// SetReferenceIDAttribute set the referenceIDAttribute
+func (s *Signer) SetReferenceIDAttribute(refIDAttribute string) {
+	s.signatureData.refIDAttribute = refIDAttribute
+}
+
+func (s *Signer) setDigest() (err error) {
+	references := s.signedInfo.FindElements("./Reference")
+	for _, ref := range references {
+		// Skip external references like cid: URIs (used for MIME attachments in WS-Security).
+		// These have pre-computed digests and use transforms we don't implement.
+		uri := ref.SelectAttrValue("URI", "")
+		if strings.HasPrefix(uri, "cid:") {
+			continue
+		}
+
+		doc := s.xml.Copy()
+
+		transforms := ref.SelectElement("Transforms")
+
+		var calculatedValue string
+
+		if transforms == nil || len(transforms.SelectElements("Transform")) == 0 {
+			// No transforms - extract and hash
+			doc, err := s.getReferencedXML(ref, doc)
+			if err != nil {
+				return err
+			}
+			calculatedValue, err = calculateHash(ref, doc)
+			if err != nil {
+				return err
+			}
+		} else {
+			// Has transforms - process them in the correct order.
+			// Non-c14n transforms (like enveloped-signature) operate on the full document.
+			// C14n transforms operate on the referenced element IN ITS ORIGINAL CONTEXT
+			// to properly handle inherited namespace declarations.
+
+			// First pass: apply non-c14n transforms to the full document
+			for _, transform := range transforms.SelectElements("Transform") {
+				transformAlgoURI := transform.SelectAttrValue("Algorithm", "")
+				if !strings.Contains(transformAlgoURI, "c14n") {
+					doc, err = processTransform(transform, doc, ALL_TRANSFORMS)
+					if err != nil {
+						return err
+					}
+				}
+			}
+
+			// Find the referenced element (keep it in context for c14n)
+			refElement, findErr := s.findReferencedElement(ref, doc)
+			if findErr != nil {
+				return findErr
+			}
+
+			// Apply c14n transforms to the element IN ITS CONTEXT
+			// This properly handles inherited namespace declarations.
+			var canonicalXML string
+			hasCanonicalization := false
+			for _, transform := range transforms.SelectElements("Transform") {
+				transformAlgoURI := transform.SelectAttrValue("Algorithm", "")
+				if strings.Contains(transformAlgoURI, "c14n") {
+					hasCanonicalization = true
+					canonAlgo, ok := CanonicalizationAlgorithms[transformAlgoURI]
+					if !ok {
+						return fmt.Errorf("signedxml: unsupported c14n algorithm: %s", transformAlgoURI)
+					}
+
+					// Get transform content (e.g., InclusiveNamespaces)
+					var transformContent string
+					if transform.ChildElements() != nil {
+						tDoc := etree.NewDocument()
+						tDoc.SetRoot(transform.Copy())
+						transformContent, _ = tDoc.WriteToString()
+					}
+
+					canonicalXML, err = canonAlgo.ProcessElement(refElement, transformContent)
+					if err != nil {
+						return err
+					}
+					// Only apply the first c14n transform (there should only be one)
+					break
+				}
+			}
+
+			if hasCanonicalization {
+				// Hash the canonical XML string directly
+				calculatedValue, err = calculateHashFromString(ref, canonicalXML)
+				if err != nil {
+					return err
+				}
+			} else {
+				// No explicit c14n transform in Reference - use the old approach:
+				// extract element to a new document and hash it.
+				extractedDoc, err := s.getReferencedXML(ref, doc)
+				if err != nil {
+					return err
+				}
+				calculatedValue, err = calculateHash(ref, extractedDoc)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		digestValueElement := ref.SelectElement("DigestValue")
+		if digestValueElement == nil {
+			return errors.New("signedxml: unable to find DigestValue")
+		}
+		digestValueElement.SetText(calculatedValue)
+	}
+	return nil
+}
+
+type P11SignerOpts struct {
+	Hash crypto.Hash
+}
+
+func (o *P11SignerOpts) HashFunc() crypto.Hash { return o.Hash }
+
+func (s *Signer) setSignature() error {
+	canonSignedInfo, err := s.canonAlgorithm.ProcessElement(s.signedInfo, s.canonTransform)
+	if err != nil {
+		return err
+	}
+
+	var hashed, signature []byte
+	//var h1, h2 *big.Int
+	signingAlgorithm, ok := signingAlgorithms[s.sigAlgorithm]
+	if !ok {
+		return errors.New("signedxml: unsupported algorithm")
+	}
+
+	// Ed25519 is "pure" - it signs the message directly without pre-hashing
+	// For other algorithms, we hash the canonicalized SignedInfo first
+	if signingAlgorithm.algorithm != "ed25519" {
+		hasher := signingAlgorithm.hash.New()
+		hasher.Write([]byte(canonSignedInfo))
+		hashed = hasher.Sum(nil)
+	}
+
+	switch signingAlgorithm.algorithm {
+	case "rsa":
+		pk, ok := s.privateKey.(*rsa.PrivateKey)
+		if ok {
+			signature, err = rsa.SignPKCS1v15(rand.Reader, pk, signingAlgorithm.hash, hashed)
+		} else {
+			// Support any crypto.Signer implementation (including PKCS#11/HSM signers)
+			signer, ok := s.privateKey.(crypto.Signer)
+			if ok {
+				signerOpts := &P11SignerOpts{Hash: signingAlgorithm.hash}
+				signature, err = signer.Sign(rand.Reader, hashed, signerOpts)
+			} else {
+				return fmt.Errorf("unexpected %T (expected *rsa.PrivateKey or crypto.Signer)", s.privateKey)
+			}
+		}
+	case "rsa-pss":
+		pssOptions := &rsa.PSSOptions{
+			SaltLength: rsa.PSSSaltLengthEqualsHash,
+			Hash:       signingAlgorithm.hash,
+		}
+		pk, ok := s.privateKey.(*rsa.PrivateKey)
+		if ok {
+			signature, err = rsa.SignPSS(rand.Reader, pk, signingAlgorithm.hash, hashed, pssOptions)
+		} else {
+			// Support any crypto.Signer implementation (including PKCS#11/HSM signers)
+			signer, ok := s.privateKey.(crypto.Signer)
+			if ok {
+				signature, err = signer.Sign(rand.Reader, hashed, pssOptions)
+			} else {
+				return fmt.Errorf("unexpected %T (expected *rsa.PrivateKey or crypto.Signer)", s.privateKey)
+			}
+		}
+	case "ed25519":
+		// Ed25519 is a "pure" signature scheme - it signs the message directly
+		// without pre-hashing. The message is the canonicalized SignedInfo.
+		pk, ok := s.privateKey.(ed25519.PrivateKey)
+		if ok {
+			signature = ed25519.Sign(pk, []byte(canonSignedInfo))
+		} else {
+			// Support any crypto.Signer implementation (including PKCS#11/HSM signers)
+			signer, ok := s.privateKey.(crypto.Signer)
+			if ok {
+				// For Ed25519, use Hash(0) to indicate no pre-hashing
+				signature, err = signer.Sign(rand.Reader, []byte(canonSignedInfo), crypto.Hash(0))
+			} else {
+				return fmt.Errorf("unexpected %T (expected ed25519.PrivateKey or crypto.Signer)", s.privateKey)
+			}
+		}
+		/*
+			case "dsa":
+				h1, h2, err = dsa.Sign(rand.Reader, s.privateKey.(*dsa.PrivateKey), hashed)
+			case "ecdsa":
+				h1, h2, err = ecdsa.Sign(rand.Reader, s.privateKey.(*ecdsa.PrivateKey), hashed)
+		*/
+
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// DSA and ECDSA has not been validated
+	/*
+		if signature == nil && h1 != nil && h2 != nil {
+			signature = append(h1.Bytes(), h2.Bytes()...)
+		}
+	*/
+
+	b64 := base64.StdEncoding.EncodeToString(signature)
+	sigValueElement := s.signature.SelectElement("SignatureValue")
+	sigValueElement.SetText(b64)
+
+	return nil
+}

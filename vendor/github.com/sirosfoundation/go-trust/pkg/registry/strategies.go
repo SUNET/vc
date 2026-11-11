@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,6 +13,11 @@ import (
 
 // evaluateFirstMatch queries registries in parallel and returns first positive match.
 // If no registry approves, the response includes aggregated deny reasons from all registries.
+// errCircuitOpen is the result recorded for a registry skipped by an open
+// circuit breaker: it did not answer, and a denial without it can become an
+// allow when the circuit recovers.
+var errCircuitOpen = errors.New("circuit breaker open")
+
 func (m *RegistryManager) evaluateFirstMatch(ctx context.Context, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
 	m.mu.RLock()
 	registries := m.getApplicableRegistries(req)
@@ -165,6 +171,18 @@ func (m *RegistryManager) evaluateFirstMatch(ctx context.Context, req *authzen.E
 	}, nil
 }
 
+// evaluateRecovering calls reg.Evaluate and turns a panic into an error, as the
+// parallel strategies do per goroutine, so a panicking registry is recorded as a
+// failure instead of unwinding through the caller.
+func evaluateRecovering(ctx context.Context, reg TrustRegistry, req *authzen.EvaluationRequest) (resp *authzen.EvaluationResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			resp, err = nil, fmt.Errorf("registry panicked: %v", r)
+		}
+	}()
+	return reg.Evaluate(ctx, req)
+}
+
 // promoteSingleDenyCode surfaces a registry's machine-readable deny "code"
 // (and its "admin" detail) at the top level of the aggregated reason when
 // exactly one registry produced a denial reason. Policies that route an
@@ -303,6 +321,7 @@ func (m *RegistryManager) evaluateAll(ctx context.Context, req *authzen.Evaluati
 			if !m.circuitBreakers[info.Name].CanAttempt() {
 				m.getLogger().Debug("Strategy[All]: circuit breaker open, skipping",
 					logging.F("registry", info.Name))
+				results <- result{registry: info.Name, err: errCircuitOpen}
 				return
 			}
 
@@ -460,7 +479,7 @@ func (m *RegistryManager) evaluateSequentialFiltered(ctx context.Context, req *a
 			logging.F("registry", info.Name))
 
 		startTime := time.Now()
-		resp, err := reg.Evaluate(ctx, req)
+		resp, err := evaluateRecovering(ctx, reg, req)
 		duration := time.Since(startTime).Milliseconds()
 
 		if err != nil {
@@ -723,6 +742,7 @@ func (m *RegistryManager) evaluateAllFiltered(ctx context.Context, req *authzen.
 			if !m.circuitBreakers[info.Name].CanAttempt() {
 				m.getLogger().Debug("Strategy[AllFiltered]: circuit breaker open, skipping",
 					logging.F("registry", info.Name))
+				results <- result{registry: info.Name, err: errCircuitOpen}
 				return
 			}
 
