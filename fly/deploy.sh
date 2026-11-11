@@ -594,6 +594,9 @@ cmd_wrpac() {
     echo "==> Setting WRPAC secrets on $app"
     fly secrets set --stage --app "$app" "${args[@]}" >/dev/null
     echo "    Staged. Mount via [[files]] in fly/${PROFILE:-dev}/${svc}/fly.toml, then deploy."
+    if [[ "$svc" == "issuer" ]]; then
+        echo "    Then redeploy apigw so it drops its cached issuer metadata."
+    fi
 }
 
 # Push the IDunion trusted-list certificate as the issuer's credential signing key.
@@ -622,7 +625,8 @@ cmd_idunion() {
     fly secrets set --stage --app "$app" \
         "ISSUER_SIGNING_PRIVATE_KEY=$(base64 < "$key" | tr -d '\n')" \
         "ISSUER_SIGNING_CHAIN=$(base64 < "$chain" | tr -d '\n')" >/dev/null
-    echo "    Staged. Mounted via fly/${PROFILE:-dev}/issuer/fly.toml; deploy the issuer to apply."
+    echo "    Staged. Mounted via fly/${PROFILE:-dev}/issuer/fly.toml; deploy the issuer to apply,"
+    echo "    then redeploy apigw so it drops its cached issuer metadata (refreshed every 55 minutes)."
 }
 
 cmd_status() {

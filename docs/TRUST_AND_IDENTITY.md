@@ -141,7 +141,7 @@ verifier:
     allowed_policy_oids: ["0.4.0.194118.1.3"]
 ```
 
-At startup the leaf must satisfy: `keyUsage` including `nonRepudiation` (contentCommitment), a `subjectAltName` carrying contact information (URI or email), and a `certificatePolicies` entry with a WRPAC policy OID. It must also be inside its own validity window. **Startup fails if it does not conform** — the point is to find out before wallets do.
+At startup the leaf must satisfy: a `subjectAltName` carrying contact information (URI or email), and a `certificatePolicies` entry with a WRPAC policy OID. `keyUsage` is not checked. It must also be inside its own validity window. **Startup fails if it does not conform** — the point is to find out before wallets do.
 
 The check is deliberately offline. Every rule reads the certificate's own attributes, so this is profile conformance, not a trust decision; deciding whether some *other* party's certificate is trusted belongs to the PDP.
 

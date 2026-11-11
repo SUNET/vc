@@ -6,7 +6,7 @@ logging:
   level: "info"
   format: "text"
 
-# Lists are loaded unverified until go-trust#238 and #239 are fixed.
+# Lists are loaded unverified: no trust_anchor_bundle is mounted yet.
 registries:
   lote:
     enabled: true
@@ -17,3 +17,23 @@ registries:
     max_dereference_depth: 2
     fetch_timeout: "30s"
     refresh_interval: "1h"
+    # A chain is only accepted for the roles mapped here; unmapped actions are denied.
+    require_role: true
+    role_scheme_types:
+      credential-issuer: &issuer_lists
+        - "http://uri.etsi.org/19602/LoTEType/EUPubEAAProvidersList"
+        - "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList"
+        - "http://uri.etsi.org/TrstSvc/TrustedList/TSLType/EUgeneric"
+      issuer: *issuer_lists
+      status-list-signer: *issuer_lists
+      mdoc-issuer: *issuer_lists
+      mdl-issuer: *issuer_lists
+      pid-provider:
+        - "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList"
+      wallet_provider:
+        - "http://uri.etsi.org/19602/LoTEType/EUWalletProvidersList"
+      credential-verifier: &verifier_lists
+        - "http://uri.etsi.org/19602/LoTEType/EUWRPACProvidersList"
+      verifier: *verifier_lists
+      mdoc-verifier: *verifier_lists
+      mdl-verifier: *verifier_lists

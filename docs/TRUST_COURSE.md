@@ -42,7 +42,6 @@ A WRPAC is issued by an authorised trust service provider (TSP). Our verifier re
 
 - a Subject Alternative Name (SAN) with a contact URI or email,
 - a policy OID that marks it as a WRPAC,
-- a key usage that includes `nonRepudiation`,
 - a validity period that has not ended.
 
 The subject also carries the registered data of the WRP: `organizationName` (legal name), `countryName`, `organizationIdentifier` (the WRP identifier, for example `VATSE-...`) and `commonName` (trade name).
@@ -83,6 +82,8 @@ There is no whitelist and no fallback. A chain that no loaded list covers gets `
 A list is itself signed, so go-trust must check the list's signature before it believes the list. For that it needs the **signer certificate** of each list, called a **trust anchor**. You give these to go-trust in a file named by `trust_anchor_bundle`.
 
 Without an anchor for a list, go-trust skips that list. This is the main thing that can go wrong, and the main thing to look for in the logs.
+
+Fly dev does not do this yet. Its go-trust config sets no `trust_anchor_bundle`, so it loads every list **unverified**: an unauthenticated list can authorise a chain. Adding the anchors is on the to-do list in [WEBUILD_TRUST_PROGRESS.md](WEBUILD_TRUST_PROGRESS.md).
 
 ## Lesson 7: where things stand on Fly dev
 
