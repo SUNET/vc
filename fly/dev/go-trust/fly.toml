@@ -12,6 +12,10 @@ primary_region = "arn"
   guest_path = "/config.yaml"
   local_path = "fly/dev/go-trust/config.yaml"
 
+[[files]]
+  guest_path = "/trust-anchors.pem"
+  local_path = "fly/dev/go-trust/trust-anchors.pem"
+
 [experimental]
   cmd = ["--config", "/config.yaml"]
 

@@ -6,7 +6,6 @@ logging:
   level: "info"
   format: "text"
 
-# Lists are loaded unverified: no trust_anchor_bundle is mounted yet.
 registries:
   lote:
     enabled: true
@@ -17,6 +16,9 @@ registries:
     max_dereference_depth: 2
     fetch_timeout: "30s"
     refresh_interval: "1h"
+    # Every list must verify against the pinned signers in this bundle (built with bin/lol).
+    verify_jws: true
+    trust_anchor_bundle: "/trust-anchors.pem"
     # A chain is only accepted for the roles mapped here; unmapped actions are denied.
     require_role: true
     role_scheme_types:

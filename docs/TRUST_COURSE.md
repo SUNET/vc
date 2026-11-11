@@ -83,7 +83,7 @@ A list is itself signed, so go-trust must check the list's signature before it b
 
 Without an anchor for a list, go-trust skips that list. This is the main thing that can go wrong, and the main thing to look for in the logs.
 
-Fly dev does not do this yet. Its go-trust config sets no `trust_anchor_bundle`, so it loads every list **unverified**: an unauthenticated list can authorise a chain. Adding the anchors is on the to-do list in [WEBUILD_TRUST_PROGRESS.md](WEBUILD_TRUST_PROGRESS.md).
+Fly dev does this. Its go-trust config sets `verify_jws: true` and mounts `fly/dev/go-trust/trust-anchors.pem`, built with `lol` from the pinned LoTL signer. A list without a backed signer is skipped.
 
 ## Lesson 7: where things stand on Fly dev
 
