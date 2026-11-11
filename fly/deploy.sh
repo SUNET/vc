@@ -592,7 +592,8 @@ cmd_wrpac() {
         args+=("WRPRC_JWT=$(base64 < "$rprc" | tr -d '\n')")
     fi
     echo "==> Setting WRPAC secrets on $app"
-    fly secrets set --stage --app "$app" "${args[@]}" >/dev/null
+    # stdin keeps the private key out of the process list
+    printf '%s\n' "${args[@]}" | fly secrets import --stage --app "$app" >/dev/null
     echo "    Staged. Mount via [[files]] in fly/${PROFILE:-dev}/${svc}/fly.toml, then deploy."
     if [[ "$svc" == "issuer" ]]; then
         echo "    Then redeploy apigw so it drops its cached issuer metadata."
@@ -622,9 +623,11 @@ cmd_idunion() {
     local app
     app="$(app_name issuer)"
     echo "==> Setting issuer signing secrets on $app"
-    fly secrets set --stage --app "$app" \
+    # stdin keeps the private key out of the process list
+    printf '%s\n' \
         "ISSUER_SIGNING_PRIVATE_KEY=$(base64 < "$key" | tr -d '\n')" \
-        "ISSUER_SIGNING_CHAIN=$(base64 < "$chain" | tr -d '\n')" >/dev/null
+        "ISSUER_SIGNING_CHAIN=$(base64 < "$chain" | tr -d '\n')" |
+        fly secrets import --stage --app "$app" >/dev/null
     echo "    Staged. Mounted via fly/${PROFILE:-dev}/issuer/fly.toml; deploy the issuer to apply,"
     echo "    then redeploy apigw so it drops its cached issuer metadata (refreshed every 55 minutes)."
 }
