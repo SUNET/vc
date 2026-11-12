@@ -53,6 +53,19 @@ the exit code is 1. The result can be used as go-trust's `trust_anchor_bundle`.
 Do not use the certificate from the LoTL's own signature header as the pin:
 that only shows the file is consistent with itself, not who published it.
 
+To check a pin against a fingerprint you got from the publisher, add
+`-show_fingerprint`:
+
+```sh
+lol -anchors lotl-signer.pem -show_fingerprint
+```
+
+It prints the SHA-256 of the certificate that signed the LoTL on the `SHA256`
+line, and the signer of each list under its row. With `-json` the values are
+`signer.fingerprint` and `lists[].signerFingerprint`. It is the fingerprint of
+the signing certificate, which equals your anchor only when the signer is the
+anchor itself.
+
 ## Flags
 
 | Flag | Meaning |
@@ -60,6 +73,7 @@ that only shows the file is consistent with itself, not who published it.
 | `-lotl URL` | LoTL to check (default: the WE BUILD WP4 LoTL) |
 | `-anchors FILE` | PEM trust anchors; turns on signature checks |
 | `-export-anchors FILE` | write a bundle as described above (needs `-anchors`) |
+| `-show_fingerprint` | print the SHA-256 fingerprint of each signer certificate (needs `-anchors`) |
 | `-json` | JSON report instead of the table |
 | `-v` | kind, operator, type, format and URL for every list |
 | `-timeout D` | per-request timeout (default `30s`) |

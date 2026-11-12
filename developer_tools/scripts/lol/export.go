@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const dateLayout = "2006-01-02"
+
 type signerEntry struct {
 	n       int
 	label   string
@@ -22,38 +24,54 @@ type signerEntry struct {
 	failure string
 }
 
+// exportRequest is what runExport needs; the LoTL must already be verified against the pin.
+type exportRequest struct {
+	out        string
+	pinnedFile string
+	lotlURL    string
+	signer     signerResult
+	info       schemeInfo
+	now        time.Time
+}
+
+// bundleWriter collects certificates for the bundle, skipping duplicates.
+type bundleWriter struct {
+	buf     strings.Builder
+	seen    map[[32]byte]bool
+	written int
+}
+
+func (b *bundleWriter) add(label string, cert *x509.Certificate) {
+	fp := sha256.Sum256(cert.Raw)
+	if b.seen[fp] {
+		return
+	}
+	b.seen[fp] = true
+	b.written++
+	fmt.Fprintf(&b.buf, "\n# %s\n# %s, expires %s, sha256 %s\n", oneLine(label), oneLine(cert.Subject.String()),
+		cert.NotAfter.UTC().Format(dateLayout), hex.EncodeToString(fp[:]))
+	_ = pem.Encode(&b.buf, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+}
+
 // runExport writes the pinned certificates plus every list signer that its own list backs,
-// and returns the process exit code. The LoTL must already be verified against the pin.
-func runExport(ctx context.Context, c *http.Client, out, pinnedFile, lotlURL string, signer signerResult, info schemeInfo, now time.Time) int {
-	pinned, err := readCerts(pinnedFile)
+// and returns the process exit code.
+func runExport(ctx context.Context, c *http.Client, req exportRequest) int {
+	pinned, err := readCerts(req.pinnedFile)
 	if err != nil {
 		fatal(err)
 	}
 
-	entries := make([]signerEntry, len(info.PointersToOtherLoTE))
-	for i, p := range info.PointersToOtherLoTE {
-		entries[i] = bindPointer(ctx, c, i+1, p, now)
+	entries := make([]signerEntry, len(req.info.PointersToOtherLoTE))
+	for i, p := range req.info.PointersToOtherLoTE {
+		entries[i] = bindPointer(ctx, c, i+1, p, req.now)
 	}
 
-	var buf strings.Builder
-	fmt.Fprintf(&buf, "# trust_anchor_bundle written by lol on %s\n# LoTL: %s\n", now.UTC().Format("2006-01-02"), lotlURL)
-	seen := map[[32]byte]bool{}
-	written := 0
-	add := func(label string, cert *x509.Certificate) {
-		fp := sha256.Sum256(cert.Raw)
-		if seen[fp] {
-			return
-		}
-		seen[fp] = true
-		written++
-		fmt.Fprintf(&buf, "\n# %s\n# %s, expires %s, sha256 %s\n", oneLine(label), oneLine(cert.Subject.String()),
-			cert.NotAfter.UTC().Format("2006-01-02"), hex.EncodeToString(fp[:]))
-		_ = pem.Encode(&buf, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-	}
+	w := &bundleWriter{seen: map[[32]byte]bool{}}
+	fmt.Fprintf(&w.buf, "# trust_anchor_bundle written by lol on %s\n# LoTL: %s\n", req.now.UTC().Format(dateLayout), req.lotlURL)
 	for _, cert := range pinned {
-		add("LoTL signer (pinned by you)", cert)
+		w.add("LoTL signer (pinned by you)", cert)
 	}
-	pinnedCount := written
+	pinnedCount := w.written
 
 	leftOut := 0
 	for _, e := range entries {
@@ -62,14 +80,28 @@ func runExport(ctx context.Context, c *http.Client, out, pinnedFile, lotlURL str
 			continue
 		}
 		for _, cert := range e.added {
-			add(fmt.Sprintf("%s (list #%d)", e.label, e.n), cert)
+			w.add(fmt.Sprintf("%s (list #%d)", e.label, e.n), cert)
 		}
 	}
 
-	printField("LoTL", lotlURL)
-	printField("Signer", paint(colorGreen, "signature ok")+" "+signer.Subject)
-	printField("Output", out)
+	printField("LoTL", req.lotlURL)
+	printField("Signer", paint(colorGreen, "signature ok")+" "+req.signer.Subject)
+	printField("Output", req.out)
+	printExportTable(entries)
 
+	// public certificates only, so world-readable is fine
+	if err := os.WriteFile(req.out, []byte(w.buf.String()), 0o644); err != nil { //nolint:gosec
+		fatal(err)
+	}
+	fmt.Printf("\nWrote %d certificates to %s (%d pinned, %d list signers).\n", w.written, req.out, pinnedCount, w.written-pinnedCount)
+	if leftOut == 0 {
+		return 0
+	}
+	fmt.Println(paint(colorRed, fmt.Sprintf("%d lists left out: none of their listed certificates is backed by the list.", leftOut)))
+	return 1
+}
+
+func printExportTable(entries []signerEntry) {
 	kindMax := 1 << 20
 	if w := terminalWidth(); w > 0 {
 		kindMax = max(w-45, 16)
@@ -87,23 +119,9 @@ func runExport(ctx context.Context, c *http.Client, out, pinnedFile, lotlURL str
 		for _, cert := range e.added {
 			fp := sha256.Sum256(cert.Raw)
 			fmt.Printf("%2d  %s  %s  %s  %s\n", e.n, paint(colorGreen, pad("ADDED", 6)),
-				pad(cert.NotAfter.UTC().Format("2006-01-02"), 10), hex.EncodeToString(fp[:4]), kind)
+				pad(cert.NotAfter.UTC().Format(dateLayout), 10), hex.EncodeToString(fp[:4]), kind)
 		}
 	}
-
-	// public certificates only, so world-readable is fine
-	if err := os.WriteFile(out, []byte(buf.String()), 0o644); err != nil { //nolint:gosec
-		fatal(err)
-	}
-	fmt.Printf("\nWrote %d certificates to %s (%d pinned, %d list signers).\n", written, out, pinnedCount, written-pinnedCount)
-	if leftOut > 0 {
-		fmt.Println(paint(colorRed, fmt.Sprintf("%d lists left out: none of their listed certificates is backed by the list.", leftOut)))
-	}
-
-	if leftOut > 0 {
-		return 1
-	}
-	return 0
 }
 
 // bindPointer keeps a pointer's certificate only when the list it points to is signed by it.
@@ -131,7 +149,7 @@ func bindPointer(ctx context.Context, c *http.Client, n int, p pointer, now time
 	for _, cert := range certs {
 		pool := x509.NewCertPool()
 		pool.AddCert(cert)
-		if _, err := verifyList(ctx, body, pool, now); err != nil {
+		if _, _, err := verifyList(ctx, body, pool, now); err != nil {
 			if first == nil {
 				first = err
 			}
