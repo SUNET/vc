@@ -14,6 +14,12 @@ import (
 	dsig "github.com/russellhaering/goxmldsig"
 )
 
+// maxReferences caps SignedInfo Reference elements processed during
+// validation and signing. Legitimate SAML/WS-Federation and XAdES
+// documents use a handful of references; this bound rejects adversarial
+// input that would otherwise deep-copy the document once per reference.
+const maxReferences = 32
+
 func init() {
 	hashAlgorithms = map[string]crypto.Hash{
 		"http://www.w3.org/2001/04/xmldsig-more#md5":    crypto.MD5,
@@ -122,6 +128,7 @@ type signatureData struct {
 // that Validator will verify
 func (s *signatureData) SetSignature(sig string) error {
 	doc := etree.NewDocument()
+	doc.ReadSettings.PreserveCData = true
 	err := doc.ReadFromString(sig)
 	s.signature = doc.Root()
 	return err
@@ -251,37 +258,46 @@ func (s *signatureData) parseCanonAlgorithm() error {
 		"CanonicalizationMethod")
 }
 
+// referenceRequiresDocumentCopy reports whether this Reference may mutate a
+// working copy of the whole document (for example enveloped-signature).
+// Canonicalization transforms operate on an element copy and do not need
+// the full tree cloned first.
+func referenceRequiresDocumentCopy(ref *etree.Element) bool {
+	transforms := ref.SelectElement("Transforms")
+	if transforms == nil {
+		return false
+	}
+	for _, transform := range transforms.SelectElements("Transform") {
+		algo := transform.SelectAttrValue("Algorithm", "")
+		if algo != "" && !strings.Contains(algo, "c14n") {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneIfSame(orig, doc *etree.Document) *etree.Document {
+	if doc == orig {
+		return orig.Copy()
+	}
+	return doc
+}
+
 func (s *signatureData) getReferencedXML(reference *etree.Element, inputDoc *etree.Document) (outputDoc *etree.Document, err error) {
 	uri := reference.SelectAttrValue("URI", "")
 	uri = strings.Replace(uri, "#", "", 1)
 	// populate doc with the referenced xml from the Reference URI
 	if uri == "" {
-		outputDoc = inputDoc
-	} else {
-		refIDAttribute := "ID"
-		if s.refIDAttribute != "" {
-			refIDAttribute = s.refIDAttribute
-		}
-		path := fmt.Sprintf(".//[@%s='%s']", refIDAttribute, uri)
-		e := inputDoc.FindElement(path)
-		if e != nil {
-			outputDoc = etree.NewDocument()
-			outputDoc.SetRoot(e.Copy())
-		} else {
-			// SAML v1.1 Assertions use AssertionID
-			path := fmt.Sprintf(".//[@AssertionID='%s']", uri)
-			e := inputDoc.FindElement(path)
-			if e != nil {
-				outputDoc = etree.NewDocument()
-				outputDoc.SetRoot(e.Copy())
-			}
-		}
+		return inputDoc, nil
 	}
 
-	if outputDoc == nil {
+	e, err := s.findReferencedElement(reference, inputDoc)
+	if err != nil {
 		return nil, errors.New("signedxml: unable to find refereced xml")
 	}
 
+	outputDoc = etree.NewDocument()
+	outputDoc.SetRoot(e.Copy())
 	return outputDoc, nil
 }
 
@@ -296,24 +312,58 @@ func (s *signatureData) findReferencedElement(reference *etree.Element, inputDoc
 		return inputDoc.Root(), nil
 	}
 
-	refIDAttribute := "ID"
+	// Try the common XML ID attribute casings used in signatures.
+	// SetReferenceIDAttribute overrides the list when callers need a custom name.
+	attrs := []string{"ID", "Id", "id"}
 	if s.refIDAttribute != "" {
-		refIDAttribute = s.refIDAttribute
+		attrs = []string{s.refIDAttribute}
 	}
-	path := fmt.Sprintf(".//[@%s='%s']", refIDAttribute, uri)
-	e := inputDoc.FindElement(path)
-	if e != nil {
-		return e, nil
+	for _, attr := range attrs {
+		if e := findElementByAttr(inputDoc.Root(), attr, uri); e != nil {
+			return e, nil
+		}
 	}
 
 	// SAML v1.1 Assertions use AssertionID
-	path = fmt.Sprintf(".//[@AssertionID='%s']", uri)
-	e = inputDoc.FindElement(path)
-	if e != nil {
+	if e := findElementByAttr(inputDoc.Root(), "AssertionID", uri); e != nil {
 		return e, nil
 	}
 
 	return nil, errors.New("signedxml: unable to find referenced xml element")
+}
+
+// findElementByAttr returns the first element with a matching attribute name
+// and value. Values are compared directly instead of interpolating them into
+// an etree path, which panics on quotes.
+func findElementByAttr(root *etree.Element, attrName, attrValue string) *etree.Element {
+	if root == nil {
+		return nil
+	}
+
+	space, key := "", attrName
+	if i := strings.IndexByte(attrName, ':'); i >= 0 {
+		space, key = attrName[:i], attrName[i+1:]
+	}
+
+	if elementHasAttr(root, space, key, attrValue) {
+		return root
+	}
+	for _, child := range root.ChildElements() {
+		if found := findElementByAttr(child, attrName, attrValue); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func elementHasAttr(e *etree.Element, space, key, value string) bool {
+	for _, a := range e.Attr {
+		// Empty space matches any namespace, matching etree path [@attr='val'].
+		if (space == "" || space == a.Space) && a.Key == key && a.Value == value {
+			return true
+		}
+	}
+	return false
 }
 
 func getCertFromPEMString(pemString string) (*x509.Certificate, error) {
@@ -326,7 +376,7 @@ func getCertFromPEMString(pemString string) (*x509.Certificate, error) {
 		return &x509.Certificate{}, errors.New("Could not parse Certificate PEM")
 	}
 	if pemBlock.Type != "CERTIFICATE" {
-		return &x509.Certificate{}, errors.New("Found wrong key type")
+		return &x509.Certificate{}, fmt.Errorf("unexpected PEM block %v", pemBlock.Type)
 	}
 
 	cert, err := x509.ParseCertificate(pemBlock.Bytes)
@@ -368,6 +418,7 @@ func processTransform(transform *etree.Element,
 		}
 
 		docOut = etree.NewDocument()
+		docOut.ReadSettings.PreserveCData = true
 		docOut.ReadFromString(docString)
 	} else {
 		docOut = docIn
@@ -509,11 +560,11 @@ func removeXMLDeclaration(doc *etree.Document) {
 // parseXML parses an XML string into an etree.Document and removes the XML declaration if present.
 func parseXML(xml string) (*etree.Document, error) {
 	doc := etree.NewDocument()
+	doc.ReadSettings.PreserveCData = true
 	if err := doc.ReadFromString(xml); err != nil {
 		return nil, err
 	}
 
-	doc.ReadSettings.PreserveCData = true
 	removeXMLDeclaration(doc)
 
 	return doc, nil

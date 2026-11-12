@@ -17,3 +17,8 @@ cover-test:
 	go test -coverprofile=cover.out ./...
 cover-web:
 	go tool cover -html=cover.out
+
+.PHONY: bench
+bench:
+	go test ./xmlenc -count=6 -cpu=2 -run '^$$' -bench '^Benchmark' -benchmem > output.raw.txt
+	python3 scripts/bench-median.py output.raw.txt | tee output.txt

@@ -91,13 +91,17 @@ func NewValidator(xml string) (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &Validator{signatureData: signatureData{xml: doc}}
-	return v, nil
+	return NewValidatorFromDoc(doc), nil
 }
 
-// SetCryptoExtensions sets the crypto extensions for extended algorithm support
-// (e.g. brainpool curves). When set, certificate parsing and signature verification
-// will use the extensions to handle non-standard algorithms.
+// NewValidatorFromDoc returns a *Validator for the Document provided
+func NewValidatorFromDoc(doc *etree.Document) *Validator {
+	return &Validator{signatureData: signatureData{xml: doc}}
+}
+
+// SetCryptoExtensions sets crypto extensions for non-standard algorithms
+// (for example Brainpool curves). When set, certificate parsing and
+// signature verification use the extensions as a fallback.
 func (v *Validator) SetCryptoExtensions(ext *cryptoutil.Extensions) {
 	v.cryptoExt = ext
 }
@@ -110,6 +114,7 @@ func (v *Validator) SetReferenceIDAttribute(refIDAttribute string) {
 // SetXML is used to assign the XML document that the Validator will verify
 func (v *Validator) SetXML(xml string) error {
 	doc := etree.NewDocument()
+	doc.ReadSettings.PreserveCData = true
 	err := doc.ReadFromString(xml)
 	v.xml = doc
 	return err
@@ -131,6 +136,10 @@ func (v *Validator) SigningCert() x509.Certificate {
 //
 // The references returned contain validated XML from the signature and must be used.
 // Callers that ignore the returned references are vulnerable to XML injection.
+//
+// SignedInfo may contain at most 32 Reference elements, including cid:
+// attachment references. Additional references are rejected before digest
+// or signature checks.
 func (v *Validator) ValidateReferences() ([]string, error) {
 	if err := v.loadValuesFromXML(); err != nil {
 		return nil, err
@@ -180,6 +189,9 @@ func (v *Validator) loadValuesFromXML() error {
 
 func (v *Validator) validateReferences() (referenced []*etree.Document, err error) {
 	references := v.signedInfo.FindElements("./Reference")
+	if len(references) > maxReferences {
+		return nil, fmt.Errorf("signedxml: SignedInfo contains %d Reference elements, which exceeds the limit of %d", len(references), maxReferences)
+	}
 	for _, ref := range references {
 		refUri := ref.SelectAttrValue("URI", "")
 
@@ -190,7 +202,10 @@ func (v *Validator) validateReferences() (referenced []*etree.Document, err erro
 			continue
 		}
 
-		doc := v.xml.Copy()
+		doc := v.xml
+		if referenceRequiresDocumentCopy(ref) {
+			doc = v.xml.Copy()
+		}
 
 		transforms := ref.SelectElement("Transforms")
 
@@ -254,9 +269,9 @@ func (v *Validator) validateReferences() (referenced []*etree.Document, err erro
 					if transform.ChildElements() != nil {
 						tDoc := etree.NewDocument()
 						tDoc.SetRoot(transform.Copy())
-						content, err := tDoc.WriteToString()
-						if err != nil {
-							return nil, err
+						content, writeErr := tDoc.WriteToString()
+						if writeErr != nil {
+							return nil, writeErr
 						}
 						transformContent = content
 					}
@@ -303,12 +318,11 @@ func (v *Validator) validateReferences() (referenced []*etree.Document, err erro
 				" expected digestvalue of %s", refUri, calculatedValue, digestValue)
 		}
 
-		// Extract the element for return
 		doc, err = v.getReferencedXML(ref, doc)
 		if err != nil {
 			return nil, err
 		}
-		referenced = append(referenced, doc)
+		referenced = append(referenced, cloneIfSame(v.xml, doc))
 	}
 	return referenced, nil
 }
@@ -319,16 +333,16 @@ func (v *Validator) validateSignature() error {
 		return err
 	}
 
-	b64, err := base64.StdEncoding.DecodeString(v.sigValue)
+	sigBytes, err := base64.StdEncoding.DecodeString(v.sigValue)
 	if err != nil {
 		return err
 	}
-	sig := []byte(b64)
+	sig := sigBytes
 
 	// XML DSig encodes ECDSA signatures as raw r||s concatenation (RFC 4050),
 	// but Go's x509.CheckSignature expects ASN.1 DER encoding.
 	if isECDSAAlgorithm(v.sigAlgorithm) {
-		derSig, convErr := cryptoutil.ECDSARawToASN1(sig)
+		derSig, convErr := convertECDSARawToASN1(v.sigAlgorithm, sig)
 		if convErr != nil {
 			return convErr
 		}
@@ -337,20 +351,18 @@ func (v *Validator) validateSignature() error {
 
 	v.signingCert = x509.Certificate{}
 	for _, cert := range v.Certificates {
-		// Use crypto extensions for CheckSignature if available (supports brainpool etc.)
+		var err error
 		if v.cryptoExt != nil {
-			if err := v.cryptoExt.CheckSignature(&cert, v.sigAlgorithm, []byte(canonSignedInfo), sig); err == nil {
-				v.signingCert = cert
-				return nil
-			}
+			err = v.cryptoExt.CheckSignature(&cert, v.sigAlgorithm, []byte(canonSignedInfo), sig)
 		} else {
-			if err := cert.CheckSignature(v.sigAlgorithm, []byte(canonSignedInfo), sig); err == nil {
-				v.signingCert = cert
-				return nil
-			}
+			err = cert.CheckSignature(v.sigAlgorithm, []byte(canonSignedInfo), sig)
 		}
-		// If standard verification failed and we're using RSA-PSS, try manual verification
-		// - this handles certificates with RSA-PSS public keys
+		if err == nil {
+			v.signingCert = cert
+			return nil
+		}
+		// If standard verification failed with "algorithm unimplemented" and we're using
+		// RSA-PSS, try manual verification - this handles certificates with RSA-PSS public keys
 		if cert.PublicKey == nil && isRSAPSSAlgorithm(v.sigAlgorithm) {
 			verifyErr := v.verifyRSAPSSSignature(cert.Raw, []byte(canonSignedInfo), sig)
 			if verifyErr == nil {
@@ -364,11 +376,6 @@ func (v *Validator) validateSignature() error {
 		"SignatureValue provided")
 }
 
-// isRSAPSSAlgorithm returns true if the algorithm is RSA-PSS
-func isRSAPSSAlgorithm(alg x509.SignatureAlgorithm) bool {
-	return alg == x509.SHA256WithRSAPSS || alg == x509.SHA384WithRSAPSS || alg == x509.SHA512WithRSAPSS
-}
-
 // isECDSAAlgorithm returns true if the algorithm is ECDSA
 func isECDSAAlgorithm(alg x509.SignatureAlgorithm) bool {
 	switch alg { //nolint:exhaustive
@@ -379,7 +386,45 @@ func isECDSAAlgorithm(alg x509.SignatureAlgorithm) bool {
 	}
 }
 
+// convertECDSARawToASN1 converts an ECDSA signature from the raw r||s
+// concatenation format used by XML DSig (RFC 4050) to the ASN.1 DER
+// encoding expected by Go's x509.Certificate.CheckSignature.
+// The input must be an even number of bytes, with r and s each occupying
+// half the total length.
+func convertECDSARawToASN1(alg x509.SignatureAlgorithm, raw []byte) ([]byte, error) {
+	if len(raw) == 0 || len(raw)%2 != 0 {
+		return nil, fmt.Errorf("signedxml: invalid ECDSA signature length %d", len(raw))
+	}
+	switch alg { //nolint:exhaustive
+	case x509.ECDSAWithSHA256:
+		if len(raw) != 64 {
+			return nil, fmt.Errorf("signedxml: invalid ECDSA signature length %d (expected 64)", len(raw))
+		}
+	case x509.ECDSAWithSHA384:
+		if len(raw) != 96 {
+			return nil, fmt.Errorf("signedxml: invalid ECDSA signature length %d (expected 96)", len(raw))
+		}
+	case x509.ECDSAWithSHA512:
+		if len(raw) != 132 {
+			return nil, fmt.Errorf("signedxml: invalid ECDSA signature length %d (expected 132)", len(raw))
+		}
+	case x509.ECDSAWithSHA1:
+		if len(raw) != 64 && len(raw) != 48 {
+			return nil, fmt.Errorf("signedxml: invalid ECDSA signature length %d (expected 48 or 64)", len(raw))
+		}
+	}
+	half := len(raw) / 2
+	r := new(big.Int).SetBytes(raw[:half])
+	s := new(big.Int).SetBytes(raw[half:])
+	return asn1.Marshal(struct {
+		R, S *big.Int
+	}{r, s})
+}
 
+// isRSAPSSAlgorithm returns true if the algorithm is RSA-PSS
+func isRSAPSSAlgorithm(alg x509.SignatureAlgorithm) bool {
+	return alg == x509.SHA256WithRSAPSS || alg == x509.SHA384WithRSAPSS || alg == x509.SHA512WithRSAPSS
+}
 
 // verifyRSAPSSSignature manually verifies an RSA-PSS signature for certificates
 // with RSA-PSS public keys that Go's x509 library can't handle

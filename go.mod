@@ -1,6 +1,6 @@
 module github.com/SUNET/vc
 
-go 1.27.3
+go 1.27.4
 
 require (
 	filippo.io/edwards25519 v1.2.0
@@ -31,7 +31,7 @@ require (
 	github.com/gorilla/sessions v1.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/iancoleman/strcase v0.3.0
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 	github.com/jellydator/ttlcache/v3 v3.4.1
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/kaptinlin/jsonschema v0.9.10
@@ -50,7 +50,7 @@ require (
 	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/sirosfoundation/go-cryptoutil v0.7.2
 	github.com/sirosfoundation/go-spocp v0.1.0
-	github.com/sirosfoundation/go-trust v0.29.0
+	github.com/sirosfoundation/go-trust v0.29.2
 	github.com/sirosfoundation/go-ts11client v0.0.0-20260821071625-a8d5997107d0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/stretchr/testify v1.12.1
@@ -73,7 +73,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.38.0
 	golang.org/x/sync v0.25.0
@@ -171,7 +171,7 @@ require (
 	github.com/moby/term v0.5.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/moov-io/signedxml v1.2.3 // indirect
+	github.com/moov-io/signedxml v1.4.2 // indirect
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
@@ -193,7 +193,7 @@ require (
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.10 // indirect
 	github.com/shopspring/decimal v1.6.0 // indirect
-	github.com/sirosfoundation/g119612 v0.8.2 // indirect
+	github.com/sirosfoundation/g119612 v0.8.3 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect

@@ -28,8 +28,13 @@ func markEvaluationFailures(resp *authzen.EvaluationResponse) {
 				switch {
 				case incomplete:
 					// A composite whose child failed answers with a denial of its
-					// own and marks it incomplete (see CompositeRegistry).
+					// own and marks it incomplete (see CompositeRegistry); a
+					// registry whose data is not available yet (the whitelist's
+					// JWKS cache) does the same and names the cause.
 					msg = "a child registry failed to answer"
+					if cause, ok := inner["error"].(string); ok && cause != "" {
+						msg = cause
+					}
 				case !decided:
 					// A (nil, nil) answer supplies no verdict.
 					msg = "registry returned no decision"

@@ -2,7 +2,6 @@ package signedxml
 
 import (
 	"crypto"
-	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -51,7 +50,7 @@ type cryptoHash struct {
 // Signer provides options for signing an XML document
 type Signer struct {
 	signatureData
-	privateKey interface{}
+	privateKey crypto.Signer
 }
 
 // NewSigner returns a *Signer for the XML provided
@@ -69,8 +68,9 @@ func NewSignerFromDoc(doc *etree.Document) (*Signer, error) {
 	return s, nil
 }
 
-// Sign populates the XML digest and signature based on the parameters present and privateKey given
-func (s *Signer) Sign(privateKey interface{}) (string, error) {
+// Sign populates the XML digest and signature based on the parameters present and privateKey given.
+// SignedInfo may contain at most 32 Reference elements.
+func (s *Signer) Sign(privateKey crypto.Signer) (string, error) {
 	s.privateKey = privateKey
 
 	if s.signature == nil {
@@ -108,6 +108,9 @@ func (s *Signer) SetReferenceIDAttribute(refIDAttribute string) {
 
 func (s *Signer) setDigest() (err error) {
 	references := s.signedInfo.FindElements("./Reference")
+	if len(references) > maxReferences {
+		return fmt.Errorf("signedxml: SignedInfo contains %d Reference elements, which exceeds the limit of %d", len(references), maxReferences)
+	}
 	for _, ref := range references {
 		// Skip external references like cid: URIs (used for MIME attachments in WS-Security).
 		// These have pre-computed digests and use transforms we don't implement.
@@ -116,93 +119,29 @@ func (s *Signer) setDigest() (err error) {
 			continue
 		}
 
-		doc := s.xml.Copy()
+		doc := s.xml
+		if referenceRequiresDocumentCopy(ref) {
+			doc = s.xml.Copy()
+		}
 
 		transforms := ref.SelectElement("Transforms")
-
-		var calculatedValue string
-
-		if transforms == nil || len(transforms.SelectElements("Transform")) == 0 {
-			// No transforms - extract and hash
-			doc, err := s.getReferencedXML(ref, doc)
-			if err != nil {
-				return err
-			}
-			calculatedValue, err = calculateHash(ref, doc)
-			if err != nil {
-				return err
-			}
-		} else {
-			// Has transforms - process them in the correct order.
-			// Non-c14n transforms (like enveloped-signature) operate on the full document.
-			// C14n transforms operate on the referenced element IN ITS ORIGINAL CONTEXT
-			// to properly handle inherited namespace declarations.
-
-			// First pass: apply non-c14n transforms to the full document
+		if transforms != nil {
 			for _, transform := range transforms.SelectElements("Transform") {
-				transformAlgoURI := transform.SelectAttrValue("Algorithm", "")
-				if !strings.Contains(transformAlgoURI, "c14n") {
-					doc, err = processTransform(transform, doc, ALL_TRANSFORMS)
-					if err != nil {
-						return err
-					}
-				}
-			}
-
-			// Find the referenced element (keep it in context for c14n)
-			refElement, findErr := s.findReferencedElement(ref, doc)
-			if findErr != nil {
-				return findErr
-			}
-
-			// Apply c14n transforms to the element IN ITS CONTEXT
-			// This properly handles inherited namespace declarations.
-			var canonicalXML string
-			hasCanonicalization := false
-			for _, transform := range transforms.SelectElements("Transform") {
-				transformAlgoURI := transform.SelectAttrValue("Algorithm", "")
-				if strings.Contains(transformAlgoURI, "c14n") {
-					hasCanonicalization = true
-					canonAlgo, ok := CanonicalizationAlgorithms[transformAlgoURI]
-					if !ok {
-						return fmt.Errorf("signedxml: unsupported c14n algorithm: %s", transformAlgoURI)
-					}
-
-					// Get transform content (e.g., InclusiveNamespaces)
-					var transformContent string
-					if transform.ChildElements() != nil {
-						tDoc := etree.NewDocument()
-						tDoc.SetRoot(transform.Copy())
-						transformContent, _ = tDoc.WriteToString()
-					}
-
-					canonicalXML, err = canonAlgo.ProcessElement(refElement, transformContent)
-					if err != nil {
-						return err
-					}
-					// Only apply the first c14n transform (there should only be one)
-					break
-				}
-			}
-
-			if hasCanonicalization {
-				// Hash the canonical XML string directly
-				calculatedValue, err = calculateHashFromString(ref, canonicalXML)
-				if err != nil {
-					return err
-				}
-			} else {
-				// No explicit c14n transform in Reference - use the old approach:
-				// extract element to a new document and hash it.
-				extractedDoc, err := s.getReferencedXML(ref, doc)
-				if err != nil {
-					return err
-				}
-				calculatedValue, err = calculateHash(ref, extractedDoc)
+				doc, err = processTransform(transform, doc, ALL_TRANSFORMS)
 				if err != nil {
 					return err
 				}
 			}
+		}
+
+		doc, err := s.getReferencedXML(ref, doc)
+		if err != nil {
+			return err
+		}
+
+		calculatedValue, err := calculateHash(ref, doc)
+		if err != nil {
+			return err
 		}
 
 		digestValueElement := ref.SelectElement("DigestValue")
@@ -214,6 +153,8 @@ func (s *Signer) setDigest() (err error) {
 	return nil
 }
 
+// P11SignerOpts implements crypto.SignerOpts for use with crypto.Signer
+// implementations (e.g. PKCS#11/HSM signers).
 type P11SignerOpts struct {
 	Hash crypto.Hash
 }
@@ -243,61 +184,29 @@ func (s *Signer) setSignature() error {
 
 	switch signingAlgorithm.algorithm {
 	case "rsa":
-		pk, ok := s.privateKey.(*rsa.PrivateKey)
-		if ok {
-			signature, err = rsa.SignPKCS1v15(rand.Reader, pk, signingAlgorithm.hash, hashed)
-		} else {
-			// Support any crypto.Signer implementation (including PKCS#11/HSM signers)
-			signer, ok := s.privateKey.(crypto.Signer)
-			if ok {
-				signerOpts := &P11SignerOpts{Hash: signingAlgorithm.hash}
-				signature, err = signer.Sign(rand.Reader, hashed, signerOpts)
-			} else {
-				return fmt.Errorf("unexpected %T (expected *rsa.PrivateKey or crypto.Signer)", s.privateKey)
-			}
-		}
+		signerOpts := &P11SignerOpts{Hash: signingAlgorithm.hash}
+		signature, err = s.privateKey.Sign(rand.Reader, hashed, signerOpts)
 	case "rsa-pss":
 		pssOptions := &rsa.PSSOptions{
 			SaltLength: rsa.PSSSaltLengthEqualsHash,
 			Hash:       signingAlgorithm.hash,
 		}
 		pk, ok := s.privateKey.(*rsa.PrivateKey)
-		if ok {
-			signature, err = rsa.SignPSS(rand.Reader, pk, signingAlgorithm.hash, hashed, pssOptions)
-		} else {
-			// Support any crypto.Signer implementation (including PKCS#11/HSM signers)
-			signer, ok := s.privateKey.(crypto.Signer)
-			if ok {
-				signature, err = signer.Sign(rand.Reader, hashed, pssOptions)
-			} else {
-				return fmt.Errorf("unexpected %T (expected *rsa.PrivateKey or crypto.Signer)", s.privateKey)
-			}
+		if !ok {
+			return fmt.Errorf("unexpected %T (expected *rsa.PrivateKey)", s.privateKey)
 		}
+		signature, err = rsa.SignPSS(rand.Reader, pk, signingAlgorithm.hash, hashed, pssOptions)
 	case "ed25519":
 		// Ed25519 is a "pure" signature scheme - it signs the message directly
 		// without pre-hashing. The message is the canonicalized SignedInfo.
-		pk, ok := s.privateKey.(ed25519.PrivateKey)
-		if ok {
-			signature = ed25519.Sign(pk, []byte(canonSignedInfo))
-		} else {
-			// Support any crypto.Signer implementation (including PKCS#11/HSM signers)
-			signer, ok := s.privateKey.(crypto.Signer)
-			if ok {
-				// For Ed25519, use Hash(0) to indicate no pre-hashing
-				signature, err = signer.Sign(rand.Reader, []byte(canonSignedInfo), crypto.Hash(0))
-			} else {
-				return fmt.Errorf("unexpected %T (expected ed25519.PrivateKey or crypto.Signer)", s.privateKey)
-			}
-		}
+		signature, err = s.privateKey.Sign(rand.Reader, []byte(canonSignedInfo), crypto.Hash(0))
 		/*
 			case "dsa":
 				h1, h2, err = dsa.Sign(rand.Reader, s.privateKey.(*dsa.PrivateKey), hashed)
 			case "ecdsa":
 				h1, h2, err = ecdsa.Sign(rand.Reader, s.privateKey.(*ecdsa.PrivateKey), hashed)
 		*/
-
 	}
-
 	if err != nil {
 		return err
 	}
