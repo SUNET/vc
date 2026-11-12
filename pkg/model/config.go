@@ -2821,6 +2821,30 @@ type CredentialMetadata struct {
 	// Unset leaves the scope unrequestable rather than guessed at.
 	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
 
+	// DCQLClaims are the claim paths a verifier REQUESTS from this
+	// credential, in the same form a presentation request template writes
+	// them (OpenID4VP 1.0 6.4.1):
+	//
+	//	claims:
+	//	  - path: ["given_name"]
+	//	  - path: ["address", "locality"]
+	//	  - path: ["nationalities", null]
+	//
+	// Leaving this unset is not the same as letting the wallet choose. A
+	// query with no claims member requests no selectively disclosable claim
+	// at all, and a compliant wallet returns only what is mandatory to
+	// present (OpenID4VP 1.0 6.4.1). A dc+sd-jwt or mso_mdoc scope left
+	// unset is therefore asked for without any attributes, and only a
+	// lenient wallet discloses them anyway. The default is kept because it
+	// is what deployments already send; set this to ask for the subset the
+	// use case needs.
+	//
+	// Only read when the request is built from this config. A presentation
+	// request template (verifier.inbound.openid4vp.presentation_requests_dir)
+	// carries a whole DCQL query of its own, and wins whenever one matches
+	// the request's scopes.
+	DCQLClaims []openid4vp.ClaimQuery `yaml:"claims,omitempty" json:"-" validate:"omitempty,dive"`
+
 	// CredentialContexts are JSON-LD contexts appended after the VC 2.0 base
 	// context when this credential is issued.
 	//
