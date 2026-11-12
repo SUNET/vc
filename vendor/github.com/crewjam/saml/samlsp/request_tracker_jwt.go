@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	dsig "github.com/russellhaering/goxmldsig"
+	"github.com/golang-jwt/jwt/v4"
 
-	"github.com/crewjam/saml/internal/signerutil"
+	"github.com/crewjam/saml"
 )
 
 // JWTTrackedRequestCodec encodes TrackedRequests as signed JWTs
@@ -18,10 +17,6 @@ type JWTTrackedRequestCodec struct {
 	Issuer        string
 	MaxAge        time.Duration
 	Key           crypto.Signer
-
-	// Clock, if non-nil, is the time source for the times of the tokens it issues and for checking their expiry. If nil, the real
-	// clock is used (through the deprecated saml.TimeNow).
-	Clock *dsig.Clock
 }
 
 var _ TrackedRequestCodec = JWTTrackedRequestCodec{}
@@ -35,7 +30,7 @@ type JWTTrackedRequestClaims struct {
 
 // Encode returns an encoded string representing the TrackedRequest.
 func (s JWTTrackedRequestCodec) Encode(value TrackedRequest) (string, error) {
-	now := clockNow(s.Clock)
+	now := saml.TimeNow()
 	claims := JWTTrackedRequestClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Audience:  jwt.ClaimStrings{s.Audience},
@@ -49,26 +44,26 @@ func (s JWTTrackedRequestCodec) Encode(value TrackedRequest) (string, error) {
 		SAMLAuthnRequest: true,
 	}
 	token := jwt.NewWithClaims(s.SigningMethod, claims)
-	return signToken(token, s.Key)
+	return token.SignedString(s.Key)
 }
 
 // Decode returns a Tracked request from an encoded string.
 func (s JWTTrackedRequestCodec) Decode(signed string) (*TrackedRequest, error) {
-	if signerutil.IsNil(s.Key) {
-		return nil, fmt.Errorf("decoding key is nil")
+	parser := jwt.Parser{
+		ValidMethods: []string{s.SigningMethod.Alg()},
 	}
-	parser := jwt.NewParser(
-		jwt.WithValidMethods([]string{s.SigningMethod.Alg()}),
-		jwt.WithTimeFunc(func() time.Time { return clockNow(s.Clock) }),
-		jwt.WithAudience(s.Audience),
-		jwt.WithIssuer(s.Issuer),
-	)
 	claims := JWTTrackedRequestClaims{}
 	_, err := parser.ParseWithClaims(signed, &claims, func(*jwt.Token) (interface{}, error) {
 		return s.Key.Public(), nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !claims.VerifyAudience(s.Audience, true) {
+		return nil, fmt.Errorf("expected audience %q, got %q", s.Audience, claims.Audience)
+	}
+	if !claims.VerifyIssuer(s.Issuer, true) {
+		return nil, fmt.Errorf("expected issuer %q, got %q", s.Issuer, claims.Issuer)
 	}
 	if !claims.SAMLAuthnRequest {
 		return nil, fmt.Errorf("expected saml-authn-request")
