@@ -2,9 +2,6 @@ package tokenstatuslistissuer
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"encoding/base64"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,24 +17,31 @@ import (
 // actually read - the signer and the resolved carriers - without a database or
 // a cache, so the wiring from configuration to issued token can be asserted on
 // its own.
-func carrierTestService(t *testing.T, configured []string, chain []string) (*Service, *ecdsa.PrivateKey) {
+func carrierTestService(t *testing.T, configured []string, withChain bool) (*Service, *ecdsa.PrivateKey, []string) {
 	t.Helper()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
+	key, leaf, encoded, _ := signingChain(t)
 
-	carriers, err := resolveKeyCarriers(configured, chain)
+	var chain []string
+	if withChain {
+		chain = encoded
+	} else {
+		leaf = nil
+	}
+
+	carriers, err := resolveKeyCarriers(configured, chain, leaf, &key.PublicKey)
 	require.NoError(t, err)
 
 	return &Service{
 		signer: pki.NewKeyMaterialSigner(&pki.KeyMaterial{
 			PrivateKey:    key,
+			Cert:          leaf,
 			Chain:         chain,
 			SigningMethod: jwt.SigningMethodES256,
 		}),
 		carriers: carriers,
 		log:      logger.NewSimple("test"),
-	}, key
+	}, key, encoded
 }
 
 func carrierTestTokenConfig() TokenConfig {
@@ -46,14 +50,6 @@ func carrierTestTokenConfig() TokenConfig {
 	cfg.Subject = "https://registry.example.com/statuslists/0"
 	cfg.Statuses = []uint8{0, 1, 0}
 	return cfg
-}
-
-func testChain(t *testing.T) []string {
-	t.Helper()
-	return []string{
-		base64.StdEncoding.EncodeToString([]byte("LEAF-CERT")),
-		base64.StdEncoding.EncodeToString([]byte("ISSUER-CERT")),
-	}
 }
 
 func tokenHeader(t *testing.T, service *Service, key *ecdsa.PrivateKey) map[string]any {
@@ -68,8 +64,7 @@ func tokenHeader(t *testing.T, service *Service, key *ecdsa.PrivateKey) map[stri
 }
 
 func TestIssuedTokenCarriesBothByDefault(t *testing.T) {
-	chain := testChain(t)
-	service, key := carrierTestService(t, []string{"x5c", "jwk"}, chain)
+	service, key, chain := carrierTestService(t, []string{"x5c", "jwk"}, true)
 
 	header := tokenHeader(t, service, key)
 
@@ -78,8 +73,7 @@ func TestIssuedTokenCarriesBothByDefault(t *testing.T) {
 }
 
 func TestIssuedTokenHonoursACarrierNarrowedToTheChain(t *testing.T) {
-	chain := testChain(t)
-	service, key := carrierTestService(t, []string{"x5c"}, chain)
+	service, key, _ := carrierTestService(t, []string{"x5c"}, true)
 
 	header := tokenHeader(t, service, key)
 
@@ -88,7 +82,7 @@ func TestIssuedTokenHonoursACarrierNarrowedToTheChain(t *testing.T) {
 }
 
 func TestIssuedTokenHonoursACarrierNarrowedToTheKey(t *testing.T) {
-	service, key := carrierTestService(t, []string{"jwk"}, testChain(t))
+	service, key, _ := carrierTestService(t, []string{"jwk"}, true)
 
 	header := tokenHeader(t, service, key)
 
@@ -99,7 +93,7 @@ func TestIssuedTokenHonoursACarrierNarrowedToTheKey(t *testing.T) {
 // The behaviour every existing chainless deployment has today, which the new
 // setting must leave exactly as it was.
 func TestIssuedTokenIsUnchangedForAChainlessDeployment(t *testing.T) {
-	service, key := carrierTestService(t, nil, nil)
+	service, key, _ := carrierTestService(t, nil, false)
 
 	header := tokenHeader(t, service, key)
 
@@ -109,7 +103,7 @@ func TestIssuedTokenIsUnchangedForAChainlessDeployment(t *testing.T) {
 }
 
 func TestPublishedKeySetIsTheSigningKey(t *testing.T) {
-	service, key := carrierTestService(t, nil, nil)
+	service, key, _ := carrierTestService(t, nil, false)
 
 	keySet, err := service.SigningKeySet(t.Context())
 	require.NoError(t, err)

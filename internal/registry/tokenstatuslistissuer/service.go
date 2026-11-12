@@ -81,7 +81,7 @@ func New(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbSer
 	// Resolved here, not per token: a deployment that asks for a carrier it
 	// cannot produce must fail to start rather than serve status lists no
 	// verifier can resolve a key from.
-	s.carriers, err = resolveKeyCarriers(cfg.Registry.TokenStatusLists.TokenKeyCarriers, km.Chain)
+	s.carriers, err = resolveKeyCarriers(cfg.Registry.TokenStatusLists.TokenKeyCarriers, km.Chain, km.Cert, signer.PublicKey())
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve Token Status List key carriers: %w", err)
 	}
