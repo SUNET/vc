@@ -2528,6 +2528,19 @@ type TokenStatusLists struct {
 	SectionSize int64 `yaml:"section_size" default:"1000000"`
 	// RateLimitRequestsPerMinute is the maximum requests per minute per IP for token status list endpoints. Default: 60
 	RateLimitRequestsPerMinute int `yaml:"rate_limit_requests_per_minute" default:"60"`
+	// TokenKeyCarriers lists the header members every issued Status List Token
+	// uses to carry its signing key, so that a verifier can resolve that key
+	// from the token itself: "x5c" for the certificate chain loaded from
+	// key_config.chain_path (the JOSE x5c header, RFC 7515, and the COSE
+	// x5chain header, RFC 9360), "jwk" for the bare public key (the JOSE jwk
+	// header). Both by default, so a deployment need not know which carrier
+	// its verifiers accept; x5c rides only when a chain is configured, so a
+	// deployment with no chain_path keeps issuing exactly what it issued
+	// before. Narrow it to bind status lists to certificates alone (["x5c"])
+	// or to keys alone (["jwk"]). A list naming only carriers this deployment
+	// cannot produce is refused at startup rather than quietly issuing tokens
+	// with no key in them at all.
+	TokenKeyCarriers []string `yaml:"token_key_carriers,omitempty" default:"[\"x5c\", \"jwk\"]" validate:"omitempty,dive,oneof=x5c jwk"`
 }
 
 // OTEL holds the OpenTelemetry tracing configuration

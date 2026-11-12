@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
@@ -22,6 +23,8 @@ type mockTokenStatusListIssuer struct {
 	cwtCache cache.Cache[[]byte]
 	sections []int64
 	err      error
+	jwks     *jose.JWKS
+	jwksErr  error
 }
 
 func newMockTokenStatusListIssuer() *mockTokenStatusListIssuer {
@@ -73,6 +76,13 @@ func (m *mockTokenStatusListIssuer) SetSections(sections []int64) {
 
 func (m *mockTokenStatusListIssuer) SetError(err error) {
 	m.err = err
+}
+
+func (m *mockTokenStatusListIssuer) SigningKeySet(ctx context.Context) (*jose.JWKS, error) {
+	if m.jwksErr != nil {
+		return nil, m.jwksErr
+	}
+	return m.jwks, nil
 }
 
 func (m *mockTokenStatusListIssuer) HealthProbe(ctx context.Context) error {

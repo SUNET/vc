@@ -12,6 +12,7 @@ import (
 
 	"github.com/SUNET/vc/internal/registry/cache"
 	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
@@ -24,6 +25,10 @@ type Service struct {
 	tokenStatusListMetadata db.TokenStatusListMetadataStore
 	signer                  pki.Signer
 	log                     *logger.Log
+
+	// carriers is what every issued token carries its signing key in, resolved
+	// once at startup from token_key_carriers and the loaded key material.
+	carriers keyCarriers
 
 	cacheService *cache.Service
 
@@ -72,7 +77,19 @@ func New(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbSer
 	// Create signer that supports any key type (RSA, ECDSA)
 	signer := pki.NewKeyMaterialSigner(km)
 	s.signer = signer
-	s.log.Info("Loaded Token Status List signing key", "algorithm", signer.Algorithm())
+
+	// Resolved here, not per token: a deployment that asks for a carrier it
+	// cannot produce must fail to start rather than serve status lists no
+	// verifier can resolve a key from.
+	s.carriers, err = resolveKeyCarriers(cfg.Registry.TokenStatusLists.TokenKeyCarriers, km.Chain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve Token Status List key carriers: %w", err)
+	}
+
+	s.log.Info("Loaded Token Status List signing key",
+		"algorithm", signer.Algorithm(),
+		"x5c_chain_length", len(s.carriers.x5cBase64),
+		"embedded_jwk", s.carriers.embedJWK)
 
 	// Initialize database if empty
 	if err := s.tokenStatusListColl.InitializeIfEmpty(ctx); err != nil {
@@ -112,6 +129,21 @@ func (s *Service) GetCachedCWT(ctx context.Context, section int64) []byte {
 		return nil
 	}
 	return v
+}
+
+// SigningKeySet returns the public half of the Status List Token signing key
+// as a JWK Set, for publication under the list URI.
+//
+// It is the same key the tokens are signed with, so a verifier that fetched
+// this set can bind a token's signer to it by fingerprint - which is what a
+// trust registry doing name-to-key binding for the list URI needs, and the
+// only way to establish that binding for a deployment whose tokens carry a
+// bare "jwk" rather than a certificate chain.
+func (s *Service) SigningKeySet(ctx context.Context) (*jose.JWKS, error) {
+	if s.signer == nil {
+		return nil, fmt.Errorf("status list signing key not loaded")
+	}
+	return jose.CreateJWKSFromSigner(s.signer, "sig")
 }
 
 // refreshLoop periodically refreshes all cached status list tokens

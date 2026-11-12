@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/registry/apiv1"
 	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
@@ -29,6 +30,9 @@ type mockApiv1 struct {
 	updateErr       error
 	statusListReply *apiv1.TokenStatusListsResponse
 	statusListErr   error
+	jwksReply       *jose.JWKS
+	jwksErr         error
+	jwksSection     int64
 }
 
 func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
@@ -44,6 +48,14 @@ func (m *mockApiv1) TokenStatusLists(ctx context.Context, req *apiv1.TokenStatus
 
 func (m *mockApiv1) TokenStatusListAggregation(ctx context.Context) (*apiv1.TokenStatusListAggregationResponse, error) {
 	return nil, nil
+}
+
+func (m *mockApiv1) TokenStatusListJWKS(ctx context.Context, req *apiv1.TokenStatusListJWKSRequest) (*jose.JWKS, error) {
+	m.jwksSection = req.ID
+	if m.jwksErr != nil {
+		return nil, m.jwksErr
+	}
+	return m.jwksReply, nil
 }
 
 func (m *mockApiv1) SearchPerson(ctx context.Context, req *apiv1.SearchPersonRequest) (*apiv1.SearchPersonReply, error) {
