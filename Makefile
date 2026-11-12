@@ -14,6 +14,9 @@ LDFLAGS                 := -ldflags "-w -s --extldflags '-static'"
 LDFLAGS_DYNAMIC         := -ldflags "-w -s"
 CGO_ENABLED_STATIC      := CGO_ENABLED=0
 CGO_ENABLED_DYNAMIC     := CGO_ENABLED=1
+# Go 1.27.4 refuses LLVM bitcode in cgo link inputs; the staged Rust staticlibs carry it.
+OBJCOPY                 ?= objcopy
+strip_bitcode            = $(OBJCOPY) --remove-section=.llvmbc --remove-section=.llvmcmd $(1)
 BUILD_OS                ?= linux
 # Follow the host arch so `make build-*` on arm64 dev machines produces
 # arm64 binaries whose staged cgo libs (built by bbs-native-lib et al.
@@ -394,6 +397,7 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/" || exit 1; \
 	done
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
+	$(call strip_bitcode,"$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a")
 	@# The nym_auth vectors ship with the crate (the circuit artifact, a
 	@# real proof and the request values that produced it), and
 	@# pkg/nymauth/verifier's zknative test verifies that proof rather
@@ -449,6 +453,7 @@ bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issu
 	@mkdir -p "$(ZK_CRED_BBS_STAGE)/include" "$(ZK_CRED_BBS_STAGE)/lib" "$(ZK_CRED_BBS_STAGE)/test-vectors"
 	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi/zk_cred_bbs_go.h" "$(ZK_CRED_BBS_STAGE)/include/"
 	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi"/libzk_cred_bbs.* "$(ZK_CRED_BBS_STAGE)/lib/"
+	$(call strip_bitcode,"$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a")
 	@# The crate's own reference vectors, so pkg/bbs's tests check against
 	@# the same ground truth the Rust and TypeScript sides do rather than a
 	@# second copy that can drift.
@@ -484,6 +489,7 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_nymauth_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi"/libzk_cred_vega.* "$(ZK_CRED_VEGA_STAGE)/lib/"
+	$(call strip_bitcode,"$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a")
 	@# The crate's own nym_auth vectors - the published mdoc circuit's
 	@# shapes, a reference proof made against them, and the statement
 	@# that produced it. Staged beside the library, the same way the
