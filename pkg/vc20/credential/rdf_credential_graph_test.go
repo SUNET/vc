@@ -2,6 +2,7 @@ package credential
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -167,10 +168,41 @@ func requireNormalizeLeavesAlone(t *testing.T, doc, message string) *RDFCredenti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before != after {
+	if !sameQuads(before, after) {
 		t.Errorf("%s:\n--- before ---\n%s\n--- after ---\n%s", message, before, after)
 	}
 	return cred
+}
+
+// sameQuads reports whether two N-Quads serializations hold the same quads.
+//
+// Compared as a set, not as text. An RDF dataset IS a set of quads, and
+// NQuads() - "without normalization", by its own doc - inherits its order from
+// json-gold's NQuadRDFSerializer, which walks dataset.Graphs, a Go map. Map
+// iteration order is randomized per run, so any document with a named graph
+// beside the default one serializes its graphs in an arbitrary order and a
+// string comparison fails at random, with before and after holding exactly the
+// same quads. That was roughly one run in four on CI (SUNET/vc main, runs
+// 42646895352 and 42653994564, both TestNormalizeLeavesAppliedContainersAlone).
+//
+// Sorting here rather than in NQuads() on purpose: nothing outside these tests
+// calls NQuads, it promises no ordering, and the canonical form every signature
+// is computed over comes from normalization, which sorts already. The fix
+// belongs where the ordering assumption was made.
+func sameQuads(before, after string) bool {
+	return slices.Equal(sortedQuadLines(before), sortedQuadLines(after))
+}
+
+func sortedQuadLines(nquads string) []string {
+	lines := strings.Split(strings.TrimSpace(nquads), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // TestNormalizeLeavesJSONLiteralsAlone: a JSON literal that happens to hold a
