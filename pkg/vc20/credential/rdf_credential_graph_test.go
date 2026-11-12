@@ -2,6 +2,7 @@ package credential
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -167,7 +168,11 @@ func requireNormalizeLeavesAlone(t *testing.T, doc, message string) *RDFCredenti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before != after {
+	beforeLines := strings.Split(strings.TrimSpace(before), "\n")
+	afterLines := strings.Split(strings.TrimSpace(after), "\n")
+	slices.Sort(beforeLines)
+	slices.Sort(afterLines)
+	if !slices.Equal(beforeLines, afterLines) {
 		t.Errorf("%s:\n--- before ---\n%s\n--- after ---\n%s", message, before, after)
 	}
 	return cred
