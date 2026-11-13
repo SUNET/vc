@@ -1361,6 +1361,9 @@ func mdocStatusClaim(st *mdoc.MSOStatus) (map[string]any, error) {
 	if st == nil || st.StatusList == nil {
 		return nil, nil
 	}
+	if st.StatusList.URI == "" {
+		return nil, errors.New("status list URI is empty")
+	}
 	if st.StatusList.Idx > math.MaxInt64 {
 		return nil, fmt.Errorf("status index %d out of range", st.StatusList.Idx)
 	}

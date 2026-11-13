@@ -31,6 +31,11 @@ func TestMdocStatusClaim(t *testing.T) {
 		assert.Equal(t, int64(42), ref.Index)
 	})
 
+	t.Run("empty URI is an error", func(t *testing.T) {
+		_, err := mdocStatusClaim(&mdoc.MSOStatus{StatusList: &mdoc.MSOStatusList{URI: "", Idx: 1}})
+		require.Error(t, err)
+	})
+
 	t.Run("overflowing index is an error", func(t *testing.T) {
 		_, err := mdocStatusClaim(&mdoc.MSOStatus{StatusList: &mdoc.MSOStatusList{URI: "https://r.example/1", Idx: math.MaxInt64 + 1}})
 		require.Error(t, err)
