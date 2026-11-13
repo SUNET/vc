@@ -1586,24 +1586,52 @@ type DigitalCredentialsConfig struct {
 	DeepLinkScheme string `yaml:"deep_link_scheme,omitempty" doc_example:"\"eudi-wallet://\""`
 }
 
-// AuthorizationPageCSSConfig allows deployers to customize the authorization page styling
+// AuthorizationPageCSSConfig allows deployers to customize the authorization page styling.
+//
+// A theme chooses the page's two brand colors, and primary_color and
+// secondary_color override whichever pair it chose. The override used to lose:
+// the template emitted the configured colors and then the theme's, two :root
+// rules of equal specificity in one stylesheet, so "blue" and "purple" silently
+// discarded an operator's primary_color - including in this repository's own
+// documented example, which set both. The pair is now resolved before the
+// template sees it, by ThemeColors.
+//
+// There is deliberately no inline-CSS member here. It existed and could never
+// apply: the CSS was interpolated into a `style` element as a plain string,
+// where html/template's CSS-context filter replaces anything that is not a
+// safe CSS value - a stylesheet very much included - with the literal
+// ZgotmplZ. Making it work would mean injecting operator-supplied CSS
+// unescaped into every authorization page, a configuration-controlled
+// injection sink in exchange for a knob no deployment can be relying on,
+// because it has never once applied. See SUNET/vc#930.
+//
+// CSSFile is a different story and stays: it renders as a `link` element with
+// an href, which works whenever the configured value is a URL the browser can
+// fetch. Only its documentation was wrong, calling it a path read from disk.
+//
+// Tag names are written in backticks deliberately: gen_config_docs renders
+// this comment as Markdown prose in docs/CONFIGURATION.md, where a bare
+// `<style>` is raw HTML rather than text.
 type AuthorizationPageCSSConfig struct {
-	// CustomCSS is inline CSS that will be injected into the authorization page
-	// Allows deployers to override default styling without modifying templates
-	CustomCSS string `yaml:"custom_css,omitempty"`
-
-	// CSSFile is a path to an external CSS file to include
-	// If both CustomCSS and CSSFile are provided, both are included
-	CSSFile string `yaml:"css_file,omitempty"`
-
-	// Theme sets predefined color scheme: "light" (default), "dark", "blue", "purple"
+	// Theme selects the color scheme the page starts from: "light" (default),
+	// "dark", "blue" or "purple". The colors below override it.
 	Theme string `yaml:"theme,omitempty" validate:"omitempty,oneof=light dark blue purple" default:"light"`
 
-	// PrimaryColor overrides the primary brand color
+	// PrimaryColor overrides the primary brand color the theme selected.
 	PrimaryColor string `yaml:"primary_color,omitempty" doc_example:"\"#667eea\""`
 
-	// SecondaryColor overrides the secondary brand color
+	// SecondaryColor overrides the secondary brand color the theme selected.
 	SecondaryColor string `yaml:"secondary_color,omitempty" doc_example:"\"#764ba2\""`
+
+	// CSSFile is the URL of a stylesheet to link from the authorization page.
+	//
+	// Fetched by the browser, not read by this service, so it has to be a URL
+	// the browser can reach: an absolute https URL, or a path this deployment
+	// serves. It was documented as "a path to an external CSS file" and its
+	// documented example was a filesystem path, which the browser duly
+	// requested from the verifier and got a 404 for; the member itself has
+	// always worked for a URL, which is why it is still here.
+	CSSFile string `yaml:"css_file,omitempty" doc_example:"\"https://static.example.com/verifier.css\""`
 
 	// LogoURL provides a URL to a custom logo image
 	LogoURL string `yaml:"logo_url,omitempty"`
@@ -1613,6 +1641,37 @@ type AuthorizationPageCSSConfig struct {
 
 	// Subtitle overrides the page subtitle
 	Subtitle string `yaml:"subtitle,omitempty"`
+}
+
+// ThemeColors returns the primary and secondary brand colors the authorization
+// page should use: the configured theme's pair, with PrimaryColor and
+// SecondaryColor overriding either of them independently.
+//
+// Resolving this here rather than in the template is what makes the override
+// an override. The template used to emit the configured colors first and the
+// theme's afterwards, two :root rules of equal specificity in one stylesheet,
+// so the theme won whatever the operator configured.
+//
+// An unrecognized or absent theme resolves as "light". defaults.Set fills the
+// field, and the validator restricts it to the four names, so neither case
+// should reach a running verifier; answering with the default pair rather than
+// with empty strings keeps a page that somehow does reach it readable.
+func (a *AuthorizationPageCSSConfig) ThemeColors() (primary string, secondary string) {
+	switch a.Theme {
+	case "purple":
+		primary, secondary = "#805ad5", "#553c9a"
+	default:
+		primary, secondary = "#3182ce", "#2c5282"
+	}
+
+	if a.PrimaryColor != "" {
+		primary = a.PrimaryColor
+	}
+	if a.SecondaryColor != "" {
+		secondary = a.SecondaryColor
+	}
+
+	return primary, secondary
 }
 
 // CredentialDisplayConfig controls whether and how credentials are displayed before being sent to RP

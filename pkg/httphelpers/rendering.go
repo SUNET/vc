@@ -158,18 +158,47 @@ func prefersHTML(accept string) bool {
 
 // parseMediaRange splits one Accept entry into its lowercased media range and
 // its quality value, defaulting q to 1 when absent or malformed.
+//
+// The parameter is matched case-insensitively. Parameter names are
+// case-insensitive per RFC 9110 5.6.6, and "Q=" does occur; read as a name
+// this did not recognise, the entry kept the default quality of 1, so a client
+// writing "text/html;Q=0" - refusing HTML - was served the HTML error page,
+// and on the Accept-Language side a refused language stayed a preference.
+// Lowercasing the whole parameter is safe because the only one read here is a
+// number.
 func parseMediaRange(part string) (string, float64) {
-	segs := strings.Split(part, ";")
-	mediaRange := strings.ToLower(strings.TrimSpace(segs[0]))
+	// Cut rather than Split: Split allocates a slice for every entry, and the
+	// entry count is the client's to choose. A 1 MB Accept-Language of
+	// one-subtag ranges allocated 62 MB and 699k objects parsing it, which is
+	// a poor exchange for a request that costs the sender a megabyte.
+	value, rest, _ := strings.Cut(part, ";")
+	mediaRange := strings.ToLower(strings.TrimSpace(value))
 	if mediaRange == "" {
 		return "", 0
 	}
 
 	q := 1.0
-	for _, param := range segs[1:] {
-		param = strings.TrimSpace(param)
+	for rest != "" {
+		var param string
+		param, rest, _ = strings.Cut(rest, ";")
+		param = strings.ToLower(strings.TrimSpace(param))
 		if after, ok := strings.CutPrefix(param, "q="); ok {
-			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil {
+			// Outside 0..1 is as malformed as unparsable: RFC 9110 12.4.2
+			// admits only "0[.0*3]" and "1[.0*3]", so both are left at the
+			// default rather than taken literally. Taken literally, "q=-1"
+			// read as a refusal - silently dropping a language the client
+			// had asked for, and doing it on exactly the kind of malformed
+			// input that "q=notanumber" is already forgiven for - while
+			// "q=5" outranked every well-formed preference beside it.
+			//
+			// A value INSIDE the range is honoured as written, including the
+			// ones with more decimal places than the grammar admits: "0.0000"
+			// and "0e0" parse to zero, and zero means not acceptable. Leaving
+			// those at the default of 1 instead - the other reading of "not in
+			// the grammar" - would turn an unmistakable refusal into the
+			// client's top preference, which is the more harmful way to be
+			// wrong. Deliberate; see the cases in accept_language_test.go.
+			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil && v >= 0 && v <= 1 {
 				q = v
 			}
 		}

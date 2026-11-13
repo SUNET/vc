@@ -185,7 +185,6 @@ type GetCredentialDisplayDataResponse struct {
 	ShowClaims        bool           `json:"show_claims"`
 	PrimaryColor      string         `json:"primary_color"`
 	SecondaryColor    string         `json:"secondary_color"`
-	CustomCSS         string         `json:"custom_css"`
 }
 
 // GetCredentialDisplayData retrieves data needed for the credential display page
@@ -215,18 +214,13 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 		State:             authCtx.State,
 		ShowRawCredential: c.cfg.Verifier.CredentialDisplay.ShowRawCredential,
 		ShowClaims:        model.BoolVal(c.cfg.Verifier.CredentialDisplay.ShowClaims, true),
-		PrimaryColor:      c.cfg.Verifier.AuthorizationPageCSS.PrimaryColor,
-		SecondaryColor:    c.cfg.Verifier.AuthorizationPageCSS.SecondaryColor,
-		CustomCSS:         c.cfg.Verifier.AuthorizationPageCSS.CustomCSS,
 	}
 
-	// Set defaults
-	if response.PrimaryColor == "" {
-		response.PrimaryColor = "#3182ce"
-	}
-	if response.SecondaryColor == "" {
-		response.SecondaryColor = "#2c5282"
-	}
+	// Same resolution as the authorization page: the theme picks the colors
+	// and primary_color/secondary_color override them. Read through
+	// ThemeColors rather than off the config so a deployment on the purple
+	// theme does not get a blue details page.
+	response.PrimaryColor, response.SecondaryColor = c.cfg.Verifier.AuthorizationPageCSS.ThemeColors()
 
 	return response, nil
 }

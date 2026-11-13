@@ -1936,16 +1936,40 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.authorization_page_css`
 
-| Field             | Type     | Description                                                                                                                           | Example     | Default | Required |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
-| `custom_css`      | `string` | Inline CSS that will be injected into the authorization page Allows deployers to override default styling without modifying templates | -           | -       | No       |
-| `css_file`        | `string` | Path to an external CSS file to include If both CustomCSS and CSSFile are provided, both are included                                 | -           | -       | No       |
-| `theme`           | `string` | Predefined color scheme: "light" (default), "dark", "blue", "purple"                                                                  | -           | `light` | No       |
-| `primary_color`   | `string` | PrimaryColor overrides the primary brand color                                                                                        | `"#667eea"` | -       | No       |
-| `secondary_color` | `string` | SecondaryColor overrides the secondary brand color                                                                                    | `"#764ba2"` | -       | No       |
-| `logo_url`        | `string` | A URL to a custom logo image                                                                                                          | -           | -       | No       |
-| `title`           | `string` | Title overrides the page title (default: "Wallet Authorization")                                                                      | -           | -       | No       |
-| `subtitle`        | `string` | Subtitle overrides the page subtitle                                                                                                  | -           | -       | No       |
+A theme chooses the page's two brand colors, and primary_color and
+secondary_color override whichever pair it chose. The override used to lose:
+the template emitted the configured colors and then the theme's, two :root
+rules of equal specificity in one stylesheet, so "blue" and "purple" silently
+discarded an operator's primary_color - including in this repository's own
+documented example, which set both. The pair is now resolved before the
+template sees it, by ThemeColors.
+
+There is deliberately no inline-CSS member here. It existed and could never
+apply: the CSS was interpolated into a `style` element as a plain string,
+where html/template's CSS-context filter replaces anything that is not a
+safe CSS value - a stylesheet very much included - with the literal
+ZgotmplZ. Making it work would mean injecting operator-supplied CSS
+unescaped into every authorization page, a configuration-controlled
+injection sink in exchange for a knob no deployment can be relying on,
+because it has never once applied. See SUNET/vc#930.
+
+CSSFile is a different story and stays: it renders as a `link` element with
+an href, which works whenever the configured value is a URL the browser can
+fetch. Only its documentation was wrong, calling it a path read from disk.
+
+Tag names are written in backticks deliberately: gen_config_docs renders
+this comment as Markdown prose in docs/CONFIGURATION.md, where a bare
+`<style>` is raw HTML rather than text.
+
+| Field             | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Example                                     | Default | Required |
+| ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------- | -------- |
+| `theme`           | `string` | Theme selects the color scheme the page starts from: "light" (default), "dark", "blue" or "purple". The colors below override it.                                                                                                                                                                                                                                                                                                                                            | -                                           | `light` | No       |
+| `primary_color`   | `string` | PrimaryColor overrides the primary brand color the theme selected.                                                                                                                                                                                                                                                                                                                                                                                                           | `"#667eea"`                                 | -       | No       |
+| `secondary_color` | `string` | SecondaryColor overrides the secondary brand color the theme selected.                                                                                                                                                                                                                                                                                                                                                                                                       | `"#764ba2"`                                 | -       | No       |
+| `css_file`        | `string` | URL of a stylesheet to link from the authorization page. Fetched by the browser, not read by this service, so it has to be a URL the browser can reach: an absolute https URL, or a path this deployment serves. It was documented as "a path to an external CSS file" and its documented example was a filesystem path, which the browser duly requested from the verifier and got a 404 for; the member itself has always worked for a URL, which is why it is still here. | `"https://static.example.com/verifier.css"` | -       | No       |
+| `logo_url`        | `string` | A URL to a custom logo image                                                                                                                                                                                                                                                                                                                                                                                                                                                 | -                                           | -       | No       |
+| `title`           | `string` | Title overrides the page title (default: "Wallet Authorization")                                                                                                                                                                                                                                                                                                                                                                                                             | -                                           | -       | No       |
+| `subtitle`        | `string` | Subtitle overrides the page subtitle                                                                                                                                                                                                                                                                                                                                                                                                                                         | -                                           | -       | No       |
 
 ### `ts12`
 
