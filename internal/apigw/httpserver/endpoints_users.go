@@ -81,13 +81,16 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 
 	s.log.Debug("endpointUserLookup", "requestURI", requestURI)
 
+	// Read once, and across every field line: see AcceptLanguageOf.
+	acceptLanguage := httphelpers.AcceptLanguageOf(c)
+
 	request := &vcclient.UserLookupRequest{
 		RequestURI: requestURI,
 		// The consent page names the credential in the holder's language
 		// where the metadata has one, so the browser's preference has to
 		// reach apiv1; it has no other way to learn it.
-		Locales:         httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
-		RejectedLocales: httphelpers.RejectedLanguages(c.GetHeader("Accept-Language")),
+		Locales:         httphelpers.AcceptedLanguages(acceptLanguage),
+		RejectedLocales: httphelpers.RejectedLanguages(acceptLanguage),
 	}
 
 	authProvider, ok := session.Get("auth_provider").(string)

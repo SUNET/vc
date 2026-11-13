@@ -3,7 +3,29 @@ package httphelpers
 import (
 	"sort"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
+
+// AcceptLanguageOf returns the request's Accept-Language field value, with
+// repeated field lines joined as one.
+//
+// A field may be sent as several lines, and RFC 9110 5.3 makes that exactly
+// equivalent to one line with the values comma-separated. Reading it with
+// Header.Get returns the FIRST line only, so a client sending
+//
+//	Accept-Language: sv-SE
+//	Accept-Language: en;q=0
+//
+// had its second line discarded - here, a refusal discarded, which is the
+// thing this file exists to stop happening.
+func AcceptLanguageOf(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+
+	return strings.Join(c.Request.Header.Values("Accept-Language"), ",")
+}
 
 // AcceptedLanguages parses an Accept-Language header into the language tags it
 // names as acceptable, most preferred first, lowercased.

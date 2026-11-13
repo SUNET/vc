@@ -59,19 +59,19 @@ func userLookupEngine(t *testing.T, mockAPI Apiv1) *gin.Engine {
 func TestUserLookupCarriesTheHolderLanguagePreference(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
-		header       string
+		headerLines  []string
 		want         []string
 		wantRejected []string
 	}{
 		{
 			name:         "the browser's ordered preference reaches apiv1",
-			header:       "sv-SE,sv;q=0.9,en-US;q=0.8",
+			headerLines:  []string{"sv-SE,sv;q=0.9,en-US;q=0.8"},
 			want:         []string{"sv-se", "sv", "en-us"},
 			wantRejected: []string{},
 		},
 		{
 			name:         "a request with no Accept-Language carries none",
-			header:       "",
+			headerLines:  nil,
 			want:         []string{},
 			wantRejected: []string{},
 		},
@@ -80,9 +80,19 @@ func TestUserLookupCarriesTheHolderLanguagePreference(t *testing.T) {
 			// but it still has to reach apiv1 or the selection there cannot
 			// keep honouring it.
 			name:         "a refused tag travels separately from the preferences",
-			header:       "sv-SE;q=0, sv;q=1, en;q=0.8",
+			headerLines:  []string{"sv-SE;q=0, sv;q=1, en;q=0.8"},
 			want:         []string{"sv", "en"},
 			wantRejected: []string{"sv-se"},
+		},
+		{
+			// RFC 9110 5.3: several field lines of one name mean the same as
+			// one comma-joined line. Header.Get returns only the first, so
+			// everything after it was discarded - here a refusal, which is
+			// the thing this plumbing exists to carry.
+			name:         "a field sent as several lines is read whole",
+			headerLines:  []string{"sv-SE", "en;q=0.8", "de;q=0"},
+			want:         []string{"sv-se", "en"},
+			wantRejected: []string{"de"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,8 +100,8 @@ func TestUserLookupCarriesTheHolderLanguagePreference(t *testing.T) {
 			engine := userLookupEngine(t, api)
 
 			req := httptest.NewRequest(http.MethodGet, "/user/lookup", nil)
-			if tc.header != "" {
-				req.Header.Set("Accept-Language", tc.header)
+			for _, line := range tc.headerLines {
+				req.Header.Add("Accept-Language", line)
 			}
 			w := httptest.NewRecorder()
 			engine.ServeHTTP(w, req)

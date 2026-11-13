@@ -89,26 +89,22 @@ func displayForLocales[T any](entries []T, locales, rejected []string, localeOf 
 	}
 	sort.SliceStable(byLocale, func(a, b int) bool { return tags[byLocale[a]] < tags[byLocale[b]] })
 
-	firstMatch := func(match func(tag string) bool) int {
-		for _, i := range byLocale {
-			if eligible(i) && tags[i] != "" && match(tags[i]) {
-				return i
-			}
-		}
-
-		return -1
-	}
-
+	// Locale order also settles exact-before-extension at each level, without
+	// a separate pass: everything matching a range either equals it or begins
+	// with it plus "-", and a proper prefix sorts first, so an "en" entry is
+	// reached before "en-US" and a "zh-Hans" entry before "zh-Hans-CN".
+	// Asserted by TestAnExactMatchSortsBeforeAnyExtensionOfIt.
+	//
+	// Written as a plain nested loop rather than with a per-level predicate
+	// closure: the closure captured the range, so it allocated once per
+	// truncation level per range, which a client controls the count of
+	// through its own Accept-Language header.
 	for _, locale := range locales {
 		for r := locale; r != ""; r = httphelpers.TruncateLanguageRange(r) {
-			// Locale order also settles exact-before-extension at each level,
-			// without a separate pass: everything matching range r either
-			// equals it or begins with r + "-", and a proper prefix sorts
-			// first, so an "en" entry is reached before "en-US" and a
-			// "zh-Hans" entry before "zh-Hans-CN". Asserted by
-			// TestAnExactMatchSortsBeforeAnyExtensionOfIt.
-			if i := firstMatch(func(tag string) bool { return httphelpers.LanguageRangeMatches(r, tag) }); i >= 0 {
-				return i
+			for _, i := range byLocale {
+				if eligible(i) && tags[i] != "" && httphelpers.LanguageRangeMatches(r, tags[i]) {
+					return i
+				}
 			}
 		}
 	}

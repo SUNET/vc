@@ -622,14 +622,17 @@ func (s *Service) headlessConsentComplete(ctx context.Context, c *gin.Context, s
 		}
 	}
 
+	// Read once, and across every field line: see AcceptLanguageOf.
+	acceptLanguage := httphelpers.AcceptLanguageOf(c)
+
 	reply, err := s.apiv1.UserLookup(ctx, &vcclient.UserLookupRequest{
 		RequestURI:      requestURI,
 		AuthProvider:    authProvider,
 		ResponseCode:    responseCode,
 		VCTM:            vctm,
 		MDDL:            mddl,
-		Locales:         httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
-		RejectedLocales: httphelpers.RejectedLanguages(c.GetHeader("Accept-Language")),
+		Locales:         httphelpers.AcceptedLanguages(acceptLanguage),
+		RejectedLocales: httphelpers.RejectedLanguages(acceptLanguage),
 	})
 	if err != nil {
 		return fmt.Errorf("user lookup: %w", err)
