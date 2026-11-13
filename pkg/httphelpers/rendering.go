@@ -177,7 +177,14 @@ func parseMediaRange(part string) (string, float64) {
 	for _, param := range segs[1:] {
 		param = strings.ToLower(strings.TrimSpace(param))
 		if after, ok := strings.CutPrefix(param, "q="); ok {
-			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil {
+			// Outside 0..1 is as malformed as unparsable: RFC 9110 12.4.2
+			// admits only "0[.0*3]" and "1[.0*3]", so both are left at the
+			// default rather than taken literally. Taken literally, "q=-1"
+			// read as a refusal - silently dropping a language the client
+			// had asked for, and doing it on exactly the kind of malformed
+			// input that "q=notanumber" is already forgiven for - while
+			// "q=5" outranked every well-formed preference beside it.
+			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil && v >= 0 && v <= 1 {
 				q = v
 			}
 		}

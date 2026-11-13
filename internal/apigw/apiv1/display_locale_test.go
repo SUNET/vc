@@ -26,165 +26,56 @@ func localeEntries(locales ...string) []localeEntry {
 	return entries
 }
 
+// Driven by the header rather than by a hand-derived (locales, rejected) pair,
+// because that pair is only ever derived from a header - and because three of
+// the bugs this test now covers lived in the seam between the two, where a
+// refusal the parser dropped could not be honoured by the selection no matter
+// how either behaved alone.
 func TestDisplayForLocales(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		entries  []localeEntry
-		locales  []string
-		rejected []string
-		want     int
+		name    string
+		entries []localeEntry
+		header  string
+		want    int
 	}{
-		{
-			name:    "nothing to show",
-			entries: nil,
-			locales: []string{"sv-se"},
-			want:    -1,
-		},
-		{
-			name:    "an exact match wins",
-			entries: localeEntries("en-US", "sv-SE", "de-DE"),
-			locales: []string{"sv-se"},
-			want:    1,
-		},
-		{
-			name:    "the holder's order decides between two entries they both accept",
-			entries: localeEntries("en-US", "sv-SE"),
-			locales: []string{"sv-se", "en-us"},
-			want:    1,
-		},
-		{
-			name:    "a region-less preference matches a regional entry",
-			entries: localeEntries("en-US", "sv-SE"),
-			locales: []string{"sv"},
-			want:    1,
-		},
-		{
-			name:    "a different region of the same language still matches",
-			entries: localeEntries("de-DE", "en-US"),
-			locales: []string{"en-gb"},
-			want:    1,
-		},
-		{
-			name:    "an exact match is preferred over a language match from a stronger tag",
-			entries: localeEntries("en-GB", "sv-SE"),
-			locales: []string{"en-us", "sv-se"},
-			want:    1,
-		},
-		{
-			name:    "an unmatched holder gets English rather than entry zero",
-			entries: localeEntries("de-DE", "en-US", "sv-SE"),
-			locales: []string{"fr-fr"},
-			want:    1,
-		},
-		{
-			name:    "English is picked deterministically when there is more than one",
-			entries: localeEntries("en-US", "en-GB"),
-			locales: []string{"fr-fr"},
-			want:    1,
-		},
-		{
-			name:    "with no English at all the lowest locale wins, not the first listed",
-			entries: localeEntries("sv-SE", "de-DE"),
-			locales: []string{"fr-fr"},
-			want:    1,
-		},
-		{
-			name:    "an entry declaring no locale is the catch-all",
-			entries: localeEntries("sv-SE", ""),
-			locales: []string{"fr-fr"},
-			want:    1,
-		},
-		{
-			name:    "no Accept-Language still answers, and still prefers English",
-			entries: localeEntries("de-DE", "en-US"),
-			locales: nil,
-			want:    1,
-		},
-		{
-			name:    "metadata case does not matter",
-			entries: localeEntries("DE-de", "SV-SE"),
-			locales: []string{"sv-se"},
-			want:    1,
-		},
-		{
-			// Accept-Language: sv-SE;q=0, sv;q=1, en;q=0.8 - the holder wants
-			// Swedish but not this Swedish. The language-only step must not
-			// hand them the entry they ruled out while English is on offer.
-			name:     "a rejected tag is not reached through its own language",
-			entries:  localeEntries("sv-SE", "en-US"),
-			locales:  []string{"sv", "en"},
-			rejected: []string{"sv-se"},
-			want:     1,
-		},
-		{
-			name:     "a rejection does not exclude a sibling region it does not match",
-			entries:  localeEntries("sv-SE", "sv-FI"),
-			locales:  []string{"sv"},
-			rejected: []string{"sv-se"},
-			want:     1,
-		},
-		{
-			name:     "a rejection outranks only a less specific acceptance",
-			entries:  localeEntries("de-DE", "sv-SE"),
-			locales:  []string{"sv-se"},
-			rejected: []string{"sv"},
-			want:     1,
-		},
-		{
-			name:     "a rejected tag is kept out of the English fallback too",
-			entries:  localeEntries("en-US", "sv-SE"),
-			locales:  []string{"fr"},
-			rejected: []string{"en"},
-			want:     1,
-		},
-		{
-			// Nothing acceptable is left, and the page still has to name the
-			// credential, so the rejections are ignored rather than answering
-			// with nothing.
-			name:     "every entry ruled out still yields an entry",
-			entries:  localeEntries("en-US", "sv-SE"),
-			locales:  nil,
-			rejected: []string{"en", "sv"},
-			want:     0,
-		},
-		{
-			name:     "an entry declaring no locale is not mistaken for a rejected one",
-			entries:  localeEntries("sv-SE", ""),
-			locales:  []string{"sv"},
-			rejected: []string{"sv-se"},
-			want:     1,
-		},
-		{
-			// Accept-Language: en;q=1,en-US;q=0 - the holder takes English
-			// but not the US variant, and the document offers both.
-			name:     "a refused region yields the sibling region of the same language",
-			entries:  localeEntries("en-US", "en-GB"),
-			locales:  []string{"en"},
-			rejected: []string{"en-us"},
-			want:     1,
-		},
-		{
-			// Accept-Language: fr, *;q=0 - French, and nothing else. The
-			// document has no French, so the entry that declares no language
-			// is the one the wildcard does not reach.
-			name:     "a refusing wildcard leaves the language-independent entry",
-			entries:  localeEntries("en-US", ""),
-			locales:  []string{"fr"},
-			rejected: []string{"*"},
-			want:     1,
-		},
-		{
-			// Same header, but every entry names a language the wildcard
-			// refuses, so the page falls back rather than showing nothing.
-			name:     "a refusing wildcard over a document with no catch-all still names it",
-			entries:  localeEntries("de-DE", "en-US"),
-			locales:  []string{"fr"},
-			rejected: []string{"*"},
-			want:     1,
-		},
+		{name: "nothing to show", entries: nil, header: "sv-SE", want: -1},
+		{name: "an exact match wins", entries: localeEntries("en-US", "sv-SE", "de-DE"), header: "sv-SE", want: 1},
+		{name: "the holder's order decides between two they accept", entries: localeEntries("en-US", "sv-SE"), header: "sv-SE,en-US;q=0.8", want: 1},
+		{name: "a region-less preference matches a regional entry", entries: localeEntries("en-US", "sv-SE"), header: "sv", want: 1},
+		{name: "a different region of the same language still matches", entries: localeEntries("de-DE", "en-US"), header: "en-GB", want: 1},
+		{name: "an exact match beats a language match from a stronger tag", entries: localeEntries("en-GB", "sv-SE"), header: "en-US,sv-SE;q=0.8", want: 1},
+		{name: "an unmatched holder gets English, not entry zero", entries: localeEntries("de-DE", "en-US", "sv-SE"), header: "fr-FR", want: 1},
+		{name: "English is picked deterministically when there are two", entries: localeEntries("en-US", "en-GB"), header: "fr-FR", want: 1},
+		{name: "with no English the lowest locale wins, not the first listed", entries: localeEntries("sv-SE", "de-DE"), header: "fr-FR", want: 1},
+		{name: "an entry declaring no locale is the catch-all", entries: localeEntries("sv-SE", ""), header: "fr-FR", want: 1},
+		{name: "no header at all still answers, and still prefers English", entries: localeEntries("de-DE", "en-US"), header: "", want: 1},
+		{name: "metadata case does not matter", entries: localeEntries("DE-de", "SV-SE"), header: "sv-SE", want: 1},
+
+		// Refusals. The holder names a language they will not take, and the
+		// selection has to keep honouring that through every step - which is
+		// what it did not do: a tag refused with q=0 was reached anyway by the
+		// language-only step, and a refusing wildcard was discarded outright.
+		{name: "a refused tag is not reached through its own language", entries: localeEntries("sv-SE", "en-US"), header: "sv-SE;q=0, sv;q=1, en;q=0.8", want: 1},
+		{name: "a refusal spares a sibling region it does not match", entries: localeEntries("sv-SE", "sv-FI"), header: "sv-SE;q=0, sv", want: 1},
+		{name: "a refusal outranks only a less specific acceptance", entries: localeEntries("de-DE", "sv-SE"), header: "sv;q=0, sv-SE", want: 1},
+		{name: "a refused tag is kept out of the English fallback too", entries: localeEntries("en-US", "sv-SE"), header: "en;q=0, fr", want: 1},
+		{name: "a refused region yields the sibling region", entries: localeEntries("en-US", "en-GB"), header: "en;q=1, en-US;q=0", want: 1},
+		{name: "an entry with no locale is not mistaken for a refused one", entries: localeEntries("sv-SE", ""), header: "sv-SE;q=0, sv", want: 1},
+		{name: "a refusing wildcard leaves the language-independent entry", entries: localeEntries("en-US", ""), header: "fr, *;q=0", want: 1},
+		{name: "an uppercase Q refuses just as a lowercase one does", entries: localeEntries("sv-SE", "en-US"), header: "sv-SE;Q=0, sv;Q=1, en;Q=0.8", want: 1},
+
+		// Every entry refused. The page still has to name the credential, so
+		// the refusals give way rather than the name disappearing.
+		{name: "all refused by name still yields an entry", entries: localeEntries("en-US", "sv-SE"), header: "en;q=0, sv;q=0", want: 0},
+		{name: "all refused by wildcard still yields an entry", entries: localeEntries("de-DE", "en-US"), header: "fr, *;q=0", want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := displayForLocales(tc.entries, tc.locales, tc.rejected, func(e localeEntry) string { return e.locale })
+			got := displayForLocales(
+				tc.entries,
+				httphelpers.AcceptedLanguages(tc.header),
+				httphelpers.RejectedLanguages(tc.header),
+				func(e localeEntry) string { return e.locale },
+			)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -239,10 +130,9 @@ func TestMDDLCredentialDisplayFollowsTheHolderLanguage(t *testing.T) {
 	assert.Equal(t, "Driving licence", display.Name)
 }
 
-// End to end from the raw header to the name the consent page shows, which is
-// the pairing that matters: the parser drops a q=0 tag from the preferences,
-// and the selection has to keep honouring it anyway or the holder is handed
-// the one entry they ruled out.
+// End to end from the raw header to the name the consent page shows, over real
+// VCTM metadata - the index-level semantics are TestDisplayForLocales's job,
+// so this keeps only what is about resolving a name.
 func TestConsentNameFromAcceptLanguageHeader(t *testing.T) {
 	vctm := &sdjwtvc.VCTM{
 		VCT:  "https://credential.example/pid",
@@ -259,49 +149,12 @@ func TestConsentNameFromAcceptLanguageHeader(t *testing.T) {
 		header string
 		want   string
 	}{
-		{
-			name:   "the holder's language",
-			header: "sv-SE,sv;q=0.9,en-US;q=0.8",
-			want:   "Identitetshandling",
-		},
-		{
-			name:   "Swedish, but not this Swedish, with English on offer",
-			header: "sv-SE;q=0, sv;q=1, en;q=0.8",
-			want:   "Identity document",
-		},
-		{
-			name:   "Swedish of another region is still Swedish",
-			header: "sv-FI",
-			want:   "Identitetshandling",
-		},
-		{
-			name:   "a language nobody published falls back to English",
-			header: "fr-FR,fr;q=0.9",
-			want:   "Identity document",
-		},
-		{
-			name:   "English refused, so the next deterministic choice",
-			header: "en;q=0, fr",
-			want:   "Personalausweis",
-		},
-		{
-			name:   "no header at all",
-			header: "",
-			want:   "Identity document",
-		},
-		{
-			name:   "an uppercase Q refuses the same language a lowercase one would",
-			header: "sv-SE;Q=0, sv;Q=1, en;Q=0.8",
-			want:   "Identity document",
-		},
-		{
-			// French and nothing else. This document names three languages and
-			// none of them is French, so the wildcard refuses every entry and
-			// the page falls back rather than showing no name at all.
-			name:   "nothing else, over a document that has nothing else",
-			header: "fr, *;q=0",
-			want:   "Identity document",
-		},
+		{name: "the holder's language", header: "sv-SE,sv;q=0.9,en-US;q=0.8", want: "Identitetshandling"},
+		{name: "Swedish, but not this Swedish, with English on offer", header: "sv-SE;q=0, sv;q=1, en;q=0.8", want: "Identity document"},
+		{name: "a language nobody published falls back to English", header: "fr-FR,fr;q=0.9", want: "Identity document"},
+		{name: "English refused, so the next deterministic choice", header: "en;q=0, fr", want: "Personalausweis"},
+		{name: "nothing else, over a document that has nothing else", header: "fr, *;q=0", want: "Identity document"},
+		{name: "no header at all", header: "", want: "Identity document"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			display := vctmCredentialDisplay(

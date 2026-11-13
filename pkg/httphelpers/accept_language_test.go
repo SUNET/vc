@@ -68,6 +68,19 @@ func TestAcceptedLanguages(t *testing.T) {
 			want:   []string{"sv-se"},
 		},
 		{
+			// A quality outside 0..1 is malformed, so it falls back to 1 like
+			// any other malformed value. Read literally, q=-1 was a refusal
+			// and q=5 outranked every well-formed preference beside it.
+			name:   "a quality below the range is malformed, not a refusal",
+			header: "sv-SE;q=-1, en;q=0.8",
+			want:   []string{"sv-se", "en"},
+		},
+		{
+			name:   "a quality above the range does not outrank a well-formed one",
+			header: "de;q=5, sv-SE;q=1, en;q=0.8",
+			want:   []string{"de", "sv-se", "en"},
+		},
+		{
 			// Parameter names are case-insensitive (RFC 9110 5.6.6), and an
 			// unrecognised name left the entry at the default quality of 1 -
 			// so an uppercase refusal read as a preference.
@@ -127,6 +140,11 @@ func TestRejectedLanguages(t *testing.T) {
 			want:   []string{"*"},
 		},
 		{
+			name:   "a malformed negative quality is not a refusal",
+			header: "sv-SE;q=-1, en",
+			want:   []string{},
+		},
+		{
 			name:   "an uppercase Q refuses just as a lowercase one does",
 			header: "sv-SE;Q=0, en",
 			want:   []string{"sv-se"},
@@ -134,12 +152,21 @@ func TestRejectedLanguages(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, RejectedLanguages(tc.header))
-			// A rejected tag is never also offered as a preference.
-			for _, rejected := range RejectedLanguages(tc.header) {
-				assert.NotContains(t, AcceptedLanguages(tc.header), rejected)
-			}
 		})
 	}
+}
+
+// A header that both refuses and accepts the same range is ill-defined, and
+// the parser reports it in both lists rather than picking for the client.
+// LanguageRejects then settles it, and settles it towards acceptance: a
+// refusal has to be more precise than the acceptance to win, and an equally
+// precise one is not.
+func TestARangeBothRefusedAndAccepted(t *testing.T) {
+	const header = "en;q=0, en;q=1"
+
+	assert.Equal(t, []string{"en"}, AcceptedLanguages(header))
+	assert.Equal(t, []string{"en"}, RejectedLanguages(header))
+	assert.False(t, LanguageRejects(AcceptedLanguages(header), RejectedLanguages(header), "en-US"))
 }
 
 // The most precise range the client named decides, which is the rule

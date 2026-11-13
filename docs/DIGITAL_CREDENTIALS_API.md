@@ -109,9 +109,14 @@ verifier:
 ```
 
 `logo_url` is fetched by the browser, so it has to be a URL the browser can
-reach. To replace the logo on every page of every service instead, including
-the ones this block does not reach, set `common.branding.logo_path` to a PNG
-on disk.
+reach, and it applies to this page alone.
+
+The two logo settings do not overlap. `common.branding.logo_path` names a PNG
+on disk and is served in place of `/static/logo.png`, which is what the consent,
+offers, callback, presentation, dashboard and admin pages reference, along with
+the registry admin GUI and the shared error page - every browser-facing page
+except this one. This page is the only one that reads `logo_url`, and the only
+one `common.branding` does not reach. Set both to brand all of them.
 
 ### Theming Options
 
