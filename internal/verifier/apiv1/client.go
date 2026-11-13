@@ -754,9 +754,16 @@ func requiredQueryIDs(dcql *openid4vp.DCQL) []string {
 //
 // This is the fallback path used when no presentation request templates are configured
 // or when template loading fails (e.g. invalid presentation_requests_dir).
-// It does NOT enumerate individual claims from the VCTM — instead it omits the Claims
-// field, letting the wallet decide what to disclose. To request specific claims,
-// configure presentation request templates with explicit DCQL claim paths.
+// Claims come from the scope's own dcql claims config and nothing else: this
+// does not enumerate the VCTM, because a VCTM describes what a credential MAY
+// carry, not what this exchange needs.
+//
+// A scope that configures none is sent without a claims member, which is what
+// deployments already send and so stays the default - but it is not "the
+// wallet decides". OpenID4VP 1.0 6.4.1 reads a query with no claims member as
+// requesting no selectively disclosable claim, and a compliant wallet then
+// returns only what is mandatory to present. Configure claims on the scope,
+// or use a presentation request template, to ask for attributes.
 func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, error) {
 	var credentials []openid4vp.CredentialQuery
 
@@ -784,6 +791,12 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			ID:     scope,
 			Format: credInfo.Format,
 			Meta:   meta,
+		}
+		// Cloned, not aliased: augmentDCQLFromVCTM rewrites this slice in
+		// place, and a query built from config must not edit the config it
+		// was built from - the next request reads the same map.
+		if len(credInfo.DCQLClaims) > 0 {
+			cred.Claims = slices.Clone(credInfo.DCQLClaims)
 		}
 
 		credentials = append(credentials, cred)
