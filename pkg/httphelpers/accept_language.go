@@ -182,5 +182,14 @@ func TruncateLanguageRange(r string) string {
 		return truncated[:j]
 	}
 
+	// A singleton with nothing in front of it is not a range anyone can mean.
+	// "x-foo" is a private-use tag whose subtags are opaque by definition, so
+	// truncating it to "x" produced a range that matched every other
+	// private-use tag: a holder asking for x-foo was handed x-bar, which has
+	// no relationship to it, in preference to the English they also accepted.
+	if len(truncated) == 1 {
+		return ""
+	}
+
 	return truncated
 }

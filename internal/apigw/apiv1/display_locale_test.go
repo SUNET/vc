@@ -66,6 +66,20 @@ func TestDisplayForLocales(t *testing.T) {
 		{name: "the same rule holds for a Latin and Cyrillic pair", entries: localeEntries("sr-Cyrl-RS", "sr-Latn-RS"), header: "sr-Latn", want: 1},
 		{name: "an extension subtag is not left stranded by truncation", entries: localeEntries("de-DE", "en-GB"), header: "en-a-bbb", want: 1},
 
+		// An entry that IS the range beats one that merely extends it, at
+		// every truncation level - and does so whichever order the document
+		// lists them in, which is the invariant this whole function exists
+		// for. See TestDisplayIsIndependentOfDocumentOrder.
+		{name: "a bare locale beats its own regional variant", entries: localeEntries("en-US", "en"), header: "en", want: 1},
+		{name: "and beats it from the other side of the document too", entries: localeEntries("en", "en-US"), header: "en", want: 0},
+		{name: "a regional entry is still reached when the bare one is absent", entries: localeEntries("de-DE", "en-US"), header: "en", want: 1},
+
+		// Private-use subtags are opaque, so x-foo says nothing about x-bar.
+		// Truncating x-foo to the bare singleton "x" made it match every
+		// other private-use tag.
+		{name: "a private-use range does not reach an unrelated private-use entry", entries: localeEntries("x-bar", "en-US"), header: "x-foo, en;q=0.8", want: 1},
+		{name: "a private-use range still matches itself exactly", entries: localeEntries("x-bar", "x-foo"), header: "x-foo, en;q=0.8", want: 1},
+
 		// Refusals. The holder names a language they will not take, and the
 		// selection has to keep honouring that through every step - which is
 		// what it did not do: a tag refused with q=0 was reached anyway by the
@@ -181,5 +195,66 @@ func TestConsentNameFromAcceptLanguageHeader(t *testing.T) {
 			require.NotNil(t, display)
 			assert.Equal(t, tc.want, display.Name)
 		})
+	}
+}
+
+// The invariant behind every step of displayForLocales: the entry a holder
+// sees is decided by their languages and the entries' locales, never by the
+// order the metadata document happens to list them in. Reading entry 0 was the
+// original bug; taking the first match at a truncation level was the same bug
+// one level down.
+func TestDisplayIsIndependentOfDocumentOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		locales []string
+		header  string
+	}{
+		{name: "a bare locale beside its regional variant", locales: []string{"en-US", "en"}, header: "en"},
+		{name: "two regions of one language", locales: []string{"en-GB", "en-US"}, header: "en"},
+		{name: "two scripts of one language", locales: []string{"zh-Hant-TW", "zh-Hans-CN"}, header: "zh"},
+		{name: "a catch-all beside a named locale", locales: []string{"sv-SE", ""}, header: "fr"},
+		{name: "nothing the holder asked for", locales: []string{"de-DE", "sv-SE"}, header: "fr"},
+		{name: "everything the holder refused", locales: []string{"de-DE", "en-US"}, header: "fr, *;q=0"},
+		{name: "unrelated private-use entries", locales: []string{"x-bar", "x-baz"}, header: "x-foo, en;q=0.8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pick := func(locales []string) string {
+				i := displayForLocales(
+					localeEntries(locales...),
+					httphelpers.AcceptedLanguages(tc.header),
+					httphelpers.RejectedLanguages(tc.header),
+					func(e localeEntry) string { return e.locale },
+				)
+				require.GreaterOrEqual(t, i, 0)
+
+				return locales[i]
+			}
+
+			reversed := make([]string, len(tc.locales))
+			for i, locale := range tc.locales {
+				reversed[len(tc.locales)-1-i] = locale
+			}
+
+			assert.Equal(t, pick(tc.locales), pick(reversed),
+				"reversing the document must not change which locale is shown")
+		})
+	}
+}
+
+// displayForLocales relies on locale ordering to prefer an entry that IS the
+// range over one that merely extends it, rather than on a separate exact-match
+// pass. That only holds because every tag matching a range either equals it or
+// begins with it plus "-", and a proper prefix sorts first. If that ever stops
+// being true the selection silently starts preferring the wrong entry, so it is
+// asserted here rather than left as a remark in a comment.
+func TestAnExactMatchSortsBeforeAnyExtensionOfIt(t *testing.T) {
+	for _, r := range []string{"en", "zh-Hans", "sr-Latn", "x-foo", "a"} {
+		for _, suffix := range []string{"-US", "-CN", "-001", "-a-bbb", "-x-private"} {
+			extension := r + suffix
+			require.True(t, httphelpers.LanguageRangeMatches(r, extension),
+				"%q must match the range %q for this property to be about anything", extension, r)
+			assert.Less(t, r, extension,
+				"the range must sort before anything extending it, or locale order stops preferring the exact entry")
+		}
 	}
 }

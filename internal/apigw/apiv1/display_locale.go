@@ -34,7 +34,8 @@ import (
 //
 // Where no range matches at all, the fallbacks keep the choice deterministic
 // rather than dependent on document order: any English entry, then the first
-// entry by locale. The shipped metadata populates en-US, so English is the
+// entry by locale. No step in this function reads the entries in document
+// order, at any level. The shipped metadata populates en-US, so English is the
 // useful one, and sorting breaks the remaining tie the same way on every
 // request. The verifier UI applies the same two fallbacks client-side
 // (staticembed/locale-helpers.js).
@@ -75,12 +76,39 @@ func displayForLocales[T any](entries []T, locales, rejected []string, localeOf 
 
 	eligible := func(i int) bool { return !excluded[i] }
 
+	// Every step below walks the entries in locale order, never in document
+	// order. That is the whole point of this function: which entry a holder
+	// sees must not depend on how the metadata document happens to be
+	// arranged. Reading entry 0 was the original bug, and taking the first
+	// matching entry at a truncation step was the same bug in miniature -
+	// "en" against a document offering en-US and en selected whichever came
+	// first.
+	byLocale := make([]int, 0, len(entries))
+	for i := range entries {
+		byLocale = append(byLocale, i)
+	}
+	sort.SliceStable(byLocale, func(a, b int) bool { return tags[byLocale[a]] < tags[byLocale[b]] })
+
+	firstMatch := func(match func(tag string) bool) int {
+		for _, i := range byLocale {
+			if eligible(i) && tags[i] != "" && match(tags[i]) {
+				return i
+			}
+		}
+
+		return -1
+	}
+
 	for _, locale := range locales {
 		for r := locale; r != ""; r = httphelpers.TruncateLanguageRange(r) {
-			for i, tag := range tags {
-				if eligible(i) && tag != "" && httphelpers.LanguageRangeMatches(r, tag) {
-					return i
-				}
+			// Locale order also settles exact-before-extension at each level,
+			// without a separate pass: everything matching range r either
+			// equals it or begins with r + "-", and a proper prefix sorts
+			// first, so an "en" entry is reached before "en-US" and a
+			// "zh-Hans" entry before "zh-Hans-CN". Asserted by
+			// TestAnExactMatchSortsBeforeAnyExtensionOfIt.
+			if i := firstMatch(func(tag string) bool { return httphelpers.LanguageRangeMatches(r, tag) }); i >= 0 {
+				return i
 			}
 		}
 	}
@@ -90,12 +118,11 @@ func displayForLocales[T any](entries []T, locales, rejected []string, localeOf 
 	// sorts lowest of all, which is the right place for the one entry a
 	// document means to apply regardless of language.
 	ordered := make([]int, 0, len(entries))
-	for i := range entries {
+	for _, i := range byLocale {
 		if eligible(i) {
 			ordered = append(ordered, i)
 		}
 	}
-	sort.SliceStable(ordered, func(a, b int) bool { return tags[ordered[a]] < tags[ordered[b]] })
 
 	for _, i := range ordered {
 		if baseLanguage(tags[i]) == "en" {

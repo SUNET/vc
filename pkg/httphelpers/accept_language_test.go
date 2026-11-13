@@ -290,6 +290,13 @@ func TestTruncateLanguageRange(t *testing.T) {
 		{in: "en-a-bbb", want: "en"},
 		{in: "de-DE-u-co-phonebk", want: "de-DE-u-co"},
 		{in: "en-GB-oed", want: "en-GB"},
+		// A singleton with nothing in front of it is not a range anyone can
+		// mean: private-use subtags are opaque, so truncating x-foo to "x"
+		// produced a range matching every other private-use tag.
+		{in: "x-foo", want: ""},
+		{in: "x-foo-bar", want: "x-foo"},
+		{in: "x", want: ""},
+		{in: "de-x-private", want: "de"},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			assert.Equal(t, tc.want, TruncateLanguageRange(tc.in))
@@ -300,7 +307,7 @@ func TestTruncateLanguageRange(t *testing.T) {
 // Truncating all the way down terminates, for every range shape, which the
 // selection loop depends on - it truncates until the range is empty.
 func TestTruncateLanguageRangeTerminates(t *testing.T) {
-	for _, start := range []string{"zh-Hans-CN", "en-a-bbb", "de-DE-u-co-phonebk", "x", "a-b-c-d-e"} {
+	for _, start := range []string{"zh-Hans-CN", "en-a-bbb", "de-DE-u-co-phonebk", "x", "x-foo", "a-b-c-d-e"} {
 		steps := 0
 		for r := start; r != ""; r = TruncateLanguageRange(r) {
 			steps++
