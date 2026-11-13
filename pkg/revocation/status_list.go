@@ -50,6 +50,8 @@ type statusListToken struct {
 	statuses []uint8
 	// ttl is the token's ttl claim, zero when absent.
 	ttl time.Duration
+	// ttlSet tells an explicit ttl of 0 (do not cache) from an absent ttl.
+	ttlSet bool
 	// exp is the token's exp claim, zero when absent.
 	exp time.Time
 }
@@ -173,6 +175,9 @@ func (c *StatusListChecker) getStatusList(ctx context.Context, uri string) ([]ui
 	ttl, err := c.entryTTL(tok)
 	if err != nil {
 		return nil, err
+	}
+	if tok.ttlSet && tok.ttl == 0 {
+		return tok.statuses, nil
 	}
 	if ttl > 0 {
 		c.cache.SetWithTTL(ctx, uri, tok.statuses, ttl)
@@ -380,6 +385,7 @@ func cwtToken(uri string, claims map[int]any) (*statusListToken, error) {
 			return nil, fmt.Errorf("invalid ttl claim in CWT: %v", raw)
 		}
 		tok.ttl = ttl
+		tok.ttlSet = true
 	}
 
 	statusListRaw, ok := claims[cwtClaimStatusList]
@@ -534,6 +540,7 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 			return nil, fmt.Errorf("invalid ttl claim: %v", raw)
 		}
 		tok.ttl = ttl
+		tok.ttlSet = true
 	}
 
 	tok.statuses, err = tokenstatuslist.DecodeAndDecompress(lst)

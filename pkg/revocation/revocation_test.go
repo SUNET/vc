@@ -353,7 +353,58 @@ func TestCWTToken_NumericClaims(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, tok.exp.IsZero())
 		assert.Zero(t, tok.ttl)
+		assert.False(t, tok.ttlSet)
 	})
+
+	t.Run("explicit zero ttl is recorded as set", func(t *testing.T) {
+		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: int64(0)}))
+		require.NoError(t, err)
+		assert.True(t, tok.ttlSet)
+		assert.Zero(t, tok.ttl)
+	})
+}
+
+// A token with ttl 0 permits no caching, so every check must refetch.
+func TestStatusListChecker_ExplicitZeroTTLIsNotCached(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	lst, err := tokenstatuslist.CompressAndEncode([]uint8{0})
+	require.NoError(t, err)
+
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+			"iss": "x", "sub": "http://" + r.Host + r.URL.Path, "ttl": 0,
+			"status_list": map[string]any{"lst": lst},
+		})
+		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+		signed, err := tok.SignedString(key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(signed))
+	}))
+	defer server.Close()
+
+	statusCache := cache.NewMemoryCache[[]uint8](time.Hour)
+	defer statusCache.Stop()
+	checker, err := NewStatusListChecker(
+		WithCache(statusCache),
+		WithMaxCacheTTL(time.Hour),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	)
+	require.NoError(t, err)
+
+	ref := &Reference{Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 0}
+	for range 2 {
+		_, err := checker.CheckStatus(t.Context(), ref)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(2), hits.Load())
 }
 
 // Reads must not extend a cached list past its absolute lifetime.
