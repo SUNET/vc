@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAcceptedLanguages(t *testing.T) {
@@ -268,5 +269,42 @@ func TestLanguageRejects(t *testing.T) {
 			got := LanguageRejects(AcceptedLanguages(tc.header), RejectedLanguages(tc.header), tc.candidate)
 			assert.Equal(t, tc.want, got)
 		})
+	}
+}
+
+// RFC 4647 3.4 defines lookup as progressive truncation of the range, which is
+// how a script subtag gets its own chance to match before the primary language
+// does.
+func TestTruncateLanguageRange(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{in: "zh-Hans-CN", want: "zh-Hans"},
+		{in: "zh-Hans", want: "zh"},
+		{in: "zh", want: ""},
+		{in: "", want: ""},
+		{in: "sr-Latn-RS", want: "sr-Latn"},
+		// A singleton subtag introduces an extension and is never left
+		// stranded at the end of a range.
+		{in: "en-a-bbb", want: "en"},
+		{in: "de-DE-u-co-phonebk", want: "de-DE-u-co"},
+		{in: "en-GB-oed", want: "en-GB"},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, TruncateLanguageRange(tc.in))
+		})
+	}
+}
+
+// Truncating all the way down terminates, for every range shape, which the
+// selection loop depends on - it truncates until the range is empty.
+func TestTruncateLanguageRangeTerminates(t *testing.T) {
+	for _, start := range []string{"zh-Hans-CN", "en-a-bbb", "de-DE-u-co-phonebk", "x", "a-b-c-d-e"} {
+		steps := 0
+		for r := start; r != ""; r = TruncateLanguageRange(r) {
+			steps++
+			require.Less(t, steps, 20, "truncating %q from %q did not terminate", r, start)
+		}
 	}
 }

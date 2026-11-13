@@ -1,6 +1,9 @@
 package configuration
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -55,4 +58,58 @@ verifier:
 	require.NoError(t, yaml.Unmarshal(raw, cfg))
 	require.NotNil(t, cfg.Verifier)
 	assert.Equal(t, "https://static.example.com/verifier.css", cfg.Verifier.AuthorizationPageCSS.CSSFile)
+}
+
+// The two tests above exercise yaml.Unmarshal, which is where the keys are
+// discarded - but not that the real loader gets past them, and a config that
+// died earlier for another reason would prove nothing either way. This drives
+// New itself.
+//
+// The configuration is deliberately incomplete, because a complete verifier
+// config is long and none of it is the point. What matters is WHICH error
+// comes back: the three genuinely required verifier fields, and nothing about
+// the removed key. A loader that became strict - yaml.v3 with KnownFields, or
+// UnmarshalStrict - would name custom_css in that error instead, and this
+// fails. Asserting the expected fields are named is what stops it passing
+// because the load died before reaching validation at all.
+func TestNew_DoesNotRefuseAConfigCarryingTheRemovedKey(t *testing.T) {
+	dir := t.TempDir()
+
+	vctm := filepath.Join(dir, "vctm.json")
+	require.NoError(t, os.WriteFile(vctm, []byte(`{"vct":"urn:example:pid","name":"PID"}`), 0o600))
+
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+common:
+  mongo:
+    uri: mongodb://localhost:27017
+  credential_metadata:
+    pid:
+      format: vc+sd-jwt
+      vctm_file_path: `+vctm+`
+verifier:
+  authorization_page_css:
+    theme: "purple"
+    primary_color: "#1e40af"
+    css_file: "https://static.example.com/verifier.css"
+    custom_css: |
+      .container { max-width: 600px; }
+`), 0o600))
+
+	t.Setenv("VC_CONFIG_YAML", path)
+
+	_, err := New(t.Context(), "verifier")
+	require.Error(t, err, "this configuration is incomplete, so it must fail - on its missing fields")
+
+	assert.NotContains(t, err.Error(), "custom_css",
+		"the removed key must be discarded, not refused")
+	assert.NotContains(t, strings.ToLower(err.Error()), "unknown",
+		"a strict loader would reject the key as unknown, breaking every deployment that still sets it")
+
+	// Proof the load reached validation rather than dying before it: these are
+	// the fields a verifier genuinely requires.
+	for _, field := range []string{"public_url", "key_config", "openid4vp"} {
+		assert.Contains(t, err.Error(), field,
+			"the load must have reached validation, or this test proves nothing")
+	}
 }

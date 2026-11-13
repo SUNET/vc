@@ -18,13 +18,26 @@ import (
 // else. The consent page is the most end-user-facing surface this service has,
 // so the entry it shows should be chosen for the end user.
 //
-// The preference order below is the one the verifier UI already applies to the
-// same metadata client-side (staticembed/locale-helpers.js): an exact locale
-// match, then a match on the language alone, then any English entry, then the
-// first entry by locale. The last two steps are what make an unmatched holder
-// deterministic rather than dependent on document order - the shipped metadata
-// populates en-US, so English is the useful fallback, and sorting breaks the
-// remaining tie the same way on every request.
+// Matching follows RFC 4647 3.4 Lookup: the holder's ranges are tried in
+// priority order, and each is truncated from the right until it matches or
+// runs out - zh-Hans-CN, then zh-Hans, then zh. Matching only exactly and then
+// on the primary language skips every subtag in between, which is where a
+// script lives: a reader asking for zh-Hans-CN was handed zh-Hant-TW over an
+// available zh-Hans, Traditional Chinese for someone who asked for Simplified.
+//
+// Lookup also settles which range wins. A holder asking for "en-US, sv-SE;q=0.8"
+// against a document offering en-GB and sv-SE gets en-GB: their first choice,
+// reached by truncation, outranks an exact match on their second. That is the
+// spec's answer and it is the right one - they said English first - though it
+// is not what an earlier revision of this function did, which compared every
+// range exactly before trying any of them loosely.
+//
+// Where no range matches at all, the fallbacks keep the choice deterministic
+// rather than dependent on document order: any English entry, then the first
+// entry by locale. The shipped metadata populates en-US, so English is the
+// useful one, and sorting breaks the remaining tie the same way on every
+// request. The verifier UI applies the same two fallbacks client-side
+// (staticembed/locale-helpers.js).
 //
 // A tag the holder ruled out with q=0 is excluded from every one of those
 // steps, so "sv-SE;q=0, sv;q=1, en;q=0.8" lands on en-US rather than reaching
@@ -63,21 +76,11 @@ func displayForLocales[T any](entries []T, locales, rejected []string, localeOf 
 	eligible := func(i int) bool { return !excluded[i] }
 
 	for _, locale := range locales {
-		for i, tag := range tags {
-			if eligible(i) && tag == locale {
-				return i
-			}
-		}
-	}
-
-	for _, locale := range locales {
-		language := baseLanguage(locale)
-		if language == "" {
-			continue
-		}
-		for i, tag := range tags {
-			if eligible(i) && tag != "" && baseLanguage(tag) == language {
-				return i
+		for r := locale; r != ""; r = httphelpers.TruncateLanguageRange(r) {
+			for i, tag := range tags {
+				if eligible(i) && tag != "" && httphelpers.LanguageRangeMatches(r, tag) {
+					return i
+				}
 			}
 		}
 	}

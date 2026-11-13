@@ -123,7 +123,7 @@ const noRangeMatch = -1
 func bestRangeMatch(ranges []string, candidate string) int {
 	best := noRangeMatch
 	for _, r := range ranges {
-		if !languageRangeMatches(r, candidate) {
+		if !LanguageRangeMatches(r, candidate) {
 			continue
 		}
 
@@ -139,11 +139,14 @@ func bestRangeMatch(ranges []string, candidate string) int {
 	return best
 }
 
-// languageRangeMatches reports whether the language range r matches the tag
+// LanguageRangeMatches reports whether the language range r matches the tag
 // candidate: the wildcard matches any tag, and a named range matches one it
 // equals or is a whole-subtag prefix of, so "sv" matches "sv-SE" but "sv" does
 // not match "svx" and "sv-SE" does not match "sv".
-func languageRangeMatches(r, candidate string) bool {
+//
+// Exported because selection needs the same notion of "matches" this package
+// refuses by, and two definitions of it would drift.
+func LanguageRangeMatches(r, candidate string) bool {
 	if r == "" {
 		return false
 	}
@@ -155,4 +158,29 @@ func languageRangeMatches(r, candidate string) bool {
 	}
 
 	return strings.HasPrefix(candidate, r+"-")
+}
+
+// TruncateLanguageRange removes the last subtag of a language range, returning
+// "" once nothing is left. It is the progressive fallback RFC 4647 3.4 Lookup
+// is defined in terms of: "zh-Hans-CN" yields "zh-Hans", then "zh", then "".
+//
+// A singleton subtag - one character, which introduces an extension - is never
+// left stranded at the end, so "en-a-bbb" yields "en" rather than "en-a".
+//
+// Selection without this step matches a range only exactly or on its primary
+// language, and the subtags in between are where a script lives: a reader
+// asking for zh-Hans-CN was handed zh-Hant-TW over zh-Hans, which is
+// Traditional Chinese for someone who asked for Simplified.
+func TruncateLanguageRange(r string) string {
+	i := strings.LastIndex(r, "-")
+	if i < 0 {
+		return ""
+	}
+	truncated := r[:i]
+
+	if j := strings.LastIndex(truncated, "-"); j >= 0 && len(truncated)-j == 2 {
+		return truncated[:j]
+	}
+
+	return truncated
 }

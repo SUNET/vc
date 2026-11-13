@@ -43,13 +43,28 @@ func TestDisplayForLocales(t *testing.T) {
 		{name: "the holder's order decides between two they accept", entries: localeEntries("en-US", "sv-SE"), header: "sv-SE,en-US;q=0.8", want: 1},
 		{name: "a region-less preference matches a regional entry", entries: localeEntries("en-US", "sv-SE"), header: "sv", want: 1},
 		{name: "a different region of the same language still matches", entries: localeEntries("de-DE", "en-US"), header: "en-GB", want: 1},
-		{name: "an exact match beats a language match from a stronger tag", entries: localeEntries("en-GB", "sv-SE"), header: "en-US,sv-SE;q=0.8", want: 1},
+		// RFC 4647 3.4 tries the ranges in priority order, so the holder's
+		// first choice reached by truncation (en-US -> en, matching en-GB)
+		// outranks an exact match on their second. They said English first.
+		{name: "the top range, truncated, beats an exact match on a weaker one", entries: localeEntries("en-GB", "sv-SE"), header: "en-US,sv-SE;q=0.8", want: 0},
+		{name: "an exact match on the top range still wins outright", entries: localeEntries("en-GB", "en-US"), header: "en-US,sv-SE;q=0.8", want: 1},
 		{name: "an unmatched holder gets English, not entry zero", entries: localeEntries("de-DE", "en-US", "sv-SE"), header: "fr-FR", want: 1},
 		{name: "English is picked deterministically when there are two", entries: localeEntries("en-US", "en-GB"), header: "fr-FR", want: 1},
 		{name: "with no English the lowest locale wins, not the first listed", entries: localeEntries("sv-SE", "de-DE"), header: "fr-FR", want: 1},
 		{name: "an entry declaring no locale is the catch-all", entries: localeEntries("sv-SE", ""), header: "fr-FR", want: 1},
 		{name: "no header at all still answers, and still prefers English", entries: localeEntries("de-DE", "en-US"), header: "", want: 1},
 		{name: "metadata case does not matter", entries: localeEntries("DE-de", "SV-SE"), header: "sv-SE", want: 1},
+
+		// Script subtags. Truncating a range one subtag at a time is what
+		// keeps these apart; matching only exactly and then on the primary
+		// language collapses zh-Hans and zh-Hant to "zh" and hands a
+		// Simplified reader Traditional text.
+		{name: "a script is matched before falling back to the language", entries: localeEntries("zh-Hant-TW", "zh-Hans"), header: "zh-Hans-CN", want: 1},
+		{name: "a script range reaches a more specific entry", entries: localeEntries("zh-Hant-TW", "zh-Hans-CN"), header: "zh-Hans", want: 1},
+		{name: "an exact script-and-region match still wins", entries: localeEntries("zh-Hant-TW", "zh-Hans-CN"), header: "zh-Hans-CN", want: 1},
+		{name: "a script that is published nowhere falls back to the language", entries: localeEntries("de-DE", "zh-Hant-TW"), header: "zh-Hans-CN", want: 1},
+		{name: "the same rule holds for a Latin and Cyrillic pair", entries: localeEntries("sr-Cyrl-RS", "sr-Latn-RS"), header: "sr-Latn", want: 1},
+		{name: "an extension subtag is not left stranded by truncation", entries: localeEntries("de-DE", "en-GB"), header: "en-a-bbb", want: 1},
 
 		// Refusals. The holder names a language they will not take, and the
 		// selection has to keep honouring that through every step - which is
