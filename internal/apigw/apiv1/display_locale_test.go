@@ -154,6 +154,15 @@ func TestDisplayForLocales(t *testing.T) {
 			rejected: []string{"sv-se"},
 			want:     1,
 		},
+		{
+			// Accept-Language: en;q=1,en-US;q=0 - the holder takes English
+			// but not the US variant, and the document offers both.
+			name:     "a refused region yields the sibling region of the same language",
+			entries:  localeEntries("en-US", "en-GB"),
+			locales:  []string{"en"},
+			rejected: []string{"en-us"},
+			want:     1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := displayForLocales(tc.entries, tc.locales, tc.rejected, func(e localeEntry) string { return e.locale })
@@ -259,6 +268,11 @@ func TestConsentNameFromAcceptLanguageHeader(t *testing.T) {
 		{
 			name:   "no header at all",
 			header: "",
+			want:   "Identity document",
+		},
+		{
+			name:   "an uppercase Q refuses the same language a lowercase one would",
+			header: "sv-SE;Q=0, sv;Q=1, en;Q=0.8",
 			want:   "Identity document",
 		},
 	} {

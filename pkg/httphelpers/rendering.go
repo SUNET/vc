@@ -158,6 +158,14 @@ func prefersHTML(accept string) bool {
 
 // parseMediaRange splits one Accept entry into its lowercased media range and
 // its quality value, defaulting q to 1 when absent or malformed.
+//
+// The parameter is matched case-insensitively. Parameter names are
+// case-insensitive per RFC 9110 5.6.6, and "Q=" does occur; read as a name
+// this did not recognise, the entry kept the default quality of 1, so a client
+// writing "text/html;Q=0" - refusing HTML - was served the HTML error page,
+// and on the Accept-Language side a refused language stayed a preference.
+// Lowercasing the whole parameter is safe because the only one read here is a
+// number.
 func parseMediaRange(part string) (string, float64) {
 	segs := strings.Split(part, ";")
 	mediaRange := strings.ToLower(strings.TrimSpace(segs[0]))
@@ -167,7 +175,7 @@ func parseMediaRange(part string) (string, float64) {
 
 	q := 1.0
 	for _, param := range segs[1:] {
-		param = strings.TrimSpace(param)
+		param = strings.ToLower(strings.TrimSpace(param))
 		if after, ok := strings.CutPrefix(param, "q="); ok {
 			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil {
 				q = v

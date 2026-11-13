@@ -62,6 +62,14 @@ func TestAcceptedLanguages(t *testing.T) {
 			header: "sv-SE;q=high",
 			want:   []string{"sv-se"},
 		},
+		{
+			// Parameter names are case-insensitive (RFC 9110 5.6.6), and an
+			// unrecognised name left the entry at the default quality of 1 -
+			// so an uppercase refusal read as a preference.
+			name:   "an uppercase Q is the same parameter",
+			header: "sv-SE;Q=0, en;Q=0.8, de;Q=0.9",
+			want:   []string{"de", "en"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, AcceptedLanguages(tc.header))
@@ -99,6 +107,11 @@ func TestRejectedLanguages(t *testing.T) {
 			name:   "the wildcard is not a tag, even at zero",
 			header: "*;q=0, en",
 			want:   []string{},
+		},
+		{
+			name:   "an uppercase Q refuses just as a lowercase one does",
+			header: "sv-SE;Q=0, en",
+			want:   []string{"sv-se"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
