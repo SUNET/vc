@@ -210,7 +210,7 @@ func metadataJSON(t *testing.T, server *OAuthServer, ia *InteractiveAuthorizatio
 // enforcing the old ceiling; lowering it without the tag would let a
 // configuration through that the cache cannot hold.
 func TestMaxAuthSessionTTLMatchesItsTag(t *testing.T) {
-	field, ok := reflect.TypeOf(InteractiveAuthorization{}).FieldByName("AuthSessionTTLSeconds")
+	field, ok := reflect.TypeFor[InteractiveAuthorization]().FieldByName("AuthSessionTTLSeconds")
 	require.True(t, ok)
 
 	want := fmt.Sprintf("lte=%d", MaxAuthSessionTTLSeconds)
@@ -235,7 +235,7 @@ func TestDefaultAuthSessionTTLIsWithinTheCeiling(t *testing.T) {
 // where the rule lives, and because a new interaction type added to the
 // build must be added here too - this is the test that says so.
 func TestInteractionTypesSupportedAcceptsOnlyImplementedSuffixes(t *testing.T) {
-	field, ok := reflect.TypeOf(InteractiveAuthorization{}).FieldByName("InteractionTypesSupported")
+	field, ok := reflect.TypeFor[InteractiveAuthorization]().FieldByName("InteractionTypesSupported")
 	require.True(t, ok)
 
 	tag := field.Tag.Get("validate")

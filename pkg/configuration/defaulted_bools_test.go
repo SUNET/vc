@@ -106,8 +106,8 @@ func defaultedTrueBoolFields(t *testing.T) []string {
 		}
 		seen[typ] = true
 
-		for i := range typ.NumField() {
-			field := typ.Field(i)
+		for field := range typ.Fields() {
+			field := field
 			if !field.IsExported() {
 				continue
 			}
@@ -120,7 +120,7 @@ func defaultedTrueBoolFields(t *testing.T) []string {
 		}
 	}
 
-	walk(reflect.TypeOf(model.Cfg{}), "Cfg")
+	walk(reflect.TypeFor[model.Cfg](), "Cfg")
 	sort.Strings(found)
 	return found
 }

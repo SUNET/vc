@@ -102,7 +102,7 @@ func TestCredentialGraphsHoldTheirOwnDescriptions(t *testing.T) {
 
 	issuerName := 0
 	holderNameInDefaultGraph := 0
-	for _, line := range strings.Split(nquads, "\n") {
+	for line := range strings.SplitSeq(nquads, "\n") {
 		if !strings.Contains(line, `<https://schema.org/name>`) {
 			continue
 		}

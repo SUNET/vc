@@ -588,7 +588,7 @@ func (r ReqItem) MarshalYAML() (any, error) {
 	if r.Params != nil {
 		m["params"] = r.Params
 	}
-	return mergeExtraYAML(m, r.Extra, declaredJSONKeys(reflect.TypeOf(ReqItem{})), "_req item")
+	return mergeExtraYAML(m, r.Extra, declaredJSONKeys(reflect.TypeFor[ReqItem]()), "_req item")
 }
 
 // UnmarshalYAML captures every member other than the modelled ones.
@@ -670,7 +670,7 @@ func (c ZkpReqFormat) MarshalYAML() (any, error) {
 	if c.SystemIDValues != nil {
 		m["system_id_values"] = c.SystemIDValues
 	}
-	return mergeExtraYAML(m, c.Extra, declaredJSONKeys(reflect.TypeOf(ZkpReqFormat{})), "zkp_req client metadata")
+	return mergeExtraYAML(m, c.Extra, declaredJSONKeys(reflect.TypeFor[ZkpReqFormat]()), "zkp_req client metadata")
 }
 
 // UnmarshalYAML captures every member other than the modelled ones -
@@ -818,8 +818,7 @@ func (e *unrepresentableScalarError) Error() string { return e.message }
 // isUnrepresentableScalar reports whether err is such a refusal,
 // including through whatever yaml.v2 wraps it in.
 func isUnrepresentableScalar(err error) bool {
-	var refusal *unrepresentableScalarError
-	if errors.As(err, &refusal) {
+	if _, ok := errors.AsType[*unrepresentableScalarError](err); ok {
 		return true
 	}
 	// yaml.v2 collects errors from nested UnmarshalYAML calls into a

@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"maps"
 	"testing"
 	"time"
 
@@ -26,9 +27,7 @@ func proofWithClaims(t *testing.T, key *ecdsa.PrivateKey, extra map[string]any) 
 		"htm": "POST",
 		"htu": "https://issuer.example.com/token",
 	}
-	for name, value := range extra {
-		claims[name] = value
-	}
+	maps.Copy(claims, extra)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "dpop+jwt"

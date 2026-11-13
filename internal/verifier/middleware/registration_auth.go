@@ -193,8 +193,7 @@ func NewRegistrationAuthMiddleware(cfg *model.Cfg, log *logger.Log) (gin.Handler
 		}
 
 		if err := validator.Validate(c.Request.Context(), token); err != nil {
-			var authErr *registrationAuthError
-			if errors.As(err, &authErr) {
+			if authErr, ok := errors.AsType[*registrationAuthError](err); ok {
 				writeRegistrationAuthError(c, authErr)
 				return
 			}
@@ -801,8 +800,7 @@ func (k *classifyingKeySet) VerifySignature(ctx context.Context, jwt string) ([]
 // goroutine path, where go-oidc wraps the context error directly rather than a
 // client error.
 func isTransportFailure(err error) bool {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if _, ok := errors.AsType[*url.Error](err); ok {
 		return true
 	}
 

@@ -269,8 +269,7 @@ func hasMongoCode(err error, code int32) bool {
 		return true
 	}
 
-	var writeErr mongo.WriteException
-	if errors.As(err, &writeErr) {
+	if writeErr, ok := errors.AsType[mongo.WriteException](err); ok {
 		if writeErr.WriteConcernError != nil && int32(writeErr.WriteConcernError.Code) == code {
 			return true
 		}

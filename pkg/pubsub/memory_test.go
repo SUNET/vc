@@ -114,10 +114,8 @@ func TestMemoryPubSub_PublishRacesWithClose(t *testing.T) {
 	defer func() { _ = ps.Close() }()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for range 200 {
 			sub, err := ps.Subscribe(t.Context(), "race")
 			require.NoError(t, err)
 			drained := make(chan struct{})
@@ -130,9 +128,9 @@ func TestMemoryPubSub_PublishRacesWithClose(t *testing.T) {
 			require.NoError(t, sub.Close())
 			<-drained
 		}
-	}()
+	})
 
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		_ = ps.Publish(t.Context(), "race", []byte("concurrent"))
 	}
 
@@ -165,7 +163,7 @@ func TestMemoryPubSub_SlowSubscriberDropsRatherThanBlocks(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_ = ps.Publish(t.Context(), "slow", []byte("x"))
 		}
 	}()

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"maps"
 	"math/big"
 	"strings"
 	"testing"
@@ -966,9 +967,7 @@ func TestExtractKeyFromMetadata_PublicKeyMultibase(t *testing.T) {
 
 func didDocument(did string, vms []any, rest map[string]any) map[string]any {
 	doc := map[string]any{"id": did, "verificationMethod": vms}
-	for k, v := range rest {
-		doc[k] = v
-	}
+	maps.Copy(doc, rest)
 	return doc
 }
 

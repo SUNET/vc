@@ -77,7 +77,7 @@ func TestService_SubmitRacesWithCloseListener(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 200; i++ {
+		for range 200 {
 			listener := svc.OpenListener("race-id")
 			// Drain in a goroutine so Submit never blocks on a buffer.
 			drained := make(chan struct{})
@@ -92,7 +92,7 @@ func TestService_SubmitRacesWithCloseListener(t *testing.T) {
 		}
 	}()
 
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		svc.Submit("race-id", "concurrent")
 	}
 

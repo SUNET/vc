@@ -634,7 +634,7 @@ func TestClaimAuthSessionDoesNotWriteIntoAHandedOutContext(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 2000; i++ {
+		for range 2000 {
 			seen = append(seen, held.AuthSession)
 		}
 	}()

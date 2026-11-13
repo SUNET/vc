@@ -290,11 +290,9 @@ func TestEnsureCredentialsRenewsOnceUnderConcurrency(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			assert.NoError(t, s.ensureCredentials(t.Context()))
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -526,9 +524,7 @@ func TestEnsureCredentialsIsSafeAgainstConcurrentReaders(t *testing.T) {
 	// Bounded rather than "until a channel closes": readers that only stop
 	// on a signal sent after wg.Wait() never stop at all.
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 2000 {
 				creds := s.creds.load()
 				require.NotNil(t, creds)
@@ -537,15 +533,13 @@ func TestEnsureCredentialsIsSafeAgainstConcurrentReaders(t *testing.T) {
 				assert.Equal(t, creds.clientID, creds.config.ClientID)
 				assert.NotNil(t, creds.verifier)
 			}
-		}()
+		})
 	}
 
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			assert.NoError(t, s.ensureCredentials(t.Context()))
-		}()
+		})
 	}
 
 	wg.Wait()

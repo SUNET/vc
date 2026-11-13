@@ -143,8 +143,7 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 	reply, err := s.apiv1.OAuthAuthorizationChallenge(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		var challengeErr *apiv1.AuthorizationChallengeError
-		if errors.As(err, &challengeErr) {
+		if challengeErr, ok := errors.AsType[*apiv1.AuthorizationChallengeError](err); ok {
 			c.AbortWithStatusJSON(challengeErr.HTTPStatus, challengeErr)
 			return nil, nil
 		}
