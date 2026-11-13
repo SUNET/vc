@@ -1936,16 +1936,32 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.authorization_page_css`
 
-| Field             | Type     | Description                                                                                                                           | Example     | Default | Required |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
-| `custom_css`      | `string` | Inline CSS that will be injected into the authorization page Allows deployers to override default styling without modifying templates | -           | -       | No       |
-| `css_file`        | `string` | Path to an external CSS file to include If both CustomCSS and CSSFile are provided, both are included                                 | -           | -       | No       |
-| `theme`           | `string` | Predefined color scheme: "light" (default), "dark", "blue", "purple"                                                                  | -           | `light` | No       |
-| `primary_color`   | `string` | PrimaryColor overrides the primary brand color                                                                                        | `"#667eea"` | -       | No       |
-| `secondary_color` | `string` | SecondaryColor overrides the secondary brand color                                                                                    | `"#764ba2"` | -       | No       |
-| `logo_url`        | `string` | A URL to a custom logo image                                                                                                          | -           | -       | No       |
-| `title`           | `string` | Title overrides the page title (default: "Wallet Authorization")                                                                      | -           | -       | No       |
-| `subtitle`        | `string` | Subtitle overrides the page subtitle                                                                                                  | -           | -       | No       |
+A theme chooses the page's two brand colors, and primary_color and
+secondary_color override whichever pair it chose. The override used to lose:
+the template emitted the configured colors and then the theme's, two :root
+rules of equal specificity in one stylesheet, so "blue" and "purple" silently
+discarded an operator's primary_color - including in this repository's own
+documented example, which set both. The pair is now resolved before the
+template sees it, by ThemeColors.
+
+There is deliberately no inline-CSS or stylesheet-path member here. Both
+existed and neither ever applied: inline CSS was interpolated into a <style>
+element as a plain string, where html/template's CSS-context filter replaced
+every stylesheet with the literal ZgotmplZ, and the "file" was rendered as a
+<link href>, so it was fetched by the browser from this verifier's own origin
+rather than read from disk. See SUNET/vc#930. Making the inline form work
+would mean injecting operator-supplied CSS unescaped into every authorization
+page, which is a configuration-controlled injection sink in exchange for a
+knob no deployment can be relying on.
+
+| Field             | Type     | Description                                                                                                                       | Example     | Default | Required |
+| ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
+| `theme`           | `string` | Theme selects the color scheme the page starts from: "light" (default), "dark", "blue" or "purple". The colors below override it. | -           | `light` | No       |
+| `primary_color`   | `string` | PrimaryColor overrides the primary brand color the theme selected.                                                                | `"#667eea"` | -       | No       |
+| `secondary_color` | `string` | SecondaryColor overrides the secondary brand color the theme selected.                                                            | `"#764ba2"` | -       | No       |
+| `logo_url`        | `string` | A URL to a custom logo image                                                                                                      | -           | -       | No       |
+| `title`           | `string` | Title overrides the page title (default: "Wallet Authorization")                                                                  | -           | -       | No       |
+| `subtitle`        | `string` | Subtitle overrides the page subtitle                                                                                              | -           | -       | No       |
 
 ### `ts12`
 

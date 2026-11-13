@@ -24,7 +24,7 @@ The [W3C Digital Credentials API](https://wicg.github.io/digital-credentials/) i
          │ 1. Standard OIDC authorize           │
          │─────────────────────────────────────>│
          │                                      │
-         │ 2. Render authorize.html             │
+         │ 2. Render authorize_enhanced.html    │
          │<─────────────────────────────────────│
          │                                      │
     ┌────▼────────────────────────────────┐    │
@@ -103,22 +103,31 @@ verifier:
     title: "Employee Verification"
     subtitle: "Present your employee credential to access this service"
     theme: "blue"                    # light, dark, blue, purple
-    primary_color: "#1e40af"         # Override theme color
-    secondary_color: "#1e3a8a"
+    primary_color: "#1e40af"         # overrides the theme's primary
+    secondary_color: "#1e3a8a"       # overrides the theme's secondary
     logo_url: "https://example.com/logo.png"
-    custom_css: |
-      .container { max-width: 600px; }
-    # css_file: "/path/to/custom.css"
 ```
+
+`logo_url` is fetched by the browser, so it has to be a URL the browser can
+reach. To replace the logo on every page of every service instead, including
+the ones this block does not reach, set `common.branding.logo_path` to a PNG
+on disk.
 
 ### Theming Options
 
-| Theme | Primary Color | Secondary Color | Best For |
-|-------|--------------|-----------------|----------|
-| `light` | `#3182ce` | `#2c5282` | Default, general purpose |
-| `dark` | `#3182ce` | `#2c5282` | Dark mode preference |
-| `blue` | `#3182ce` | `#2c5282` | Corporate, professional |
-| `purple` | `#805ad5` | `#553c9a` | Creative, modern |
+A theme picks the two brand colors and, for `dark`, the page's surface and
+text colors. `primary_color` and `secondary_color` override whichever pair the
+theme picked, independently of each other.
+
+| Theme | Primary | Secondary | Surfaces | Best for |
+|-------|---------|-----------|----------|----------|
+| `light` | `#3182ce` | `#2c5282` | light | default, general purpose |
+| `dark` | `#3182ce` | `#2c5282` | dark | dark mode preference |
+| `blue` | `#3182ce` | `#2c5282` | light | corporate, professional |
+| `purple` | `#805ad5` | `#553c9a` | light | creative, modern |
+
+`light` and `blue` are the same theme under two names; `blue` is kept because
+deployments configure it.
 
 ## Browser Support
 
