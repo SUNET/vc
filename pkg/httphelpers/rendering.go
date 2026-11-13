@@ -167,14 +167,20 @@ func prefersHTML(accept string) bool {
 // Lowercasing the whole parameter is safe because the only one read here is a
 // number.
 func parseMediaRange(part string) (string, float64) {
-	segs := strings.Split(part, ";")
-	mediaRange := strings.ToLower(strings.TrimSpace(segs[0]))
+	// Cut rather than Split: Split allocates a slice for every entry, and the
+	// entry count is the client's to choose. A 1 MB Accept-Language of
+	// one-subtag ranges allocated 62 MB and 699k objects parsing it, which is
+	// a poor exchange for a request that costs the sender a megabyte.
+	value, rest, _ := strings.Cut(part, ";")
+	mediaRange := strings.ToLower(strings.TrimSpace(value))
 	if mediaRange == "" {
 		return "", 0
 	}
 
 	q := 1.0
-	for _, param := range segs[1:] {
+	for rest != "" {
+		var param string
+		param, rest, _ = strings.Cut(rest, ";")
 		param = strings.ToLower(strings.TrimSpace(param))
 		if after, ok := strings.CutPrefix(param, "q="); ok {
 			// Outside 0..1 is as malformed as unparsable: RFC 9110 12.4.2
