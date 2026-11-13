@@ -207,9 +207,11 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	// to support future revocation mechanisms (e.g., OCSP, W3C Bitstring Status List).
 	if cfg.Verifier.Revocation != nil && cfg.Verifier.Revocation.Enabled {
 		cacheTTL := time.Duration(cfg.Verifier.Revocation.CacheTTL) * time.Second
-		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL)
+		// Absolute expiry: a busy list must still be re-fetched when its lifetime ends.
+		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL, pkgcache.WithAbsoluteExpiry())
 		statusListChecker, err := revocation.NewStatusListChecker(
 			revocation.WithCache(statusCache),
+			revocation.WithMaxCacheTTL(cacheTTL),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
 		)

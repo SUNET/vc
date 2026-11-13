@@ -225,6 +225,45 @@ func TestMemoryCache_TTLExpiration(t *testing.T) {
 	assert.False(t, ok, "expected item to expire")
 }
 
+// readUntilGone reads key every step and reports whether it was still present
+// after total has elapsed, so reads that extend an entry's life keep it alive.
+func readUntilGone(c *MemoryCache[string], key string, step, total time.Duration) bool {
+	ctx := context.Background()
+	start := time.Now()
+	for time.Since(start) < total {
+		c.Get(ctx, key)
+		time.Sleep(step)
+	}
+	_, ok := c.Get(ctx, key)
+	return ok
+}
+
+func TestMemoryCache_ReadsExtendLifetimeByDefault(t *testing.T) {
+	c := NewMemoryCache[string](200 * time.Millisecond)
+	defer c.Stop()
+	c.Set(context.Background(), "k", "v")
+
+	assert.True(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond),
+		"default behaviour is a sliding lifetime")
+}
+
+func TestMemoryCache_WithAbsoluteExpiry_ReadsDoNotExtendLifetime(t *testing.T) {
+	c := NewMemoryCache[string](200*time.Millisecond, WithAbsoluteExpiry())
+	defer c.Stop()
+	c.Set(context.Background(), "k", "v")
+
+	assert.False(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond),
+		"entry must expire a fixed time after Set however often it is read")
+}
+
+func TestMemoryCache_WithAbsoluteExpiry_SetWithTTL(t *testing.T) {
+	c := NewMemoryCache[string](time.Hour, WithAbsoluteExpiry())
+	defer c.Stop()
+	c.SetWithTTL(context.Background(), "k", "v", 200*time.Millisecond)
+
+	assert.False(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond))
+}
+
 func TestMemoryCache_SetNXWithTTL_Expiration(t *testing.T) {
 	ctx := context.Background()
 	c := NewMemoryCache[string](5 * time.Minute)

@@ -239,6 +239,20 @@ type MobileSecurityObject struct {
 
 	// ValidityInfo contains validity timestamps.
 	ValidityInfo ValidityInfo `json:"validityInfo" cbor:"validityInfo" validate:"required"`
+
+	// Status references the Token Status List entry for this credential (optional).
+	Status *MSOStatus `json:"status,omitempty" cbor:"status,omitempty"`
+}
+
+// MSOStatus is the MSO status claim (draft-ietf-oauth-status-list).
+type MSOStatus struct {
+	StatusList *MSOStatusList `json:"status_list" cbor:"status_list"`
+}
+
+// MSOStatusList locates a credential's entry in a Status List Token.
+type MSOStatusList struct {
+	Idx uint64 `json:"idx" cbor:"idx"`
+	URI string `json:"uri" cbor:"uri"`
 }
 
 // IssuerSignedItem represents a single signed data element.

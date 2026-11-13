@@ -195,6 +195,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 
 	// Allocate status list entry for revocation support (if registry is configured)
 	var statusSection, statusIndex int64
+	var msoStatus *mdoc.MSOStatusList
 	if c.registryClient != nil {
 		grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
 			Status: 0, // VALID status for new credential
@@ -204,6 +205,9 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		} else {
 			statusSection = grpcReply.GetSection()
 			statusIndex = grpcReply.GetIndex()
+			if statusIndex >= 0 && grpcReply.GetStatusListUri() != "" {
+				msoStatus = &mdoc.MSOStatusList{Idx: uint64(statusIndex), URI: grpcReply.GetStatusListUri()}
+			}
 			c.log.Debug("status list entry allocated for mdoc", "section", statusSection, "index", statusIndex)
 		}
 	}
@@ -213,6 +217,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		DevicePublicKey: deviceKey,
 		DocumentData:    req.DocumentData,
 		Schema:          schema,
+		Status:          msoStatus,
 	}
 
 	issued, err := c.mdocIssuer.Issue(issuanceReq)
