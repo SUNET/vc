@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
@@ -82,6 +83,10 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 
 	request := &vcclient.UserLookupRequest{
 		RequestURI: requestURI,
+		// The consent page names the credential in the holder's language
+		// where the metadata has one, so the browser's preference has to
+		// reach apiv1; it has no other way to learn it.
+		Locales: httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
 	}
 
 	authProvider, ok := session.Get("auth_provider").(string)

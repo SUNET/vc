@@ -11,6 +11,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -627,6 +628,7 @@ func (s *Service) headlessConsentComplete(ctx context.Context, c *gin.Context, s
 		ResponseCode: responseCode,
 		VCTM:         vctm,
 		MDDL:         mddl,
+		Locales:      httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
 	})
 	if err != nil {
 		return fmt.Errorf("user lookup: %w", err)

@@ -21,6 +21,12 @@ type UserLookupRequest struct {
 	VCTM         *sdjwtvc.VCTM `json:"-"`
 	// MDDL is set instead of VCTM for mso_mdoc scopes, which have no VCTM.
 	MDDL *mdoc.MDDLSchema `json:"-"`
+	// Locales are the holder's accepted language tags, most preferred first,
+	// used to pick which display entry of the credential's metadata the
+	// consent page shows. The HTTP layer fills it from Accept-Language
+	// (httphelpers.AcceptedLanguages); empty is fine and selects the
+	// deterministic fallback.
+	Locales []string `json:"-"`
 }
 
 // SVGTemplateReply holds SVG template data.
