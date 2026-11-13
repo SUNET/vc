@@ -214,46 +214,10 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
-	issuerNameSpaces := make(map[string][]cbor.Tag)
-	valueDigests := make(map[string]map[uint][]byte)
-	for namespace, items := range b.namespaces {
-		currentNSTaggedItems := make([]cbor.Tag, 0, len(items))
-		nsValueDigests := make(map[uint][]byte)
-
-		for _, item := range items {
-			// Encode the inner map (MSOIssuerSignedItem)
-			innerEncoded, err := encoder.Marshal(item)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to encode item %s: %w", item.ElementID, err)
-			}
-
-			// Wrap in Tag 24
-			wrapper := cbor.Tag{Number: TagEncodedCBOR, Content: innerEncoded}
-			// Encode the WRAPPER itself
-			wrapperEncoded, err := encoder.Marshal(wrapper)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to encode wrapper: %w", err)
-			}
-
-			// Save the wrapper for the IssuerSigned structure
-			currentNSTaggedItems = append(currentNSTaggedItems, wrapper)
-
-			// Compute digest of the ENTIRE wrapperEncoded block
-			digest, err := b.computeDigest(wrapperEncoded)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to compute digest for %s: %w", item.ElementID, err)
-			}
-			nsValueDigests[item.DigestID] = digest
-		}
-
-		// Store results for this namespace
-		issuerNameSpaces[namespace] = currentNSTaggedItems
-		valueDigests[namespace] = nsValueDigests
+	issuerNameSpaces, valueDigests, err := b.encodeNamespaces(encoder)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	signedTime := time.Now().UTC().Format(time.RFC3339)
-	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
-	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
 	mso := map[string]any{
 		"version":         "1.0",
@@ -263,11 +227,7 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 		"deviceKeyInfo": map[string]any{
 			"deviceKey": *b.deviceKey,
 		},
-		"validityInfo": map[string]any{
-			"signed":     cbor.Tag{Number: 0, Content: signedTime},
-			"validFrom":  cbor.Tag{Number: 0, Content: validFromStr},
-			"validUntil": cbor.Tag{Number: 0, Content: validUntilStr},
-		},
+		"validityInfo": b.validityInfo(),
 	}
 	if b.status != nil {
 		mso["status"] = b.status
@@ -305,6 +265,53 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	}
 
 	return signedMSO, issuerNameSpaces, nil
+}
+
+// validityInfo builds the MSO validityInfo map.
+func (b *MSOBuilder) validityInfo() map[string]any {
+	date := func(t time.Time) cbor.Tag {
+		return cbor.Tag{Number: 0, Content: t.UTC().Format(time.RFC3339)}
+	}
+	return map[string]any{
+		"signed":     date(time.Now()),
+		"validFrom":  date(b.validFrom),
+		"validUntil": date(b.validUntil),
+	}
+}
+
+// encodeNamespaces encodes every data element as a Tag 24 item and digests it.
+func (b *MSOBuilder) encodeNamespaces(encoder *CBOREncoder) (map[string][]cbor.Tag, map[string]map[uint][]byte, error) {
+	issuerNameSpaces := make(map[string][]cbor.Tag)
+	valueDigests := make(map[string]map[uint][]byte)
+	for namespace, items := range b.namespaces {
+		tagged := make([]cbor.Tag, 0, len(items))
+		digests := make(map[uint][]byte)
+
+		for _, item := range items {
+			innerEncoded, err := encoder.Marshal(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to encode item %s: %w", item.ElementID, err)
+			}
+
+			wrapper := cbor.Tag{Number: TagEncodedCBOR, Content: innerEncoded}
+			wrapperEncoded, err := encoder.Marshal(wrapper)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to encode wrapper: %w", err)
+			}
+			tagged = append(tagged, wrapper)
+
+			// The digest covers the entire encoded wrapper.
+			digest, err := b.computeDigest(wrapperEncoded)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to compute digest for %s: %w", item.ElementID, err)
+			}
+			digests[item.DigestID] = digest
+		}
+
+		issuerNameSpaces[namespace] = tagged
+		valueDigests[namespace] = digests
+	}
+	return issuerNameSpaces, valueDigests, nil
 }
 
 // computeDigest computes the digest of data using the configured algorithm.

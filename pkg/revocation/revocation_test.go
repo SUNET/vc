@@ -5,8 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -252,18 +254,147 @@ func TestStatusListChecker_CWTAccepted(t *testing.T) {
 }
 
 func TestStatusListChecker_EntryTTL(t *testing.T) {
+	ttl := func(c *StatusListChecker, tok *statusListToken) time.Duration {
+		t.Helper()
+		d, err := c.entryTTL(tok)
+		require.NoError(t, err)
+		return d
+	}
+
 	c := &StatusListChecker{}
-	assert.Equal(t, time.Duration(0), c.entryTTL(&statusListToken{}))
-	assert.Equal(t, time.Minute, c.entryTTL(&statusListToken{ttl: time.Minute}))
+	assert.Equal(t, time.Duration(0), ttl(c, &statusListToken{}))
+	assert.Equal(t, time.Minute, ttl(c, &statusListToken{ttl: time.Minute}))
 
 	// exp sooner than ttl wins
-	got := c.entryTTL(&statusListToken{ttl: time.Hour, exp: time.Now().Add(time.Minute)})
+	got := ttl(c, &statusListToken{ttl: time.Hour, exp: time.Now().Add(time.Minute)})
 	assert.InDelta(t, float64(time.Minute), float64(got), float64(2*time.Second))
 
 	// configured maximum caps a longer ttl and an unset one
 	c.maxCacheTTL = 30 * time.Second
-	assert.Equal(t, 30*time.Second, c.entryTTL(&statusListToken{ttl: time.Hour}))
-	assert.Equal(t, 30*time.Second, c.entryTTL(&statusListToken{}))
+	assert.Equal(t, 30*time.Second, ttl(c, &statusListToken{ttl: time.Hour}))
+	assert.Equal(t, 30*time.Second, ttl(c, &statusListToken{}))
+}
+
+// A token that expired between parsing and caching must be rejected, not cached.
+func TestStatusListChecker_EntryTTL_RejectsExpired(t *testing.T) {
+	for name, c := range map[string]*StatusListChecker{
+		"no max":   {},
+		"with max": {maxCacheTTL: time.Minute},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := c.entryTTL(&statusListToken{ttl: time.Hour, exp: time.Now().Add(-time.Second)})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "expired")
+		})
+	}
+}
+
+func TestCWTToken_NumericClaims(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	lst, err := tokenstatuslist.CompressStatuses([]uint8{0, 1})
+	require.NoError(t, err)
+	claims := func(extra map[int]any) map[int]any {
+		m := map[int]any{cwtClaimSub: uri, cwtClaimStatusList: map[int]any{statusListKeyLst: lst}}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	now := time.Now()
+
+	t.Run("float exp in the past is rejected", func(t *testing.T) {
+		_, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: float64(now.Add(-time.Hour).Unix()) + 0.5}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expired")
+	})
+
+	t.Run("float exp in the future sets the deadline", func(t *testing.T) {
+		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: float64(now.Add(time.Hour).Unix()) + 0.5}))
+		require.NoError(t, err)
+		assert.WithinDuration(t, now.Add(time.Hour), tok.exp, 2*time.Second)
+	})
+
+	t.Run("integer widths are accepted", func(t *testing.T) {
+		for _, exp := range []any{int64(now.Add(time.Hour).Unix()), uint64(now.Add(time.Hour).Unix()), int(now.Add(time.Hour).Unix())} {
+			tok, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: exp}))
+			require.NoError(t, err, "%T", exp)
+			assert.False(t, tok.exp.IsZero())
+		}
+	})
+
+	t.Run("present but non-numeric exp is rejected", func(t *testing.T) {
+		for _, exp := range []any{"tomorrow", []byte{1}, math.NaN(), math.Inf(1), nil} {
+			_, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: exp}))
+			require.Error(t, err, "%v", exp)
+			assert.Contains(t, err.Error(), "invalid exp")
+		}
+	})
+
+	t.Run("ttl accepts integers and floats", func(t *testing.T) {
+		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: int64(60)}))
+		require.NoError(t, err)
+		assert.Equal(t, time.Minute, tok.ttl)
+
+		tok, err = cwtToken(uri, claims(map[int]any{cwtClaimTTL: 1.5}))
+		require.NoError(t, err)
+		assert.Equal(t, 1500*time.Millisecond, tok.ttl)
+	})
+
+	t.Run("present but invalid ttl is rejected", func(t *testing.T) {
+		for _, ttl := range []any{"soon", -1, math.NaN(), 1e30} {
+			_, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: ttl}))
+			require.Error(t, err, "%v", ttl)
+			assert.Contains(t, err.Error(), "invalid ttl")
+		}
+	})
+
+	t.Run("absent exp and ttl are fine", func(t *testing.T) {
+		tok, err := cwtToken(uri, claims(nil))
+		require.NoError(t, err)
+		assert.True(t, tok.exp.IsZero())
+		assert.Zero(t, tok.ttl)
+	})
+}
+
+// Reads must not extend a cached list past its absolute lifetime.
+func TestStatusListChecker_CacheDoesNotSlide(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		sl := tokenstatuslist.NewWithConfig([]uint8{0}, "https://registry.test", "http://"+r.Host+r.URL.Path)
+		signed, err := sl.GenerateJWT(tokenstatuslist.JWTSigningConfig{SigningKey: key, SigningMethod: jwt.SigningMethodES256})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(signed))
+	}))
+	defer server.Close()
+
+	const life = 400 * time.Millisecond
+	statusCache := cache.NewMemoryCache[[]uint8](life, cache.WithAbsoluteExpiry())
+	defer statusCache.Stop()
+	checker, err := NewStatusListChecker(
+		WithCache(statusCache),
+		WithMaxCacheTTL(life),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	)
+	require.NoError(t, err)
+
+	ref := &Reference{Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 0}
+	start := time.Now()
+	// Keep reading well past the lifetime: a sliding cache would never refetch.
+	for time.Since(start) < 3*life/2 {
+		_, err := checker.CheckStatus(t.Context(), ref)
+		require.NoError(t, err)
+		time.Sleep(life / 8)
+	}
+	assert.GreaterOrEqual(t, hits.Load(), int32(2), "status list was never refetched after its lifetime ended")
 }
 
 func TestStatusListChecker_Unreachable(t *testing.T) {

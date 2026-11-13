@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"slices"
 	"strings"
@@ -428,10 +429,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 				verifiedClaims["namespaces"] = nsMap
 				// Same shape as an SD-JWT status claim, so the revocation registry reads it unchanged.
-				if st := docClaims.Status; st != nil && st.StatusList != nil {
-					verifiedClaims["status"] = map[string]any{
-						"status_list": map[string]any{"uri": st.StatusList.URI, "idx": int64(st.StatusList.Idx)},
+				statusClaim, err := mdocStatusClaim(docClaims.Status)
+				if err != nil {
+					c.log.Error(err, "invalid mDOC status reference", "scope", scope)
+					return nil, fmt.Errorf("invalid mDOC status reference for scope %s: %w", scope, err)
+				}
+				if statusClaim != nil {
+					// A data element called "status" would hide the signed MSO status from the revocation check.
+					if _, clash := verifiedClaims["status"]; clash {
+						return nil, fmt.Errorf("mDOC for scope %s carries a %q data element next to an MSO status", scope, "status")
 					}
+					verifiedClaims["status"] = statusClaim
 				}
 				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 					Scope:      scope,
@@ -1345,6 +1353,20 @@ func looksLikeJSONDocument(vpToken string) bool {
 func isJSONDocument(b []byte) bool {
 	trimmed := bytes.TrimSpace(b)
 	return bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))
+}
+
+// mdocStatusClaim shapes the signed MSO status like an SD-JWT status claim.
+// It returns nil when the credential carries no status.
+func mdocStatusClaim(st *mdoc.MSOStatus) (map[string]any, error) {
+	if st == nil || st.StatusList == nil {
+		return nil, nil
+	}
+	if st.StatusList.Idx > math.MaxInt64 {
+		return nil, fmt.Errorf("status index %d out of range", st.StatusList.Idx)
+	}
+	return map[string]any{
+		"status_list": map[string]any{"uri": st.StatusList.URI, "idx": int64(st.StatusList.Idx)},
+	}, nil
 }
 
 // mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.
