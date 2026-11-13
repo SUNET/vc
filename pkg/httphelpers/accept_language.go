@@ -178,15 +178,26 @@ func TruncateLanguageRange(r string) string {
 	}
 	truncated := r[:i]
 
-	if j := strings.LastIndex(truncated, "-"); j >= 0 && len(truncated)-j == 2 {
-		return truncated[:j]
+	// A singleton is "removed at the same time as its closest trailing
+	// subtag", and a chain of them goes together: en-a-b-ccc truncates to en,
+	// not to en-a, which would be a range ending in a singleton that could
+	// match unrelated extensions. Looping rather than checking once is the
+	// difference, and it leaves a non-singleton boundary alone -
+	// de-DE-u-co-phonebk still truncates to de-DE-u-co, because "co" is two
+	// characters and the extension is not finished being read.
+	for {
+		j := strings.LastIndex(truncated, "-")
+		if j < 0 || len(truncated)-j != 2 {
+			break
+		}
+		truncated = truncated[:j]
 	}
 
 	// A singleton with nothing in front of it is not a range anyone can mean.
-	// "x-foo" is a private-use tag whose subtags are opaque by definition, so
-	// truncating it to "x" produced a range that matched every other
-	// private-use tag: a holder asking for x-foo was handed x-bar, which has
-	// no relationship to it, in preference to the English they also accepted.
+	// Private-use subtags are opaque by definition, so a bare "x" matched
+	// every other private-use tag: a holder asking for x-foo - or, through the
+	// chained-singleton path above, x-a-foo - was handed x-bar, which has no
+	// relationship to it, in preference to the English they also accepted.
 	if len(truncated) == 1 {
 		return ""
 	}

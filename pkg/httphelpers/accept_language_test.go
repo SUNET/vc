@@ -330,6 +330,10 @@ func TestTruncateLanguageRange(t *testing.T) {
 		{in: "x-foo-bar", want: "x-foo"},
 		{in: "x", want: ""},
 		{in: "de-x-private", want: "de"},
+		// Chained singletons go together, so neither a bare "x" nor a range
+		// ending in a singleton is ever produced.
+		{in: "x-a-foo", want: ""},
+		{in: "en-a-b-ccc", want: "en"},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			assert.Equal(t, tc.want, TruncateLanguageRange(tc.in))
@@ -340,11 +344,42 @@ func TestTruncateLanguageRange(t *testing.T) {
 // Truncating all the way down terminates, for every range shape, which the
 // selection loop depends on - it truncates until the range is empty.
 func TestTruncateLanguageRangeTerminates(t *testing.T) {
-	for _, start := range []string{"zh-Hans-CN", "en-a-bbb", "de-DE-u-co-phonebk", "x", "x-foo", "a-b-c-d-e"} {
+	for _, start := range []string{"zh-Hans-CN", "en-a-bbb", "de-DE-u-co-phonebk", "x", "x-foo", "x-a-foo", "a-b-c-d-e"} {
 		steps := 0
 		for r := start; r != ""; r = TruncateLanguageRange(r) {
 			steps++
 			require.Less(t, steps, 20, "truncating %q from %q did not terminate", r, start)
 		}
+	}
+}
+
+// RFC 4647 3.4 gives one worked example of the fallback sequence, for
+// "zh-Hant-CN-x-private1-private2". It is the authoritative fixture for this
+// function and reproducing it is the point: note that removing "private1"
+// also removes the "x" that it leaves trailing, which is the step a
+// check-once implementation of the singleton rule gets wrong.
+func TestTruncateLanguageRangeMatchesTheRFCExample(t *testing.T) {
+	for _, tc := range []struct {
+		start string
+		want  []string
+	}{
+		{
+			start: "zh-Hant-CN-x-private1-private2",
+			want:  []string{"zh-Hant-CN-x-private1", "zh-Hant-CN", "zh-Hant", "zh"},
+		},
+		{start: "zh-Hans-CN", want: []string{"zh-Hans", "zh"}},
+		{start: "de-DE-u-co-phonebk", want: []string{"de-DE-u-co", "de-DE", "de"}},
+		{start: "en-a-b-ccc", want: []string{"en"}},
+		{start: "x-a-foo", want: []string{}},
+		{start: "x-foo", want: []string{}},
+	} {
+		t.Run(tc.start, func(t *testing.T) {
+			sequence := []string{}
+			for r := TruncateLanguageRange(tc.start); r != ""; r = TruncateLanguageRange(r) {
+				sequence = append(sequence, r)
+				require.Less(t, len(sequence), 20, "truncation must terminate")
+			}
+			assert.Equal(t, tc.want, sequence)
+		})
 	}
 }

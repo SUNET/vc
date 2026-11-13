@@ -79,6 +79,7 @@ func TestDisplayForLocales(t *testing.T) {
 		// other private-use tag.
 		{name: "a private-use range does not reach an unrelated private-use entry", entries: localeEntries("x-bar", "en-US"), header: "x-foo, en;q=0.8", want: 1},
 		{name: "a private-use range still matches itself exactly", entries: localeEntries("x-bar", "x-foo"), header: "x-foo, en;q=0.8", want: 1},
+		{name: "nor does one reached through a chain of singletons", entries: localeEntries("x-bar", "en-US"), header: "x-a-foo, en;q=0.8", want: 1},
 
 		// Refusals. The holder names a language they will not take, and the
 		// selection has to keep honouring that through every step - which is
