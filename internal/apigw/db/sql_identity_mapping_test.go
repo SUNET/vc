@@ -245,15 +245,13 @@ func testIdentityMappingReachContract(t *testing.T, store IdentityMappingStore) 
 }
 
 func TestSQLIdentityMappingsColl_Postgres(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartPostgres(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartPostgres(t)
 
 	testIdentityMappingStoreContract(t, NewSQLIdentityMappingsColl(newTestService(t), sqlDB, dialect))
 }
 
 func TestSQLIdentityMappingsColl_MariaDB(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartMariaDB(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartMariaDB(t)
 
 	testIdentityMappingStoreContract(t, NewSQLIdentityMappingsColl(newTestService(t), sqlDB, dialect))
 }

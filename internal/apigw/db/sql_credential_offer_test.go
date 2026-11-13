@@ -53,15 +53,13 @@ func testCredentialOfferStoreContract(t *testing.T, store CredentialOfferStore) 
 }
 
 func TestSQLCredentialOfferColl_Postgres(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartPostgres(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartPostgres(t)
 
 	testCredentialOfferStoreContract(t, NewSQLCredentialOfferColl(newTestService(t), sqlDB, dialect))
 }
 
 func TestSQLCredentialOfferColl_MariaDB(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartMariaDB(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartMariaDB(t)
 
 	testCredentialOfferStoreContract(t, NewSQLCredentialOfferColl(newTestService(t), sqlDB, dialect))
 }
