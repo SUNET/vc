@@ -82,6 +82,11 @@ func TestAcceptedLanguages(t *testing.T) {
 			want:   []string{"de", "sv-se", "en"},
 		},
 		{
+			name:   "a nonzero quality finer than the grammar allows is still honoured",
+			header: "de;q=0.0001, sv-SE;q=0.5",
+			want:   []string{"sv-se", "de"},
+		},
+		{
 			// Parameter names are case-insensitive (RFC 9110 5.6.6), and an
 			// unrecognised name left the entry at the default quality of 1 -
 			// so an uppercase refusal read as a preference.
@@ -143,6 +148,34 @@ func TestRejectedLanguages(t *testing.T) {
 		{
 			name:   "a malformed negative quality is not a refusal",
 			header: "sv-SE;q=-1, en",
+			want:   []string{},
+		},
+		// A value that parses to exactly zero is a refusal whether or not it
+		// is inside RFC 9110 12.4.2's qvalue grammar, which admits "0" with at
+		// most three decimal places. Writing 0.0000, 0e0 or -0 is a clumsy way
+		// of saying zero, not a way of saying something else - and the
+		// alternative, treating an unparseable-by-grammar value as the default
+		// quality of 1, would turn an unmistakable refusal into the client's
+		// TOP preference. A quality outside 0..1 is different: -1 and 5 mean
+		// nothing at all, so those do fall back to 1.
+		{
+			name:   "a zero with more decimals than the grammar allows still refuses",
+			header: "sv-SE;q=0.0000, en",
+			want:   []string{"sv-se"},
+		},
+		{
+			name:   "a zero written as an exponent still refuses",
+			header: "sv-SE;q=0e0, en",
+			want:   []string{"sv-se"},
+		},
+		{
+			name:   "a signed zero still refuses",
+			header: "sv-SE;q=-0, en",
+			want:   []string{"sv-se"},
+		},
+		{
+			name:   "a quality above the range is nonsense, not a refusal",
+			header: "sv-SE;q=5, en",
 			want:   []string{},
 		},
 		{

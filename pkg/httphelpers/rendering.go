@@ -184,6 +184,14 @@ func parseMediaRange(part string) (string, float64) {
 			// had asked for, and doing it on exactly the kind of malformed
 			// input that "q=notanumber" is already forgiven for - while
 			// "q=5" outranked every well-formed preference beside it.
+			//
+			// A value INSIDE the range is honoured as written, including the
+			// ones with more decimal places than the grammar admits: "0.0000"
+			// and "0e0" parse to zero, and zero means not acceptable. Leaving
+			// those at the default of 1 instead - the other reading of "not in
+			// the grammar" - would turn an unmistakable refusal into the
+			// client's top preference, which is the more harmful way to be
+			// wrong. Deliberate; see the cases in accept_language_test.go.
 			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil && v >= 0 && v <= 1 {
 				q = v
 			}
