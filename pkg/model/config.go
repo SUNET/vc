@@ -1597,7 +1597,7 @@ type DigitalCredentialsConfig struct {
 // template sees it, by ThemeColors.
 //
 // There is deliberately no inline-CSS member here. It existed and could never
-// apply: the CSS was interpolated into a <style> element as a plain string,
+// apply: the CSS was interpolated into a `style` element as a plain string,
 // where html/template's CSS-context filter replaces anything that is not a
 // safe CSS value - a stylesheet very much included - with the literal
 // ZgotmplZ. Making it work would mean injecting operator-supplied CSS
@@ -1605,9 +1605,13 @@ type DigitalCredentialsConfig struct {
 // injection sink in exchange for a knob no deployment can be relying on,
 // because it has never once applied. See SUNET/vc#930.
 //
-// CSSFile is a different story and stays: it renders as a <link href>, which
-// works whenever the configured value is a URL the browser can fetch. Only its
-// documentation was wrong, calling it a path read from disk.
+// CSSFile is a different story and stays: it renders as a `link` element with
+// an href, which works whenever the configured value is a URL the browser can
+// fetch. Only its documentation was wrong, calling it a path read from disk.
+//
+// Tag names are written in backticks deliberately: gen_config_docs renders
+// this comment as Markdown prose in docs/CONFIGURATION.md, where a bare
+// `<style>` is raw HTML rather than text.
 type AuthorizationPageCSSConfig struct {
 	// Theme selects the color scheme the page starts from: "light" (default),
 	// "dark", "blue" or "purple". The colors below override it.

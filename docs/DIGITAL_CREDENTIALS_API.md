@@ -118,12 +118,20 @@ linked after the built-in one, so it can override it.
 
 `logo_url` applies to this page alone.
 
-The two logo settings do not overlap. `common.branding.logo_path` names a PNG
-on disk and is served in place of `/static/logo.png`, which is what the consent,
-offers, callback, presentation, dashboard and admin pages reference, along with
-the registry admin GUI and the shared error page - every browser-facing page
-except this one. This page is the only one that reads `logo_url`, and the only
-one `common.branding` does not reach. Set both to brand all of them.
+The two logo settings do not overlap, and between them they still do not cover
+every page:
+
+| Page | Logo comes from |
+| ---- | --------------- |
+| this one (`authorize_enhanced.html`) | `logo_url` only |
+| consent, offers, callback, presentation-definition, dashboard, admin | `common.branding.logo_path`, served in place of `/static/logo.png` |
+| registry admin GUI, shared error page | `common.branding.logo_path` |
+| credential display, payment | no logo at all — neither setting reaches them |
+
+`common.branding.logo_path` names a PNG on disk; `logo_url` is a URL the
+browser fetches. Setting both brands every page that shows a logo. The
+credential display and payment pages show none, so there is nothing for either
+setting to replace there.
 
 ### Theming Options
 
