@@ -252,6 +252,12 @@
             }
         }
     </style>
+    {{/* An operator-supplied stylesheet, linked after the defaults above so it
+         can override them. Fetched by the browser from the URL as configured;
+         nothing here reads it from disk. */}}
+    {{if .CSSFile}}
+    <link rel="stylesheet" href="{{.CSSFile}}">
+    {{end}}
     <link rel="icon" href="/static/favicon.png" type="image/png">
     {{if .RedirectURI}}
     <link rel="dns-prefetch" href="{{.RedirectURI}}">

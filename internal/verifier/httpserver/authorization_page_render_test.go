@@ -93,3 +93,22 @@ func TestEmbeddedPagesRenderNoUnsafeValueSentinel(t *testing.T) {
 		})
 	}
 }
+
+// css_file renders as a <link>, which is what has always made it work for a
+// URL - and what made its old documentation, which called it a path read from
+// disk, produce a 404 for every deployment that followed it.
+func TestAuthorizationPageLinksTheConfiguredStylesheet(t *testing.T) {
+	base := map[string]any{"Theme": "light", "PrimaryColor": "#1e40af", "SecondaryColor": "#1e3a8a"}
+
+	withFile := map[string]any{"CSSFile": "https://static.example.com/verifier.css"}
+	for k, v := range base {
+		withFile[k] = v
+	}
+	page := renderPage(t, "authorize_enhanced.html", withFile)
+	assert.Contains(t, page, `<link rel="stylesheet" href="https://static.example.com/verifier.css">`)
+	// After the built-in styles, or it cannot override them.
+	assert.Greater(t, strings.Index(page, "static.example.com"), strings.Index(page, "</style>"))
+
+	// Absent, no empty link element.
+	assert.NotContains(t, renderPage(t, "authorize_enhanced.html", base), `rel="stylesheet"`)
+}

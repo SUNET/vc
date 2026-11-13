@@ -84,3 +84,42 @@ func TestAuthorizeResolvesThemeColorsWithTheOverrideWinning(t *testing.T) {
 		})
 	}
 }
+
+// The browser-fetched members have to reach the template or they do nothing at
+// all. css_file in particular: it renders as a <link>, which is the whole
+// reason it has always worked for a URL, and a handler that stopped carrying
+// it would drop the styling of every deployment that had set one.
+func TestAuthorizeCarriesTheBrowserFetchedMembers(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(t, nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
+	client.cfg.Verifier.AuthorizationPageCSS.CSSFile = "https://static.example.com/verifier.css"
+	client.cfg.Verifier.AuthorizationPageCSS.LogoURL = "https://static.example.com/logo.png"
+
+	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid", "profile"}))
+
+	require.NoError(t, mockDB.Clients.Create(ctx, &db.Client{
+		ClientID:      "assets-client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		ResponseTypes: []string{"code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}))
+
+	resp, err := client.Authorize(ctx, &AuthorizeRequest{
+		ResponseType:        "code",
+		ClientID:            "assets-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               strings.Join([]string{"openid", "profile"}, " "),
+		State:               "assets-state",
+		Nonce:               "assets-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, "https://static.example.com/verifier.css", resp.CSSFile)
+	assert.Equal(t, "https://static.example.com/logo.png", resp.LogoURL)
+}

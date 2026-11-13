@@ -106,10 +106,17 @@ verifier:
     primary_color: "#1e40af"         # overrides the theme's primary
     secondary_color: "#1e3a8a"       # overrides the theme's secondary
     logo_url: "https://example.com/logo.png"
+    css_file: "https://static.example.com/verifier.css"
 ```
 
-`logo_url` is fetched by the browser, so it has to be a URL the browser can
-reach, and it applies to this page alone.
+`logo_url` and `css_file` are both fetched by the browser, so each has to be a
+URL the browser can reach - an absolute `https` URL, or a path this deployment
+serves. Neither is read from disk. `css_file` was previously documented as "a
+path to an external CSS file", with a filesystem path for an example; such a
+value is requested from the verifier and answered with a 404. The stylesheet is
+linked after the built-in one, so it can override it.
+
+`logo_url` applies to this page alone.
 
 The two logo settings do not overlap. `common.branding.logo_path` names a PNG
 on disk and is served in place of `/static/logo.png`, which is what the consent,

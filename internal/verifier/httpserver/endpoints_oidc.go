@@ -99,6 +99,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		"PrimaryColor":     response.PrimaryColor,
 		"SecondaryColor":   response.SecondaryColor,
 		"Theme":            response.Theme,
+		"CSSFile":          response.CSSFile,
 		"LogoURL":          response.LogoURL,
 		"RedirectURI":      request.RedirectURI,
 		"Config": gin.H{

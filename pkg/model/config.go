@@ -1596,15 +1596,18 @@ type DigitalCredentialsConfig struct {
 // documented example, which set both. The pair is now resolved before the
 // template sees it, by ThemeColors.
 //
-// There is deliberately no inline-CSS or stylesheet-path member here. Both
-// existed and neither ever applied: inline CSS was interpolated into a <style>
-// element as a plain string, where html/template's CSS-context filter replaced
-// every stylesheet with the literal ZgotmplZ, and the "file" was rendered as a
-// <link href>, so it was fetched by the browser from this verifier's own origin
-// rather than read from disk. See SUNET/vc#930. Making the inline form work
-// would mean injecting operator-supplied CSS unescaped into every authorization
-// page, which is a configuration-controlled injection sink in exchange for a
-// knob no deployment can be relying on.
+// There is deliberately no inline-CSS member here. It existed and could never
+// apply: the CSS was interpolated into a <style> element as a plain string,
+// where html/template's CSS-context filter replaces anything that is not a
+// safe CSS value - a stylesheet very much included - with the literal
+// ZgotmplZ. Making it work would mean injecting operator-supplied CSS
+// unescaped into every authorization page, a configuration-controlled
+// injection sink in exchange for a knob no deployment can be relying on,
+// because it has never once applied. See SUNET/vc#930.
+//
+// CSSFile is a different story and stays: it renders as a <link href>, which
+// works whenever the configured value is a URL the browser can fetch. Only its
+// documentation was wrong, calling it a path read from disk.
 type AuthorizationPageCSSConfig struct {
 	// Theme selects the color scheme the page starts from: "light" (default),
 	// "dark", "blue" or "purple". The colors below override it.
@@ -1615,6 +1618,16 @@ type AuthorizationPageCSSConfig struct {
 
 	// SecondaryColor overrides the secondary brand color the theme selected.
 	SecondaryColor string `yaml:"secondary_color,omitempty" doc_example:"\"#764ba2\""`
+
+	// CSSFile is the URL of a stylesheet to link from the authorization page.
+	//
+	// Fetched by the browser, not read by this service, so it has to be a URL
+	// the browser can reach: an absolute https URL, or a path this deployment
+	// serves. It was documented as "a path to an external CSS file" and its
+	// documented example was a filesystem path, which the browser duly
+	// requested from the verifier and got a 404 for; the member itself has
+	// always worked for a URL, which is why it is still here.
+	CSSFile string `yaml:"css_file,omitempty" doc_example:"\"https://static.example.com/verifier.css\""`
 
 	// LogoURL provides a URL to a custom logo image
 	LogoURL string `yaml:"logo_url,omitempty"`

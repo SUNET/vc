@@ -70,6 +70,7 @@ type AuthorizeResponse struct {
 	PrimaryColor     string       `json:"primary_color"`
 	SecondaryColor   string       `json:"secondary_color"`
 	Theme            string       `json:"theme"`
+	CSSFile          string       `json:"css_file"`
 	LogoURL          string       `json:"logo_url"`
 }
 
@@ -261,6 +262,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	if response.Theme == "" {
 		response.Theme = "light"
 	}
+	response.CSSFile = cssConfig.CSSFile
 	response.LogoURL = cssConfig.LogoURL
 
 	return response, nil
