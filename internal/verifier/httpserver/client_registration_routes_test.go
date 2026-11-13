@@ -148,9 +148,9 @@ func TestRegistrationRoutesAbsentWhenDisabled(t *testing.T) {
 	}
 }
 
-// The auth block left behind by a deployment that has since closed
-// registration is inert, not a startup failure: the routes it protected are
-// not there to protect.
+// Which routes exist is decided by the switch alone. An auth block that
+// reached this far - the config loader drops it once registration is closed -
+// neither reopens registration nor fails the wiring.
 func TestRegistrationRoutesStayClosedWithAnAuthBlockConfigured(t *testing.T) {
 	engine := registrationRouteEngine(t, &model.OIDCOP{
 		Issuer:              "https://verifier.example.com",

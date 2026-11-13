@@ -108,8 +108,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// to keep an unusable credential from silently rejecting every
 	// registration - with the endpoint closed there is nothing left for it
 	// to guard, so a deployment that has closed registration is free to
-	// retire the file. Re-enable it and the check runs again, at the
-	// startup where it matters.
+	// retire the file. The config loader drops the stanza itself in that
+	// state (configuration.dropInertRegistrationAuth), so this guard is
+	// what keeps the two from disagreeing if a config reaches here by
+	// another path. Re-enable registration and both run again, at the
+	// startup where they matter.
 	if s.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled() {
 		s.registerAuth, err = middleware.NewRegistrationAuthMiddleware(s.cfg, s.log.New("registration_auth"))
 		if err != nil {
@@ -239,10 +242,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 func (s *Service) registerDynamicClientRegistrationEndpoints(ctx context.Context, rgRoot *gin.RouterGroup) {
 	if !s.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled() {
 		s.log.Info("Dynamic client registration is disabled; /register endpoints are not served and registration_endpoint is omitted from discovery metadata")
-
-		if s.cfg.Verifier.Outbound.OIDCProvider != nil && s.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationAuth != nil {
-			s.log.Info("dynamic_registration_auth is configured but has no effect while dynamic_registration.enabled is false")
-		}
 
 		return
 	}
