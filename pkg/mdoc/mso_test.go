@@ -258,6 +258,46 @@ func TestMSOBuilder_Build(t *testing.T) {
 	}
 }
 
+func TestMSOBuilder_WithStatus_SurvivesSignAndVerify(t *testing.T) {
+	priv, certChain := createTestSignerAndCert(t)
+	deviceKey := createTestDeviceKey(t)
+	now := time.Now()
+
+	build := func(withStatus bool) *MobileSecurityObject {
+		b := NewMSOBuilder(DocType).
+			WithValidity(now, now.Add(time.Hour)).
+			WithDeviceKey(deviceKey).
+			WithSigner(priv, certChain)
+		if withStatus {
+			b.WithStatus("https://registry.example.com/statuslists/3", 42)
+		}
+		if err := b.AddDataElement(Namespace, "family_name", "Doe"); err != nil {
+			t.Fatalf("AddDataElement() error = %v", err)
+		}
+		signed, _, err := b.Build()
+		if err != nil {
+			t.Fatalf("Build() error = %v", err)
+		}
+		mso, err := VerifyMSO(signed, certChain[0])
+		if err != nil {
+			t.Fatalf("VerifyMSO() error = %v", err)
+		}
+		return mso
+	}
+
+	got := build(true).Status
+	if got == nil || got.StatusList == nil {
+		t.Fatal("status missing from verified MSO")
+	}
+	if got.StatusList.URI != "https://registry.example.com/statuslists/3" || got.StatusList.Idx != 42 {
+		t.Errorf("status = %+v, want uri .../statuslists/3 idx 42", got.StatusList)
+	}
+
+	if build(false).Status != nil {
+		t.Error("MSO without WithStatus must carry no status")
+	}
+}
+
 func TestMSOBuilder_Build_MissingSignerKey(t *testing.T) {
 	deviceKey := createTestDeviceKey(t)
 

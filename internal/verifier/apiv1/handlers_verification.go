@@ -427,6 +427,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 					nsMap[ns] = items
 				}
 				verifiedClaims["namespaces"] = nsMap
+				// Same shape as an SD-JWT status claim, so the revocation registry reads it unchanged.
+				if st := docClaims.Status; st != nil && st.StatusList != nil {
+					verifiedClaims["status"] = map[string]any{
+						"status_list": map[string]any{"uri": st.StatusList.URI, "idx": int64(st.StatusList.Idx)},
+					}
+				}
 				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 					Scope:      scope,
 					Credential: verifiedClaims,

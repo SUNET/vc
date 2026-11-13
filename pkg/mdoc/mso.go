@@ -69,6 +69,7 @@ type MSOBuilder struct {
 	certChain       []*x509.Certificate
 	namespaces      map[string][]MSOIssuerSignedItem
 	digestIDCounter map[string]uint
+	status          *MSOStatus
 	// saltBytes, when non-zero, fixes EVERY element's random salt to
 	// exactly this length - see WithSaltBytes's doc.
 	saltBytes int
@@ -95,6 +96,12 @@ func (b *MSOBuilder) WithDigestAlgorithm(alg DigestAlgorithm) *MSOBuilder {
 func (b *MSOBuilder) WithValidity(from, until time.Time) *MSOBuilder {
 	b.validFrom = from
 	b.validUntil = until
+	return b
+}
+
+// WithStatus embeds a Token Status List reference in the signed MSO.
+func (b *MSOBuilder) WithStatus(uri string, idx uint64) *MSOBuilder {
+	b.status = &MSOStatus{StatusList: &MSOStatusList{Idx: idx, URI: uri}}
 	return b
 }
 
@@ -261,6 +268,9 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 			"validFrom":  cbor.Tag{Number: 0, Content: validFromStr},
 			"validUntil": cbor.Tag{Number: 0, Content: validUntilStr},
 		},
+	}
+	if b.status != nil {
+		mso["status"] = b.status
 	}
 
 	// Encode MSO as CBOR

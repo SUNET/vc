@@ -210,6 +210,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL)
 		statusListChecker, err := revocation.NewStatusListChecker(
 			revocation.WithCache(statusCache),
+			revocation.WithMaxCacheTTL(cacheTTL),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
 		)

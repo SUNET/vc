@@ -98,23 +98,18 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	// Create a test status list with entry 0=valid, 1=revoked, 2=suspended
 	statuses := []uint8{tokenstatuslist.StatusValid, tokenstatuslist.StatusInvalid, tokenstatuslist.StatusSuspended}
 
-	encoded, err := tokenstatuslist.CompressAndEncode(statuses)
-	require.NoError(t, err)
-
 	// Generate an EC key pair for signing the status list token
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	// Create a properly signed JWT status list token
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss":         "https://registry.test",
-		"status_list": map[string]any{"lst": encoded},
-	})
-	signedJWT, err := token.SignedString(privateKey)
-	require.NoError(t, err)
-
-	// Serve the status list token
+	// Serve a token whose sub is the URL it was fetched from.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sl := tokenstatuslist.NewWithConfig(statuses, "https://registry.test", "http://"+r.Host+r.URL.Path)
+		signedJWT, err := sl.GenerateJWT(tokenstatuslist.JWTSigningConfig{SigningKey: privateKey, SigningMethod: jwt.SigningMethodES256})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
 		_, _ = w.Write([]byte(signedJWT))
 	}))
@@ -157,6 +152,118 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "out of range")
 	})
+}
+
+// serveToken serves one fixed token and returns a checker trusting key.
+func serveToken(t *testing.T, key *ecdsa.PrivateKey, contentType string, body []byte, opts ...StatusListCheckerOption) (*StatusListChecker, *httptest.Server, cache.Cache[[]uint8]) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(server.Close)
+
+	statusCache := cache.NewMemoryCache[[]uint8](time.Hour)
+	checker, err := NewStatusListChecker(append([]StatusListCheckerOption{
+		WithCache(statusCache),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	}, opts...)...)
+	require.NoError(t, err)
+	return checker, server, statusCache
+}
+
+func TestStatusListChecker_RejectsBadTokens(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	statuses := []uint8{tokenstatuslist.StatusValid}
+	lst, err := tokenstatuslist.CompressAndEncode(statuses)
+	require.NoError(t, err)
+
+	t.Run("jwt without typ", func(t *testing.T) {
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": "u", "status_list": map[string]any{"lst": lst}})
+		signed, err := tok.SignedString(key)
+		require.NoError(t, err)
+		checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, []byte(signed))
+		_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: srv.URL, Index: 0})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "typ")
+	})
+
+	t.Run("jwt sub mismatch", func(t *testing.T) {
+		sl := tokenstatuslist.NewWithConfig(statuses, "x", "https://elsewhere.example/statuslists/9")
+		signed, err := sl.GenerateJWT(tokenstatuslist.JWTSigningConfig{SigningKey: key, SigningMethod: jwt.SigningMethodES256})
+		require.NoError(t, err)
+		checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, []byte(signed))
+		_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: srv.URL, Index: 0})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match")
+	})
+
+	t.Run("jwt expired", func(t *testing.T) {
+		claims := tokenstatuslist.JWTClaims{
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "u", ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute))},
+			StatusList:       tokenstatuslist.StatusListClaim{Bits: 8, Lst: lst},
+		}
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+		signed, err := tok.SignedString(key)
+		require.NoError(t, err)
+		checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, []byte(signed))
+		_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: srv.URL, Index: 0})
+		require.Error(t, err)
+	})
+
+	t.Run("cwt sub mismatch", func(t *testing.T) {
+		sl := tokenstatuslist.NewWithConfig(statuses, "x", "https://elsewhere.example/statuslists/9")
+		cwtBytes, err := sl.GenerateCWT(tokenstatuslist.CWTSigningConfig{SigningKey: key})
+		require.NoError(t, err)
+		checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeCWT, cwtBytes)
+		_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: srv.URL, Index: 0})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match")
+	})
+
+	t.Run("cwt expired", func(t *testing.T) {
+		sl := tokenstatuslist.NewWithConfig(statuses, "x", "")
+		sl.ExpiresIn = time.Nanosecond
+		checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeCWT, nil)
+		sl.Subject = srv.URL
+		cwtBytes, err := sl.GenerateCWT(tokenstatuslist.CWTSigningConfig{SigningKey: key})
+		require.NoError(t, err)
+		time.Sleep(1100 * time.Millisecond)
+		_, err = checker.parseCWTStatusList(t.Context(), srv.URL, cwtBytes)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expired")
+	})
+}
+
+func TestStatusListChecker_CWTAccepted(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeCWT, nil)
+	sl := tokenstatuslist.NewWithConfig([]uint8{0, tokenstatuslist.StatusInvalid}, "x", srv.URL)
+	cwtBytes, err := sl.GenerateCWT(tokenstatuslist.CWTSigningConfig{SigningKey: key})
+	require.NoError(t, err)
+
+	tok, err := checker.parseCWTStatusList(t.Context(), srv.URL, cwtBytes)
+	require.NoError(t, err)
+	assert.Equal(t, []uint8{0, tokenstatuslist.StatusInvalid}, tok.statuses)
+}
+
+func TestStatusListChecker_EntryTTL(t *testing.T) {
+	c := &StatusListChecker{}
+	assert.Equal(t, time.Duration(0), c.entryTTL(&statusListToken{}))
+	assert.Equal(t, time.Minute, c.entryTTL(&statusListToken{ttl: time.Minute}))
+
+	// exp sooner than ttl wins
+	got := c.entryTTL(&statusListToken{ttl: time.Hour, exp: time.Now().Add(time.Minute)})
+	assert.InDelta(t, float64(time.Minute), float64(got), float64(2*time.Second))
+
+	// configured maximum caps a longer ttl and an unset one
+	c.maxCacheTTL = 30 * time.Second
+	assert.Equal(t, 30*time.Second, c.entryTTL(&statusListToken{ttl: time.Hour}))
+	assert.Equal(t, 30*time.Second, c.entryTTL(&statusListToken{}))
 }
 
 func TestStatusListChecker_Unreachable(t *testing.T) {
