@@ -216,6 +216,18 @@ func TestStatusListChecker_RejectsBadTokens(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("jwt with exp 0", func(t *testing.T) {
+		const uri = "https://registry.example.com/statuslists/1"
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": uri, "exp": 0, "status_list": map[string]any{"lst": lst}})
+		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+		signed, err := tok.SignedString(key)
+		require.NoError(t, err)
+		checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil)
+		_, err = checker.parseJWTStatusList(t.Context(), uri, []byte(signed))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expired")
+	})
+
 	t.Run("cwt sub mismatch", func(t *testing.T) {
 		sl := tokenstatuslist.NewWithConfig(statuses, "x", "https://elsewhere.example/statuslists/9")
 		cwtBytes, err := sl.GenerateCWT(tokenstatuslist.CWTSigningConfig{SigningKey: key})

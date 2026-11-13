@@ -511,7 +511,6 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 		return nil, errors.New("failed to extract JWT claims")
 	}
 
-	// jwt.Parse has already rejected an expired exp.
 	if sub, _ := claims.GetSubject(); sub != uri {
 		return nil, fmt.Errorf("status list token sub %q does not match referenced uri %q", sub, uri)
 	}
@@ -527,12 +526,16 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 	}
 
 	tok := &statusListToken{}
-	exp, err := claims.GetExpirationTime()
-	if err != nil {
-		return nil, fmt.Errorf("invalid exp claim: %w", err)
-	}
-	if exp != nil {
-		tok.exp = exp.Time
+	// jwt.MapClaims treats exp 0 as absent, so a present exp is checked here.
+	if raw, ok := claims["exp"]; ok {
+		exp, ok := numericDate(raw)
+		if !ok {
+			return nil, fmt.Errorf("invalid exp claim: %v", raw)
+		}
+		if !exp.After(time.Now()) {
+			return nil, errors.New("status list token expired")
+		}
+		tok.exp = exp
 	}
 	if raw, ok := claims["ttl"]; ok {
 		ttl, ok := numericSeconds(raw)
