@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -27,10 +28,11 @@ func localeEntries(locales ...string) []localeEntry {
 
 func TestDisplayForLocales(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		entries []localeEntry
-		locales []string
-		want    int
+		name     string
+		entries  []localeEntry
+		locales  []string
+		rejected []string
+		want     int
 	}{
 		{
 			name:    "nothing to show",
@@ -104,9 +106,57 @@ func TestDisplayForLocales(t *testing.T) {
 			locales: []string{"sv-se"},
 			want:    1,
 		},
+		{
+			// Accept-Language: sv-SE;q=0, sv;q=1, en;q=0.8 - the holder wants
+			// Swedish but not this Swedish. The language-only step must not
+			// hand them the entry they ruled out while English is on offer.
+			name:     "a rejected tag is not reached through its own language",
+			entries:  localeEntries("sv-SE", "en-US"),
+			locales:  []string{"sv", "en"},
+			rejected: []string{"sv-se"},
+			want:     1,
+		},
+		{
+			name:     "a rejection does not exclude a sibling region it does not match",
+			entries:  localeEntries("sv-SE", "sv-FI"),
+			locales:  []string{"sv"},
+			rejected: []string{"sv-se"},
+			want:     1,
+		},
+		{
+			name:     "a rejection outranks only a less specific acceptance",
+			entries:  localeEntries("de-DE", "sv-SE"),
+			locales:  []string{"sv-se"},
+			rejected: []string{"sv"},
+			want:     1,
+		},
+		{
+			name:     "a rejected tag is kept out of the English fallback too",
+			entries:  localeEntries("en-US", "sv-SE"),
+			locales:  []string{"fr"},
+			rejected: []string{"en"},
+			want:     1,
+		},
+		{
+			// Nothing acceptable is left, and the page still has to name the
+			// credential, so the rejections are ignored rather than answering
+			// with nothing.
+			name:     "every entry ruled out still yields an entry",
+			entries:  localeEntries("en-US", "sv-SE"),
+			locales:  nil,
+			rejected: []string{"en", "sv"},
+			want:     0,
+		},
+		{
+			name:     "an entry declaring no locale is not mistaken for a rejected one",
+			entries:  localeEntries("sv-SE", ""),
+			locales:  []string{"sv"},
+			rejected: []string{"sv-se"},
+			want:     1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := displayForLocales(tc.entries, tc.locales, func(e localeEntry) string { return e.locale })
+			got := displayForLocales(tc.entries, tc.locales, tc.rejected, func(e localeEntry) string { return e.locale })
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -126,7 +176,7 @@ func TestVCTMCredentialDisplayFollowsTheHolderLanguage(t *testing.T) {
 		},
 	}
 
-	display := vctmCredentialDisplay(vctm, "https://issuer.example", []string{"sv-se"})
+	display := vctmCredentialDisplay(vctm, "https://issuer.example", []string{"sv-se"}, nil)
 	require.NotNil(t, display)
 	assert.Equal(t, "Identitetshandling", display.Name)
 	assert.Equal(t, "Svensk beskrivning", display.Description)
@@ -135,7 +185,7 @@ func TestVCTMCredentialDisplayFollowsTheHolderLanguage(t *testing.T) {
 
 	// A language nobody published falls back to English, not to the first
 	// entry, which here is German.
-	display = vctmCredentialDisplay(vctm, "https://issuer.example", []string{"fr-fr"})
+	display = vctmCredentialDisplay(vctm, "https://issuer.example", []string{"fr-fr"}, nil)
 	require.NotNil(t, display)
 	assert.Equal(t, "Identity document", display.Name)
 }
@@ -150,13 +200,77 @@ func TestMDDLCredentialDisplayFollowsTheHolderLanguage(t *testing.T) {
 		},
 	}
 
-	display := mddlCredentialDisplay(mddl, "https://issuer.example", []string{"sv"})
+	display := mddlCredentialDisplay(mddl, "https://issuer.example", []string{"sv"}, nil)
 	require.NotNil(t, display)
 	assert.Equal(t, "Körkort", display.Name)
 	assert.Equal(t, "Svensk beskrivning", display.Description)
 	assert.Equal(t, "org.iso.18013.5.1.mDL", display.VCT)
 
-	display = mddlCredentialDisplay(mddl, "https://issuer.example", nil)
+	display = mddlCredentialDisplay(mddl, "https://issuer.example", nil, nil)
 	require.NotNil(t, display)
 	assert.Equal(t, "Driving licence", display.Name)
+}
+
+// End to end from the raw header to the name the consent page shows, which is
+// the pairing that matters: the parser drops a q=0 tag from the preferences,
+// and the selection has to keep honouring it anyway or the holder is handed
+// the one entry they ruled out.
+func TestConsentNameFromAcceptLanguageHeader(t *testing.T) {
+	vctm := &sdjwtvc.VCTM{
+		VCT:  "https://credential.example/pid",
+		Name: "pid-v2-internal",
+		Display: []sdjwtvc.VCTMDisplay{
+			{Locale: "sv-SE", Name: "Identitetshandling"},
+			{Locale: "en-US", Name: "Identity document"},
+			{Locale: "de-DE", Name: "Personalausweis"},
+		},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{
+			name:   "the holder's language",
+			header: "sv-SE,sv;q=0.9,en-US;q=0.8",
+			want:   "Identitetshandling",
+		},
+		{
+			name:   "Swedish, but not this Swedish, with English on offer",
+			header: "sv-SE;q=0, sv;q=1, en;q=0.8",
+			want:   "Identity document",
+		},
+		{
+			name:   "Swedish of another region is still Swedish",
+			header: "sv-FI",
+			want:   "Identitetshandling",
+		},
+		{
+			name:   "a language nobody published falls back to English",
+			header: "fr-FR,fr;q=0.9",
+			want:   "Identity document",
+		},
+		{
+			name:   "English refused, so the next deterministic choice",
+			header: "en;q=0, fr",
+			want:   "Personalausweis",
+		},
+		{
+			name:   "no header at all",
+			header: "",
+			want:   "Identity document",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			display := vctmCredentialDisplay(
+				vctm,
+				"https://issuer.example",
+				httphelpers.AcceptedLanguages(tc.header),
+				httphelpers.RejectedLanguages(tc.header),
+			)
+			require.NotNil(t, display)
+			assert.Equal(t, tc.want, display.Name)
+		})
+	}
 }

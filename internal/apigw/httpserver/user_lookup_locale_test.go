@@ -58,19 +58,31 @@ func userLookupEngine(t *testing.T, mockAPI Apiv1) *gin.Engine {
 // whichever entry the metadata listed first.
 func TestUserLookupCarriesTheHolderLanguagePreference(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		header string
-		want   []string
+		name         string
+		header       string
+		want         []string
+		wantRejected []string
 	}{
 		{
-			name:   "the browser's ordered preference reaches apiv1",
-			header: "sv-SE,sv;q=0.9,en-US;q=0.8",
-			want:   []string{"sv-se", "sv", "en-us"},
+			name:         "the browser's ordered preference reaches apiv1",
+			header:       "sv-SE,sv;q=0.9,en-US;q=0.8",
+			want:         []string{"sv-se", "sv", "en-us"},
+			wantRejected: []string{},
 		},
 		{
-			name:   "a request with no Accept-Language carries none",
-			header: "",
-			want:   []string{},
+			name:         "a request with no Accept-Language carries none",
+			header:       "",
+			want:         []string{},
+			wantRejected: []string{},
+		},
+		{
+			// A q=0 tag is not a preference, so it is absent from Locales,
+			// but it still has to reach apiv1 or the selection there cannot
+			// keep honouring it.
+			name:         "a refused tag travels separately from the preferences",
+			header:       "sv-SE;q=0, sv;q=1, en;q=0.8",
+			want:         []string{"sv", "en"},
+			wantRejected: []string{"sv-se"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,6 +99,7 @@ func TestUserLookupCarriesTheHolderLanguagePreference(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 			require.NotNil(t, api.got, "UserLookup was never called")
 			assert.Equal(t, tc.want, api.got.Locales)
+			assert.Equal(t, tc.wantRejected, api.got.RejectedLocales)
 		})
 	}
 }

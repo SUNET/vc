@@ -27,6 +27,12 @@ type UserLookupRequest struct {
 	// (httphelpers.AcceptedLanguages); empty is fine and selects the
 	// deterministic fallback.
 	Locales []string `json:"-"`
+	// RejectedLocales are the tags the holder named with q=0, which a
+	// selection must keep honouring: a rejection outranks an acceptance it
+	// is more specific than, so "sv-SE;q=0, sv;q=1" must not land on an
+	// sv-SE display entry while an acceptable one exists. Filled from the
+	// same header by httphelpers.RejectedLanguages.
+	RejectedLocales []string `json:"-"`
 }
 
 // SVGTemplateReply holds SVG template data.

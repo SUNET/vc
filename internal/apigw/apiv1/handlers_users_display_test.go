@@ -31,7 +31,7 @@ func TestVCTMCredentialDisplay(t *testing.T) {
 				Name:        "Personal ID",
 				Description: "Your identity, issued by Example University",
 			}},
-		}, testIssuerURL, nil)
+		}, testIssuerURL, nil, nil)
 
 		require.NotNil(t, got)
 		assert.Equal(t, "Personal ID", got.Name)
@@ -47,7 +47,7 @@ func TestVCTMCredentialDisplay(t *testing.T) {
 			Name:        "pid-v2-internal",
 			Description: "The holder's identity attributes",
 			Display:     []sdjwtvc.VCTMDisplay{{Locale: "en-US", Name: "Personal ID"}},
-		}, testIssuerURL, nil)
+		}, testIssuerURL, nil, nil)
 
 		require.NotNil(t, got)
 		assert.Equal(t, "Personal ID", got.Name)
@@ -58,7 +58,7 @@ func TestVCTMCredentialDisplay(t *testing.T) {
 		got := vctmCredentialDisplay(&sdjwtvc.VCTM{
 			VCT:  "https://credentials.example.com/pid",
 			Name: "Personal ID",
-		}, testIssuerURL, nil)
+		}, testIssuerURL, nil, nil)
 
 		require.NotNil(t, got)
 		assert.Equal(t, "Personal ID", got.Name)
@@ -67,7 +67,7 @@ func TestVCTMCredentialDisplay(t *testing.T) {
 	t.Run("no metadata, no display block", func(t *testing.T) {
 		// The page then falls back to a generic heading. A missing name is
 		// a worse page, never a broken one.
-		assert.Nil(t, vctmCredentialDisplay(nil, testIssuerURL, nil))
+		assert.Nil(t, vctmCredentialDisplay(nil, testIssuerURL, nil, nil))
 	})
 }
 
@@ -82,7 +82,7 @@ func TestMDDLCredentialDisplay(t *testing.T) {
 				Name:        "Driving Licence",
 				Description: "Your driving entitlements",
 			}},
-		}, testIssuerURL, nil)
+		}, testIssuerURL, nil, nil)
 
 		require.NotNil(t, got)
 		assert.Equal(t, "Driving Licence", got.Name)
@@ -92,7 +92,7 @@ func TestMDDLCredentialDisplay(t *testing.T) {
 	})
 
 	t.Run("a schema with no Display still names its doctype and issuer", func(t *testing.T) {
-		got := mddlCredentialDisplay(&mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"}, testIssuerURL, nil)
+		got := mddlCredentialDisplay(&mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"}, testIssuerURL, nil, nil)
 
 		require.NotNil(t, got)
 		assert.Empty(t, got.Name)
@@ -101,6 +101,6 @@ func TestMDDLCredentialDisplay(t *testing.T) {
 	})
 
 	t.Run("no schema, no display block", func(t *testing.T) {
-		assert.Nil(t, mddlCredentialDisplay(nil, testIssuerURL, nil))
+		assert.Nil(t, mddlCredentialDisplay(nil, testIssuerURL, nil, nil))
 	})
 }

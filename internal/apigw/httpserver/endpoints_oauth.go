@@ -623,12 +623,13 @@ func (s *Service) headlessConsentComplete(ctx context.Context, c *gin.Context, s
 	}
 
 	reply, err := s.apiv1.UserLookup(ctx, &vcclient.UserLookupRequest{
-		RequestURI:   requestURI,
-		AuthProvider: authProvider,
-		ResponseCode: responseCode,
-		VCTM:         vctm,
-		MDDL:         mddl,
-		Locales:      httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
+		RequestURI:      requestURI,
+		AuthProvider:    authProvider,
+		ResponseCode:    responseCode,
+		VCTM:            vctm,
+		MDDL:            mddl,
+		Locales:         httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
+		RejectedLocales: httphelpers.RejectedLanguages(c.GetHeader("Accept-Language")),
 	})
 	if err != nil {
 		return fmt.Errorf("user lookup: %w", err)

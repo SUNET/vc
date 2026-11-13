@@ -152,13 +152,13 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	case req.VCTM != nil:
 		presentationClaims = req.VCTM.Presentation(doc.DocumentData)
 		svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
-		credentialDisplay = vctmCredentialDisplay(req.VCTM, c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Locales)
+		credentialDisplay = vctmCredentialDisplay(req.VCTM, c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Locales, req.RejectedLocales)
 	case req.MDDL != nil:
 		presentationClaims = req.MDDL.Presentation(doc.DocumentData)
 		// mdoc.SVGValue mirrors sdjwtvc.SVGValue field-for-field but is a
 		// distinct type (keeps pkg/mdoc decoupled from pkg/sdjwtvc); convert
 		// into the wire type UserLookupReply.SVGTemplateClaims already commits to.
-		credentialDisplay = mddlCredentialDisplay(req.MDDL, c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Locales)
+		credentialDisplay = mddlCredentialDisplay(req.MDDL, c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Locales, req.RejectedLocales)
 		mdocSVGValues := req.MDDL.SVGValues(doc.DocumentData)
 		if len(mdocSVGValues) > 0 {
 			svgTemplateClaims = make(map[string]sdjwtvc.SVGValue, len(mdocSVGValues))
@@ -269,7 +269,7 @@ func buildAuthorizationRedirectURL(walletURI, code, state, issuer string) (strin
 // carries the end-user wording, and the consent page is the most end-user
 // facing surface there is. Which Display entry is the holder's, by their
 // accepted languages rather than by document order - see displayForLocales.
-func vctmCredentialDisplay(vctm *sdjwtvc.VCTM, issuerURL string, locales []string) *vcclient.CredentialDisplay {
+func vctmCredentialDisplay(vctm *sdjwtvc.VCTM, issuerURL string, locales, rejected []string) *vcclient.CredentialDisplay {
 	if vctm == nil {
 		return nil
 	}
@@ -279,7 +279,7 @@ func vctmCredentialDisplay(vctm *sdjwtvc.VCTM, issuerURL string, locales []strin
 		VCT:         vctm.VCT,
 		Issuer:      issuerURL,
 	}
-	if i := displayForLocales(vctm.Display, locales, func(d sdjwtvc.VCTMDisplay) string { return d.Locale }); i >= 0 {
+	if i := displayForLocales(vctm.Display, locales, rejected, func(d sdjwtvc.VCTMDisplay) string { return d.Locale }); i >= 0 {
 		// Each field falls back independently: a Display entry with a name
 		// and no description should not blank out a description the
 		// top-level metadata does have.
@@ -297,7 +297,7 @@ func vctmCredentialDisplay(vctm *sdjwtvc.VCTM, issuerURL string, locales []strin
 //
 // An MDDL schema has no top-level name, so Display is the only source and
 // there is nothing to fall back to. The doctype stands in for the vct.
-func mddlCredentialDisplay(mddl *mdoc.MDDLSchema, issuerURL string, locales []string) *vcclient.CredentialDisplay {
+func mddlCredentialDisplay(mddl *mdoc.MDDLSchema, issuerURL string, locales, rejected []string) *vcclient.CredentialDisplay {
 	if mddl == nil {
 		return nil
 	}
@@ -305,7 +305,7 @@ func mddlCredentialDisplay(mddl *mdoc.MDDLSchema, issuerURL string, locales []st
 		VCT:    mddl.DocType,
 		Issuer: issuerURL,
 	}
-	if i := displayForLocales(mddl.Display, locales, func(d mdoc.DisplayProperties) string { return d.Locale }); i >= 0 {
+	if i := displayForLocales(mddl.Display, locales, rejected, func(d mdoc.DisplayProperties) string { return d.Locale }); i >= 0 {
 		display.Name = mddl.Display[i].Name
 		display.Description = mddl.Display[i].Description
 	}

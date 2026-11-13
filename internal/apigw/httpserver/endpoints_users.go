@@ -86,7 +86,8 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 		// The consent page names the credential in the holder's language
 		// where the metadata has one, so the browser's preference has to
 		// reach apiv1; it has no other way to learn it.
-		Locales: httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
+		Locales:         httphelpers.AcceptedLanguages(c.GetHeader("Accept-Language")),
+		RejectedLocales: httphelpers.RejectedLanguages(c.GetHeader("Accept-Language")),
 	}
 
 	authProvider, ok := session.Get("auth_provider").(string)

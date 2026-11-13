@@ -68,3 +68,123 @@ func TestAcceptedLanguages(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectedLanguages(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header string
+		want   []string
+	}{
+		{
+			name:   "nothing rejected",
+			header: "sv-SE, en;q=0.8",
+			want:   []string{},
+		},
+		{
+			name:   "a tag the client will not take",
+			header: "sv-SE;q=0, sv;q=1, en;q=0.8",
+			want:   []string{"sv-se"},
+		},
+		{
+			name:   "several, sorted, since their order carries no meaning",
+			header: "sv;q=0, en;q=0, de",
+			want:   []string{"en", "sv"},
+		},
+		{
+			name:   "a zero written long-hand is still zero",
+			header: "sv-SE;q=0.000, en",
+			want:   []string{"sv-se"},
+		},
+		{
+			name:   "the wildcard is not a tag, even at zero",
+			header: "*;q=0, en",
+			want:   []string{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, RejectedLanguages(tc.header))
+			// A rejected tag is never also offered as a preference.
+			for _, rejected := range RejectedLanguages(tc.header) {
+				assert.NotContains(t, AcceptedLanguages(tc.header), rejected)
+			}
+		})
+	}
+}
+
+// The most precise range the client named decides, which is the rule
+// prefersHTML already applies to Accept: an explicit application/json;q=0
+// beats a */*;q=1 fallback.
+func TestLanguageRejects(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		header    string
+		candidate string
+		want      bool
+	}{
+		{
+			name:      "a two-subtag rejection beats a one-subtag acceptance",
+			header:    "sv-SE;q=0, sv;q=1, en;q=0.8",
+			candidate: "sv-SE",
+			want:      true,
+		},
+		{
+			name:      "and leaves a sibling region it does not match alone",
+			header:    "sv-SE;q=0, sv;q=1",
+			candidate: "sv-FI",
+			want:      false,
+		},
+		{
+			name:      "a one-subtag rejection loses to a two-subtag acceptance",
+			header:    "sv;q=0, sv-SE;q=1",
+			candidate: "sv-SE",
+			want:      false,
+		},
+		{
+			name:      "but still rejects what only it matches",
+			header:    "sv;q=0, sv-SE;q=1",
+			candidate: "sv-FI",
+			want:      true,
+		},
+		{
+			name:      "a language rejection reaches its regions",
+			header:    "en;q=0, sv",
+			candidate: "en-US",
+			want:      true,
+		},
+		{
+			name:      "a region rejection does not reach the bare language",
+			header:    "en-US;q=0, sv",
+			candidate: "en",
+			want:      false,
+		},
+		{
+			name:      "a prefix that is not a whole subtag is not a match",
+			header:    "sv;q=0",
+			candidate: "svx",
+			want:      false,
+		},
+		{
+			name:      "a candidate no range mentions is unguided, not rejected",
+			header:    "sv;q=0",
+			candidate: "de-DE",
+			want:      false,
+		},
+		{
+			name:      "an entry with no locale is never rejected",
+			header:    "sv;q=0, en;q=0",
+			candidate: "",
+			want:      false,
+		},
+		{
+			name:      "case does not matter on either side",
+			header:    "SV-se;q=0, sv",
+			candidate: "sv-SE",
+			want:      true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LanguageRejects(AcceptedLanguages(tc.header), RejectedLanguages(tc.header), tc.candidate)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
