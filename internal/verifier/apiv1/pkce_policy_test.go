@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptr(b bool) *bool { return &b }
-
 // cfgWithPKCE is a Cfg whose OP carries this policy.
 func cfgWithPKCE(requirePKCE *bool) *model.Cfg {
 	cfg := &model.Cfg{Verifier: &model.Verifier{}}
@@ -36,7 +34,7 @@ func TestPKCEIsNeverWaivableForAPublicClient(t *testing.T) {
 			TokenEndpointAuthMethod: "none",
 			RequirePKCE:             requirePKCE,
 		}
-		assert.True(t, clientWith(ptr(false)).pkceRequired(client, false),
+		assert.True(t, clientWith(new(false)).pkceRequired(client, false),
 			"a public client with RequirePKCE=%v was let through", requirePKCE)
 	}
 }
@@ -56,8 +54,8 @@ func TestADynamicClientFollowsTheOPPolicy(t *testing.T) {
 	for name, client := range map[string]*db.Client{"fresh": fresh, "legacy pinned": legacy} {
 		t.Run(name, func(t *testing.T) {
 			assert.True(t, clientWith(nil).pkceRequired(client, false), "the default is to require PKCE")
-			assert.True(t, clientWith(ptr(true)).pkceRequired(client, false))
-			assert.False(t, clientWith(ptr(false)).pkceRequired(client, false),
+			assert.True(t, clientWith(new(true)).pkceRequired(client, false))
+			assert.False(t, clientWith(new(false)).pkceRequired(client, false),
 				"require_pkce: false did not reach this client")
 		})
 	}
@@ -66,9 +64,9 @@ func TestADynamicClientFollowsTheOPPolicy(t *testing.T) {
 // A static client's flag IS the answer: getClientByID has already resolved
 // the policy, including an operator's exemption for that one client.
 func TestAStaticClientFollowsItsResolvedFlag(t *testing.T) {
-	assert.True(t, clientWith(ptr(false)).pkceRequired(
+	assert.True(t, clientWith(new(false)).pkceRequired(
 		&db.Client{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: true}, true))
-	assert.False(t, clientWith(ptr(true)).pkceRequired(
+	assert.False(t, clientWith(new(true)).pkceRequired(
 		&db.Client{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: false}, true))
 }
 
@@ -90,37 +88,37 @@ func TestStaticClientPKCEPolicy(t *testing.T) {
 		{
 			name:   "required when the policy says so",
 			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "client_secret_basic"},
-			op:     cfgWithPKCE(ptr(true)),
+			op:     cfgWithPKCE(new(true)),
 			want:   true,
 		},
 		{
 			name:   "the policy can exempt a confidential client",
 			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "client_secret_basic"},
-			op:     cfgWithPKCE(ptr(false)),
+			op:     cfgWithPKCE(new(false)),
 			want:   false,
 		},
 		{
 			name:   "one client can be exempted without relaxing the policy",
-			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: ptr(false)},
-			op:     cfgWithPKCE(ptr(true)),
+			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: new(false)},
+			op:     cfgWithPKCE(new(true)),
 			want:   false,
 		},
 		{
 			name:   "one client can be held to it while the policy is relaxed",
-			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: ptr(true)},
-			op:     cfgWithPKCE(ptr(false)),
+			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: new(true)},
+			op:     cfgWithPKCE(new(false)),
 			want:   true,
 		},
 		{
 			name:   "a public client is required even with the policy off",
 			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "none"},
-			op:     cfgWithPKCE(ptr(false)),
+			op:     cfgWithPKCE(new(false)),
 			want:   true,
 		},
 		{
 			name:   "a public client is required even when exempted by name",
-			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "none", RequirePKCE: ptr(false)},
-			op:     cfgWithPKCE(ptr(false)),
+			static: model.StaticOIDCClient{TokenEndpointAuthMethod: "none", RequirePKCE: new(false)},
+			op:     cfgWithPKCE(new(false)),
 			want:   true,
 		},
 		{
@@ -215,15 +213,15 @@ func TestAuthorizeRefusesAStaticClientWithoutPKCE(t *testing.T) {
 // above a policy test rather than a constant.
 func TestAuthorizeAllowsAnExemptedStaticClientWithoutPKCE(t *testing.T) {
 	client, _ := pkceTestClient(t, nil)
-	id := withStaticClient(t, client, "legacy-client", "client_secret_basic", ptr(false))
+	id := withStaticClient(t, client, "legacy-client", "client_secret_basic", new(false))
 
 	assert.NoError(t, authorizeNoPKCE(t, client, id))
 }
 
 // A public static client cannot be exempted, however the config is written.
 func TestAuthorizeRefusesAPublicStaticClientEvenWhenExempted(t *testing.T) {
-	client, _ := pkceTestClient(t, ptr(false))
-	id := withStaticClient(t, client, "public-client", tokenEndpointAuthNone, ptr(false))
+	client, _ := pkceTestClient(t, new(false))
+	id := withStaticClient(t, client, "public-client", tokenEndpointAuthNone, new(false))
 
 	assert.ErrorIs(t, authorizeNoPKCE(t, client, id), ErrInvalidRequest)
 }
@@ -255,7 +253,7 @@ func TestARegisteringClientCannotOptOutOfPKCE(t *testing.T) {
 // dynamic ones stayed required - policy depending on how the client was
 // created, which is the thing SUNET/vc#757 is about.
 func TestTheOPOverrideReachesDynamicClients(t *testing.T) {
-	client, _ := pkceTestClient(t, ptr(false))
+	client, _ := pkceTestClient(t, new(false))
 	id := registerDynamicClient(t, client, "client_secret_basic")
 
 	assert.NoError(t, authorizeNoPKCE(t, client, id),
@@ -265,7 +263,7 @@ func TestTheOPOverrideReachesDynamicClients(t *testing.T) {
 // A public client registered dynamically is still required, override or
 // not.
 func TestTheOPOverrideDoesNotReachAPublicDynamicClient(t *testing.T) {
-	client, _ := pkceTestClient(t, ptr(false))
+	client, _ := pkceTestClient(t, new(false))
 	id := registerDynamicClient(t, client, tokenEndpointAuthNone)
 
 	assert.ErrorIs(t, authorizeNoPKCE(t, client, id), ErrInvalidRequest)
