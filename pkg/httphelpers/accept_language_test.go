@@ -48,6 +48,11 @@ func TestAcceptedLanguages(t *testing.T) {
 			want:   []string{"sv-se"},
 		},
 		{
+			name:   "a refusing wildcard is no more of a preference",
+			header: "fr, *;q=0",
+			want:   []string{"fr"},
+		},
+		{
 			name:   "a header of nothing but a wildcard yields nothing",
 			header: "*",
 			want:   []string{},
@@ -104,9 +109,22 @@ func TestRejectedLanguages(t *testing.T) {
 			want:   []string{"sv-se"},
 		},
 		{
-			name:   "the wildcard is not a tag, even at zero",
+			// A zero-quality wildcard is the client refusing every language
+			// it did not name, so it has to survive as a rejection even
+			// though it is worthless as a preference.
+			name:   "a refusing wildcard is kept, unlike an accepting one",
 			header: "*;q=0, en",
+			want:   []string{"*"},
+		},
+		{
+			name:   "a wildcard with a usable quality carries no refusal",
+			header: "en-US,en;q=0.9,*;q=0.5",
 			want:   []string{},
+		},
+		{
+			name:   "nothing but a refusing wildcard",
+			header: "*;q=0",
+			want:   []string{"*"},
 		},
 		{
 			name:   "an uppercase Q refuses just as a lowercase one does",
@@ -180,6 +198,30 @@ func TestLanguageRejects(t *testing.T) {
 			name:      "a candidate no range mentions is unguided, not rejected",
 			header:    "sv;q=0",
 			candidate: "de-DE",
+			want:      false,
+		},
+		{
+			name:      "a refusing wildcard reaches a language nobody named",
+			header:    "fr, *;q=0",
+			candidate: "en-US",
+			want:      true,
+		},
+		{
+			name:      "a named acceptance outranks the refusing wildcard",
+			header:    "fr, *;q=0",
+			candidate: "fr-CA",
+			want:      false,
+		},
+		{
+			name:      "the wildcard is the least precise range there is",
+			header:    "en;q=0, *;q=1",
+			candidate: "en-US",
+			want:      true,
+		},
+		{
+			name:      "an entry with no locale escapes even the wildcard",
+			header:    "fr, *;q=0",
+			candidate: "",
 			want:      false,
 		},
 		{

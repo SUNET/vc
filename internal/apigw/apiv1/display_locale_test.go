@@ -163,6 +163,25 @@ func TestDisplayForLocales(t *testing.T) {
 			rejected: []string{"en-us"},
 			want:     1,
 		},
+		{
+			// Accept-Language: fr, *;q=0 - French, and nothing else. The
+			// document has no French, so the entry that declares no language
+			// is the one the wildcard does not reach.
+			name:     "a refusing wildcard leaves the language-independent entry",
+			entries:  localeEntries("en-US", ""),
+			locales:  []string{"fr"},
+			rejected: []string{"*"},
+			want:     1,
+		},
+		{
+			// Same header, but every entry names a language the wildcard
+			// refuses, so the page falls back rather than showing nothing.
+			name:     "a refusing wildcard over a document with no catch-all still names it",
+			entries:  localeEntries("de-DE", "en-US"),
+			locales:  []string{"fr"},
+			rejected: []string{"*"},
+			want:     1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := displayForLocales(tc.entries, tc.locales, tc.rejected, func(e localeEntry) string { return e.locale })
@@ -273,6 +292,14 @@ func TestConsentNameFromAcceptLanguageHeader(t *testing.T) {
 		{
 			name:   "an uppercase Q refuses the same language a lowercase one would",
 			header: "sv-SE;Q=0, sv;Q=1, en;Q=0.8",
+			want:   "Identity document",
+		},
+		{
+			// French and nothing else. This document names three languages and
+			// none of them is French, so the wildcard refuses every entry and
+			// the page falls back rather than showing no name at all.
+			name:   "nothing else, over a document that has nothing else",
+			header: "fr, *;q=0",
 			want:   "Identity document",
 		},
 	} {

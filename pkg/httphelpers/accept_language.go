@@ -8,27 +8,46 @@ import (
 // AcceptedLanguages parses an Accept-Language header into the language tags it
 // names as acceptable, most preferred first, lowercased.
 //
-// The wildcard "*" is dropped: it says "any language", which adds nothing to
-// an ordered list of preferences and would otherwise match the first candidate
-// it was compared against. Tags given q=0 are dropped too - RFC 9110 12.5.4
-// gives that quality the meaning "not acceptable", so relaying such a tag as a
-// preference would invert what the client asked for. They are not merely
-// absent, though: RejectedLanguages returns them, because a tag the client
-// ruled out has to keep ruling out whatever it matches.
+// The wildcard "*" is dropped: as a preference it says "any language", which
+// adds nothing to an ordered list and would otherwise match the first
+// candidate it was compared against. Tags given q=0 are dropped too - RFC 9110
+// 12.5.4 gives that quality the meaning "not acceptable", so relaying such a
+// tag as a preference would invert what the client asked for. Neither is
+// merely absent: RejectedLanguages returns the refusals, wildcard included,
+// because a range the client ruled out has to keep ruling out what it matches.
 //
 // Ties keep header order, so a header that states no qualities at all yields
 // its tags exactly as written, which is what every browser sends for its
 // primary language.
 func AcceptedLanguages(header string) []string {
-	return languageTags(header, func(q float64) bool { return q > 0 })
+	accepted := make([]string, 0, 4)
+	for _, tag := range languageTags(header, func(q float64) bool { return q > 0 }) {
+		if tag != wildcardRange {
+			accepted = append(accepted, tag)
+		}
+	}
+
+	return accepted
 }
 
-// RejectedLanguages returns the tags an Accept-Language header named with q=0,
-// lowercased - the languages the client has said it will not take.
+// wildcardRange is the language range that matches every tag. As an
+// acceptance it carries no information; as a refusal it is the client saying
+// "nothing else", which is why it survives into RejectedLanguages.
+const wildcardRange = "*"
+
+// RejectedLanguages returns the ranges an Accept-Language header named with
+// q=0, lowercased - what the client has said it will not take.
 //
-// Order carries no meaning here, so the result is sorted, but the tags do:
-// a rejection is a range like any other, and it applies to whatever it matches
-// as precisely as it matches it. LanguageRejects applies that rule.
+// "*" is one of them. A zero-quality wildcard is the client refusing every
+// language it did not name, so "fr, *;q=0" rejects en-US; dropping it left
+// that header behaving exactly like a bare "fr", which is the opposite of
+// "nothing else". It is kept here and only here: as an acceptance a wildcard
+// still carries nothing.
+//
+// Order carries no meaning here, so the result is sorted, but the ranges do:
+// a rejection applies to whatever it matches as precisely as it matches it,
+// and the wildcard matches everything at the lowest precision there is.
+// LanguageRejects applies that rule.
 func RejectedLanguages(header string) []string {
 	rejected := languageTags(header, func(q float64) bool { return q <= 0 })
 	sort.Strings(rejected)
@@ -50,7 +69,7 @@ func languageTags(header string, keep func(q float64) bool) []string {
 		// Accept entries parseMediaRange was written for; only the value is a
 		// language tag rather than a media range.
 		tag, q := parseMediaRange(part)
-		if tag == "" || tag == "*" || !keep(q) {
+		if tag == "" || !keep(q) {
 			continue
 		}
 		entries = append(entries, weighted{tag: tag, q: q})
@@ -85,22 +104,34 @@ func LanguageRejects(accepted, rejected []string, candidate string) bool {
 	}
 
 	rejectDepth := bestRangeMatch(rejected, candidate)
-	if rejectDepth == 0 {
+	if rejectDepth == noRangeMatch {
 		return false
 	}
 
 	return rejectDepth > bestRangeMatch(accepted, candidate)
 }
 
-// bestRangeMatch returns the subtag count of the most precise range in ranges
-// that matches candidate, or 0 when none does.
+// noRangeMatch is the precision reported for a candidate no range matches. It
+// is below the wildcard's zero, so a candidate named by nothing at all loses
+// to one a wildcard reaches - which is what makes "fr, *;q=0" refuse en-US
+// while leaving fr-CA, reached by the one-subtag "fr", acceptable.
+const noRangeMatch = -1
+
+// bestRangeMatch returns the precision of the most precise range in ranges
+// that matches candidate - its subtag count, or zero for the wildcard - and
+// noRangeMatch when none does.
 func bestRangeMatch(ranges []string, candidate string) int {
-	best := 0
+	best := noRangeMatch
 	for _, r := range ranges {
 		if !languageRangeMatches(r, candidate) {
 			continue
 		}
-		if depth := strings.Count(r, "-") + 1; depth > best {
+
+		depth := 0
+		if r != wildcardRange {
+			depth = strings.Count(r, "-") + 1
+		}
+		if depth > best {
 			best = depth
 		}
 	}
@@ -109,11 +140,15 @@ func bestRangeMatch(ranges []string, candidate string) int {
 }
 
 // languageRangeMatches reports whether the language range r matches the tag
-// candidate: equal, or r is a whole-subtag prefix of it, so "sv" matches
-// "sv-SE" but "sv" does not match "svx" and "sv-SE" does not match "sv".
+// candidate: the wildcard matches any tag, and a named range matches one it
+// equals or is a whole-subtag prefix of, so "sv" matches "sv-SE" but "sv" does
+// not match "svx" and "sv-SE" does not match "sv".
 func languageRangeMatches(r, candidate string) bool {
 	if r == "" {
 		return false
+	}
+	if r == wildcardRange {
+		return true
 	}
 	if r == candidate {
 		return true
