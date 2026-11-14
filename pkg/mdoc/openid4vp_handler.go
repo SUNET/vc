@@ -181,6 +181,10 @@ func (h *MDocHandler) verifyAndExtract(ctx context.Context, vpToken string, sess
 			// Use doc.DocType safely as it's now a concrete field
 			return nil, fmt.Errorf("failed to extract claims from %s: %w", doc.DocType, err)
 		}
+		// Only the signature-verified MSO is a trustworthy source for the status reference.
+		if i < len(verifyResult.Documents) && verifyResult.Documents[i].MSO != nil {
+			claims.Status = verifyResult.Documents[i].MSO.Status
+		}
 
 		// Reject a DeviceResponse that carries two documents with the same
 		// docType — MDocVerificationResult.Documents is a map keyed by
@@ -205,6 +209,8 @@ type MDocVerificationResult struct {
 type MDocDocumentClaims struct {
 	DocType    string
 	Namespaces map[string]map[string]any
+	// Status is the status reference from the verified MSO, nil when the credential is not revocable.
+	Status *MSOStatus
 }
 
 // GetClaims returns a flat map of all claims from all namespaces.

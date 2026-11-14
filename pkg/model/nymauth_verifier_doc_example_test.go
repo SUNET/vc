@@ -17,7 +17,7 @@ import (
 // implementation reports - a wrong answer about a person rather than an
 // error anyone sees.
 func TestVerifierIDDocExampleIsItselfAValidVerifierID(t *testing.T) {
-	field, found := reflect.TypeOf(NymAuthVerifier{}).FieldByName("VerifierID")
+	field, found := reflect.TypeFor[NymAuthVerifier]().FieldByName("VerifierID")
 	require.True(t, found, "VerifierID is gone; this guard is reading the wrong field")
 
 	example, err := strconv.Unquote(field.Tag.Get("doc_example"))

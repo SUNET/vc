@@ -26,19 +26,19 @@ type ClientRegistrationRequest struct {
 	// other grant - registering a client for refresh_token produced a
 	// registration whose grant_types the OP would always refuse, and which
 	// its own discovery document did not advertise (SUNET/vc#756).
-	GrantTypes              []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
-	ResponseTypes           []string `json:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
-	ClientName              string   `json:"client_name,omitempty"`
-	ClientURI               string   `json:"client_uri,omitempty" validate:"omitempty,httpsurl"`
-	LogoURI                 string   `json:"logo_uri,omitempty" validate:"omitempty,httpsurl"`
-	Scope                   string   `json:"scope,omitempty" default:"openid"`
-	Contacts                []string `json:"contacts,omitempty"`
-	TosURI                  string   `json:"tos_uri,omitempty" validate:"omitempty,httpsurl"`
-	PolicyURI               string   `json:"policy_uri,omitempty" validate:"omitempty,httpsurl"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
-	JWKS                    any      `json:"jwks,omitempty"`
-	SoftwareID              string   `json:"software_id,omitempty"`
-	SoftwareVersion         string   `json:"software_version,omitempty"`
+	GrantTypes      []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
+	ResponseTypes   []string `json:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
+	ClientName      string   `json:"client_name,omitempty"`
+	ClientURI       string   `json:"client_uri,omitempty" validate:"omitempty,httpsurl"`
+	LogoURI         string   `json:"logo_uri,omitempty" validate:"omitempty,httpsurl"`
+	Scope           string   `json:"scope,omitempty" default:"openid"`
+	Contacts        []string `json:"contacts,omitempty"`
+	TosURI          string   `json:"tos_uri,omitempty" validate:"omitempty,httpsurl"`
+	PolicyURI       string   `json:"policy_uri,omitempty" validate:"omitempty,httpsurl"`
+	JWKSURI         string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
+	JWKS            any      `json:"jwks,omitempty"`
+	SoftwareID      string   `json:"software_id,omitempty"`
+	SoftwareVersion string   `json:"software_version,omitempty"`
 
 	// OpenID Connect specific
 	ApplicationType         string   `json:"application_type,omitempty" default:"web" validate:"omitempty,oneof=web native"`
@@ -80,7 +80,7 @@ type ClientRegistrationResponse struct {
 	Contacts                []string `json:"contacts,omitempty"`
 	TosURI                  string   `json:"tos_uri,omitempty"`
 	PolicyURI               string   `json:"policy_uri,omitempty"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty"`
+	JWKSURI                 string   `json:"jwks_uri,omitempty"`
 	JWKS                    any      `json:"jwks,omitempty"`
 	SoftwareID              string   `json:"software_id,omitempty"`
 	SoftwareVersion         string   `json:"software_version,omitempty"`
@@ -168,7 +168,7 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		TokenEndpointAuthMethod:     req.TokenEndpointAuthMethod,
 		AllowedScopes:               allowedScopes,
 		SubjectType:                 req.SubjectType,
-		JWKSUri:                     req.JWKSUri,
+		JWKSURI:                     req.JWKSURI,
 		JWKS:                        req.JWKS,
 		RequirePKCE:                 requirePKCE,
 		RequireCodeChallenge:        requireCodeChallenge,
@@ -221,7 +221,7 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		Contacts:                req.Contacts,
 		TosURI:                  req.TosURI,
 		PolicyURI:               req.PolicyURI,
-		JWKSUri:                 req.JWKSUri,
+		JWKSURI:                 req.JWKSURI,
 		JWKS:                    req.JWKS,
 		SoftwareID:              req.SoftwareID,
 		SoftwareVersion:         req.SoftwareVersion,
@@ -298,7 +298,7 @@ func (c *Client) GetClientInformation(ctx context.Context, req *GetClientInforma
 		Contacts:                client.Contacts,
 		TosURI:                  client.TosURI,
 		PolicyURI:               client.PolicyURI,
-		JWKSUri:                 client.JWKSUri,
+		JWKSURI:                 client.JWKSURI,
 		JWKS:                    client.JWKS,
 		SoftwareID:              client.SoftwareID,
 		SoftwareVersion:         client.SoftwareVersion,
@@ -400,8 +400,8 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 	if clientReg.SubjectType != "" {
 		client.SubjectType = clientReg.SubjectType
 	}
-	if clientReg.JWKSUri != "" {
-		client.JWKSUri = clientReg.JWKSUri
+	if clientReg.JWKSURI != "" {
+		client.JWKSURI = clientReg.JWKSURI
 	}
 	if clientReg.JWKS != nil {
 		client.JWKS = clientReg.JWKS
@@ -462,7 +462,7 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 		Contacts:                client.Contacts,
 		TosURI:                  client.TosURI,
 		PolicyURI:               client.PolicyURI,
-		JWKSUri:                 client.JWKSUri,
+		JWKSURI:                 client.JWKSURI,
 		JWKS:                    client.JWKS,
 		SoftwareID:              client.SoftwareID,
 		SoftwareVersion:         client.SoftwareVersion,

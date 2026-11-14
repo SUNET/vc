@@ -1,0 +1,59 @@
+{
+  "@context": "https://www.w3.org/ns/credentials/v2",
+  "type": "VerifiablePresentation",
+  "id": "urn:uuid:0e6a1c5e-0000-4000-8000-000000000010",
+  "holder": {
+    "id": "did:key:z6MksxfKrcVYE71VoBBkDMNp2eeqXjwb5Hu7jMLqn3x6z2AD",
+    "name": "Holder Example"
+  },
+  "verifiableCredential": [
+    {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "id": "urn:uuid:0e6a1c5e-0000-4000-8000-000000000001",
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "id": "did:web:issuer.example",
+        "name": "The Shared Issuer"
+      },
+      "validFrom": "2026-01-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:key:z6MksxfKrcVYE71VoBBkDMNp2eeqXjwb5Hu7jMLqn3x6z2AD",
+        "name": "Holder Example",
+        "description": "the first credential"
+      }
+    },
+    {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "id": "urn:uuid:0e6a1c5e-0000-4000-8000-000000000002",
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": {
+        "id": "did:web:issuer.example",
+        "name": "The Shared Issuer"
+      },
+      "validFrom": "2026-02-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:key:z6MksxfKrcVYE71VoBBkDMNp2eeqXjwb5Hu7jMLqn3x6z2AD",
+        "name": "Holder Example",
+        "description": "the second credential"
+      }
+    }
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "cryptosuite": "eddsa-rdfc-2022",
+    "created": "2026-11-05T00:00:00Z",
+    "verificationMethod": "did:key:z6MksxfKrcVYE71VoBBkDMNp2eeqXjwb5Hu7jMLqn3x6z2AD#z6MksxfKrcVYE71VoBBkDMNp2eeqXjwb5Hu7jMLqn3x6z2AD",
+    "proofPurpose": "authentication",
+    "challenge": "shared-iri-challenge",
+    "domain": "x509_san_dns:verifier.example",
+    "proofValue": "z2XD9tCpHYVYbEDi5vHyKLchsBueNHhtif9UU2h56TDY2BbWCciruCJeb8JHx6fXkbV177hZ4877FjyQB3PDUwsuK"
+  }
+}

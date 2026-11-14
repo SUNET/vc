@@ -258,7 +258,7 @@ func negotiateMediaType(header string, offered ...string) string {
 // cache serve one origin's CORS response to another.
 func addVary(c *gin.Context, field string) {
 	existing := c.Writer.Header().Get("Vary")
-	for _, present := range strings.Split(existing, ",") {
+	for present := range strings.SplitSeq(existing, ",") {
 		if strings.EqualFold(strings.TrimSpace(present), field) {
 			return
 		}
@@ -314,7 +314,7 @@ func (r mediaRange) match(mediaType string) int {
 
 func parseAcceptHeader(header string) []mediaRange {
 	var ranges []mediaRange
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		fields := strings.Split(part, ";")
 		name := strings.ToLower(strings.TrimSpace(fields[0]))
 		if name == "" {

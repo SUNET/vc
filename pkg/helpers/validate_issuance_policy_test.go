@@ -345,8 +345,7 @@ func TestScopeProviderUniqueness(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := v.Struct(tc.ds)
 			if !tc.wantReject {
-				var verrs validator.ValidationErrors
-				if errors.As(err, &verrs) {
+				if verrs, ok := errors.AsType[validator.ValidationErrors](err); ok {
 					for _, ve := range verrs {
 						if ve.Tag() == "scope_provider_not_unique" {
 							t.Fatalf("expected acceptance, got: %v", err)

@@ -33,8 +33,8 @@ func IsMdocZkFormat(format string) bool {
 }
 
 // ZKSystemTypeSpec is one entry of a CredentialQuery's `meta.zk_system_type`
-// array — a verifier's declaration of one ZK proof system + circuit variant
-// it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
+// array. It is a verifier's declaration of one ZK proof system + circuit
+// variant it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
 // (`{"id": ..., "system": ..., ...params}`, e.g.
 // `{"id": "longfellow-libzk-v1_8_1_4259_2945", "system": "longfellow-libzk-v1",
 // "num_attributes": 1, "circuit_hash": "...", "block_enc_hash": ...,
