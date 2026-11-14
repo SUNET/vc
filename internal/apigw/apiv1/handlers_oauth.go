@@ -819,6 +819,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		childSession := &cache.AuthorizationContext{
 			SessionID:            childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
+			IssuanceID:           authorizationContext.IssuanceID,
 			Status:               cache.SessionStatusTokenIssued,
 			CreatedAt:            time.Now(),
 			ExpiresAt:            tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
@@ -856,6 +857,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, err
 		}
 	}
+
+	c.recordIssuanceStatus(ctx, authorizationContext.IssuanceID, IssuanceStatusTokenIssued, "", tokenDoc.ExpiresAt)
 
 	c.log.Debug("OAuthToken complete")
 

@@ -71,6 +71,9 @@ type PrepareIssuanceReply struct {
 	// ExpiresAt is when the prepared issuance stops being redeemable,
 	// as a Unix timestamp.
 	ExpiresAt int64 `json:"expires_at"`
+
+	// IssuanceID is what the caller polls at GET /api/v1/issuance/status.
+	IssuanceID string `json:"issuance_id"`
 }
 
 // defaultPreparedIssuanceTTL is how long a prepared issuance lasts when
@@ -207,8 +210,14 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		return nil, fmt.Errorf("failed to generate issuer_state: %w", err)
 	}
 
+	issuanceID, err := newIssuanceID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate issuance_id: %w", err)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:       uuid.NewString(),
+		IssuanceID:      issuanceID,
 		Code:            uuid.NewString(),
 		IssuerState:     issuerState,
 		IdentityMatch:   req.IdentityMatch,
@@ -234,6 +243,9 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, err
 	}
+	if err := c.createIssuanceStatus(ctx, issuanceID, req.Scope, source.AuthenticSource, authCtx.ExpiresAt); err != nil {
+		return nil, err
+	}
 
 	offer, err := openid4vci.NewCredentialOffer(
 		c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Scope, openid4vci.GrantTypeAuthorizationCode)
@@ -254,6 +266,7 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		CredentialOffer: offer,
 		IssuerState:     issuerState,
 		ExpiresAt:       authCtx.ExpiresAt,
+		IssuanceID:      issuanceID,
 	}, nil
 }
 

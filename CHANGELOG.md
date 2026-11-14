@@ -63,6 +63,25 @@
   offer once plus one entry per configured wallet. This is the internal
   operator UI's own endpoint, not a wallet-facing one.
 
+### Added
+
+- **Issuance status endpoint**: `GET /api/v1/issuance/status` tells a calling
+  service how an issuance went. `POST /api/v1/issuance/prepare` and
+  `POST /api/v1/datastore/preauth_offer` now return an `issuance_id`; poll with
+  `issuance_id`, `authentic_source` and `scope` as query parameters. The status
+  is one of `offer_created`, `authorization_started`, `token_issued`,
+  `credential_issued`, `accepted`, `rejected`, `failed` or `expired`, and only
+  moves forward. A wrong id, or an `authentic_source`/`scope` that does not match
+  the offer, answers 404. Status is kept 24 hours in a cache that is in memory
+  unless HA (MongoDB) is enabled, so without HA it is lost on restart.
+- **OpenID4VCI notification endpoint is functional**: the Credential Response
+  now carries a `notification_id`, and `POST /notification` maps
+  `credential_accepted` to `accepted` and `credential_failure` or
+  `credential_deleted` to `rejected` on the issuance. An unknown
+  `notification_id` answers `invalid_notification_id`. `notification_endpoint`
+  in the issuer metadata now defaults to `<public_url>/notification` instead of
+  being omitted, so wallets start sending notifications.
+
 ### Fixed
 
 - **SPOCP resource rules hold for the selector a handler receives**: the

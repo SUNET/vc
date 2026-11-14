@@ -36,6 +36,16 @@ func (s *Service) NewAuthContextCache(ctx context.Context, collection string, tt
 	return NewMongoStore(ctx, s.client, s.databaseName, collection, ttl)
 }
 
+// NewFixedLifetimeCache creates a Cache[V] whose entries expire ttl after
+// they were created. Reads never extend them and Update keeps the remaining
+// lifetime.
+func NewFixedLifetimeCache[V any](s *Service, ctx context.Context, collection string, ttl time.Duration, opts ...MongoCacheOption[V]) (Cache[V], error) {
+	if !s.ha {
+		return NewFixedLifetimeMemoryCache[V](ttl), nil
+	}
+	return NewMongoCache[V](ctx, s.client, s.databaseName, collection, ttl, s.log, opts...)
+}
+
 // NewGenericCache creates a Cache[V] backed by the service's backend.
 func NewGenericCache[V any](s *Service, ctx context.Context, collection string, ttl time.Duration, opts ...MongoCacheOption[V]) (Cache[V], error) {
 	if !s.ha {

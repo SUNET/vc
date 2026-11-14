@@ -763,6 +763,30 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	return reply, nil
 }
 
+// endpointIssuanceStatus reports the state of an issuance created through
+// /api/v1/issuance/prepare or /api/v1/datastore/preauth_offer. The caller's
+// authentic_source and scope come from the query string, where the
+// authorization middleware reads and checks them.
+func (s *Service) endpointIssuanceStatus(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIssuanceStatus")
+	defer span.End()
+
+	// Query only: Binding.Request would also read a JSON body, letting a
+	// caller authorize one source/scope in the query and look up another.
+	request := &apiv1.IssuanceStatusRequest{}
+	if err := c.ShouldBindQuery(request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	reply, err := s.apiv1.IssuanceStatus(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}
+
 // isAnonymousAdminSession reports whether the request is authenticated by
 // an admin session granted anonymously by /ui/login.
 func isAnonymousAdminSession(c *gin.Context) bool {

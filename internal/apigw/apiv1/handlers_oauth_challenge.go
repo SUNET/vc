@@ -603,6 +603,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
 			"interactive authorization could not be completed", 500, err)
 	}
+	c.extendIssuanceDeadline(ctx, authCtx.IssuanceID, codeExpiresAt)
 
 	c.log.Info("CHALLENGE: authorization complete", "session_id", authCtx.SessionID, "scopes", authCtx.Scopes)
 
@@ -1315,6 +1316,7 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 			"issuer_state is invalid or has expired", 400)
 	}
 	authCtx = claimed
+	c.recordIssuanceStatus(ctx, authCtx.IssuanceID, IssuanceStatusAuthorizationStarted, "", authCtx.ExpiresAt)
 
 	c.log.Info("CHALLENGE: prepared issuance resumed, interaction required",
 		"client_id", req.ClientID, "scope", scope,
