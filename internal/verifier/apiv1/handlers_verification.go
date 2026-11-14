@@ -63,7 +63,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", ErrSessionExpired
 	}
 
-	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+	signedJWT, err := c.wireRequestObject(requestObject).Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err
