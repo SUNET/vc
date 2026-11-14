@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/google/uuid"
@@ -308,6 +309,9 @@ type DatastoreListRequest struct {
 	Scope             string `json:"scope"`
 	ValidFrom         int64  `json:"valid_from"`
 	ValidTo           int64  `json:"valid_to"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreListReply is the reply for a list of documents
@@ -334,6 +338,7 @@ func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (
 		Scope:             req.Scope,
 		ValidFrom:         req.ValidFrom,
 		ValidTo:           req.ValidTo,
+		Reach:             req.Reach,
 	})
 	if err != nil {
 		return nil, err
@@ -424,6 +429,8 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		AuthenticSource:   req.AuthenticSource,
 		Scope:             req.Scope,
 		IdentityMappingID: personID,
+		// The SPOCP guard answered the selectors this request names.
+		Reach: resourcereach.Everything(),
 	})
 	if err != nil {
 		return nil, err
@@ -493,12 +500,13 @@ func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadReque
 
 // DatastoreSearchRequest is the request for searching documents
 type DatastoreSearchRequest struct {
-	Search                  string   `json:"search" form:"search"`
-	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
-	Scope                   string   `json:"scope" form:"scope"`
-	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-"`
-	AllowedScopes           []string `json:"-" form:"-"`
+	Search          string `json:"search" form:"search"`
+	AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	Scope           string `json:"scope" form:"scope"`
+	Limit           int64  `json:"limit" form:"limit"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreSearchReply is the reply for searching documents
@@ -526,12 +534,11 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 		limit = 50
 	}
 	docs, err := c.datastoreStore.Search(ctx, &db.SearchDocumentsQuery{
-		Search:                  req.Search,
-		AuthenticSource:         req.AuthenticSource,
-		Scope:                   req.Scope,
-		Limit:                   limit,
-		AllowedAuthenticSources: req.AllowedAuthenticSources,
-		AllowedScopes:           req.AllowedScopes,
+		Search:          req.Search,
+		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
+		Limit:           limit,
+		Reach:           req.Reach,
 	})
 	if err != nil {
 		return nil, err
@@ -549,20 +556,17 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 // DatastorePreAuthOfferRequest is the request for generating a pre-authorized credential offer
 // for a specific document in the datastore.
 type DatastorePreAuthOfferRequest struct {
-	// header:"-" on every field: gin binds headers by field name when there is no
-	// header tag, and the SPOCP middleware never reads headers (see PrepareIssuanceRequest).
-
 	// required: true
 	// example: SUNET
-	AuthenticSource string `json:"authentic_source" header:"-" validate:"required,max=128,printascii"`
+	AuthenticSource string `json:"authentic_source" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: pid
-	Scope string `json:"scope" header:"-" validate:"required,max=128,printascii"`
+	Scope string `json:"scope" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
-	DocumentID string `json:"document_id" header:"-" validate:"required,max=128,printascii"`
+	DocumentID string `json:"document_id" validate:"required,max=128,printascii"`
 }
 
 // DatastorePreAuthOfferReply is the reply containing a credential offer

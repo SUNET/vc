@@ -496,6 +496,7 @@ pseudonym concept of its own yet either).
 | `make test`          | Run all service tests                                         |
 | `make test-bbsnative`| Test the `pkg/bbs` native cgo path (requires `make bbs-native-lib`) |
 | `make test-pkcs11`   | Test with `pkcs11` build tag (requires `make test-env`)       |
+| `make test-apigw-integration` | Test `internal/apigw/integration` and `internal/apigw/httpserver` with `integration` build tag (mocks only) |
 | `make test-zknative` | Test with `zknative` build tag (requires `make zk-native-lib zk-native-lib-vega`) |
 | `make test-env`      | Install test dependencies (softhsm2, opensc)                  |
 

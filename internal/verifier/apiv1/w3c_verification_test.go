@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/SUNET/vc/internal/verifier/notify"
@@ -29,6 +30,9 @@ import (
 // AllowAllEvaluator deliberately cannot do without a PDP.
 type staticKeyEvaluator struct {
 	keys map[string]crypto.PublicKey
+	// authorizedFor limits a method to the relationships listed; a method absent from it
+	// is authorized for every relationship.
+	authorizedFor map[string][]string
 }
 
 func (e *staticKeyEvaluator) Evaluate(context.Context, *trust.EvaluationRequest) (*trust.TrustDecision, error) {
@@ -43,17 +47,19 @@ func (e *staticKeyEvaluator) ResolveKey(_ context.Context, verificationMethod st
 	return key, nil
 }
 
-// TestVerificationDirectPostW3C drives a real signed W3C VC 2.0 credential
-// through the verifier: minted with a Data Integrity proof, returned as the
-// vp_token of an encrypted direct_post, and verified through the same switch
-// SD-JWT and mdoc go through.
-//
-// Before this branch existed, detectCredentialFormat returned FormatUnknown
-// for JSON-LD and the default case rejected it - the credential reached the
-// wallet and failed only on presentation.
-func TestVerificationDirectPostW3C(t *testing.T) {
-	ctx := t.Context()
+// ResolveKeyFor answers as a PDP does for a DID document that authorizes every method
+// it lists for every relationship, unless authorizedFor says otherwise.
+func (e *staticKeyEvaluator) ResolveKeyFor(ctx context.Context, verificationMethod, relationship string) (crypto.PublicKey, error) {
+	if allowed, limited := e.authorizedFor[verificationMethod]; limited && !slices.Contains(allowed, relationship) {
+		return nil, fmt.Errorf("verification method %s is not authorized for %s", verificationMethod, relationship)
+	}
+	return e.ResolveKey(ctx, verificationMethod)
+}
 
+// mintDegreeCredential has did:example:issuer sign a degree credential whose subject is
+// did:example:holder, and returns the issuer's key with the credential.
+func mintDegreeCredential(t *testing.T) (*ecdsa.PrivateKey, *openid4vp.VC20CreateResult) {
+	t.Helper()
 	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -74,12 +80,27 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	created, err := issuerHandler.CreateCredential(ctx, &openid4vp.VC20CreateRequest{
+	created, err := issuerHandler.CreateCredential(t.Context(), &openid4vp.VC20CreateRequest{
 		Types:              []string{"UniversityDegreeCredential"},
 		AdditionalContexts: []string{degreeContext},
-		Subject:            map[string]any{"id": "did:example:subject", "degree": "Master of Science"},
+		Subject:            map[string]any{"id": "did:example:holder", "degree": "Master of Science"},
 	})
 	require.NoError(t, err)
+	return issuerKey, created
+}
+
+// TestVerificationDirectPostW3C drives a real signed W3C VC 2.0 credential
+// through the verifier: minted with a Data Integrity proof, returned as the
+// vp_token of an encrypted direct_post, and verified through the same switch
+// SD-JWT and mdoc go through.
+//
+// Before this branch existed, detectCredentialFormat returned FormatUnknown
+// for JSON-LD and the default case rejected it - the credential reached the
+// wallet and failed only on presentation.
+func TestVerificationDirectPostW3C(t *testing.T) {
+	ctx := t.Context()
+
+	issuerKey, created := mintDegreeCredential(t)
 
 	// The holder signs the presentation; the issuer signed the credential.
 	// Two distinct keys, which is the whole point of holder binding.

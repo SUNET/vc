@@ -706,12 +706,7 @@ func admitsKeyAgreement(ops jwk.KeyOperationList) bool {
 }
 
 func contains(haystack []string, needle string) bool {
-	for _, v := range haystack {
-		if v == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 // isCompactJWE reports whether body is JWE compact serialization: five
