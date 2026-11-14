@@ -253,10 +253,10 @@ func TestRawShadowsEveryReadableModelledMember(t *testing.T) {
 // CredentialQuery has to be reachable through it. A member added without
 // being shadowed is the bug this catches on the commit that adds it.
 func TestEveryModelledMemberIsShadowed(t *testing.T) {
-	structure := reflect.TypeOf(CredentialQuery{})
+	structure := reflect.TypeFor[CredentialQuery]()
 	var shadowed int
-	for i := range structure.NumField() {
-		name, _, _ := strings.Cut(structure.Field(i).Tag.Get("json"), ",")
+	for field := range structure.Fields() {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 		if name == "" || name == "-" {
 			continue // Raw and Extra, which are not wire members
 		}

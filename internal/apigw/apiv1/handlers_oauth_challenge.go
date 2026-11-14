@@ -810,8 +810,7 @@ func (c *Client) authSessionStoreFailure(err error, op string) error {
 // trusted" from "no documents for this person" and that difference is not
 // the caller's to probe.
 func (c *Client) interactiveAuthorizationFailure(err error) error {
-	var oauthErr *oauth2.OAuthError
-	if errors.As(err, &oauthErr) {
+	if _, ok := errors.AsType[*oauth2.OAuthError](err); ok {
 		return err
 	}
 
@@ -1091,14 +1090,9 @@ func (c *Client) interactionTypeForScope(ia *model.InteractiveAuthorization, sco
 // contain neither a comma nor a space - so splitting on both cannot merge
 // two values or split one.
 func interactionTypeOffered(supported, required string) bool {
-	for _, field := range strings.FieldsFunc(supported, func(r rune) bool {
+	return slices.Contains(strings.FieldsFunc(supported, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
-	}) {
-		if field == required {
-			return true
-		}
-	}
-	return false
+	}), required)
 }
 
 // authorizationChallengePrepared opens an exchange against an issuance

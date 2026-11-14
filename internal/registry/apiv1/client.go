@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/status"
@@ -14,6 +15,7 @@ type TokenStatusListIssuer interface {
 	GetCachedJWT(ctx context.Context, section int64) string
 	GetCachedCWT(ctx context.Context, section int64) []byte
 	GetAllSections(ctx context.Context) ([]int64, error)
+	SigningKeySet(ctx context.Context) (*jose.JWKS, error)
 	HealthProbe(ctx context.Context) error
 }
 

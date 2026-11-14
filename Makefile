@@ -128,7 +128,7 @@ comma                   := ,
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gh-install gh-auth \
 	gosec staticcheck vulncheck \
-	test-pkcs11 \
+	test-pkcs11 test-apigw-integration \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
 	test-wallet-stack-vci test-wallet-stack-vp test-wallet-stack-e2e test-wallet-stack-security \
 	test-cross-device test-cross-device-quick \
@@ -335,6 +335,14 @@ test-js-deps: ## Install the staticembed JS dev dependencies when missing
 test-pkcs11: ## Test pkg/pki and pkg/jose (cgo, PKCS#11 code paths)
 	$(info Testing pkg/pki and pkg/jose)
 	CGO_ENABLED=1 go test -v -tags pkcs11 ./pkg/pki/... ./pkg/jose/...
+
+# These two packages run against mocks. internal/wallet/integration and
+# internal/verifier/integration need a running stack (test-wallet-stack,
+# test-cross-device).
+test-apigw-integration: bbs-native-lib-staged ## Test internal/apigw/integration and internal/apigw/httpserver (integration tag, mocks only)
+	$(info Testing internal/apigw/integration and internal/apigw/httpserver)
+	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
+		$(CGO_ENABLED_DYNAMIC) go test -v -count=1 -tags integration ./internal/apigw/integration/... ./internal/apigw/httpserver/...
 
 # ==============================================================================
 # Native ZK/PPID Proof Verification (zk-cred-longfellow, cgo, opt-in)

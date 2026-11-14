@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 
 	"github.com/stretchr/testify/assert"
@@ -99,23 +101,15 @@ func testIdentityMappingStoreContract(t *testing.T, store IdentityMappingStore) 
 	assert.ErrorIs(t, err, helpers.ErrNoIdentityFound)
 
 	// SearchMappings: free-text search over family_name.
-	results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: "Karlsson"})
+	results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: "Karlsson", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "person-3", results[0].AuthenticSourcePersonID)
 
 	// SearchMappings: filter by authentic_source.
-	results, err = store.SearchMappings(ctx, &SearchMappingsQuery{AuthenticSource: "OTHER"})
+	results, err = store.SearchMappings(ctx, &SearchMappingsQuery{AuthenticSource: "OTHER", Reach: resourcereach.Everything()})
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
-
-	// SearchMappings: AllowedAuthenticSources restriction blocks a disallowed source.
-	results, err = store.SearchMappings(ctx, &SearchMappingsQuery{
-		AuthenticSource:         "SUNET",
-		AllowedAuthenticSources: []string{"OTHER"},
-	})
-	require.NoError(t, err)
-	assert.Empty(t, results)
 
 	// DeleteMapping.
 	require.NoError(t, store.DeleteMapping(ctx, &DeleteMappingQuery{AuthenticSource: "SUNET", AuthenticSourcePersonID: "person-1"}))
@@ -171,6 +165,7 @@ func testIdentityMappingStoreContract(t *testing.T, store IdentityMappingStore) 
 	assert.ErrorIs(t, err, helpers.ErrNoIdentityFound)
 
 	testIdentityMappingExactIdentifiers(t, store)
+	testIdentityMappingReachContract(t, store)
 }
 
 // testIdentityMappingExactIdentifiers requires a variant spelling of a key column
@@ -211,22 +206,97 @@ func testIdentityMappingExactIdentifiers(t *testing.T, store IdentityMappingStor
 
 	// "owner" reaches a JSON field and "exact" a key column.
 	for term, want := range map[string]int{"OWNER": 1, "owner": 1, "EXACT": 1, "exact": 1, "Ówner": 0, "Exáct": 0, "Owner ": 0} {
-		results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: term})
+		results, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: term, Reach: resourcereach.Everything()})
 		require.NoError(t, err)
 		assert.Lenf(t, results, want, "SearchMappings %q", term)
 	}
 }
 
+// testIdentityMappingReachContract holds the guarantee of the source filter on one
+// store: a mapping comes back only when the engine allows its source with scope
+// identity_mapping.
+func testIdentityMappingReachContract(t *testing.T, store IdentityMappingStore) {
+	t.Helper()
+	ctx := t.Context()
+
+	const term = "reach-person"
+	sources := []string{"A", "B", "a", "A "}
+	for i, source := range sources {
+		require.NoError(t, store.CreateMapping(ctx, &model.IdentityMapping{
+			AuthenticSource:         source,
+			AuthenticSourcePersonID: term + "-" + string(rune('0'+i)),
+			Attributes:              map[string]string{"family_name": "x"},
+		}))
+	}
+
+	rule := func(source, scope string) string {
+		return "(vc (service apigw)(method GET)(path /p)(subject alice)(authentic_source " + source + ")(scope " + scope + "))"
+	}
+	for _, row := range []struct {
+		name   string
+		rules  []string
+		source string
+		// leftOut: a form outside the filter, so the result is a subset.
+		leftOut bool
+	}{
+		{name: "no rule", rules: []string{"(vc (service apigw)(method GET)(path /p)(subject bob)(authentic_source *)(scope *))"}},
+		{name: "other scope", rules: []string{rule("A", "pid")}},
+		{name: "its scope", rules: []string{rule("A", "identity_mapping")}},
+		{name: "paired with another scope", rules: []string{rule("A", "identity_mapping"), rule("B", "pid")}},
+		{name: "wildcard scope", rules: []string{rule("(* set A B)", "*")}},
+		{name: "wildcard source", rules: []string{rule("*", "identity_mapping")}},
+		{name: "everything", rules: []string{rule("*", "*")}},
+		{name: "scope form", rules: []string{rule("B", "identity*")}},
+		{name: "lower case value", rules: []string{rule("a", "identity_mapping")}},
+		{name: "named source within sources", rules: []string{rule("(* set A B)", "identity_mapping")}, source: "A"},
+		{name: "named lower case source", rules: []string{rule("*", "*")}, source: "a"},
+		{name: "source form", rules: []string{rule("(* prefix A)", "identity_mapping")}, leftOut: true},
+		{name: "source form, named", rules: []string{rule("(* prefix A)", "identity_mapping")}, source: "A"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			engine, err := httphelpers.BuildSPOCPEngine(model.APIAuth{Rules: row.rules})
+			require.NoError(t, err)
+			reach, err := resourcereach.Resolve(engine, "apigw", "GET", "/p", "alice")
+			require.NoError(t, err)
+
+			want := []string{}
+			for _, source := range sources {
+				if (row.source == "" || row.source == source) &&
+					engine.QueryElement(httphelpers.BuildSPOCPQuery("apigw", "GET", "/p", "alice", source, resourcereach.IdentityMappingScope)) {
+					want = append(want, source)
+				}
+			}
+
+			found, err := store.SearchMappings(ctx, &SearchMappingsQuery{
+				Search: term, AuthenticSource: row.source, Limit: 200, Reach: reach.Selecting(row.source, ""),
+			})
+			require.NoError(t, err)
+			received := make([]string, 0, len(found))
+			for _, mapping := range found {
+				received = append(received, mapping.AuthenticSource)
+			}
+			if row.leftOut {
+				assert.Subset(t, want, received)
+				return
+			}
+			assert.ElementsMatch(t, want, received)
+		})
+	}
+
+	// The zero value matches no mapping.
+	found, err := store.SearchMappings(ctx, &SearchMappingsQuery{Search: term})
+	require.NoError(t, err)
+	assert.Empty(t, found)
+}
+
 func TestSQLIdentityMappingsColl_Postgres(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartPostgres(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartPostgres(t)
 
 	testIdentityMappingStoreContract(t, NewSQLIdentityMappingsColl(newTestService(t), sqlDB, dialect))
 }
 
 func TestSQLIdentityMappingsColl_MariaDB(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartMariaDB(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartMariaDB(t)
 
 	testIdentityMappingStoreContract(t, NewSQLIdentityMappingsColl(newTestService(t), sqlDB, dialect))
 }

@@ -11,11 +11,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// isDockerAvailable checks if Docker is accessible
-func isDockerAvailable() bool {
-	return testsupport.IsDockerAvailable()
-}
-
 // startMongoContainer spins up a throwaway MongoDB via testcontainers and
 // returns a connected *mongo.Client plus a cleanup function.
 func startMongoContainer(t *testing.T) (*mongo.Client, func()) {

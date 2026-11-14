@@ -61,14 +61,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", http.StatusOK, s.endpointHealth)
 
-	// Token Status List endpoints per draft-ietf-oauth-status-list
-	// These endpoints are rate-limited to prevent abuse
-	rgStatuslists := rgRoot.Group("statuslists")
-	rgStatuslists.Use(s.statusListsRateLimiter.Middleware())
-	// Section 9.3: Status List Aggregation at /statuslists returns list of all Status List Token URIs
-	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, "", http.StatusOK, s.endpointTokenStatusListAggregation)
-	// Section 8.1: Individual Status List Token at /statuslists/:id
-	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, ":id", http.StatusOK, s.endpointStatusLists)
+	s.registerStatusListEndpoints(ctx, rgRoot)
 
 	// Admin GUI endpoints for managing Token Status Lists
 	if model.BoolVal(s.cfg.Registry.AdminGUI.Enable, true) {
@@ -118,6 +111,26 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 	s.log.Info("Started")
 
 	return s, nil
+}
+
+// registerStatusListEndpoints registers the Token Status List endpoints per
+// draft-ietf-oauth-status-list. They share one rate-limited group to keep an
+// unauthenticated public surface from being hammered.
+func (s *Service) registerStatusListEndpoints(ctx context.Context, rgRoot *gin.RouterGroup) {
+	rgStatuslists := rgRoot.Group("statuslists")
+	rgStatuslists.Use(s.statusListsRateLimiter.Middleware())
+
+	// Section 9.3: Status List Aggregation at /statuslists returns list of all Status List Token URIs
+	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, "", http.StatusOK, s.endpointTokenStatusListAggregation)
+
+	// Section 8.1: Individual Status List Token at /statuslists/:id
+	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, ":id", http.StatusOK, s.endpointStatusLists)
+
+	// The signing keys for that token, published under the list URI itself so
+	// a trust registry can bind the list's signer to a key it discovered for
+	// the list. See apiv1.TokenStatusListJWKS for why this sits under the list
+	// path and not at the registry's origin.
+	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, ":id/.well-known/jwks.json", http.StatusOK, s.endpointStatusListJWKS)
 }
 
 // Close closing httpserver
