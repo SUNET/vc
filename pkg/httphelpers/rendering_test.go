@@ -90,6 +90,12 @@ func TestPrefersHTML(t *testing.T) {
 		{"substring false positive", "application/x-text/html", false},
 		{"malformed q defaults to 1", "text/html;q=notanumber", true},
 		{"whitespace and casing", "  TEXT/HTML ;  q=0.9  ", true},
+		// Parameter names are case-insensitive (RFC 9110 5.6.6). An
+		// unrecognised name left the entry at the default quality of 1, so a
+		// client refusing HTML in capitals was served the HTML error page.
+		{"uppercase Q=0 still refuses html", "text/html;Q=0, application/json", false},
+		{"uppercase Q ranks html below json", "application/json, text/html;Q=0.5", false},
+		{"uppercase Q on json beats a wildcard fallback", "application/json;Q=0, text/html;q=0.5, */*;q=1", true},
 	}
 
 	for _, tt := range tests {

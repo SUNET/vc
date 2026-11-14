@@ -288,7 +288,7 @@ func TestClientRegistrationRequest_Validation(t *testing.T) {
 			name: "both jwks_uri and jwks not allowed",
 			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
-				JWKSUri:      "https://example.com/.well-known/jwks.json",
+				JWKSURI:      "https://example.com/.well-known/jwks.json",
 				JWKS:         map[string]any{"keys": []any{}},
 			},
 			wantErr: true,
@@ -852,7 +852,7 @@ func TestUpdateClient(t *testing.T) {
 				RedirectURIs:        []string{"https://example.com/new-callback"},
 				GrantTypes:          []string{"authorization_code"},
 				ResponseTypes:       []string{"code"},
-				JWKSUri:             "https://example.com/.well-known/jwks.json",
+				JWKSURI:             "https://example.com/.well-known/jwks.json",
 				JWKS:                nil, // Can't set both jwks_uri and jwks
 				ClientName:          "Full Update Client",
 				ClientURI:           "https://example.com",
@@ -865,7 +865,7 @@ func TestUpdateClient(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "update with JWKS instead of JWKSUri",
+			name: "update with JWKS instead of JWKSURI",
 			setupMock: func(t *testing.T, clients *MockClientCollection) (string, string) {
 				token := "valid-token-789"
 				hash, _ := hashRegistrationAccessToken(token)
@@ -886,7 +886,7 @@ func TestUpdateClient(t *testing.T) {
 				RedirectURIs:  []string{"https://example.com/new-callback"},
 				GrantTypes:    []string{"authorization_code"},
 				ResponseTypes: []string{"code"},
-				JWKS:          map[string]any{"keys": []any{}}, // Use JWKS instead of JWKSUri
+				JWKS:          map[string]any{"keys": []any{}}, // Use JWKS instead of JWKSURI
 			},
 			expectError: false,
 		},

@@ -138,7 +138,7 @@ func newTestTemplate() *PresentationRequestTemplate {
 		ClaimMappings: openid4vp.NameMappings(map[string]string{
 			"a": "b",
 		}),
-		Enabled: boolPtr(true),
+		Enabled: new(true),
 	}
 }
 
@@ -181,9 +181,9 @@ func TestGetClaimMappings(t *testing.T) {
 func newTestConfig() *PresentationRequestConfig {
 	return &PresentationRequestConfig{
 		Templates: []*PresentationRequestTemplate{
-			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: boolPtr(true), ClaimMappings: openid4vp.NameMappings(map[string]string{"a": "b"})},
-			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: boolPtr(true), ClaimMappings: openid4vp.NameMappings(map[string]string{"c": "d"})},
-			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: boolPtr(false), ClaimMappings: openid4vp.NameMappings(map[string]string{})},
+			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: new(true), ClaimMappings: openid4vp.NameMappings(map[string]string{"a": "b"})},
+			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: new(true), ClaimMappings: openid4vp.NameMappings(map[string]string{"c": "d"})},
+			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: new(false), ClaimMappings: openid4vp.NameMappings(map[string]string{})},
 		},
 		DefaultTemplate: "pid",
 	}
@@ -547,10 +547,6 @@ func TestLoadPresentationRequestsFromFile_DuplicateScopes(t *testing.T) {
 		t.Fatal("expected error for duplicate scopes")
 	}
 }
-
-// boolPtr is for PresentationRequestTemplate.Enabled, which has to be a
-// pointer so a file's "enabled: false" survives loading (SUNET/vc#754).
-func boolPtr(b bool) *bool { return &b }
 
 // A template file saying "enabled: false" must be skipped.
 //

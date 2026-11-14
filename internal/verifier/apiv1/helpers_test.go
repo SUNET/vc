@@ -69,6 +69,6 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 				{Path: claimpath.Keys("family_name"), Claim: "family_name"},
 			},
 		}),
-		Enabled: boolPtr(true),
+		Enabled: new(true),
 	}
 }

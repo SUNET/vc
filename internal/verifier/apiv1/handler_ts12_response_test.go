@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"testing"
 
@@ -241,9 +242,7 @@ func TestVerificationDirectPost_TS12ScopedToTheBoundCredential(t *testing.T) {
 			return createTestSDJWTWithKBClaims(r.t, r.key, map[string]any{"given_name": "Ada"}, nil, authCtx.Nonce, authCtx.ClientID, kb)
 		}
 		sca := map[string]any{"_vct": "https://psp.example/sca"}
-		for k, v := range scaKB {
-			sca[k] = v
-		}
+		maps.Copy(sca, scaKB)
 		body, err := json.Marshal(openid4vp.VPResponse{VPToken: map[string][]string{"sca": {mk(sca)}, "age": {mk(nil)}}, State: authCtx.State})
 		require.NoError(r.t, err)
 		_, pub, err := r.client.ephemeralEncryptionKey(ctx, authCtx.EphemeralEncryptionKeyID)

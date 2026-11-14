@@ -5,6 +5,7 @@ import (
 
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/registry/apiv1"
+	"github.com/SUNET/vc/pkg/jose"
 )
 
 // Apiv1 interface
@@ -14,6 +15,7 @@ type Apiv1 interface {
 	// Token Status List endpoints
 	TokenStatusLists(ctx context.Context, req *apiv1.TokenStatusListsRequest) (*apiv1.TokenStatusListsResponse, error)
 	TokenStatusListAggregation(ctx context.Context) (*apiv1.TokenStatusListAggregationResponse, error)
+	TokenStatusListJWKS(ctx context.Context, req *apiv1.TokenStatusListJWKSRequest) (*jose.JWKS, error)
 
 	// Admin GUI endpoints
 	SearchPerson(ctx context.Context, req *apiv1.SearchPersonRequest) (*apiv1.SearchPersonReply, error)

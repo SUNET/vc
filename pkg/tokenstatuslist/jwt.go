@@ -39,6 +39,16 @@ type JWTSigningConfig struct {
 	// When set, the public key is serialized as a JWK and included in the "jwk" header parameter,
 	// allowing verifiers to validate the token signature without external key resolution.
 	PublicKey crypto.PublicKey
+
+	// X5C is the signer's certificate chain, base64-encoded DER, leaf first
+	// (OPTIONAL). When non-empty it is set as the "x5c" header parameter
+	// (RFC 7515 §4.1.6), which lets a verifier bind the signer to a
+	// certificate trust list instead of to a bare key.
+	//
+	// X5C and PublicKey are independent: a token may carry both, as the
+	// Token Status List conformance suite's own token does, and a verifier
+	// then uses whichever carrier its policy accepts.
+	X5C []string
 }
 
 // JWTConfig holds JWT-specific configuration for generating a Status List Token.
@@ -67,7 +77,7 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 	}
 
 	// Compress and encode the status list
-	lst, err := sl.CompressAndEncode()
+	encodedList, err := sl.CompressAndEncode()
 	if err != nil {
 		return "", fmt.Errorf("failed to compress status list: %w", err)
 	}
@@ -81,7 +91,7 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 		IssuedAt: jwt.NewNumericDate(now),
 		StatusList: StatusListClaim{
 			Bits:           Bits,
-			Lst:            lst,
+			Lst:            encodedList,
 			AggregationURI: sl.AggregationURI,
 		},
 	}
@@ -114,6 +124,13 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 			return "", fmt.Errorf("failed to convert public key to JWK: %w", err)
 		}
 		token.Header["jwk"] = jwkMap
+	}
+
+	// Carry the signing chain if one was supplied. Set after "jwk" and
+	// independently of it: the two carriers describe the same key, and a
+	// verifier picks the one its policy accepts.
+	if len(cfg.X5C) > 0 {
+		token.Header["x5c"] = cfg.X5C
 	}
 
 	// Sign the token
