@@ -45,10 +45,10 @@ func carrierTestService(t *testing.T, configured []string, withChain bool) (*Ser
 }
 
 func carrierTestTokenConfig() TokenConfig {
-	cfg := TokenConfig{SigningMethod: jwt.SigningMethodES256}
-	cfg.Issuer = "https://registry.example.com"
-	cfg.Subject = "https://registry.example.com/statuslists/0"
-	cfg.Statuses = []uint8{0, 1, 0}
+	cfg := TokenConfig{SigningMethod: jwt.SigningMethodES256,
+		Issuer:   "https://registry.example.com",
+		Subject:  "https://registry.example.com/statuslists/0",
+		Statuses: []uint8{0, 1, 0}}
 	return cfg
 }
 

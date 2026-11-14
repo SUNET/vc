@@ -113,7 +113,6 @@ func defaultedTrueBoolFields(t *testing.T) []string {
 		seen[typ] = true
 
 		for field := range typ.Fields() {
-			field := field
 			if !field.IsExported() {
 				continue
 			}

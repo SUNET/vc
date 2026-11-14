@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"maps"
 	"strings"
 	"testing"
 
@@ -101,9 +102,7 @@ func TestAuthorizationPageLinksTheConfiguredStylesheet(t *testing.T) {
 	base := map[string]any{"Theme": "light", "PrimaryColor": "#1e40af", "SecondaryColor": "#1e3a8a"}
 
 	withFile := map[string]any{"CSSFile": "https://static.example.com/verifier.css"}
-	for k, v := range base {
-		withFile[k] = v
-	}
+	maps.Copy(withFile, base)
 	page := renderPage(t, "authorize_enhanced.html", withFile)
 	assert.Contains(t, page, `<link rel="stylesheet" href="https://static.example.com/verifier.css">`)
 	// After the built-in styles, or it cannot override them.

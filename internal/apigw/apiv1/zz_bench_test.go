@@ -9,7 +9,7 @@ import (
 
 func bigHeader(ranges int, shape string) string {
 	parts := make([]string, 0, ranges)
-	for i := 0; i < ranges; i++ {
+	for range ranges {
 		parts = append(parts, shape)
 	}
 	return strings.Join(parts, ",")
