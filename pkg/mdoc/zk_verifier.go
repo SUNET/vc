@@ -304,6 +304,7 @@ func (h *ZkHandler) VerifyAndExtract(ctx context.Context, vpToken string, pctx Z
 		}
 
 		docResult, err := h.verifyOneDocument(ctx, zkDoc, docData, pctx)
+		
 		if err != nil {
 			errs = append(errs, fmt.Errorf("zkDocuments[%d] (docType=%s): %w", i, docData.DocType, err))
 			result.Valid = false
