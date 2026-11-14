@@ -217,8 +217,8 @@ func cDisclosedInputs(disclosedBytes [][]byte) ([MaxClaims]C.CDisclosedInput, er
 		}
 		out[i].present = 1
 		out[i].len = C.size_t(len(b))
-		for j, bb := range b {
-			out[i].bytes[j] = C.uint8_t(bb)
+		for j, disclosedByte := range b {
+			out[i].bytes[j] = C.uint8_t(disclosedByte)
 		}
 	}
 	return out, nil

@@ -31,24 +31,24 @@ func TestHashAlgorithmComparison(t *testing.T) {
 		}
 	})
 
-	t.Run("isSHA3_256_true", func(t *testing.T) {
+	t.Run("isSHA3Digest256_true", func(t *testing.T) {
 		h := hash.Hash(sha30.New256())
-		if !isSHA3_256(h) {
-			t.Error("Expected isSHA3_256 to return true for SHA3-256 hash")
+		if !isSHA3Digest256(h) {
+			t.Error("Expected isSHA3Digest256 to return true for SHA3-256 hash")
 		}
 	})
 
-	t.Run("isSHA3_256_false_with_SHA256", func(t *testing.T) {
+	t.Run("isSHA3Digest256_false_with_SHA256", func(t *testing.T) {
 		h := sha256.New()
-		if isSHA3_256(h) {
-			t.Error("Expected isSHA3_256 to return false for SHA-256 hash")
+		if isSHA3Digest256(h) {
+			t.Error("Expected isSHA3Digest256 to return false for SHA-256 hash")
 		}
 	})
 
-	t.Run("isSHA3_256_false_with_wrong_size", func(t *testing.T) {
+	t.Run("isSHA3Digest256_false_with_wrong_size", func(t *testing.T) {
 		h := sha512.New()
-		if isSHA3_256(h) {
-			t.Error("Expected isSHA3_256 to return false for SHA-512 hash")
+		if isSHA3Digest256(h) {
+			t.Error("Expected isSHA3Digest256 to return false for SHA-512 hash")
 		}
 	})
 
@@ -73,24 +73,24 @@ func TestHashAlgorithmComparison(t *testing.T) {
 		}
 	})
 
-	t.Run("isSHA3_512_true", func(t *testing.T) {
+	t.Run("isSHA3Digest512_true", func(t *testing.T) {
 		h := hash.Hash(sha30.New512())
-		if !isSHA3_512(h) {
-			t.Error("Expected isSHA3_512 to return true for SHA3-512 hash")
+		if !isSHA3Digest512(h) {
+			t.Error("Expected isSHA3Digest512 to return true for SHA3-512 hash")
 		}
 	})
 
-	t.Run("isSHA3_512_false_with_SHA512", func(t *testing.T) {
+	t.Run("isSHA3Digest512_false_with_SHA512", func(t *testing.T) {
 		h := sha512.New()
-		if isSHA3_512(h) {
-			t.Error("Expected isSHA3_512 to return false for SHA-512 hash")
+		if isSHA3Digest512(h) {
+			t.Error("Expected isSHA3Digest512 to return false for SHA-512 hash")
 		}
 	})
 
-	t.Run("isSHA3_512_false_with_wrong_size", func(t *testing.T) {
+	t.Run("isSHA3Digest512_false_with_wrong_size", func(t *testing.T) {
 		h := sha256.New()
-		if isSHA3_512(h) {
-			t.Error("Expected isSHA3_512 to return false for SHA-256 hash")
+		if isSHA3Digest512(h) {
+			t.Error("Expected isSHA3Digest512 to return false for SHA-256 hash")
 		}
 	})
 }
@@ -170,19 +170,19 @@ func TestMakeCredential_AllBranches(t *testing.T) {
 
 	t.Run("with_multiple_decoys_and_nested_structures", func(t *testing.T) {
 		level1 := "level1"
-		level2_a := "level2_a"
-		level2_b := "level2_b"
-		claim_a := "claim_a"
-		claim_b := "claim_b"
+		level2A := "level2_a"
+		level2B := "level2_b"
+		claimA := "claim_a"
+		claimB := "claim_b"
 
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&level1, &level2_a, &claim_a},
+					Path: []*string{&level1, &level2A, &claimA},
 					SD:   "always",
 				},
 				{
-					Path: []*string{&level1, &level2_b, &claim_b},
+					Path: []*string{&level1, &level2B, &claimB},
 					SD:   "always",
 				},
 			},

@@ -30,6 +30,14 @@ func (b *bindingHandler) Request(ctx context.Context, c *gin.Context, v any) err
 	_, span := b.client.tracer.Start(ctx, "httpserver:bindRequest")
 	defer span.End()
 
+	if err := b.bind(ctx, c, v); err != nil {
+		return err
+	}
+	return authorizeBoundSelectors(c, v)
+}
+
+// bind fills v from the request's URI, headers, and its body or query.
+func (b *bindingHandler) bind(ctx context.Context, c *gin.Context, v any) error {
 	// Apply struct default tags (github.com/creasty/defaults) before binding,
 	// so that request values override defaults.
 	if err := defaults.Set(v); err != nil {
