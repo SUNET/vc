@@ -45,7 +45,7 @@ func TestDiscoveryMetadataRegistrationEndpoint(t *testing.T) {
 			registration *model.DynamicRegistrationConfig
 		}{
 			{name: "no dynamic_registration block", registration: nil},
-			{name: "explicitly enabled", registration: &model.DynamicRegistrationConfig{Enabled: boolPtr(true)}},
+			{name: "explicitly enabled", registration: &model.DynamicRegistrationConfig{Enabled: new(true)}},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				client, _ := CreateTestClientWithMock(t, discoveryConfigWithRegistration(tt.registration))
@@ -61,7 +61,7 @@ func TestDiscoveryMetadataRegistrationEndpoint(t *testing.T) {
 
 	t.Run("omitted when registration is closed", func(t *testing.T) {
 		client, _ := CreateTestClientWithMock(t, discoveryConfigWithRegistration(
-			&model.DynamicRegistrationConfig{Enabled: boolPtr(false)},
+			&model.DynamicRegistrationConfig{Enabled: new(false)},
 		))
 
 		metadata, err := client.GetDiscoveryMetadata(ctx)

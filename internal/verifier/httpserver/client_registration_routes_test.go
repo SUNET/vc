@@ -84,8 +84,6 @@ var registrationRoutes = []string{
 	"DELETE /register/:client_id",
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 // A deployment that says nothing about dynamic registration keeps getting it,
 // which is what every existing config expects.
 func TestRegistrationRoutesServedByDefault(t *testing.T) {
@@ -101,7 +99,7 @@ func TestRegistrationRoutesServedByDefault(t *testing.T) {
 			name: "explicitly enabled",
 			oidcProvider: &model.OIDCOP{
 				Issuer:              "https://verifier.example.com",
-				DynamicRegistration: &model.DynamicRegistrationConfig{Enabled: boolPtr(true)},
+				DynamicRegistration: &model.DynamicRegistrationConfig{Enabled: new(true)},
 			},
 		},
 		{
@@ -124,7 +122,7 @@ func TestRegistrationRoutesServedByDefault(t *testing.T) {
 func TestRegistrationRoutesAbsentWhenDisabled(t *testing.T) {
 	engine := registrationRouteEngine(t, &model.OIDCOP{
 		Issuer:              "https://verifier.example.com",
-		DynamicRegistration: &model.DynamicRegistrationConfig{Enabled: boolPtr(false)},
+		DynamicRegistration: &model.DynamicRegistrationConfig{Enabled: new(false)},
 	})
 
 	assert.Empty(t, registeredRoutes(engine),
@@ -154,7 +152,7 @@ func TestRegistrationRoutesAbsentWhenDisabled(t *testing.T) {
 func TestRegistrationRoutesStayClosedWithAnAuthBlockConfigured(t *testing.T) {
 	engine := registrationRouteEngine(t, &model.OIDCOP{
 		Issuer:              "https://verifier.example.com",
-		DynamicRegistration: &model.DynamicRegistrationConfig{Enabled: boolPtr(false)},
+		DynamicRegistration: &model.DynamicRegistrationConfig{Enabled: new(false)},
 		DynamicRegistrationAuth: &model.DynamicRegistrationAuthConfig{
 			Mode:                  "static",
 			StaticBearerTokenFile: "/nonexistent/registration-token",

@@ -57,11 +57,11 @@ func TestEveryPublishedPresetFieldSurvivesTheBrowserSchema(t *testing.T) {
 		what string
 		of   reflect.Type
 	}{
-		{"UIPresetCredential", reflect.TypeOf(UIPresetCredential{})},
-		{"UIPresetMeta", reflect.TypeOf(UIPresetMeta{})},
+		{"UIPresetCredential", reflect.TypeFor[UIPresetCredential]()},
+		{"UIPresetMeta", reflect.TypeFor[UIPresetMeta]()},
 	} {
-		for i := 0; i < tc.of.NumField(); i++ {
-			name, _, _ := strings.Cut(tc.of.Field(i).Tag.Get("json"), ",")
+		for field := range tc.of.Fields() {
+			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 			if name == "" || name == "-" {
 				continue
 			}
@@ -93,8 +93,8 @@ func TestEveryPublishedPresetFieldSurvivesTheBrowserSchema(t *testing.T) {
 func TestCircuitZkReqReachesThePostedQuery(t *testing.T) {
 	js := presentationDefinitionJS(t)
 
-	uiName := jsonName(t, reflect.TypeOf(UIPresetCredential{}), "Req")
-	wireName := jsonName(t, reflect.TypeOf(openid4vp.CredentialQuery{}), "Req")
+	uiName := jsonName(t, reflect.TypeFor[UIPresetCredential](), "Req")
+	wireName := jsonName(t, reflect.TypeFor[openid4vp.CredentialQuery](), "Req")
 	require.NotEqual(t, uiName, wireName,
 		"this test exists because the two wires name the list differently; if they no longer do, simplify it")
 

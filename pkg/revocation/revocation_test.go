@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -204,8 +205,8 @@ func TestStatusListChecker_RejectsBadTokens(t *testing.T) {
 
 	t.Run("jwt expired", func(t *testing.T) {
 		claims := tokenstatuslist.JWTClaims{
-			RegisteredClaims: jwt.RegisteredClaims{Subject: "u", ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute))},
-			StatusList:       tokenstatuslist.StatusListClaim{Bits: 8, Lst: lst},
+			Subject: "u", ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+			StatusList: tokenstatuslist.StatusListClaim{Bits: 8, Lst: lst},
 		}
 		tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
@@ -307,9 +308,7 @@ func TestCWTToken_NumericClaims(t *testing.T) {
 	require.NoError(t, err)
 	claims := func(extra map[int]any) map[int]any {
 		m := map[int]any{cwtClaimSub: uri, cwtClaimStatusList: map[int]any{statusListKeyLst: lst}}
-		for k, v := range extra {
-			m[k] = v
-		}
+		maps.Copy(m, extra)
 		return m
 	}
 	now := time.Now()

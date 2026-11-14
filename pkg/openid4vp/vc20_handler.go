@@ -272,13 +272,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	// signature over this exchange; verify it BEFORE unwrapping, because
 	// after unwrapping there is nothing left tying the credential to this
 	// session.
-	isPresentation := false
-	for _, t := range compactTypeNames(credMap["type"]) {
-		if t == "VerifiablePresentation" {
-			isPresentation = true
-			break
-		}
-	}
+	isPresentation := slices.Contains(compactTypeNames(credMap["type"]), "VerifiablePresentation")
 
 	holder := ""
 	if isPresentation {

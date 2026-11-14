@@ -116,7 +116,7 @@ func prefersHTML(accept string) bool {
 	// more specific range always wins over a wildcard fallback (RFC 7231).
 	qJSONExact, qJSONType, qStar := -1.0, -1.0, -1.0
 
-	for _, part := range strings.Split(accept, ",") {
+	for part := range strings.SplitSeq(accept, ",") {
 		mediaRange, q := parseMediaRange(part)
 		switch mediaRange {
 		case "":

@@ -94,7 +94,7 @@ func checkPolicyClaimsAreNotCallerTemplated(cfg *model.Cfg) error {
 			// nested one under "identity" - and a requested claim of either
 			// shape carries the caller's value into it.
 			claim := dimension.Claim
-			topLevel := strings.SplitN(claim, ".", 2)[0]
+			topLevel, _, _ := strings.Cut(claim, ".")
 			if !filled[claim] && !filled[topLevel] {
 				continue
 			}

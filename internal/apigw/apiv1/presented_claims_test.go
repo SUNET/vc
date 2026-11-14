@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"math"
 	"math/big"
 	"os"
@@ -297,9 +298,7 @@ func TestDerivationsCannotReplacePresentedClaims(t *testing.T) {
 
 	// A derivation computes a different birth_date, and something else.
 	derived := map[string]any{"birth_date": "1970-01-01", "age_over_18": true}
-	for k, v := range derived {
-		docData[k] = v
-	}
+	maps.Copy(docData, derived)
 
 	conflicts := restoreProvedClaims(docData, derived, proved)
 

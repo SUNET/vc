@@ -213,11 +213,11 @@ func TestValidateMetadataNames(t *testing.T) {
 func metadataMemberNames(t *testing.T) map[string]bool {
 	t.Helper()
 
-	typ := reflect.TypeOf(AuthorizationServerMetadata{})
+	typ := reflect.TypeFor[AuthorizationServerMetadata]()
 	members := make(map[string]bool, typ.NumField())
 
-	for i := range typ.NumField() {
-		tag := typ.Field(i).Tag.Get("json")
+	for field := range typ.Fields() {
+		tag := field.Tag.Get("json")
 		if tag == "" || tag == "-" {
 			continue
 		}

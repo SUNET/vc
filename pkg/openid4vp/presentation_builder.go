@@ -534,9 +534,9 @@ func copyReflectedAt(src any, element reflect.Type, path *copyPath) (reflect.Val
 // json would NOT have dispatched to costs nothing, since encodeCopy
 // reproduces its bytes either way.
 var marshalerTypes = []reflect.Type{
-	reflect.TypeOf((*json.Marshaler)(nil)).Elem(),
-	reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem(),
-	reflect.TypeOf((*encoding.TextAppender)(nil)).Elem(),
+	reflect.TypeFor[json.Marshaler](),
+	reflect.TypeFor[encoding.TextMarshaler](),
+	reflect.TypeFor[encoding.TextAppender](),
 }
 
 var marshalerMethods = []string{"MarshalJSONTo"}

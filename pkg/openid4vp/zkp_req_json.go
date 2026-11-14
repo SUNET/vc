@@ -24,8 +24,7 @@ func refuseDuplicateJSONMembers(raw []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := scanForDuplicates(decoder); err != nil {
-		var refusal *ZkpReqResponseError
-		if errors.As(err, &refusal) {
+		if refusal, ok := errors.AsType[*ZkpReqResponseError](err); ok {
 			return refusal
 		}
 		// A scan that cannot run is not a duplicate; it is an

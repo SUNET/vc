@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -331,12 +332,7 @@ func selectCircuits(manifest *zkcircuit.Manifest, system, docType string, active
 }
 
 func slicesContains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 // artifactPath is the mirror-relative path an artifact is stored at, which
