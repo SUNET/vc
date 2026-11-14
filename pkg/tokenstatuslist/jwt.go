@@ -77,7 +77,7 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 	}
 
 	// Compress and encode the status list
-	lst, err := sl.CompressAndEncode()
+	encodedList, err := sl.CompressAndEncode()
 	if err != nil {
 		return "", fmt.Errorf("failed to compress status list: %w", err)
 	}
@@ -91,7 +91,7 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 		IssuedAt: jwt.NewNumericDate(now),
 		StatusList: StatusListClaim{
 			Bits:           Bits,
-			Lst:            lst,
+			Lst:            encodedList,
 			AggregationURI: sl.AggregationURI,
 		},
 	}

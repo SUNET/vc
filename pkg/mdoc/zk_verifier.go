@@ -296,21 +296,21 @@ func (h *ZkHandler) VerifyAndExtract(ctx context.Context, vpToken string, pctx Z
 	for i := range response.ZkDocuments {
 		zkDoc := &response.ZkDocuments[i]
 
-		dd, err := zkDoc.ParseZkDocumentData()
+		docData, err := zkDoc.ParseZkDocumentData()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("zkDocuments[%d]: %w", i, err))
 			result.Valid = false
 			continue
 		}
 
-		docResult, err := h.verifyOneDocument(ctx, zkDoc, dd, pctx)
+		docResult, err := h.verifyOneDocument(ctx, zkDoc, docData, pctx)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("zkDocuments[%d] (docType=%s): %w", i, dd.DocType, err))
+			errs = append(errs, fmt.Errorf("zkDocuments[%d] (docType=%s): %w", i, docData.DocType, err))
 			result.Valid = false
 			continue
 		}
 
-		result.Documents[dd.DocType] = docResult
+		result.Documents[docData.DocType] = docResult
 	}
 
 	if len(errs) > 0 {

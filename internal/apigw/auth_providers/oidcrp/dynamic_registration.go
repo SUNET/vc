@@ -26,7 +26,7 @@ type RegistrationRequest struct {
 	Contacts                []string `json:"contacts,omitempty"`
 	TosURI                  string   `json:"tos_uri,omitempty"`
 	PolicyURI               string   `json:"policy_uri,omitempty"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty"`
+	JWKSURI                 string   `json:"jwks_uri,omitempty"`
 	JWKS                    any      `json:"jwks,omitempty"`
 	SoftwareID              string   `json:"software_id,omitempty"`
 	SoftwareVersion         string   `json:"software_version,omitempty"`
@@ -67,7 +67,7 @@ type RegistrationResponse struct {
 	Contacts                []string `json:"contacts,omitempty"`
 	TosURI                  string   `json:"tos_uri,omitempty"`
 	PolicyURI               string   `json:"policy_uri,omitempty"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty"`
+	JWKSURI                 string   `json:"jwks_uri,omitempty"`
 	JWKS                    any      `json:"jwks,omitempty"`
 	SoftwareID              string   `json:"software_id,omitempty"`
 	SoftwareVersion         string   `json:"software_version,omitempty"`

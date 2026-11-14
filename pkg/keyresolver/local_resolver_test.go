@@ -186,8 +186,8 @@ func TestLocalResolver_DidJwk_InvalidJSON(t *testing.T) {
 	resolver := NewLocalResolver()
 
 	// Valid base64 but invalid JSON
-	invalidJson := base64.RawURLEncoding.EncodeToString([]byte("not json"))
-	_, err := resolver.ResolveEd25519("did:jwk:" + invalidJson)
+	invalidJSON := base64.RawURLEncoding.EncodeToString([]byte("not json"))
+	_, err := resolver.ResolveEd25519("did:jwk:" + invalidJSON)
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}

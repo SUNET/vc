@@ -866,7 +866,7 @@ func TestStack_VCI_Token_DPoPJTIReplay(t *testing.T) {
 
 	// Second request — get a fresh auth code but replay the same DPoP proof (same JTI)
 	authCode2, codeVerifier2, _ := getAuthCodeForNegativeTests(t)
-	data2 := url.Values{
+	replayForm := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {authCode2},
 		"redirect_uri":  {oauthRedirect},
@@ -874,7 +874,7 @@ func TestStack_VCI_Token_DPoPJTIReplay(t *testing.T) {
 		"code_verifier": {codeVerifier2},
 	}
 
-	req2, _ := http.NewRequest(http.MethodPost, tokenEndpoint, strings.NewReader(data2.Encode()))
+	req2, _ := http.NewRequest(http.MethodPost, tokenEndpoint, strings.NewReader(replayForm.Encode()))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req2.Header.Set("DPoP", dpopProof) // same JTI!
 
