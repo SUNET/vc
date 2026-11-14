@@ -290,6 +290,19 @@ type Common struct {
 	// meaningfully meet two different answers from one deployment.
 	OpenID4VPCompat OpenID4VPCompat `yaml:"openid4vp_compat" validate:"omitempty"`
 
+	// JSONLDContexts configures how this deployment obtains the JSON-LD
+	// contexts that common.credential_metadata.<scope>.credential_contexts
+	// names: whether a context that cannot be fetched stops the service
+	// starting, how fetching is retried, how often a pinned context is
+	// refreshed, and where an operator-vetted copy may be read from
+	// instead.
+	//
+	// Shared rather than per-service because the context documents are a
+	// property of the credentials this deployment handles, not of one
+	// process; the startup POLICY differs per service and is expressed by
+	// startup_policy_per_service below.
+	JSONLDContexts JSONLDContexts `yaml:"jsonld_contexts" validate:"omitempty"`
+
 	// Branding holds custom branding configuration (logo and favicon paths)
 	Branding Branding `yaml:"branding"`
 
@@ -305,6 +318,190 @@ type Branding struct {
 	LogoPath string `yaml:"logo_path,omitempty" validate:"omitempty,image_png"`
 	// FaviconPath is the file path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used
 	FaviconPath string `yaml:"favicon_path,omitempty" validate:"omitempty,image_png"`
+}
+
+// JSONLDContextPolicy says what a service does about an unfetchable context.
+//
+// "It" is a context the operator configured, and "does" is decided while
+// the service starts.
+type JSONLDContextPolicy string
+
+const (
+	// JSONLDContextRequired refuses to start without the context. Every
+	// configured context is fetched and pinned at startup, and a context
+	// that is still unavailable after the configured retries fails the
+	// boot.
+	//
+	// This is what an ISSUER wants, and its default: signing
+	// canonicalizes the credential to RDF, so a missing context is not a
+	// degraded service but an issuance that fails after the user has
+	// already been sent to their wallet.
+	JSONLDContextRequired JSONLDContextPolicy = "required"
+
+	// JSONLDContextBestEffort starts the service without the context and
+	// keeps trying in the background. The service reports NOT READY, and
+	// names the contexts it is waiting for, until every one is pinned.
+	//
+	// This is the VERIFIER's default. A verifier dereferences a context
+	// while canonicalizing a presentation, so an unavailable one costs it
+	// the presentations of that one credential type - it does not justify
+	// a crash loop that takes every other credential type down with it.
+	JSONLDContextBestEffort JSONLDContextPolicy = "best_effort"
+
+	// JSONLDContextLazy fetches nothing at startup. A context is loaded
+	// the first time something needs it, through the ordinary cache.
+	//
+	// The weakest of the three, and it is opt-in: nothing is pinned, so
+	// what a context endpoint serves later can differ from what it served
+	// before, and the type-consistency expansion that needs the context
+	// does not run at all. Readiness is not gated on it either, which is
+	// what makes it lazy.
+	JSONLDContextLazy JSONLDContextPolicy = "lazy"
+)
+
+// JSONLDContexts configures how context documents are obtained.
+//
+// The documents in question are the ones this deployment's W3C scopes name
+// through credential_contexts.
+//
+// Before this stanza existed the behaviour was JSONLDContextRequired for
+// every service, with one attempt and no refresh: a verifier whose
+// credential_contexts host was briefly unreachable crash-looped, although
+// it signs nothing. The defaults here keep that behaviour for the issuer
+// and relax it for the verifier.
+type JSONLDContexts struct {
+	// StartupPolicy applies to every service that resolves contexts
+	// (issuer and verifier). Empty means the per-service default:
+	// "required" for the issuer, "best_effort" for the verifier.
+	//
+	// A deployment that sets this sets it for BOTH, which is why
+	// StartupPolicyPerService exists.
+	StartupPolicy JSONLDContextPolicy `yaml:"startup_policy,omitempty" validate:"omitempty,oneof=required best_effort lazy" doc_example:"best_effort"`
+
+	// StartupPolicyPerService overrides StartupPolicy for one service,
+	// keyed by service name ("issuer", "verifier").
+	//
+	// Highest precedence of the three: this, then StartupPolicy, then the
+	// built-in default for that service.
+	StartupPolicyPerService map[string]JSONLDContextPolicy `yaml:"startup_policy_per_service,omitempty" validate:"omitempty,dive,oneof=required best_effort lazy" doc_key:"service name" doc_example:"verifier: best_effort"`
+
+	// Retry bounds the attempts made to fetch a context, at startup and
+	// afterwards.
+	Retry JSONLDContextRetry `yaml:"retry" validate:"omitempty"`
+
+	// RefreshInterval is how often a pinned context is re-fetched. Zero
+	// disables refreshing, which is what pinning meant before this
+	// existed: the document fetched at boot is used for the life of the
+	// process.
+	//
+	// A refresh that fails keeps the last copy that loaded, so a context
+	// host going away does not take a running service with it. Only
+	// pinned contexts refresh - under "lazy" nothing is pinned and this
+	// does nothing.
+	RefreshInterval *time.Duration `yaml:"refresh_interval" default:"12h" doc_example:"12h"`
+
+	// Sources maps a context URL to an operator-provided copy of it, so a
+	// deployment can serve a vetted document instead of dereferencing the
+	// publisher's endpoint. The key is the URL as credential_contexts
+	// names it - that is still what the credential carries and what the
+	// document is cached under; only where the BYTES come from changes.
+	Sources map[string]JSONLDContextSource `yaml:"sources,omitempty" validate:"omitempty,dive" doc_key:"context URL"`
+}
+
+// JSONLDContextRetry bounds how hard a context fetch is retried.
+type JSONLDContextRetry struct {
+	// InitialInterval is the wait before the second attempt.
+	InitialInterval time.Duration `yaml:"initial_interval" default:"1s" doc_example:"1s"`
+
+	// MaxInterval caps the exponential backoff. Background retries keep
+	// running at this interval once they reach it; they do not give up,
+	// because the alternative is a service that is permanently not ready
+	// and has stopped trying to fix it.
+	MaxInterval time.Duration `yaml:"max_interval" default:"5m" doc_example:"5m"`
+
+	// Multiplier grows the interval after each failed attempt.
+	Multiplier float64 `yaml:"multiplier" default:"2" validate:"omitempty,min=1" doc_example:"2"`
+
+	// BootAttempts is how many times a context is fetched during startup
+	// before the policy decides what happens. 1 reproduces the behaviour
+	// that predates this stanza.
+	//
+	// It applies under every policy that fetches at boot: under
+	// "required" it is how long the boot is willing to wait, under
+	// "best_effort" how long it tries before handing the context to the
+	// background loop.
+	BootAttempts int `yaml:"boot_attempts" default:"3" validate:"omitempty,min=1" doc_example:"3"`
+}
+
+// JSONLDContextSource is where one context's bytes are read from.
+//
+// Configured when they should not come from the URL the credential names.
+//
+// Exactly one of File and URL is set.
+type JSONLDContextSource struct {
+	// File is a path to a JSON-LD document on disk. Nothing is
+	// dereferenced for this context: it is the way to run with no
+	// outbound fetch at all, and the way to serve a copy from inside a
+	// perimeter the address policy would otherwise refuse to dial.
+	//
+	// What the document REFERENCES is still resolved normally, so a
+	// context whose closure reaches further URLs needs those reachable or
+	// given sources of their own.
+	File string `yaml:"file,omitempty" doc_example:"/etc/vc/contexts/individual-id.jsonld"`
+
+	// URL is a mirror to fetch from instead. Unlike File this is an
+	// ordinary fetch and the address policy applies to it unchanged - it
+	// refuses any address the public internet does not route to, so an
+	// internal mirror belongs in File, not here.
+	URL string `yaml:"url,omitempty" validate:"omitempty,url" doc_example:"https://contexts.example.org/individual-id.jsonld"`
+}
+
+// RefreshEvery returns how often a pinned context is re-fetched, with zero
+// meaning never. Unset is the default interval; a configured zero is an
+// operator turning refreshing off and is returned as such.
+//
+// This exists because RefreshInterval is a POINTER, for the same reason
+// RevocationConfig.FailOpen is one (SUNET/vc#753): creasty/defaults fills
+// any field still at its zero value, and the zero value of a Duration is
+// exactly what an operator writes to turn refreshing OFF. A plain
+// time.Duration with default:"12h" therefore could not be set to zero at
+// all - `refresh_interval: 0s` was silently replaced by 12h, so the one
+// behaviour the field documents was unreachable. Read it through here and
+// the distinction between "unset" and "set to zero" survives.
+func (j *JSONLDContexts) RefreshEvery() time.Duration {
+	if j == nil || j.RefreshInterval == nil {
+		return defaultJSONLDRefreshInterval
+	}
+	return *j.RefreshInterval
+}
+
+// defaultJSONLDRefreshInterval is the interval used when nothing is
+// configured. It agrees with the `default` tag above, which is what a
+// loaded config gets; this covers a Cfg built in code, which never passes
+// through defaults.Set.
+const defaultJSONLDRefreshInterval = 12 * time.Hour
+
+// PolicyFor returns the startup policy in force for a service: the
+// per-service override, else the global setting, else the built-in default.
+//
+// The built-in default is JSONLDContextRequired for the issuer and
+// JSONLDContextBestEffort for everything else. The issuer is the service
+// that SIGNS, and a signature is not something to attempt without the
+// context that defines the terms being signed; a verifier that cannot
+// canonicalize one presentation type should keep serving the others.
+func (j *JSONLDContexts) PolicyFor(serviceName string) JSONLDContextPolicy {
+	if j != nil {
+		if policy, ok := j.StartupPolicyPerService[serviceName]; ok && policy != "" {
+			return policy
+		}
+		if j.StartupPolicy != "" {
+			return j.StartupPolicy
+		}
+	}
+	if serviceName == "issuer" {
+		return JSONLDContextRequired
+	}
+	return JSONLDContextBestEffort
 }
 
 // GRPCServer holds the gRPC server configuration

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"net"
 	"net/http"
 	neturl "net/url"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -44,6 +46,114 @@ type CachingDocumentLoader struct {
 	client *http.Client
 	cache  *ttlcache.Cache[string, *ld.RemoteDocument]
 	log    *logger.Log
+
+	// sourcesMu guards sources, which an operator's configuration sets
+	// once at startup and every LoadDocument then reads.
+	sourcesMu sync.RWMutex
+	sources   map[string]ContextSource
+}
+
+// ContextSource is where one context document's bytes come from, when the
+// operator has provided a copy rather than letting the URL be dereferenced.
+//
+// Exactly one field is set. File reads from disk and makes no request at
+// all; URL fetches a mirror through the ordinary path, so the scheme and
+// address policy apply to it unchanged.
+type ContextSource struct {
+	File string
+	URL  string
+}
+
+// SetContextSources installs the operator's copies of context documents.
+//
+// Consulted by LoadDocument as well as by pinning, so a source applies
+// however the context is reached: pinned at startup, re-fetched by a
+// refresh, or loaded on first use under the lazy policy. A source that only
+// covered pinning would silently stop applying in the one mode that never
+// pins.
+func (l *CachingDocumentLoader) SetContextSources(sources map[string]ContextSource) {
+	l.sourcesMu.Lock()
+	l.sources = maps.Clone(sources)
+	l.sourcesMu.Unlock()
+
+	// Anything already cached for these URLs has to go, because
+	// LoadDocument answers from the cache BEFORE it consults a source. The
+	// W3C base contexts are preloaded at construction with no expiry, so
+	// an operator who configured a copy of one would have been served the
+	// embedded document instead - for the life of the process, with
+	// nothing to say the setting had been ignored.
+	for url := range sources {
+		l.cache.Delete(url)
+	}
+}
+
+// contextSource returns the configured source for a URL, if there is one.
+func (l *CachingDocumentLoader) contextSource(url string) (ContextSource, bool) {
+	l.sourcesMu.RLock()
+	defer l.sourcesMu.RUnlock()
+	source, ok := l.sources[url]
+	return source, ok
+}
+
+// loadFromSource loads a context from the operator's copy of it, reporting
+// whether a copy was configured at all.
+//
+// The document is returned under the CANONICAL url - the one the credential
+// names and the one the processor will ask for again - whichever source it
+// came from. A mirror that answered under its own URL would be cached under
+// that URL and fetched again under the canonical one.
+func (l *CachingDocumentLoader) loadFromSource(url string) (*ld.RemoteDocument, bool, error) {
+	source, ok := l.contextSource(url)
+	if !ok {
+		return nil, false, nil
+	}
+	switch {
+	case source.File != "":
+		doc, err := l.readContextFile(url, source.File)
+		return doc, true, err
+	case source.URL != "":
+		doc, err := l.fetchContext(source.URL)
+		if err != nil {
+			return nil, true, fmt.Errorf("JSON-LD context %q from its configured mirror: %w", url, err)
+		}
+		// Re-homed onto the canonical URL. DocumentURL is also what
+		// relative references inside the document resolve against, and
+		// resolving them against the mirror would point the closure at
+		// the mirror's layout rather than the publisher's.
+		doc.DocumentURL = url
+		return doc, true, nil
+	default:
+		return nil, true, fmt.Errorf("JSON-LD context %q has a source with neither file nor url", url)
+	}
+}
+
+// readContextFile reads a context document from a path the operator
+// configured.
+//
+// Capped at the same size as a fetched document: the cap is there so one
+// context cannot exhaust memory, and that is as true of a file as of a
+// response body.
+func (l *CachingDocumentLoader) readContextFile(url, path string) (*ld.RemoteDocument, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("JSON-LD context %q from %q: %w", url, path, err)
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(io.LimitReader(file, maxContextBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading JSON-LD context %q from %q: %w", url, path, err)
+	}
+	if len(body) > maxContextBytes {
+		return nil, fmt.Errorf("JSON-LD context %q at %q is larger than the %d byte limit", url, path, maxContextBytes)
+	}
+
+	var document any
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("JSON-LD context %q at %q is not valid JSON: %w", url, path, err)
+	}
+
+	return &ld.RemoteDocument{DocumentURL: url, Document: document}, nil
 }
 
 // schemeOf returns the scheme of a context URL, or "" if it has none.
@@ -275,10 +385,71 @@ func contextLinkTarget(resp *http.Response) (string, error) {
 	}
 }
 
+// cloneRemoteDocument returns a deep copy of a loaded document.
+//
+// The cache hands the same object to every caller, and json-gold MUTATES
+// what it is given: handling "@import" it merges the importing context's
+// members into the imported document's own map - including the "@import"
+// key itself (see vendor/github.com/piprate/json-gold/ld/context.go, "merge
+// import context into the outer context"). The cached document is then a
+// context that declares a nested @import, which the very next expansion
+// refuses with "must not include @import entry".
+//
+// So a context using @import worked exactly once per process and failed
+// every time after. Nothing here expanded twice before this file's startup
+// policy began re-checking scopes, which is how it stayed hidden; the
+// defect is in handing a shared mutable map to a processor that writes to
+// it, so it is fixed here rather than at the callers that now notice.
+func cloneRemoteDocument(doc *ld.RemoteDocument) *ld.RemoteDocument {
+	if doc == nil {
+		return nil
+	}
+	return &ld.RemoteDocument{
+		DocumentURL: doc.DocumentURL,
+		Document:    cloneJSONValue(doc.Document),
+		ContextURL:  doc.ContextURL,
+	}
+}
+
+// cloneJSONValue deep-copies a decoded JSON value. json.Unmarshal into an
+// `any` produces only these shapes, so the default case is every scalar.
+func cloneJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = cloneJSONValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneJSONValue(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
 // LoadDocument implements ld.DocumentLoader
+//
+// Every successful path returns a COPY: see cloneRemoteDocument.
 func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, error) {
 	if item := l.cache.Get(url); item != nil {
-		return item.Value(), nil
+		return cloneRemoteDocument(item.Value()), nil
+	}
+
+	// An operator's own copy wins over dereferencing the URL. Checked here
+	// rather than only while pinning so it also applies under the lazy
+	// startup policy, where nothing is pinned and this is the only path a
+	// context is ever loaded by.
+	if doc, configured, err := l.loadFromSource(url); configured {
+		if err != nil {
+			return nil, err
+		}
+		l.cache.Set(url, doc, ttlcache.DefaultTTL)
+		return cloneRemoteDocument(doc), nil
 	}
 
 	// Fetched here rather than by json-gold's loader, which calls os.Open for
@@ -296,7 +467,7 @@ func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, er
 
 	l.cache.Set(url, doc, ttlcache.DefaultTTL)
 
-	return doc, nil
+	return cloneRemoteDocument(doc), nil
 }
 
 func (l *CachingDocumentLoader) preloadContexts() {
@@ -304,6 +475,14 @@ func (l *CachingDocumentLoader) preloadContexts() {
 	for url, content := range contextstore.GetAllContexts() {
 		l.AddContext(url, string(content))
 	}
+}
+
+// IsPinned reports whether this URL is held with no expiry, which is what
+// pinning means: the document that was validated is the one that will be
+// used, rather than one re-fetched when a TTL lapses.
+func (l *CachingDocumentLoader) IsPinned(url string) bool {
+	item := l.cache.Get(url)
+	return item != nil && item.ExpiresAt().IsZero()
 }
 
 // AddContext adds a context to the cache manually
