@@ -1,20 +1,17 @@
 package httpserver
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
-	"io"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -147,8 +144,7 @@ func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gi
 	reply, err := s.apiv1.OAuthAuthorizationChallenge(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		var challengeErr *apiv1.AuthorizationChallengeError
-		if errors.As(err, &challengeErr) {
+		if challengeErr, ok := errors.AsType[*apiv1.AuthorizationChallengeError](err); ok {
 			c.AbortWithStatusJSON(challengeErr.HTTPStatus, challengeErr)
 			return nil, nil
 		}
@@ -625,12 +621,17 @@ func (s *Service) headlessConsentComplete(ctx context.Context, c *gin.Context, s
 		}
 	}
 
+	// Read once, and across every field line: see AcceptLanguageOf.
+	acceptLanguage := httphelpers.AcceptLanguageOf(c)
+
 	reply, err := s.apiv1.UserLookup(ctx, &vcclient.UserLookupRequest{
-		RequestURI:   requestURI,
-		AuthProvider: authProvider,
-		ResponseCode: responseCode,
-		VCTM:         vctm,
-		MDDL:         mddl,
+		RequestURI:      requestURI,
+		AuthProvider:    authProvider,
+		ResponseCode:    responseCode,
+		VCTM:            vctm,
+		MDDL:            mddl,
+		Locales:         httphelpers.AcceptedLanguages(acceptLanguage),
+		RejectedLocales: httphelpers.RejectedLanguages(acceptLanguage),
 	})
 	if err != nil {
 		return fmt.Errorf("user lookup: %w", err)
@@ -744,26 +745,6 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
-	// Refused before binding, because binding is where the two readings
-	// of this body diverge.
-	//
-	// encoding/json matches members to struct fields case-INSENSITIVELY
-	// and lets a later member overwrite an earlier one, so
-	// {"scope":"a","Scope":"b"} binds Scope to "b". The authorization
-	// middleware reads the body into a map and looks up the exact key
-	// "scope", which is "a". One request, two different scopes, and the
-	// one that was authorized is not the one that would be acted on.
-	//
-	// Refusing the ambiguity is the fix rather than picking a winner:
-	// there is no reading of a body with both members that a caller could
-	// have meant, and any rule for choosing between them would have to be
-	// kept in step with encoding/json's.
-	if err := requireCanonicalJSONBody(c, "scope", "identity_match", "authentic_source", "ttl_seconds"); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "ambiguous request body")
-		return nil, err
-	}
-
 	request := &apiv1.PrepareIssuanceRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -810,108 +791,4 @@ func operatorOf(c *gin.Context) (string, bool) {
 	}
 	subject := c.GetString("jwt_subject")
 	return subject, subject != ""
-}
-
-// requireCanonicalJSONBody refuses any request body that the authorization
-// middleware and the request binder could read differently.
-//
-// Those two read the same bytes by different rules. The middleware parses
-// the body into a map and looks up exact lowercase keys; the binder hands
-// it to encoding/json, whose field matching is case-insensitive under a
-// Unicode fold, whose later members overwrite earlier ones, whose null
-// leaves a field untouched, and whose Decoder stops at the first value and
-// ignores whatever follows. Every one of those is a way for the scope the
-// middleware authorized to differ from the scope the handler acts on.
-//
-// Rather than model each of them, this requires a body with nothing to
-// disagree about: one JSON object, members named exactly as this request
-// defines them, none repeated, and nothing after it.
-//
-// The content type is pinned for the same reason. Binding.Request also
-// accepts form encodings, and the middleware's extraction reads the query
-// string and the JSON body but never a form body - so a form-encoded
-// request reaches binding with no resource pair checked at all.
-//
-// The body is restored for the binder, the same way the middleware
-// restores it.
-func requireCanonicalJSONBody(c *gin.Context, allowed ...string) error {
-	refuse := func(format string, args ...any) error {
-		return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, fmt.Sprintf(format, args...), 400)
-	}
-
-	if c.ContentType() != "application/json" {
-		return refuse("this request must be sent as application/json")
-	}
-
-	// A declared length, because both of the other readers insist on one.
-	//
-	// extractResourcePairs skips the body unless ContentLength > 0, and
-	// Binding.Request skips BOTH its JSON and its form branch on the same
-	// condition - and then falls through to binding from the query string
-	// by FIELD NAME. So a chunked request (ContentLength == -1) carrying
-	// a harmless "{}" body reaches binding with its values taken from
-	// "?Scope=...", which the middleware never looked at under that
-	// spelling. Refusing an undeclared length is what keeps all three
-	// reading the same request.
-	if c.Request.ContentLength <= 0 {
-		return refuse("this request must carry a body with a declared length")
-	}
-
-	body, err := io.ReadAll(c.Request.Body)
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
-	if err != nil {
-		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
-	}
-
-	// Streamed rather than unmarshalled into a map, because a map has
-	// already collapsed the duplicates this needs to see.
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	opening, err := decoder.Token()
-	if err != nil {
-		return refuse("the request body is not a JSON object")
-	}
-	if delim, ok := opening.(json.Delim); !ok || delim != '{' {
-		return refuse("the request body must be a JSON object")
-	}
-
-	seen := make(map[string]bool, len(allowed))
-	for decoder.More() {
-		nameToken, err := decoder.Token()
-		if err != nil {
-			return refuse("the request body is not a well-formed JSON object")
-		}
-		name, ok := nameToken.(string)
-		if !ok {
-			return refuse("the request body is not a well-formed JSON object")
-		}
-		if !slices.Contains(allowed, name) {
-			return refuse("the request body carries a member %q that this request does not define; member names are case-sensitive", name)
-		}
-		if seen[name] {
-			return refuse("the request body carries the member %q more than once", name)
-		}
-		seen[name] = true
-
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return refuse("the request body is not a well-formed JSON object")
-		}
-	}
-	if _, err := decoder.Token(); err != nil {
-		return refuse("the request body is not a well-formed JSON object")
-	}
-
-	// encoding/json's Decoder reads ONE value and ignores the rest, so a
-	// valid object followed by anything at all would otherwise bind
-	// cleanly while this check looked at a different reading of the body.
-	//
-	// Checked by requiring EOF rather than by More(), which is not an
-	// end-of-input test: More reports whether another ELEMENT follows in
-	// the current array or object, so it answers false for a stray "}"
-	// or "]" and would have let "<object>}" through.
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return refuse("the request body carries more than one JSON value")
-	}
-
-	return nil
 }

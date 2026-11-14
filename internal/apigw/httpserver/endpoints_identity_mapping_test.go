@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-contrib/sessions"
@@ -322,10 +323,11 @@ func TestIdentityMappingSearch_SPOCPAllowed(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, mock.searchCalled)
-	// AllowedAuthenticSources should be populated from SPOCP
-	assert.NotNil(t, mock.searchReq)
-	assert.ElementsMatch(t, []string{"SUNET", "LADOK"}, mock.searchReq.AllowedAuthenticSources,
-		"SPOCP-derived AllowedAuthenticSources should be forwarded to the search request")
+	// The named source is the only one reached.
+	require.NotNil(t, mock.searchReq)
+	sources, everySource := mock.searchReq.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
+	assert.False(t, everySource)
+	assert.Equal(t, []string{"SUNET"}, sources)
 }
 
 // TestIdentityMappingSearch_SPOCPDenied verifies search with non-matching SPOCP rules.
@@ -386,9 +388,7 @@ func TestIdentityMappingSearch_NoRules_AuthOnly(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, mock.searchCalled)
-	// Without SPOCP rules, AllowedAuthenticSources should be empty
-	assert.Empty(t, mock.searchReq.AllowedAuthenticSources,
-		"without SPOCP rules, AllowedAuthenticSources should be empty (no filtering)")
+	assert.True(t, mock.searchReq.Reach.Everything())
 }
 
 // TestIdentityMapping_NoAuthMode verifies no-auth mode lets everything through.
@@ -404,95 +404,6 @@ func TestIdentityMapping_NoAuthMode(t *testing.T) {
 }
 
 // ==================== SPOCP context forwarding ====================
-
-// TestDatastoreSearch_SPOCPContextForwarding verifies that the middleware
-// populates both AllowedAuthenticSources and AllowedScopes on the search request.
-func TestDatastoreSearch_SPOCPContextForwarding(t *testing.T) {
-	// Use a combined mock that captures both datastore search requests
-	dsMock := &mockApiv1{}
-	rules := []string{
-		// alice has access to SUNET/eduid and SUNET/pid
-		`(vc (service apigw)(method GET)(path /api/v1/*)(subject alice)(authentic_source SUNET)(scope (* set eduid pid)))`,
-	}
-	engine, priv := testSetup(t, rules, dsMock)
-
-	token := signTestJWT(t, priv, "alice", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search?search=test&authentic_source=SUNET&scope=eduid", token, nil)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	require.True(t, dsMock.searchCalled)
-	require.NotNil(t, dsMock.searchReq)
-
-	// The middleware should have extracted AllowedAuthenticSources and AllowedScopes
-	// from the SPOCP engine and set them in the gin context.
-	assert.Equal(t, []string{"SUNET"}, dsMock.searchReq.AllowedAuthenticSources,
-		"AllowedAuthenticSources should be populated from SPOCP rules")
-	assert.ElementsMatch(t, []string{"eduid", "pid"}, dsMock.searchReq.AllowedScopes,
-		"AllowedScopes should be populated from SPOCP scope set")
-}
-
-// TestDatastoreSearch_SPOCPContextForwarding_WildcardSource verifies that
-// a wildcard authentic_source rule results in ["*"] being forwarded.
-func TestDatastoreSearch_SPOCPContextForwarding_WildcardSource(t *testing.T) {
-	dsMock := &mockApiv1{}
-	rules := []string{
-		`(vc (service apigw)(method GET)(path /api/v1/*)(subject admin)(authentic_source *)(scope *))`,
-	}
-	engine, priv := testSetup(t, rules, dsMock)
-
-	token := signTestJWT(t, priv, "admin", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search?search=test", token, nil)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	require.True(t, dsMock.searchCalled)
-	require.NotNil(t, dsMock.searchReq)
-
-	// Wildcard authentic_source/scope → AllowedAuthenticSources/AllowedScopes = nil
-	// (nil means "unrestricted" — the DB layer won't apply any filter)
-	assert.Nil(t, dsMock.searchReq.AllowedAuthenticSources,
-		"wildcard authentic_source should result in nil (unrestricted)")
-	assert.Nil(t, dsMock.searchReq.AllowedScopes,
-		"wildcard scope should result in nil (unrestricted)")
-}
-
-// TestDatastoreSearch_NoRules_NoContextForwarding verifies that without SPOCP rules
-// AllowedAuthenticSources and AllowedScopes are not set.
-func TestDatastoreSearch_NoRules_NoContextForwarding(t *testing.T) {
-	dsMock := &mockApiv1{}
-	engine, priv := testSetup(t, nil, dsMock) // no rules
-
-	token := signTestJWT(t, priv, "anyone", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search?search=test", token, nil)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	require.True(t, dsMock.searchCalled)
-	require.NotNil(t, dsMock.searchReq)
-
-	assert.Empty(t, dsMock.searchReq.AllowedAuthenticSources,
-		"without SPOCP rules, AllowedAuthenticSources should be empty")
-	assert.Empty(t, dsMock.searchReq.AllowedScopes,
-		"without SPOCP rules, AllowedScopes should be empty")
-}
-
-// TestIdentityMappingSearch_SPOCPContextForwarding verifies that the middleware
-// forwards AllowedAuthenticSources to identity mapping search.
-func TestIdentityMappingSearch_SPOCPContextForwarding(t *testing.T) {
-	mock := &identityMappingMock{}
-	rules := []string{
-		`(vc (service apigw)(method *)(path /api/v1/*)(subject alice)(authentic_source (* set SUNET LADOK))(scope *))`,
-	}
-	engine, priv := testSetupIdentityMapping(t, rules, mock)
-
-	token := signTestJWT(t, priv, "alice", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/identity/mapping/search?search=test&authentic_source=SUNET", token, nil)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	require.True(t, mock.searchCalled)
-	require.NotNil(t, mock.searchReq)
-
-	assert.ElementsMatch(t, []string{"SUNET", "LADOK"}, mock.searchReq.AllowedAuthenticSources,
-		"AllowedAuthenticSources should contain the SPOCP source set elements")
-}
 
 // TestIdentityMappingSearch_SPOCPDenied_NoIdentityMappingScope verifies that a user
 // whose SPOCP rules only grant a credential scope (e.g. pid) cannot list

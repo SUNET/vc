@@ -26,13 +26,6 @@ func (s *Service) endpointResetUniqueCommitment(ctx context.Context, c *gin.Cont
 		s.log.Error(err, "unique commitment reset refused")
 		return nil, err
 	}
-	// The authorization middleware reads scope from the body by its exact
-	// key, so a body the binder could read differently is refused.
-	if err := requireCanonicalJSONBody(c, "scope", "path", "key", "evidence_ref"); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "ambiguous request body")
-		return nil, err
-	}
 	request := &apiv1.ResetUniqueCommitmentRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -58,13 +51,6 @@ func (s *Service) endpointLookupUniqueCommitment(ctx context.Context, c *gin.Con
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointLookupUniqueCommitment")
 	defer span.End()
 
-	// The authorization middleware reads scope from the body by its exact
-	// key, so a body the binder could read differently is refused.
-	if err := requireCanonicalJSONBody(c, "scope", "path", "key"); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "ambiguous request body")
-		return nil, err
-	}
 	request := &apiv1.UniqueCommitmentQuery{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())

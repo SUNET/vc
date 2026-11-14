@@ -5,15 +5,9 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/sqlstore"
-	"github.com/SUNET/vc/pkg/testsupport"
+	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/mariadb"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // TestJSONTextExtract_KeyWithQuotes_Postgres is a regression test for a
@@ -25,24 +19,10 @@ import (
 // round-trips correctly against a real Postgres instance, not just that the
 // generated SQL text looks right.
 func TestJSONTextExtract_KeyWithQuotes_Postgres(t *testing.T) {
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
+	db := sqltest.OpenPostgres(t)
 	ctx := t.Context()
 
-	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
-
-	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sqlx.Open(sqlstore.PostgresDialect.DriverName(), connStr)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, db.PingContext(ctx))
-
-	_, err = db.ExecContext(ctx, "CREATE TABLE t (data JSONB NOT NULL)")
+	_, err := db.ExecContext(ctx, "CREATE TABLE t (data JSONB NOT NULL)")
 	require.NoError(t, err)
 
 	const key = `o'brien`
@@ -60,24 +40,10 @@ func TestJSONTextExtract_KeyWithQuotes_Postgres(t *testing.T) {
 // TestJSONTextExtract_KeyWithQuotes_MariaDB is the MariaDB analogue of the
 // Postgres test above -- same regression, same fix (escapeMariaDBJSONPathKey).
 func TestJSONTextExtract_KeyWithQuotes_MariaDB(t *testing.T) {
-	if !testsupport.IsDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
+	db, _ := sqltest.OpenMariaDB(t)
 	ctx := t.Context()
 
-	ctr, err := mariadb.Run(ctx, "mariadb:11")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
-
-	connStr, err := ctr.ConnectionString(ctx)
-	require.NoError(t, err)
-
-	db, err := sqlx.Open(sqlstore.MariaDBDialect.DriverName(), connStr)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, db.PingContext(ctx))
-
-	_, err = db.ExecContext(ctx, "CREATE TABLE t (data JSON NOT NULL)")
+	_, err := db.ExecContext(ctx, "CREATE TABLE t (data JSON NOT NULL)")
 	require.NoError(t, err)
 
 	// MariaDB JSON path keys with a double quote are the interesting case

@@ -196,7 +196,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, fmt.Errorf("spocp engine: %w", err)
 	}
 
-	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
+	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, spocpService, s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
 	if err != nil {
 		return nil, fmt.Errorf("api_auth middleware: %w", err)
 	}
@@ -334,7 +334,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	rgAPIv1.Use(s.httpHelpers.Middleware.CSRFProtection(adminSessionKey))
 	// Unified auth: session users go through the same SPOCP method+path+subject
 	// check as API clients. Both paths use the shared SPOCP engine.
-	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, "apigw"))
+	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, spocpService))
 
 	// Identity mapping endpoints
 	rgIdentity := rgAPIv1.Group("/identity")

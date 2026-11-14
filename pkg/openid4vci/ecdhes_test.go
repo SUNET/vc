@@ -195,7 +195,7 @@ func TestDecryptRequest_BadEphemeralKeyIsRefused(t *testing.T) {
 	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	spy := &countingKeyAgreement{opaqueKeyAgreement: opaqueKeyAgreement{key: private}}
+	spy := &countingKeyAgreement{key: private}
 	enc, err := NewCredentialEncryption([]crypto.PrivateKey{spy}, false, false)
 	require.NoError(t, err)
 
@@ -387,7 +387,7 @@ func TestDecryptRequest_CriticalHeaderIsRefused(t *testing.T) {
 	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	spy := &countingKeyAgreement{opaqueKeyAgreement: opaqueKeyAgreement{key: private}}
+	spy := &countingKeyAgreement{key: private}
 	enc, err := NewCredentialEncryption([]crypto.PrivateKey{spy}, false, false)
 	require.NoError(t, err)
 

@@ -227,15 +227,13 @@ func TestUniqueCommitmentColl_Mongo(t *testing.T) {
 }
 
 func TestSQLUniqueCommitmentColl_Postgres(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartPostgres(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartPostgres(t)
 
 	testUniqueCommitmentStoreContract(t, NewSQLUniqueCommitmentColl(newTestService(t), sqlDB, dialect))
 }
 
 func TestSQLUniqueCommitmentColl_MariaDB(t *testing.T) {
-	sqlDB, dialect, cleanup := sqltest.StartMariaDB(t)
-	defer cleanup()
+	sqlDB, dialect := sqltest.StartMariaDB(t)
 
 	testUniqueCommitmentStoreContract(t, NewSQLUniqueCommitmentColl(newTestService(t), sqlDB, dialect))
 }

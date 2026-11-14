@@ -36,7 +36,7 @@ func initZkpCBORModes() {
 		IndefLength:     cbor.IndefLengthAllowed,
 		MaxNestedLevels: maxCBORNestingLevels,
 		UTF8:            cbor.UTF8RejectInvalid,
-		DefaultMapType:  reflect.TypeOf(map[any]any(nil)),
+		DefaultMapType:  reflect.TypeFor[map[any]any](),
 	}.DecMode()
 	if err != nil {
 		panic("openid4vp: zkp_req CBOR mode: " + err.Error())
@@ -51,7 +51,7 @@ func initZkpCBORModes() {
 		IndefLength:     cbor.IndefLengthForbidden,
 		MaxNestedLevels: maxCBORNestingLevels,
 		UTF8:            cbor.UTF8RejectInvalid,
-		DefaultMapType:  reflect.TypeOf(map[any]any(nil)),
+		DefaultMapType:  reflect.TypeFor[map[any]any](),
 	}.DecMode()
 	if err != nil {
 		panic("openid4vp: zkp_req strict CBOR mode: " + err.Error())
@@ -130,8 +130,7 @@ func cborResultsMap(raw cbor.RawMessage) (map[string]cbor.RawMessage, error) {
 	lenient, _ := zkpCBOR()
 	var byAny map[any]cbor.RawMessage
 	if err := lenient.Unmarshal(raw, &byAny); err != nil {
-		var badKey *cbor.InvalidMapKeyTypeError
-		if errors.As(err, &badKey) {
+		if _, ok := errors.AsType[*cbor.InvalidMapKeyTypeError](err); ok {
 			return nil, refuse(ReasonResultKeyNotText, "%v", err)
 		}
 		return nil, refuse(ReasonPresentationMemberWrongType, "\"results\" is not a map")
@@ -175,12 +174,10 @@ func decodeProofTimeTDate(raw cbor.RawMessage) (string, error) {
 // classifyCBORError maps a decode failure to the reason code the
 // shared vocabulary uses for it.
 func classifyCBORError(err error) error {
-	var dup *cbor.DupMapKeyError
-	if errors.As(err, &dup) {
+	if _, ok := errors.AsType[*cbor.DupMapKeyError](err); ok {
 		return refuse(ReasonCBORDuplicateKey, "%v", err)
 	}
-	var badTag *cbor.InadmissibleTagContentTypeError
-	if errors.As(err, &badTag) {
+	if _, ok := errors.AsType[*cbor.InadmissibleTagContentTypeError](err); ok {
 		// The reader validates a tag's content type while checking
 		// well-formedness, so a tag 0 around anything but a text
 		// string fails here rather than at rule 8. proof_time is the
@@ -211,8 +208,7 @@ func refuseDuplicateCBORKeys(mode cbor.DecMode, raw cbor.RawMessage, depth int) 
 	case isCBORMap(raw):
 		var asMap map[any]cbor.RawMessage
 		if err := mode.Unmarshal(raw, &asMap); err != nil {
-			var badKey *cbor.InvalidMapKeyTypeError
-			if errors.As(err, &badKey) {
+			if _, ok := errors.AsType[*cbor.InvalidMapKeyTypeError](err); ok {
 				// An unhashable key - an array or a map used as one.
 				return refuse(ReasonPresentationKeyNotText, "%v", err)
 			}

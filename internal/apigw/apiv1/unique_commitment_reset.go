@@ -341,15 +341,15 @@ func sameInputs(a, b []ResettableInput) bool {
 	return len(a) == len(b) && !slices.ContainsFunc(a, func(input ResettableInput) bool { return !slices.Contains(b, input) })
 }
 
-// credentialName is the credential's name as the consent page shows it, or
-// its scope.
+// credentialName is the credential's name as the consent page shows it to a
+// holder who names no language, or its scope.
 func credentialName(meta *model.CredentialMetadata, scope string) string {
 	if meta == nil {
 		return scope
 	}
-	display := mddlCredentialDisplay(meta.MDDL, "")
+	display := mddlCredentialDisplay(meta.MDDL, "", nil, nil)
 	if display == nil {
-		display = vctmCredentialDisplay(meta.GetVCTM(), "")
+		display = vctmCredentialDisplay(meta.GetVCTM(), "", nil, nil)
 	}
 	if display == nil || display.Name == "" {
 		return scope

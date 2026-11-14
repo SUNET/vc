@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -56,9 +57,7 @@ func testCredentialNaming(t *testing.T, holder *ecdsa.PrivateKey, extraClaims ma
 		// key in 128.
 		"cnf": map[string]any{"jwk": publicJWK(t, holder.Public())},
 	}
-	for k, v := range extraClaims {
-		payload[k] = v
-	}
+	maps.Copy(payload, extraClaims)
 	payloadJSON, err := json.Marshal(payload)
 	require.NoError(t, err)
 
@@ -76,9 +75,7 @@ func testPresentation(t *testing.T, credential string, holder *ecdsa.PrivateKey,
 	sum := sha256.Sum256([]byte(sdJWT))
 
 	claims := jwtv5.MapClaims{"sd_hash": base64.RawURLEncoding.EncodeToString(sum[:])}
-	for k, v := range kbClaims {
-		claims[k] = v
-	}
+	maps.Copy(claims, kbClaims)
 
 	kb := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 	kb.Header["typ"] = "kb+jwt"
