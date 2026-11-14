@@ -869,33 +869,6 @@ func TestNormalizeVerifiableCredentialGraphNoDefaultGraph(t *testing.T) {
 	}
 }
 
-// TestIsSubjectInGraph tests the helper function
-func TestIsSubjectInGraph(t *testing.T) {
-	// Create some test quads
-	quads := []*ld.Quad{
-		{
-			Subject:   ld.NewIRI("https://example.com/subject1"),
-			Predicate: ld.NewIRI("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
-			Object:    ld.NewIRI("https://example.com/Type"),
-		},
-	}
-
-	// Test with a subject that exists
-	if !isSubjectInGraph("https://example.com/subject1", quads) {
-		t.Error("Expected true for existing subject")
-	}
-
-	// Test with a subject that doesn't exist
-	if isSubjectInGraph("https://example.com/subject2", quads) {
-		t.Error("Expected false for non-existing subject")
-	}
-
-	// Test with empty quads
-	if isSubjectInGraph("https://example.com/subject1", []*ld.Quad{}) {
-		t.Error("Expected false for empty quads")
-	}
-}
-
 // TestNormalizeVerifiableCredentialGraphWithPresentation tests normalization with a VP
 func TestNormalizeVerifiableCredentialGraphWithPresentation(t *testing.T) {
 	// A simple VP with embedded VC

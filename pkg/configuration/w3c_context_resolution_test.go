@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,7 +46,7 @@ func TestResolveW3CContexts(t *testing.T) {
 	}
 
 	t.Run("the context defines the term and the query matches it", func(t *testing.T) {
-		assert.NoError(t, resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		assert.NoError(t, resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format:               openid4vp.FormatLdpVCDCQL,
 			CredentialTypes:      []string{"DiplomaCredential"},
 			CredentialContexts:   []string{defines},
@@ -55,7 +56,7 @@ func TestResolveW3CContexts(t *testing.T) {
 
 	t.Run("a context that does not define the term", func(t *testing.T) {
 		// The structural check cannot see this: a context IS configured.
-		err := resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		err := resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format:               openid4vp.FormatLdpVCDCQL,
 			CredentialTypes:      []string{"DiplomaCredential"},
 			CredentialContexts:   []string{unrelated},
@@ -66,7 +67,7 @@ func TestResolveW3CContexts(t *testing.T) {
 	})
 
 	t.Run("the term expands, but to an IRI the query does not ask for", func(t *testing.T) {
-		err := resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		err := resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format:             openid4vp.FormatLdpVCDCQL,
 			CredentialTypes:    []string{"DiplomaCredential"},
 			CredentialContexts: []string{defines},
@@ -80,7 +81,7 @@ func TestResolveW3CContexts(t *testing.T) {
 	t.Run("one satisfiable alternative among several is enough", func(t *testing.T) {
 		// MatchTypeValues is satisfied by any one alternative, so the check
 		// must be too.
-		assert.NoError(t, resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		assert.NoError(t, resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format:             openid4vp.FormatLdpVCDCQL,
 			CredentialTypes:    []string{"DiplomaCredential"},
 			CredentialContexts: []string{defines},
@@ -92,7 +93,7 @@ func TestResolveW3CContexts(t *testing.T) {
 	})
 
 	t.Run("an unreachable context fails at startup, not at issuance", func(t *testing.T) {
-		err := resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		err := resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format:             openid4vp.FormatLdpVCDCQL,
 			CredentialTypes:    []string{"DiplomaCredential"},
 			CredentialContexts: []string{"https://no-such-host.invalid/ctx.jsonld"},
@@ -102,10 +103,10 @@ func TestResolveW3CContexts(t *testing.T) {
 	})
 
 	t.Run("scopes configuring no context are untouched", func(t *testing.T) {
-		assert.NoError(t, resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		assert.NoError(t, resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format: openid4vp.FormatLdpVCDCQL,
 		}), "issuer", log))
-		assert.NoError(t, resolveW3CContexts(cfgWith(&model.CredentialMetadata{
+		assert.NoError(t, resolveW3CContexts(context.Background(), cfgWith(&model.CredentialMetadata{
 			Format: openid4vp.FormatSDJWTVC,
 		}), "issuer", log))
 	})
@@ -128,13 +129,13 @@ func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
 	loadable := serveContext(t, `{"@context":{"Extra":"https://example.org/extra#Extra"}}`)
 
 	t.Run("an allowlisted context is loaded at startup", func(t *testing.T) {
-		require.NoError(t, resolveW3CContexts(&model.Cfg{
+		require.NoError(t, resolveW3CContexts(context.Background(), &model.Cfg{
 			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{loadable}},
 		}, "issuer", log))
 	})
 
 	t.Run("one that cannot be loaded fails the boot", func(t *testing.T) {
-		err := resolveW3CContexts(&model.Cfg{
+		err := resolveW3CContexts(context.Background(), &model.Cfg{
 			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{"https://ctx.invalid/never-resolves.jsonld"}},
 		}, "issuer", log)
 		require.Error(t, err)
@@ -156,15 +157,15 @@ func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
 		const unloadable = "https://ctx.invalid/verifier-does-not-pin-issuer-allowlist.jsonld"
 		cfg := &model.Cfg{Issuer: &model.Issuer{JSONLDContextAllowlist: []string{unloadable}}}
 
-		require.Error(t, resolveW3CContexts(cfg, "issuer", log),
+		require.Error(t, resolveW3CContexts(context.Background(), cfg, "issuer", log),
 			"the issuer does dereference this list, so an unloadable entry still fails its boot")
-		assert.NoError(t, resolveW3CContexts(cfg, "verifier", log),
+		assert.NoError(t, resolveW3CContexts(context.Background(), cfg, "verifier", log),
 			"the verifier must not inherit a dependency it never uses")
 	})
 
 	t.Run("no allowlist is not an error", func(t *testing.T) {
-		assert.NoError(t, resolveW3CContexts(&model.Cfg{Issuer: &model.Issuer{}}, "issuer", log))
-		assert.NoError(t, resolveW3CContexts(&model.Cfg{}, "issuer", log))
+		assert.NoError(t, resolveW3CContexts(context.Background(), &model.Cfg{Issuer: &model.Issuer{}}, "issuer", log))
+		assert.NoError(t, resolveW3CContexts(context.Background(), &model.Cfg{}, "issuer", log))
 	})
 }
 
@@ -262,7 +263,7 @@ func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
 		}
 	}
 
-	err := w3cStartupChecks(cfgWithAllowlist(nil), "issuer", log)
+	err := w3cStartupChecks(context.Background(), cfgWithAllowlist(nil), "issuer", log)
 	require.Error(t, err, "an issuer whose scope names a context its allowlist does not must not start")
 	assert.Contains(t, err.Error(), "jsonld_context_allowlist",
 		"the allowlist must refuse it before anything dereferences the context")
@@ -272,13 +273,25 @@ func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
 	// Allowlisted, the same context is dereferenced and the fetch is what
 	// fails. That is the contrast that makes the assertion above mean
 	// something: both gates are live, and only their order decides.
-	err = w3cStartupChecks(cfgWithAllowlist([]string{unreachable}), "issuer", log)
+	err = w3cStartupChecks(context.Background(), cfgWithAllowlist([]string{unreachable}), "issuer", log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not be loaded")
 
 	// The verifier loads the same shared file and enforces no allowlist, so
 	// the allowlist must not speak for it: it gets as far as the fetch.
-	err = w3cStartupChecks(cfgWithAllowlist(nil), "verifier", log)
+	//
+	// Asserted under an explicit "required" policy, because that is the
+	// only thing this case is about - whether the ALLOWLIST stopped the
+	// verifier before the fetch. Its default policy is best_effort, which
+	// would reach the same fetch and report the same failure through
+	// readiness instead of the boot, and then a passing assertion would
+	// not distinguish "the fetch happened and failed" from "the allowlist
+	// refused it first".
+	cfg := cfgWithAllowlist(nil)
+	cfg.Common.JSONLDContexts.StartupPolicy = model.JSONLDContextRequired
+	err = w3cStartupChecks(context.Background(), cfg, "verifier", log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not be loaded")
+	assert.NotContains(t, err.Error(), "cannot be signed",
+		"a verifier signs nothing; telling its operator otherwise sends them to the wrong service")
 }

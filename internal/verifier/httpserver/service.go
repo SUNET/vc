@@ -103,9 +103,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		s.gin.Use(cors.New(corsConfig))
 	}
 
-	s.registerAuth, err = middleware.NewRegistrationAuthMiddleware(s.cfg, s.log.New("registration_auth"))
-	if err != nil {
-		return nil, err
+	// Built only when registration is served. The constructor reads the
+	// static token file and refuses a malformed one, and that check exists
+	// to keep an unusable credential from silently rejecting every
+	// registration - with the endpoint closed there is nothing left for it
+	// to guard, so a deployment that has closed registration is free to
+	// retire the file. The config loader drops the stanza itself in that
+	// state (configuration.dropInertRegistrationAuth), so this guard is
+	// what keeps the two from disagreeing if a config reaches here by
+	// another path. Re-enable registration and both run again, at the
+	// startup where they matter.
+	if s.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled() {
+		s.registerAuth, err = middleware.NewRegistrationAuthMiddleware(s.cfg, s.log.New("registration_auth"))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Verifier.APIServer)
@@ -169,17 +181,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	})
 
 	// Dynamic Client Registration (RFC 7591/7592) with rate limiting
-	rgRoot.POST("register", s.registerLimiter.Middleware(), s.registerAuth, func(c *gin.Context) {
-		response, err := s.endpointRegisterClient(ctx, c)
-		if err != nil {
-			s.handleOAuthError(c, err)
-			return
-		}
-		c.JSON(http.StatusCreated, response)
-	})
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "register/:client_id", http.StatusOK, s.endpointGetClientConfiguration)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPut, "register/:client_id", http.StatusOK, s.endpointUpdateClient)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodDelete, "register/:client_id", http.StatusNoContent, s.endpointDeleteClient)
+	s.registerDynamicClientRegistrationEndpoints(ctx, rgRoot)
 
 	// Original verifier verification endpoints (with user session)
 	sgVerification := rgOAuthSession.Group("/verification")
@@ -227,6 +229,34 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.log.Info("Started")
 
 	return s, nil
+}
+
+// registerDynamicClientRegistrationEndpoints registers the RFC 7591
+// registration endpoint and the RFC 7592 client configuration endpoints that
+// go with it, unless the deployment has closed registration.
+//
+// Closed means the routes are never registered, so gin answers 404 - the same
+// answer a build without the feature would give, and the one that pairs with
+// leaving registration_endpoint out of the discovery document. An endpoint
+// that exists only to refuse would still invite clients to try it.
+func (s *Service) registerDynamicClientRegistrationEndpoints(ctx context.Context, rgRoot *gin.RouterGroup) {
+	if !s.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled() {
+		s.log.Info("Dynamic client registration is disabled; /register endpoints are not served and registration_endpoint is omitted from discovery metadata")
+
+		return
+	}
+
+	rgRoot.POST("register", s.registerLimiter.Middleware(), s.registerAuth, func(c *gin.Context) {
+		response, err := s.endpointRegisterClient(ctx, c)
+		if err != nil {
+			s.handleOAuthError(c, err)
+			return
+		}
+		c.JSON(http.StatusCreated, response)
+	})
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "register/:client_id", http.StatusOK, s.endpointGetClientConfiguration)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPut, "register/:client_id", http.StatusOK, s.endpointUpdateClient)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodDelete, "register/:client_id", http.StatusNoContent, s.endpointDeleteClient)
 }
 
 // Close closing httpserver

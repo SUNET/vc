@@ -178,31 +178,31 @@ func genPID(pids []string, input *InputFile) map[string]*vcclient.UploadRequest 
 			"birthdate":   p.BirthDate,
 			"place_of_birth": map[string]any{
 				"locality": input.Defaults.BirthPlace,
-				"region":   or_(pidExt.ResidentState, "Stockholm"),
+				"region":   valueOrDefault(pidExt.ResidentState, "Stockholm"),
 				"country":  firstOr(input.Defaults.Nationality, "SE"),
 			},
 			"issuing_authority":              input.Defaults.IssuingAuthority,
 			"issuing_country":                input.Defaults.IssuingCountry,
 			"nationalities":                  input.Defaults.Nationality,
-			"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "SUNET"),
+			"issuing_jurisdiction":           valueOrDefault(pidExt.IssuingJurisdiction, "SUNET"),
 			"date_of_expiry":                 now.Add(365 * 24 * time.Hour).Format(time.RFC3339),
 			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid-%s", pid)),
-			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
+			"document_number":                valueOrDefault(pidExt.DocumentNumber, fmt.Sprintf("doc-pid-%s", pid)),
+			"personal_administrative_number": valueOrDefault(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
 			"picture":                        genericFacePNG,
-			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
-			"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
-			"sex":                            or_(pidExt.Sex, "0"),
-			"email":                          or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", strings.ReplaceAll(toLower(p.FamilyName), " ", "_"))),
-			"phone_number":                   or_(pidExt.MobilePhoneNumber, "+46700000000"),
+			"birth_family_name":              valueOrDefault(pidExt.BirthFamilyName, p.FamilyName),
+			"birth_given_name":               valueOrDefault(pidExt.BirthGivenName, p.GivenName),
+			"sex":                            valueOrDefault(pidExt.Sex, "0"),
+			"email":                          valueOrDefault(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", strings.ReplaceAll(toLower(p.FamilyName), " ", "_"))),
+			"phone_number":                   valueOrDefault(pidExt.MobilePhoneNumber, "+46700000000"),
 			"address": map[string]any{
-				"locality":       or_(pidExt.ResidentCity, "Stockholm"),
+				"locality":       valueOrDefault(pidExt.ResidentCity, "Stockholm"),
 				"country":        input.Defaults.IssuingCountry,
-				"formatted":      or_(pidExt.ResidentAddress, "Tulegatan 11, Stockholm"),
-				"postal_code":    or_(pidExt.ResidentPostalCode, "11353"),
-				"house_number":   or_(pidExt.ResidentHouseNumber, "11"),
-				"street_address": or_(pidExt.ResidentStreetAddress, "Tulegatan"),
-				"region":         or_(pidExt.ResidentState, "Stockholm"),
+				"formatted":      valueOrDefault(pidExt.ResidentAddress, "Tulegatan 11, Stockholm"),
+				"postal_code":    valueOrDefault(pidExt.ResidentPostalCode, "11353"),
+				"house_number":   valueOrDefault(pidExt.ResidentHouseNumber, "11"),
+				"street_address": valueOrDefault(pidExt.ResidentStreetAddress, "Tulegatan"),
+				"region":         valueOrDefault(pidExt.ResidentState, "Stockholm"),
 			},
 		}
 
@@ -235,17 +235,17 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		doc := &EHICDocument{
 			PersonalAdministrativeNumber: e.PersonalAdministrativeNumber,
 			IssuingAuthority: IssuingAuthority{
-				ID:   or_(e.InstitutionID, "CLEISS"),
+				ID:   valueOrDefault(e.InstitutionID, "CLEISS"),
 				Name: input.Defaults.IssuingAuthority,
 			},
-			IssuingCountry: or_(e.IssuingCountry, "FR"),
+			IssuingCountry: valueOrDefault(e.IssuingCountry, "FR"),
 			DateOfExpiry:   now.AddDate(1, 0, 0).Format("2006-01-02"),
 			DateOfIssuance: e.DateOfIssuance,
 			DocumentNumber: e.DocumentNumber,
 			StartingDate:   now.Format("2006-01-02"),
 			EndingDate:     now.AddDate(1, 0, 0).Format("2006-01-02"),
 			AuthenticSource: AuthenticSource{
-				ID:   or_(e.InstitutionID, "CLEISS"),
+				ID:   valueOrDefault(e.InstitutionID, "CLEISS"),
 				Name: input.Defaults.IssuingAuthority,
 			},
 		}
@@ -316,7 +316,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 				Name: input.Defaults.IssuingAuthority,
 			},
 			LegislationCountry: "EU",
-			StatusConfirmation: or_(d.StatusConfirmation, "02"),
+			StatusConfirmation: valueOrDefault(d.StatusConfirmation, "02"),
 			IssuingCountry:     "EU",
 			DateOfExpiry:       now.AddDate(1, 0, 0).Format("2006-01-02"),
 			DateOfIssuance:     d.DateOfIssuance,
@@ -483,7 +483,7 @@ func sortedKeys(m map[string]*Person) []string {
 	return keys
 }
 
-func or_(val, fallback string) string {
+func valueOrDefault(val, fallback string) string {
 	if val != "" {
 		return val
 	}

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -254,9 +255,7 @@ func TestVerifyAndExtractRefusesAMultiProofSDCredential(t *testing.T) {
 	require.True(t, ok, "the fixture must carry one proof to duplicate")
 
 	second := map[string]any{}
-	for k, v := range proof {
-		second[k] = v
-	}
+	maps.Copy(second, proof)
 	second["created"] = "2001-01-01T00:00:00Z"
 	doc["proof"] = []any{proof, second}
 

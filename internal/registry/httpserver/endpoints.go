@@ -43,6 +43,22 @@ func (s *Service) endpointStatusLists(ctx context.Context, c *gin.Context) (any,
 	return nil, nil
 }
 
+// endpointStatusListJWKS handles GET /statuslists/:id/.well-known/jwks.json
+// Returns the public signing keys of that list's Status List Token as a JWK Set.
+func (s *Service) endpointStatusListJWKS(ctx context.Context, c *gin.Context) (any, error) {
+	request := &apiv1.TokenStatusListJWKSRequest{}
+
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		return nil, err
+	}
+
+	reply, err := s.apiv1.TokenStatusListJWKS(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
 // endpointTokenStatusListAggregation handles GET /.well-known/statuslist-aggregation
 // Returns a JSON array of URIs linking to all Status List Tokens.
 func (s *Service) endpointTokenStatusListAggregation(ctx context.Context, c *gin.Context) (any, error) {
