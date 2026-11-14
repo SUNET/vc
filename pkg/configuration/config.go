@@ -263,6 +263,22 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
 	}
 
+	// An auth stanza left behind by a deployment that has since closed
+	// dynamic client registration is dropped rather than validated. Its
+	// required_if rules, and the struct-level check that refuses auth
+	// settings with no mode to activate them, exist to stop a half-written
+	// policy from leaving /register open. With registration closed there is
+	// no /register to leave open, and holding the operator to a policy for
+	// a capability they have switched off means maintaining configuration
+	// for a feature that does nothing - including keeping a retired token
+	// file on disk to satisfy required_if.
+	//
+	// Same reason the stanzas above are nilled out: validation should not
+	// refuse a config over a section this process will never read. Flip
+	// registration back on and the stanza is kept and checked again, at the
+	// startup where it decides something.
+	dropInertRegistrationAuth(cfg, log)
+
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
 		return nil, err
 	}
@@ -1193,6 +1209,26 @@ func checkPresentationScopeFromScope(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("presentation from references unknown credential_metadata entries: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// dropInertRegistrationAuth removes the verifier's dynamic registration auth
+// stanza when dynamic client registration is closed, before validation looks
+// at it.
+//
+// Nothing reads it in that state: the middleware that would consult it is not
+// built, and the endpoints it would protect are not served.
+func dropInertRegistrationAuth(cfg *model.Cfg, log *logger.Log) {
+	if cfg.Verifier == nil || cfg.Verifier.Outbound.OIDCProvider == nil {
+		return
+	}
+
+	oidcProvider := cfg.Verifier.Outbound.OIDCProvider
+	if oidcProvider.DynamicRegistrationAuth == nil || oidcProvider.DynamicRegistrationEnabled() {
+		return
+	}
+
+	oidcProvider.DynamicRegistrationAuth = nil
+	log.Info("Ignoring dynamic_registration_auth: dynamic client registration is closed, so nothing it configures is reachable")
 }
 
 // LoadSecrets reads and parses the secrets YAML file.

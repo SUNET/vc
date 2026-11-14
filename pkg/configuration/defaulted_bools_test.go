@@ -39,6 +39,8 @@ verifier:
   outbound:
     oidc_provider:
       enable_userinfo: false
+      dynamic_registration:
+        enabled: false
 `)
 
 	cfg := &model.Cfg{}
@@ -49,6 +51,8 @@ verifier:
 		"fail_open: false must survive defaults.Set - a verifier told to fail CLOSED on an unreachable status list was failing open")
 	assert.False(t, model.BoolVal(cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo, true),
 		"enable_userinfo: false must survive defaults.Set")
+	assert.False(t, cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled(),
+		"dynamic_registration.enabled: false must survive defaults.Set - an OP told to close client registration would otherwise keep serving /register")
 }
 
 // ... and saying nothing still gets the documented default, so the fix is
@@ -71,6 +75,8 @@ verifier:
 		"an absent fail_open must still default to true")
 	assert.True(t, model.BoolVal(cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo, true),
 		"an absent enable_userinfo must still default to true")
+	assert.True(t, cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled(),
+		"an absent dynamic_registration block must still offer client registration")
 }
 
 // Every other defaulted-true bool in the config is already a pointer

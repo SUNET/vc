@@ -68,6 +68,15 @@ verifier:
       session_duration: 3600
       access_token_duration: 3600
       id_token_duration: 3600
+      # Dynamic Client Registration (RFC 7591) and the client configuration
+      # endpoints that go with it (RFC 7592). Offered unless turned off:
+      # set enabled: false and /register stops being served (404) and
+      # drops out of the discovery document, leaving static_clients as the
+      # only way a relying party gets in. Clients registered earlier keep
+      # working. dynamic_registration_auth below is then inert, so the
+      # registration credential can be retired with it.
+      # dynamic_registration:
+      #   enabled: false
       # Dynamic Client Registration authorization policy for POST /register
       # Modes: open (default), static (file bearer token), jwt (JWKS validation)
       # The token file must hold a single RFC 6750 b64token on one line

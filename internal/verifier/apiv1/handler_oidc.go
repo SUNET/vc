@@ -561,9 +561,16 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	if err != nil {
 		return nil, err
 	}
-	registrationEndpoint, err := join("/register")
-	if err != nil {
-		return nil, err
+	// Left empty, and so omitted from the document, when the deployment has
+	// closed registration: the endpoint is not served, and advertising one
+	// that answers 404 sends every client that reads this document down a
+	// path that cannot work.
+	var registrationEndpoint string
+	if c.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled() {
+		registrationEndpoint, err = join("/register")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	metadata := &DiscoveryMetadata{

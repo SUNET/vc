@@ -1393,6 +1393,14 @@ type OIDCOP struct {
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty" validate:"omitempty,dive"`
 
+	// DynamicRegistration configures whether this OP offers OAuth 2.0
+	// Dynamic Client Registration (RFC 7591) and the client configuration
+	// endpoints that go with it (RFC 7592).
+	//
+	// Omitted, registration is offered, which is what this OP has always
+	// done.
+	DynamicRegistration *DynamicRegistrationConfig `yaml:"dynamic_registration,omitempty" validate:"omitempty"`
+
 	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
 	// Modes:
 	//   - open: no authorization required (default)
@@ -1401,6 +1409,57 @@ type OIDCOP struct {
 	//
 	// Future option (not implemented yet): introspection via external authorization server.
 	DynamicRegistrationAuth *DynamicRegistrationAuthConfig `yaml:"dynamic_registration_auth,omitempty" validate:"omitempty"`
+}
+
+// DynamicRegistrationConfig configures whether the verifier-OP offers dynamic client registration at all.
+//
+// How a registration request is authorized, once the endpoint is served, is
+// dynamic_registration_auth's business. The two stay separate blocks because
+// "nobody may register" and "whoever holds this token may register" are
+// separate decisions, and because folding the older block into this one would
+// silently drop the key from every deployment that already sets it: the config
+// loader ignores YAML keys it does not know.
+type DynamicRegistrationConfig struct {
+	// Enabled controls whether POST /register and GET/PUT/DELETE
+	// /register/{client_id} are served, and whether registration_endpoint
+	// is advertised in the discovery document.
+	//
+	// True by default, which is what the verifier has always done. When
+	// false, those routes are not registered at all, so they answer 404,
+	// and no client is invited to try one. Relying parties then come from
+	// static_clients alone, which is what a deployment with a fixed, known
+	// set of RPs wants: nothing reachable from the network can add one.
+	//
+	// It closes registration rather than undoing it. Clients registered
+	// while it was enabled keep working; what stops is registering new
+	// ones and reading or editing an existing one over RFC 7592.
+	//
+	// It also turns dynamic_registration_auth off, startup checks and all,
+	// so a deployment that has closed registration can retire its
+	// registration credential instead of keeping the file around to
+	// satisfy a check that now guards nothing.
+	//
+	// A POINTER, so that an explicit false survives: defaults.Set fills any
+	// field still at its zero value, and false is the zero value of a bool,
+	// so a plain bool with default:"true" could never be turned off at all
+	// (SUNET/vc#753).
+	Enabled *bool `yaml:"enabled" default:"true"`
+}
+
+// DynamicRegistrationEnabled reports whether the verifier-OP offers dynamic
+// client registration, so that the route table and the discovery document
+// answer that question from one place.
+//
+// A nil receiver, or no dynamic_registration block, answers true: those
+// deployments served the registration endpoints before this switch existed,
+// and adding the switch is not the moment to change what an untouched
+// configuration does. Closing registration is something an operator asks for.
+func (o *OIDCOP) DynamicRegistrationEnabled() bool {
+	if o == nil || o.DynamicRegistration == nil {
+		return true
+	}
+
+	return BoolVal(o.DynamicRegistration.Enabled, true)
 }
 
 // DynamicRegistrationAuthConfig configures how the verifier authorizes dynamic client registration requests.
