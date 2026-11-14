@@ -356,7 +356,6 @@ func NewValidator() (*validator.Validate, error) {
 		d := sl.Current()
 		count := 0
 		for _, f := range d.Fields() {
-			f := f
 			if f.Kind() == reflect.Pointer && !f.IsNil() {
 				count++
 			}

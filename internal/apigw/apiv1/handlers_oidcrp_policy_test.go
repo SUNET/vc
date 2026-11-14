@@ -195,6 +195,29 @@ func TestOIDCRPCallbackAppliesIssuancePolicy(t *testing.T) {
 	}
 }
 
+// TestOIDCRPCallbackRefusesUserInfoSubMismatch covers OIDC Core §5.3.2: UserInfo
+// claims about another subject must not merge into the ID token's claims. The
+// mock's UserInfo answers for policy-test-user, and the acr passes the policy
+// so the refusal comes from the sub check.
+func TestOIDCRPCallbackRefusesUserInfoSubMismatch(t *testing.T) {
+	client, service := newPolicyGateTestClient(t, map[string]any{"sub": "another-user", "acr": "loa3"})
+
+	ctx := t.Context()
+	authReq, err := service.InitiateAuth(ctx, "pid", nil, nil)
+	require.NoError(t, err)
+
+	session, err := service.GetSession(ctx, authReq.State)
+	require.NoError(t, err)
+
+	_, err = client.OIDCRPCallback(ctx, &OIDCRPCallbackRequest{
+		Code:  "policy-test-code|" + session.Nonce,
+		State: authReq.State,
+	}, service)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not match ID token sub")
+}
+
 // TestOIDCRPCallbackDeletesSessionOnPolicyDenial pins the cleanup that the
 // denial path used to skip.
 //

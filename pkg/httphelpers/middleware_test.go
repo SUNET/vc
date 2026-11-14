@@ -187,6 +187,41 @@ func TestCustomBranding_PassesThroughUnrelatedPaths(t *testing.T) {
 	assert.Equal(t, "other-content", w.Body.String())
 }
 
+// The registry's admin GUI mounts its assets at /admin/static rather than
+// /static (internal/registry/httpserver/service.go), so a middleware that
+// matched /static alone left that one page on the built-in logo whatever the
+// operator configured.
+func TestCustomBranding_ServesTheAdminGUIAssetPaths(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+
+	dir := t.TempDir()
+	logoPath := filepath.Join(dir, "logo.png")
+	faviconPath := filepath.Join(dir, "favicon.png")
+	require.NoError(t, os.WriteFile(logoPath, []byte("fake-logo"), 0o644))       // #nosec G306
+	require.NoError(t, os.WriteFile(faviconPath, []byte("fake-favicon"), 0o644)) // #nosec G306
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: "/admin/static/logo.png", want: "fake-logo"},
+		{path: "/admin/static/favicon.png", want: "fake-favicon"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			r := gin.New()
+			r.Use(m.CustomBranding(model.Branding{LogoPath: logoPath, FaviconPath: faviconPath}))
+			r.GET(tc.path, func(c *gin.Context) {
+				c.String(http.StatusOK, "built-in")
+			})
+
+			w := performRequest(r, "GET", tc.path, nil)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tc.want, w.Body.String())
+		})
+	}
+}
+
 // ---------- extractBodyResourcePairs tests ----------
 
 func TestExtractBodyResourcePairs_TopLevel(t *testing.T) {

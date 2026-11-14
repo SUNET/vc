@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/gin-contrib/sessions"
@@ -20,6 +20,9 @@ const adminSessionKey = "admin_authenticated"
 // anonymousAdminSubject is the admin_subject /ui/login grants when no OIDC
 // is configured.
 const anonymousAdminSubject = "anonymous"
+
+// spocpService is the service name in the SPOCP rules of this service.
+const spocpService = "apigw"
 
 func (s *Service) endpointAdminUI(ctx context.Context, c *gin.Context) (any, error) {
 	c.HTML(http.StatusOK, "admin.html", nil)
@@ -143,20 +146,24 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			}
 		}
 
-		// Resolve allowed resources from SPOCP rules.
-		allowedSources := httphelpers.AllowedAuthenticSources(s.spocpEngine, subject)
-		pairs := httphelpers.ResolveAllowedResources(s.spocpEngine, subject)
-
-		// When allowedSources is nil (wildcard rule = unrestricted),
-		// fetch all authentic sources from the database for the UI dropdown.
-		if allowedSources == nil {
-			if dbSources, err := s.apiv1.ListAuthenticSources(ctx); err == nil && len(dbSources) > 0 {
-				allowedSources = dbSources
-			}
+		// This page serves every route, so it shows the union over all of them.
+		reach, err := resourcereach.ResolveOnAnyRoute(s.spocpEngine, spocpService, subject)
+		if err != nil {
+			return nil, err
 		}
 
+		// A source form other than an atom is known through the stored sources.
+		var storedSources []string
+		if !reach.Nothing() {
+			storedSources, err = s.apiv1.ListAuthenticSources(ctx)
+			if err != nil {
+				s.log.Error(err, "admin status: list authentic sources")
+			}
+		}
+		allowedSources := reach.SourcesAmong(storedSources)
+
 		// Filter scopes to only those the user is allowed to access.
-		scopes := filterAllowedScopes(allScopes, pairs)
+		scopes := filterAllowedScopes(allScopes, reach)
 
 		// Determine if running without authentication (anonymous mode).
 		authEnabled := s.cfg.APIGW != nil && (s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable || s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable)
@@ -184,7 +191,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			"scopes":                    scopes,
 			"scope_templates":           scopeTemplates,
 			"allowed_authentic_sources": allowedSources,
-			"has_identity_mapping":      hasIdentityMappingScope(pairs),
+			"has_identity_mapping":      reach.ReachesScope(resourcereach.IdentityMappingScope),
 			"csrf_token":                session.Get("csrf_token"),
 			"unrestricted":              !authEnabled,
 			"preauth_scopes":            preauthScopes,
@@ -193,40 +200,15 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 	return gin.H{"authenticated": false}, nil
 }
 
-// filterAllowedScopes returns only configured scopes that the user's SPOCP rules permit.
-// If pairs is empty (no resource constraints) or any pair has Scope "*", all scopes are returned.
-func filterAllowedScopes(allScopes []string, pairs []httphelpers.ResourcePair) []string {
-	if len(pairs) == 0 {
-		return allScopes
-	}
-	allowed := map[string]bool{}
-	for _, p := range pairs {
-		if p.Scope == "*" {
-			return allScopes
-		}
-		allowed[p.Scope] = true
-	}
-	var result []string
-	for _, s := range allScopes {
-		if allowed[s] {
-			result = append(result, s)
+// filterAllowedScopes returns the configured scopes that reach accepts.
+func filterAllowedScopes(allScopes []string, reach resourcereach.Reach) []string {
+	scopes := make([]string, 0, len(allScopes))
+	for _, scope := range allScopes {
+		if reach.ReachesScope(scope) {
+			scopes = append(scopes, scope)
 		}
 	}
-	return result
-}
-
-// hasIdentityMappingScope returns true when the SPOCP pairs grant the
-// synthetic "identity_mapping" scope (or a wildcard that covers it).
-func hasIdentityMappingScope(pairs []httphelpers.ResourcePair) bool {
-	if len(pairs) == 0 {
-		return true // no resource constraints — unrestricted
-	}
-	for _, p := range pairs {
-		if p.Scope == "*" || p.Scope == "identity_mapping" {
-			return true
-		}
-	}
-	return false
+	return scopes
 }
 
 // buildClaimTemplate creates a nested map from VCTM claims with empty string values

@@ -55,16 +55,12 @@ func RunPostgresAndMariaDBContract[S Closer](t *testing.T, tracerName string, ne
 	t.Helper()
 
 	t.Run("Postgres", func(t *testing.T) {
-		pgCfg, cleanup := PostgresConfig(t)
-		defer cleanup()
-		cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "postgres", Postgres: pgCfg}}}
+		cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "postgres", Postgres: PostgresConfig(t)}}}
 		checkFn(t, NewServiceForTest(t, tracerName, cfg, newFn))
 	})
 
 	t.Run("MariaDB", func(t *testing.T) {
-		mdbCfg, cleanup := MariaDBConfig(t)
-		defer cleanup()
-		cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "mariadb", MariaDB: mdbCfg}}}
+		cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "mariadb", MariaDB: MariaDBConfig(t)}}}
 		checkFn(t, NewServiceForTest(t, tracerName, cfg, newFn))
 	})
 }

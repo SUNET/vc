@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -102,10 +103,8 @@ func NewTS12PaymentTransactionData(payload TS12PaymentPayload, credentialIDs []s
 	if len(credentialIDs) == 0 {
 		return nil, fmt.Errorf("credential_ids must not be empty")
 	}
-	for _, id := range credentialIDs {
-		if id == "" {
-			return nil, fmt.Errorf("credential_ids must not contain an empty id")
-		}
+	if slices.Contains(credentialIDs, "") {
+		return nil, fmt.Errorf("credential_ids must not contain an empty id")
 	}
 	if len(hashAlgs) == 0 {
 		hashAlgs = []string{TransactionDataHashAlgDefault}
