@@ -140,6 +140,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := refuseRemovedSeedSettings(configFile, &seedConfigProbe{}); err != nil {
+		return nil, err
+	}
+
 	// Apply defaults AFTER unmarshalling so that nested structs inside
 	// pointer fields (e.g. Issuer.APIServer.Addr) receive their default
 	// values.
@@ -198,7 +202,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	// Before the service switch below nils out sibling stanzas, since the
 	// allowlist lives in the issuer's.
-	if err := w3cStartupChecks(cfg, serviceName, log); err != nil {
+	if err := w3cStartupChecks(ctx, cfg, serviceName, log); err != nil {
 		return nil, err
 	}
 
@@ -787,14 +791,83 @@ func customTypes(types []string) []string {
 //
 // Separate gate for the second half: the first reads config, the second
 // reaches the network. See servicesResolvingW3CContexts.
-func w3cStartupChecks(cfg *model.Cfg, serviceName string, log *logger.Log) error {
+func w3cStartupChecks(ctx context.Context, cfg *model.Cfg, serviceName string, log *logger.Log) error {
+	if err := checkJSONLDContextSources(cfg); err != nil {
+		return err
+	}
 	if serviceName == "issuer" {
 		if err := checkIssuerContextAllowlist(cfg); err != nil {
 			return err
 		}
 	}
 	if servicesResolvingW3CContexts[serviceName] {
-		return resolveW3CContexts(cfg, serviceName, log)
+		return resolveW3CContexts(ctx, cfg, serviceName, log)
+	}
+	return nil
+}
+
+// checkJSONLDContextSources refuses a common.jsonld_contexts.sources entry
+// that cannot name a document.
+//
+// Checked for EVERY service, not only the two that resolve contexts: the
+// stanza is in the shared config file, and a typo an apigw silently ignores
+// is one the operator finds out about when the verifier restarts.
+func checkJSONLDContextSources(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	var problems []string
+	for _, url := range slices.Sorted(maps.Keys(cfg.Common.JSONLDContexts.Sources)) {
+		source := cfg.Common.JSONLDContexts.Sources[url]
+		switch {
+		case source.File == "" && source.URL == "":
+			problems = append(problems, fmt.Sprintf("common.jsonld_contexts.sources.%s: set either file or url", url))
+		case source.File != "" && source.URL != "":
+			// Refused rather than resolved by precedence. Both are
+			// deliberate acts by the operator, and silently using one
+			// means the vetted copy they meant to serve may be the one
+			// that was ignored.
+			problems = append(problems, fmt.Sprintf("common.jsonld_contexts.sources.%s: file and url are alternatives, set one", url))
+		case source.File != "":
+			// Read at startup anyway under required and best_effort, but
+			// not under lazy - where an unreadable path would otherwise
+			// surface at the first presentation that needed it.
+			//
+			// OPENED, not stat'd. os.Stat answers only that the path
+			// resolves: a directory passes it, and so does a file whose
+			// mode or owner stops this process reading it. Either one
+			// then failed at the first credential that needed the
+			// context, which is the moment this check exists to move
+			// away from.
+			if err := checkReadableFile(source.File); err != nil {
+				problems = append(problems, fmt.Sprintf("common.jsonld_contexts.sources.%s: file %q cannot be read: %v", url, source.File, err))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// checkReadableFile reports whether a path names a regular file this
+// process can actually open and read.
+func checkReadableFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New("is a directory, not a JSON-LD document")
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("is not a regular file (mode %s)", info.Mode())
 	}
 	return nil
 }
@@ -863,11 +936,22 @@ func checkIssuerContextAllowlist(cfg *model.Cfg) error {
 // what a context endpoint does afterwards - redirect, change, disappear -
 // cannot affect an issued credential.
 //
-// The cost is the network dependency at boot, which is the deliberate
-// trade-off: a deployment configuring credential_contexts must have those
-// hosts reachable when the service starts.
-func resolveW3CContexts(cfg *model.Cfg, serviceName string, log *logger.Log) error {
+// How hard a failure that is now belongs to the operator, through
+// common.jsonld_contexts. The boot dependency above is what "required"
+// means and stays the issuer's default, because an issuer that cannot
+// resolve a context cannot sign the credential either. A verifier defaults
+// to "best_effort": it starts, reports itself NOT READY and names the
+// context it is waiting for, and a background loop keeps trying - an
+// unreachable context costs it one credential type, which does not justify
+// a crash loop that takes every other credential type down with it.
+//
+// Pinned contexts are also re-fetched on common.jsonld_contexts
+// .refresh_interval, keeping the last copy that loaded when a refresh
+// fails, so neither a context that changes nor one that disappears can
+// stop a running service.
+func resolveW3CContexts(ctx context.Context, cfg *model.Cfg, serviceName string, log *logger.Log) error {
 	loader := credential.GetGlobalLoader()
+	loader.SetContextSources(contextSources(cfg))
 
 	// Every context the issuer may be ASKED to dereference at request time
 	// is pinned here too, transitively.
@@ -899,50 +983,142 @@ func resolveW3CContexts(cfg *model.Cfg, serviceName string, log *logger.Log) err
 	// the issuer's startup network dependency, and failing to start when an
 	// issuer-only context was unavailable. It has no MakeVC20 request to
 	// serve and dereferences nothing from this list.
-	if serviceName == "issuer" && cfg.Issuer != nil {
-		for _, contextURL := range cfg.Issuer.JSONLDContextAllowlist {
-			if err := loader.PinRemoteContext(contextURL); err != nil {
-				return fmt.Errorf("issuer.jsonld_context_allowlist: %q could not be loaded, so a request naming it could not be signed: %w", contextURL, err)
+	var groups []credential.PinGroup
+	if serviceName == "issuer" && cfg.Issuer != nil && len(cfg.Issuer.JSONLDContextAllowlist) > 0 {
+		groups = append(groups, credential.PinGroup{
+			Name:        "issuer.jsonld_context_allowlist",
+			URLs:        cfg.Issuer.JSONLDContextAllowlist,
+			Consequence: "so a request naming it could not be signed",
+		})
+	}
+
+	if cfg.Common != nil {
+		for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+			cm := cfg.Common.CredentialMetadata[scope]
+			if cm == nil || !openid4vp.IsW3CVCFormatIdentifier(cm.Format) || len(cm.CredentialContexts) == 0 {
+				continue
 			}
-			log.Info("pinned JSON-LD context from the issuer allowlist", "url", contextURL)
+			groups = append(groups, credential.PinGroup{
+				Name:        "common.credential_metadata." + scope,
+				Field:       "credential_contexts",
+				URLs:        cm.CredentialContexts,
+				Consequence: contextConsequence(serviceName),
+				Verify:      func() error { return checkExpandedTypes(scope, cm) },
+			})
 		}
 	}
 
+	// ExpandTypes always prepends the VC 2.0 base context, and an
+	// operator may configure a copy of THAT. Installing the source evicts
+	// the embedded document, which is pinned with no expiry, so without
+	// this the override would be loaded lazily on the ordinary one-hour
+	// TTL - outside the pin and refresh policy that every other context
+	// here obeys, and free to expire or change while readiness still
+	// passes. Added only when a source is configured for it; otherwise
+	// the embedded copy is already pinned and there is nothing to do.
+	if hasContextSource(cfg, credential.ContextV2) {
+		groups = append(groups, credential.PinGroup{
+			Name:        "common.jsonld_contexts.sources",
+			URLs:        []string{credential.ContextV2},
+			Consequence: "so no W3C credential of any scope can be processed",
+		})
+	}
+
+	pinner := credential.NewPinner(loader, pinnerOptions(cfg, serviceName, log))
+	if err := pinner.Pin(ctx, groups); err != nil {
+		return err
+	}
+	pinner.Start(ctx)
+	credential.SetGlobalPinner(pinner)
+	return nil
+}
+
+// contextConsequence says what THIS service loses when a context will not
+// load.
+//
+// One sentence per service rather than one for both. The text an operator
+// reads decides where they look, and telling a verifier operator that
+// credentials "cannot be signed" sends them to a service that is not
+// running and a key that is not involved - the verifier signs nothing.
+func contextConsequence(serviceName string) string {
+	if serviceName == "issuer" {
+		return "so credentials of this type cannot be signed"
+	}
+	return "so presentations of this credential type cannot be verified"
+}
+
+// hasContextSource reports whether the operator configured their own copy
+// of one particular context.
+func hasContextSource(cfg *model.Cfg, url string) bool {
 	if cfg.Common == nil {
+		return false
+	}
+	_, ok := cfg.Common.JSONLDContexts.Sources[url]
+	return ok
+}
+
+// contextSources converts the operator's configured copies into the form
+// the loader takes.
+func contextSources(cfg *model.Cfg) map[string]credential.ContextSource {
+	if cfg.Common == nil || len(cfg.Common.JSONLDContexts.Sources) == 0 {
 		return nil
 	}
+	out := make(map[string]credential.ContextSource, len(cfg.Common.JSONLDContexts.Sources))
+	for url, source := range cfg.Common.JSONLDContexts.Sources {
+		out[url] = credential.ContextSource{File: source.File, URL: source.URL}
+	}
+	return out
+}
 
-	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
-		cm := cfg.Common.CredentialMetadata[scope]
-		if cm == nil || !openid4vp.IsW3CVCFormatIdentifier(cm.Format) || len(cm.CredentialContexts) == 0 {
-			continue
-		}
+// pinnerOptions translates the operator's stanza into the pinner's own
+// vocabulary.
+func pinnerOptions(cfg *model.Cfg, serviceName string, log *logger.Log) credential.PinnerOptions {
+	var jc model.JSONLDContexts
+	if cfg.Common != nil {
+		jc = cfg.Common.JSONLDContexts
+	}
+	return credential.PinnerOptions{
+		Policy: credential.PinPolicy(jc.PolicyFor(serviceName)),
+		Retry: credential.RetryPolicy{
+			InitialInterval: jc.Retry.InitialInterval,
+			MaxInterval:     jc.Retry.MaxInterval,
+			Multiplier:      jc.Retry.Multiplier,
+			BootAttempts:    jc.Retry.BootAttempts,
+		},
+		RefreshInterval: jc.RefreshEvery(),
+		Log:             log,
+	}
+}
 
-		for _, contextURL := range cm.CredentialContexts {
-			if err := loader.PinRemoteContext(contextURL); err != nil {
-				return fmt.Errorf("common.credential_metadata.%s: credential_contexts %q could not be loaded, so credentials of this type cannot be signed: %w", scope, contextURL, err)
-			}
-			log.Info("pinned JSON-LD context", "scope", scope, "url", contextURL)
-		}
+// checkExpandedTypes is the half of the W3C configuration check that cannot
+// be answered without the context documents: whether the contexts actually
+// DEFINE the terms this scope issues, and whether the query this deployment
+// builds can be satisfied by them.
+//
+// Split out of resolveW3CContexts so it can run at the moment the contexts
+// become available, which under a non-required startup policy is not
+// startup. Under "required" it still runs at boot and still fails it;
+// under "best_effort" a failure here is reported through readiness instead,
+// because the process has already been allowed to start; under "lazy" it
+// does not run at all, which is stated in the log at startup.
+func checkExpandedTypes(scope string, cm *model.CredentialMetadata) error {
+	expanded, err := credential.ExpandTypes(cm.CredentialContexts, cm.W3CTypes())
+	if err != nil {
+		return fmt.Errorf("common.credential_metadata.%s: credential_types could not be expanded against credential_contexts: %w", scope, err)
+	}
 
-		expanded, err := credential.ExpandTypes(cm.CredentialContexts, cm.W3CTypes())
-		if err != nil {
-			return fmt.Errorf("common.credential_metadata.%s: credential_types could not be expanded against credential_contexts: %w", scope, err)
-		}
+	// Every configured term must survive expansion. One that does not is
+	// undefined by every configured context, and the credential would
+	// carry a type identifying nothing.
+	if missing := undefinedTypes(cm.W3CTypes(), expanded); len(missing) > 0 {
+		return fmt.Errorf("common.credential_metadata.%s: credential_contexts defines none of %s - the issued credential's type would expand to a relative IRI", scope, strings.Join(missing, ", "))
+	}
 
-		// Every configured term must survive expansion. One that does not is
-		// undefined by every configured context, and the credential would
-		// carry a type identifying nothing.
-		if missing := undefinedTypes(cm.W3CTypes(), expanded); len(missing) > 0 {
-			return fmt.Errorf("common.credential_metadata.%s: credential_contexts defines none of %s - the issued credential's type would expand to a relative IRI", scope, strings.Join(missing, ", "))
-		}
-
-		// And the query this deployment builds has to be answerable by the
-		// credential it issues. MatchTypeValues is satisfied by any ONE
-		// alternative, so one being satisfiable is enough.
-		if alternatives := cm.W3CTypeValuesForCheck(); len(alternatives) > 0 && !anyAlternativeSatisfied(alternatives, expanded) {
-			return fmt.Errorf("common.credential_metadata.%s: no credential_type_values alternative is satisfied by the types this scope issues (expanded: %s) - the deployment would issue credentials its own verifier refuses", scope, strings.Join(expanded, ", "))
-		}
+	// And the query this deployment builds has to be answerable by the
+	// credential it issues. MatchTypeValues is satisfied by any ONE
+	// alternative, so one being satisfiable is enough.
+	if alternatives := cm.W3CTypeValuesForCheck(); len(alternatives) > 0 && !anyAlternativeSatisfied(alternatives, expanded) {
+		return fmt.Errorf("common.credential_metadata.%s: no credential_type_values alternative is satisfied by the types this scope issues (expanded: %s) - the deployment would issue credentials its own verifier refuses", scope, strings.Join(expanded, ", "))
 	}
 	return nil
 }
@@ -1259,6 +1435,10 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	secrets := &model.Secrets{}
 	if err := yaml.Unmarshal(data, secrets); err != nil {
 		return nil, fmt.Errorf("cannot parse secrets file %q: %w", cleanPath, err)
+	}
+
+	if err := refuseRemovedSeedSettings(data, &seedSecretsProbe{}); err != nil {
+		return nil, fmt.Errorf("%s: %w", cleanPath, err)
 	}
 
 	return secrets, nil

@@ -35,22 +35,23 @@ Shared configuration used across all services.
 
 > **Constraint** (`mongo`, `sql`, `ha`): Mongo.URI is required by registry unconditionally, since it connects to MongoDB whatever SQL.Backend says. For apigw and verifier it is required when SQL.Backend is 'mongo' (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo), and not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled). The issuer never needs it, having no database at all. Enforced in configuration.New rather than as a struct validation, since it depends on the running service.
 
-| Field                     | Type     | Description                                                                                                                                                                                                                                                                                                                                             | Example                  | Default | Required |
-| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
-| `production`              | `bool`   | Production mode                                                                                                                                                                                                                                                                                                                                         | -                        | `true`  | No       |
-| `log`                     | `object` | Logging configuration                                                                                                                                                                                                                                                                                                                                   | -                        | -       | No       |
-| `mongo`                   | `object` | MongoDB configuration                                                                                                                                                                                                                                                                                                                                   | -                        | -       | No       |
-| `sql`                     | `object` | Relational database configuration, used by services that support a relational storage backend as an alternative to MongoDB.                                                                                                                                                                                                                             | -                        | -       | No       |
-| `tracing`                 | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                                                                                     | -                        | -       | No       |
-| `metrics`                 | `object` | OpenTelemetry metrics configuration                                                                                                                                                                                                                                                                                                                     | -                        | -       | No       |
-| `kafka`                   | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                                                                                      | -                        | -       | No       |
-| `secret_file_path`        | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                                                                                        | `"/etc/vc/secrets.yaml"` | -       | No       |
-| `skip_secrets_perm_check` | `bool`   | SkipSecretsPermCheck disables file permission validation on the secrets file. Required for platforms like Fly.io that mount files as 0755.                                                                                                                                                                                                              | -                        | `false` | No       |
-| `ha`                      | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                                                                                    | -                        | -       | No       |
-| `credential_registry`     | `object` | An optional TS11 credential metadata registry client, used as an add-on to (not a replacement for) the existing vctm_file_path/vctm_url/mddl_file_path/mddl_url per-scope configuration: disabled by default, so existing deployments are unaffected until this is explicitly enabled and at least one scope sets vct or doctype instead of a file/URL. | -                        | -       | No       |
-| `openid4vp_compat`        | `object` | Opt-in switches for wallets that predate OpenID4VP 1.0. Shared rather than per-service because both the verifier and the apigw build client_metadata, and a wallet cannot meaningfully meet two different answers from one deployment.                                                                                                                  | -                        | -       | No       |
-| `branding`                | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                                                                                  | -                        | -       | No       |
-| `credential_metadata`     | `object` | OAuth2 scope values to their credential configuration, required by apigw, issuer, and verifier Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope Each entry contains the VCTM reference, format, and other configuration for that credential type                                                                 | -                        | -       | No       |
+| Field                     | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example                  | Default | Required |
+| ------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
+| `production`              | `bool`   | Production mode                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | -                        | `true`  | No       |
+| `log`                     | `object` | Logging configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | -                        | -       | No       |
+| `mongo`                   | `object` | MongoDB configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | -                        | -       | No       |
+| `sql`                     | `object` | Relational database configuration, used by services that support a relational storage backend as an alternative to MongoDB.                                                                                                                                                                                                                                                                                                                                                                                                                                     | -                        | -       | No       |
+| `tracing`                 | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | -                        | -       | No       |
+| `metrics`                 | `object` | OpenTelemetry metrics configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | -                        | -       | No       |
+| `kafka`                   | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | -                        | -       | No       |
+| `secret_file_path`        | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                                                                                                                                                                                                                                                                                                | `"/etc/vc/secrets.yaml"` | -       | No       |
+| `skip_secrets_perm_check` | `bool`   | SkipSecretsPermCheck disables file permission validation on the secrets file. Required for platforms like Fly.io that mount files as 0755.                                                                                                                                                                                                                                                                                                                                                                                                                      | -                        | `false` | No       |
+| `ha`                      | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                                                                                                                                                                                                                                                                                            | -                        | -       | No       |
+| `credential_registry`     | `object` | An optional TS11 credential metadata registry client, used as an add-on to (not a replacement for) the existing vctm_file_path/vctm_url/mddl_file_path/mddl_url per-scope configuration: disabled by default, so existing deployments are unaffected until this is explicitly enabled and at least one scope sets vct or doctype instead of a file/URL.                                                                                                                                                                                                         | -                        | -       | No       |
+| `openid4vp_compat`        | `object` | Opt-in switches for wallets that predate OpenID4VP 1.0. Shared rather than per-service because both the verifier and the apigw build client_metadata, and a wallet cannot meaningfully meet two different answers from one deployment.                                                                                                                                                                                                                                                                                                                          | -                        | -       | No       |
+| `jsonld_contexts`         | `object` | How this deployment obtains the JSON-LD contexts that common.credential_metadata.<scope>.credential_contexts names: whether a context that cannot be fetched stops the service starting, how fetching is retried, how often a pinned context is refreshed, and where an operator-vetted copy may be read from instead. Shared rather than per-service because the context documents are a property of the credentials this deployment handles, not of one process; the startup POLICY differs per service and is expressed by startup_policy_per_service below. | -                        | -       | No       |
+| `branding`                | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | -                        | -       | No       |
+| `credential_metadata`     | `object` | OAuth2 scope values to their credential configuration, required by apigw, issuer, and verifier Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope Each entry contains the VCTM reference, format, and other configuration for that credential type                                                                                                                                                                                                                                                                         | -                        | -       | No       |
 
 ### `log`
 
@@ -81,7 +82,6 @@ Shared configuration used across all services.
 
 > **Constraint** (`postgres`, `mariadb`): When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs.
 
-support a relational storage backend as an alternative to MongoDB.
 Backend selection is config-time only: a running service uses exactly
 one backend for its whole lifetime.
 
@@ -207,6 +207,8 @@ stay in-process and do not cross nodes.
 
 > **Path:** `.common.credential_registry`
 
+When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
+
 | Field              | Type       | Description                                                                                                                                                                                                   | Example | Default | Required         |
 | ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
 | `enable`           | `bool`     | Registry-backed resolution for any scope that sets vct or doctype instead of a local file/URL. Existing vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes are entirely unaffected either way. | -       | `false` | No               |
@@ -241,6 +243,51 @@ sets none of them is an OpenID4VP 1.0 deployment.
 | ------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `send_legacy_jarm_encryption_params` | `bool` | SendLegacyJARMEncryptionParams re-adds the draft-era authorization_encrypted_response_alg and authorization_encrypted_response_enc members to client_metadata, alongside the encrypted_response_enc_values_supported that replaced them. Off by default, and deliberately: OpenID4VP 1.0 defines client_metadata as a closed set of members, so a request carrying these two is non-conformant - the OIDF conformance suite reports them as unknown parameters and fails the test. Turn this on only for a deployment that still has to reach a draft-era wallet, and expect conformance to fail for as long as it is on.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | -       | `false` | No       |
 | `compact_w3c_type_values`            | `bool` | CompactW3CTypeValues sends the type_values of an ldp_vc credential query to the wallet as compact terms ("IndividualIDCredential") instead of fully expanded IRIs ("https://schemas.example.org/vocab#IndividualIDCredential"). Off by default, and deliberately: OpenID4VP 1.0 B.3.2 defines type_values as expanded IRIs, and a conformant wallet finds no credential for a compact name. Some deployed wallets match the credential's own compact `type` array instead, so they offer nothing for the conformant request. Turn this on only for a deployment that has to reach such a wallet. Only the request object sent to the wallet changes. Queries, templates, the session and the response check stay in expanded form, so a returned credential is still matched by its expanded types. The compact term sent is the part of the IRI after its last '#' or, without one, its last '/', which is the term a credential's context defines for it in the common case (the W3C base context, Accredify's vocab); a type whose context names it differently needs the wallet fixed instead. | -       | `false` | No       |
+
+### `jsonld_contexts`
+
+> **Path:** `.common.jsonld_contexts`
+
+The documents in question are the ones this deployment's W3C scopes name
+through credential_contexts.
+
+Before this stanza existed the behaviour was JSONLDContextRequired for
+every service, with one attempt and no refresh: a verifier whose
+credential_contexts host was briefly unreachable crash-looped, although
+it signs nothing. The defaults here keep that behaviour for the issuer
+and relax it for the verifier.
+
+| Field                        | Type                                   | Description                                                                                                                                                                                                                                                                                                                                                                                             | Example                 | Default | Required |
+| ---------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
+| `startup_policy`             | `string` (required\|best_effort\|lazy) | StartupPolicy applies to every service that resolves contexts (issuer and verifier). Empty means the per-service default: "required" for the issuer, "best_effort" for the verifier. A deployment that sets this sets it for BOTH, which is why StartupPolicyPerService exists.                                                                                                                         | `best_effort`           | -       | No       |
+| `startup_policy_per_service` | `object`                               | StartupPolicyPerService overrides StartupPolicy for one service, keyed by service name ("issuer", "verifier"). Highest precedence of the three: this, then StartupPolicy, then the built-in default for that service.                                                                                                                                                                                   | `verifier: best_effort` | -       | No       |
+| `retry`                      | `object`                               | Retry bounds the attempts made to fetch a context, at startup and afterwards.                                                                                                                                                                                                                                                                                                                           | -                       | -       | No       |
+| `refresh_interval`           | `duration`                             | How often a pinned context is re-fetched. Zero disables refreshing, which is what pinning meant before this existed: the document fetched at boot is used for the life of the process. A refresh that fails keeps the last copy that loaded, so a context host going away does not take a running service with it. Only pinned contexts refresh - under "lazy" nothing is pinned and this does nothing. | `12h`                   | `12h`   | No       |
+| `sources`                    | `object`                               | A context URL to an operator-provided copy of it, so a deployment can serve a vetted document instead of dereferencing the publisher's endpoint. The key is the URL as credential_contexts names it - that is still what the credential carries and what the document is cached under; only where the BYTES come from changes.                                                                          | -                       | -       | No       |
+
+### `retry`
+
+> **Path:** `.common.jsonld_contexts.retry`
+
+| Field              | Type       | Description                                                                                                                                                                                                                                                                                                                                                | Example | Default | Required |
+| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `initial_interval` | `duration` | Wait before the second attempt.                                                                                                                                                                                                                                                                                                                            | `1s`    | `1s`    | No       |
+| `max_interval`     | `duration` | MaxInterval caps the exponential backoff. Background retries keep running at this interval once they reach it; they do not give up, because the alternative is a service that is permanently not ready and has stopped trying to fix it.                                                                                                                   | `5m`    | `5m`    | No       |
+| `multiplier`       | `float64`  | Multiplier grows the interval after each failed attempt.                                                                                                                                                                                                                                                                                                   | `2`     | `2`     | No       |
+| `boot_attempts`    | `int`      | How many times a context is fetched during startup before the policy decides what happens. 1 reproduces the behaviour that predates this stanza. It applies under every policy that fetches at boot: under "required" it is how long the boot is willing to wait, under "best_effort" how long it tries before handing the context to the background loop. | `3`     | `3`     | No       |
+
+### `sources` entry
+
+> **Path:** `.common.jsonld_contexts.sources.<context URL>`
+
+Configured when they should not come from the URL the credential names.
+
+Exactly one of File and URL is set.
+
+| Field  | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                            | Example                                             | Default | Required |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ------- | -------- |
+| `file` | `string` | Path to a JSON-LD document on disk. Nothing is dereferenced for this context: it is the way to run with no outbound fetch at all, and the way to serve a copy from inside a perimeter the address policy would otherwise refuse to dial. What the document REFERENCES is still resolved normally, so a context whose closure reaches further URLs needs those reachable or given sources of their own. | `/etc/vc/contexts/individual-id.jsonld`             | -       | No       |
+| `url`  | `string` | Mirror to fetch from instead. Unlike File this is an ordinary fetch and the address policy applies to it unchanged - it refuses any address the public internet does not route to, so an internal mirror belongs in File, not here.                                                                                                                                                                    | `https://contexts.example.org/individual-id.jsonld` | -       | No       |
 
 ### `branding`
 
@@ -277,8 +324,6 @@ sets none of them is an OpenID4VP 1.0 deployment.
 
 > **Path:** `.common.credential_metadata.<credential scope>.auxiliary_data`
 
-credential configuration.
-
 | Field       | Type    | Description                                                                        | Example | Default | Required |
 | ----------- | ------- | ---------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `to_wallet` | `array` | The entries the Credential Issuer sends in each response that carries Credentials. | -       | -       | No       |
@@ -288,6 +333,7 @@ credential configuration.
 
 > **Path:** `.common.credential_metadata.<credential scope>.auxiliary_data.to_wallet[]`, `.common.credential_metadata.<credential scope>.auxiliary_data.to_issuer[]`
 
+Its members other than
 Type are those of hash_commitment.
 
 | Field        | Type       | Description                                                                                                           | Example                                   | Default | Required |
@@ -375,8 +421,8 @@ Configuration for the API Gateway service that handles credential issuance reque
 >
 > **Constraint** (`rules`, `rules_file`): Authorization rules require JWKS or OIDC to be enabled.
 
-JWKS and OIDC are mutually exclusive
-If neither is enabled, no authentication is applied (open access)
+JWKS and OIDC are mutually exclusive.
+If neither is enabled, no authentication is applied (open access).
 
 When Rules (and/or RulesFile) are configured, each authenticated request is
 checked against a SPOCP engine. A query of the form
@@ -507,10 +553,10 @@ Each key under a data source is a credential type.
 
 > **Path:** `.apigw.data_sources.datastore`
 
-| Field    | Type     | Description                                                                                                                                                                                                                                            | Example | Default | Required |
-| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `scopes` | `object` | Credential scope names to their datastore configuration                                                                                                                                                                                                | -       | -       | No       |
-| `import` | `object` | Automatic data import from JSON files at startup. When configured, APIGW reads JSON files on every startup and imports each document whose natural key is not already present, so newly added fixtures (or a whole new scope) are imported on restart. | -       | -       | No       |
+| Field    | Type     | Description                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their datastore configuration                                                                                                                                                                                                                                                                               | -       | -       | No       |
+| `import` | `object` | Automatic data import from JSON files at startup. When configured, APIGW reads JSON files on every startup and inserts each document whose natural key is absent, so newly added fixtures (or a whole new scope) are imported on restart. A document already present is left untouched, or overwritten when replace_existing is true. | -       | -       | No       |
 
 ### `scopes` entry
 
@@ -729,7 +775,7 @@ Impossible calendar dates surface as a hard error.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>.derivations[].swamid_highest_assurance_level`, `<scope>.derivations[].swamid_highest_assurance_level`
 
-swamid_highest_assurance_level primitive. Reduces a multi-valued
+Reduces a multi-valued
 eduPersonAssurance claim to the strongest recognised SWAMID URI; hard
 errors if the input is present but no SWAMID URI is recognised.
 
@@ -862,7 +908,7 @@ reads it.
 
 | Field              | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                        | Example                                                     | Default | Required |
 | ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------- | -------- |
-| `file_paths`       | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. On every startup each document is imported only if one with the same natural key is not already present; existing documents are left untouched.                                                                                                                                                            | `["./bootstrapping/pid.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
+| `file_paths`       | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. On every startup each document whose natural key is absent is inserted. A document already present is left untouched, or overwritten when replace_existing is true.                                                                                                                                        | `["./bootstrapping/pid.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
 | `users`            | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                                                                                                                                                                                                                                                                       | `["100", "102"]`                                            | -       | No       |
 | `replace_existing` | `bool`     | ReplaceExisting makes the import overwrite documents whose natural key is already present with the fixture content. Use it only for shipped, generator-owned fixtures so corrected content (e.g. regenerated validity dates) reaches deployments that already hold the previous version. Leave it false (the default) for operator-edited data, which keeps the insert-only behaviour so existing documents are never overwritten. | `false`                                                     | -       | No       |
 
@@ -939,8 +985,6 @@ a derivation on the target scope; see the Derivation Primitives catalog
 
 > **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>`
 
-another credential presented by the wallet via OpenID4VP during OpenID4VCI.
-
 | Field             | Type     | Description                                                                                                                                                                                                                  | Example   | Default     | Required |
 | ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------- | -------- |
 | `from`            | `object` | The credentials the wallet may present, keyed by their credential scope (e.g. "eduid"). The wallet presents one of them. The presented credential is verified against the issuer trust chain before its claims are consumed. | -         | -           | Yes      |
@@ -951,8 +995,6 @@ another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 ### `from` entry
 
 > **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>.from.<presented credential scope>`
-
-accepts.
 
 | Field             | Type     | Description                                                                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
 | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1062,6 +1104,8 @@ A single language tag applies to all localized child elements.
 ### `logo`
 
 > **Path:** `.apigw.auth_providers.saml.metadata.ui_info.logo`
+
+Width and height are required by the spec.
 
 | Field    | Type     | Description | Example | Default | Required |
 | -------- | -------- | ----------- | ------- | ------- | -------- |
@@ -1387,6 +1431,8 @@ that can name both settings and say which combination was written.
 
 > **Path:** `.apigw.issuer_metadata.display[]`
 
+Below is a non-exhaustive list of valid parameters that MAY be included:
+
 | Field    | Type     | Description                                                                                                                                                                                                        | Example | Default | Required |
 | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `name`   | `string` | Name: OPTIONAL. String value of a display name for the Credential Issuer.                                                                                                                                          | -       | -       | No       |
@@ -1396,6 +1442,8 @@ that can name both settings and say which combination was written.
 ### `logo`
 
 > **Path:** `.apigw.issuer_metadata.display[].logo`
+
+Below is a non-exhaustive list of parameters that MAY be included:
 
 | Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1694,7 +1742,7 @@ is a known and accepted property of this format rather than an oversight.
 
 > **Path:** `.issuer.zk_circuits`
 
-catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here
+CacheTTL lives here
 rather than on the shared ZkCircuitsConfig because only the issuer's
 resolver honours it - the verifier reads Sources alone, so a cache_ttl
 under verifier.zk_circuits would be a silent no-op.
@@ -1804,9 +1852,6 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 ### `zkp_req`
 
 > **Path:** `.verifier.preferred_vp_formats.zkp_req`
-
-vp_formats_supported: which proof systems and circuits the Verifier will
-accept a proof from.
 
 Entirely an open map, with the two known arrays as a convenience. The
 rulebook's own example wraps the same information in a
@@ -2062,8 +2107,8 @@ as the human-readable label.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.zk_system_type[]`
 
-array — a verifier's declaration of one ZK proof system + circuit variant
-it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
+It is a verifier's declaration of one ZK proof system + circuit
+variant it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
 (`{"id": ..., "system": ..., ...params}`, e.g.
 `{"id": "longfellow-libzk-v1_8_1_4259_2945", "system": "longfellow-libzk-v1",
 "num_attributes": 1, "circuit_hash": "...", "block_enc_hash": ...,
@@ -2084,9 +2129,6 @@ are intentionally loosely typed at this layer.
 ### `req` entry
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.req[]`
-
-query: a function, a handle its result is returned under, and the
-function's parameters.
 
 A circuit_zk preset needs two things to be published - a non-empty req,
 and verifier.preferred_vp_formats.circuit_zk advertising the format:
@@ -2158,7 +2200,7 @@ could not produce the bad requests a negative test needs.
 
 > **Path:** `.verifier.zk_circuits`
 
-(pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
+The verifier uses it to resolve a presented
 "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
 the issuer resolves wire-shape constraints from the same sources through
 its own IssuerZkCircuitsConfig, which adds a resolver cache.
@@ -2188,8 +2230,6 @@ block would make the answer to each depend on the other.
 ### `circuits`
 
 > **Path:** `.verifier.nym_auth.circuits`
-
-where their bytes come from.
 
 | Field     | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
 | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -2279,6 +2319,13 @@ Configuration for the Registry service that manages credential status.
 ## Secrets File Reference
 
 The structure of the separate secrets file.
+
+When Common.SecretFilePath is set, ApplySecrets merges these values
+into the main config: the Mongo URI is only used when the main config
+has none. For each service section (apigw, registry, verifier) that
+is present in the secrets file, the corresponding secret fields in
+the main config are cleared and replaced by the secrets-file values.
+Sections omitted from the secrets file are left untouched.
 
 ### Secrets file structure
 
