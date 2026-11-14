@@ -22,7 +22,7 @@ type Client struct {
 	AllowedScopes           []string `bson:"allowed_scopes" json:"allowed_scopes"`
 	DefaultScopes           []string `bson:"default_scopes,omitempty" json:"default_scopes,omitempty"`
 	SubjectType             string   `bson:"subject_type" json:"subject_type"` // "public" or "pairwise"
-	JWKSUri                 string   `bson:"jwks_uri,omitempty" json:"jwks_uri,omitempty"`
+	JWKSURI                 string   `bson:"jwks_uri,omitempty" json:"jwks_uri,omitempty"`
 	JWKS                    any      `bson:"jwks,omitempty" json:"jwks,omitempty"`
 	RequirePKCE             bool     `bson:"require_pkce" json:"require_pkce"`
 	RequireCodeChallenge    bool     `bson:"require_code_challenge" json:"require_code_challenge"`

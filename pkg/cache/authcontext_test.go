@@ -387,9 +387,9 @@ func TestForfeitAuthorizationCode_AlreadyUsed(t *testing.T) {
 
 	// Second forfeit attempt - trying to reuse an already-used authorization code
 	// This should fail as it's a security violation (code replay attack)
-	result2, err := cache.ForfeitAuthorizationCode(ctx, query)
+	replayResult, err := cache.ForfeitAuthorizationCode(ctx, query)
 	assert.Error(t, err, "Attempting to forfeit an already-forfeited code should fail")
-	assert.Nil(t, result2)
+	assert.Nil(t, replayResult)
 	assert.Contains(t, err.Error(), "already forfeited", "Error should indicate the code was already forfeited")
 
 	// Verify the context remains marked as forfeited
@@ -417,11 +417,11 @@ func TestRedeemPreAuthorizedCode_MultipleClients(t *testing.T) {
 	assert.Contains(t, result.RedeemedBy, "thumbprint-client-1")
 
 	// Second client also redeems successfully
-	result2, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-2")
+	secondClientResult, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-2")
 	require.NoError(t, err)
-	assert.Equal(t, "preauth-session", result2.SessionID)
-	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-1")
-	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-2")
+	assert.Equal(t, "preauth-session", secondClientResult.SessionID)
+	assert.Contains(t, secondClientResult.RedeemedBy, "thumbprint-client-1")
+	assert.Contains(t, secondClientResult.RedeemedBy, "thumbprint-client-2")
 
 	// Same client trying again is rejected
 	result3, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-1")

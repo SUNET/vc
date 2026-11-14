@@ -646,7 +646,7 @@ func getHashAlgorithmName(h hash.Hash) (string, error) {
 		if isSHA256(h) {
 			return "sha-256", nil
 		}
-		if isSHA3_256(h) {
+		if isSHA3Digest256(h) {
 			return "sha3-256", nil
 		}
 		return "sha-256", nil // default to SHA-256 for 32-byte hashes
@@ -659,7 +659,7 @@ func getHashAlgorithmName(h hash.Hash) (string, error) {
 		if isSHA512(h) {
 			return "sha-512", nil
 		}
-		if isSHA3_512(h) {
+		if isSHA3Digest512(h) {
 			return "sha3-512", nil
 		}
 		return "sha-512", nil // default to SHA-512 for 64-byte hashes
@@ -696,8 +696,8 @@ func isSHA256(h hash.Hash) bool {
 	return true
 }
 
-// isSHA3_256 checks if the hash is SHA3-256
-func isSHA3_256(h hash.Hash) bool {
+// isSHA3Digest256 checks if the hash is SHA3-256
+func isSHA3Digest256(h hash.Hash) bool {
 	h.Reset()
 	testData := []byte("test")
 	h.Write(testData)
@@ -744,8 +744,8 @@ func isSHA512(h hash.Hash) bool {
 	return true
 }
 
-// isSHA3_512 checks if the hash is SHA3-512
-func isSHA3_512(h hash.Hash) bool {
+// isSHA3Digest512 checks if the hash is SHA3-512
+func isSHA3Digest512(h hash.Hash) bool {
 	h.Reset()
 	testData := []byte("test")
 	h.Write(testData)
