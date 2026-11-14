@@ -75,6 +75,7 @@ verifier:
         nym_auth:                        # a common.credential_metadata scope
           format: zkp_req
           validate: nym_auth             # optional, and worth having
+          source_format: mso_mdoc        # required: the credential the proof is made from
           req:
             - fn_id: pseudonym
               return: nym
@@ -255,14 +256,16 @@ preset key is `req` (the wire member it becomes is `_req`)
 `sha-256` is the one defined over a stored mdoc. A preset missing either is
 well formed and unsatisfiable: wallets decline it.
 
-`meta.source_format` is **derived, never configured.** It names the stored
-attestation the proof is made over, which is the scope's own
-`common.credential_metadata` format — the credential the wallet actually
-holds. A second place to state it is a second place for the two to
-disagree, and a disagreement surfaces as a wallet refusing the request
-rather than as a configuration error. A request built without one is
+`source_format` is **configured, and required.** It names the stored
+attestation the proof is made over — `mso_mdoc` or `bbs_cd` — and it
+becomes `meta.source_format` in the query. A request built without one is
 refused by the wallet's matcher as `invalid_meta` before it reads anything
-else.
+else, so a preset that omits it asks the wallet for something no wallet
+will answer.
+
+Only its presence is checked, never its value: `validate: nym_auth`
+requires it, and config load refuses `source_format` on a preset of any
+other format, where it would mean nothing.
 
 `validate: nym_auth` is optional and checks the preset against the rulebook
 at startup, where you can still do something about it. It is the same set
