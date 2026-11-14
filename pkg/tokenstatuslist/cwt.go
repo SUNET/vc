@@ -25,6 +25,10 @@ const (
 	coseHeaderKid = 4  // Key ID
 	coseHeaderTyp = 16 // Content Type (used for typ in CWT)
 
+	// coseHeaderX5Chain is the x5chain header parameter (RFC 9360 Section 2),
+	// the COSE counterpart of JOSE's "x5c".
+	coseHeaderX5Chain = 33
+
 	// CWT claims (RFC 8392 Section 4)
 	cwtClaimIss        = 1     // Issuer
 	cwtClaimSub        = 2     // Subject
@@ -69,6 +73,13 @@ type CWTSigningConfig struct {
 	// Use 0 to auto-detect from the key type and curve (ES256 for P-256,
 	// ES384 for P-384, ES512 for P-521, PS256 for RSA keys).
 	Algorithm int
+
+	// X5Chain is the signer's certificate chain as raw DER, leaf first
+	// (OPTIONAL). When non-empty it is set as the x5chain header parameter
+	// (RFC 9360 Section 2) in the PROTECTED header, so the chain the
+	// verifier binds against is covered by the signature rather than
+	// strippable in transit.
+	X5Chain [][]byte
 }
 
 // CWTConfig holds CWT-specific configuration for generating a Status List Token.
@@ -135,6 +146,21 @@ func (sl *StatusList) GenerateCWT(cfg CWTSigningConfig) ([]byte, error) {
 	}
 	if sl.KeyID != "" {
 		protectedHeader[coseHeaderKid] = sl.KeyID
+	}
+	// RFC 9360 Section 2: a single certificate is carried as a byte string,
+	// several as an array of byte strings. Encoding one certificate as a
+	// one-element array is not the defined shape, so a strict COSE decoder
+	// is entitled to reject it.
+	switch len(cfg.X5Chain) {
+	case 0:
+	case 1:
+		protectedHeader[coseHeaderX5Chain] = cfg.X5Chain[0]
+	default:
+		chain := make([]any, 0, len(cfg.X5Chain))
+		for _, der := range cfg.X5Chain {
+			chain = append(chain, der)
+		}
+		protectedHeader[coseHeaderX5Chain] = chain
 	}
 
 	// Encode protected header to CBOR

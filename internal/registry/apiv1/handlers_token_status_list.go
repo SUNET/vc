@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
@@ -92,6 +93,48 @@ func (c *Client) TokenStatusLists(ctx context.Context, req *TokenStatusListsRequ
 	}
 
 	return reply, nil
+}
+
+// TokenStatusListJWKSRequest is the request for a status list's signing key set.
+type TokenStatusListJWKSRequest struct {
+	// ID is the section identifier for the status list (from URI path)
+	ID int64 `json:"id" uri:"id" validate:"gte=0"`
+}
+
+// TokenStatusListJWKS returns the public signing keys of a Status List Token as
+// a JWK Set, served from under the list URI itself.
+//
+// The Token Status List draft defines no key discovery of its own: a verifier
+// is left to resolve the signer from the token (an "x5c" chain or an embedded
+// "jwk") and then decide whether to trust it. Deciding that is a trust
+// registry's job, and a registry that binds names to keys needs somewhere to
+// read this signer's keys from. The name it has is the list URI - the token's
+// "sub", and the subject every status-list trust query carries - so the keys
+// are published relative to that URI rather than to the registry's origin.
+//
+// The path is {list URI}/.well-known/jwks.json, which is the JWKS location
+// metadata discovery falls back to when no metadata document names a jwks_uri
+// (RFC 8615 reserves the .well-known space for exactly this). Nothing is
+// served at the origin's own .well-known: a status list signer is not the
+// registry's issuing identity, and publishing it there would say it was.
+//
+// Returns ErrSectionNotFound for a section this registry does not serve a
+// token for, so a list URI's keys exist exactly when the list does.
+func (c *Client) TokenStatusListJWKS(ctx context.Context, req *TokenStatusListJWKSRequest) (*jose.JWKS, error) {
+	c.log.Debug("status_list_jwks", "request", req)
+
+	if c.tokenStatusListIssuer.GetCachedJWT(ctx, req.ID) == "" {
+		c.log.Info("JWKS requested for unknown section", "section", req.ID)
+		return nil, tokenstatuslist.ErrSectionNotFound
+	}
+
+	jwks, err := c.tokenStatusListIssuer.SigningKeySet(ctx)
+	if err != nil {
+		c.log.Error(err, "failed to build status list signing key set")
+		return nil, err
+	}
+
+	return jwks, nil
 }
 
 // TokenStatusListAggregationResponse represents the Status List Aggregation response per Section 9.3.

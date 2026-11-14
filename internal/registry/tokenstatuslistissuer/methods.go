@@ -34,11 +34,17 @@ func (s *Service) GenerateStatusListTokenJWT(ctx context.Context, cfg TokenConfi
 		return "", fmt.Errorf("signer must be a *pki.KeyMaterialSigner, got %T", s.signer)
 	}
 
-	// Generate JWT using tokenstatuslist package
+	// Generate JWT using tokenstatuslist package. Which header members carry
+	// the signing key is a deployment choice (token_key_carriers), resolved
+	// once at startup; PublicKey is left nil when "jwk" is not among them, as
+	// that is what makes GenerateJWT omit the header.
 	jwtCfg := tokenstatuslist.JWTSigningConfig{
 		SigningKey:    kmSigner.PrivateKey(),
 		SigningMethod: cfg.SigningMethod,
-		PublicKey:     kmSigner.PublicKey(),
+		X5C:           s.carriers.x5cBase64,
+	}
+	if s.carriers.embedJWK {
+		jwtCfg.PublicKey = kmSigner.PublicKey()
 	}
 
 	return sl.GenerateJWT(jwtCfg)
@@ -62,8 +68,14 @@ func (s *Service) GenerateStatusListTokenCWT(ctx context.Context, cfg TokenConfi
 
 	// Generate CWT using tokenstatuslist package.
 	// Algorithm is auto-detected from the key type (ES256 for ECDSA, PS256 for RSA).
+	//
+	// Only the x5c carrier has a COSE counterpart (x5chain, RFC 9360); there
+	// is no COSE equivalent of the "jwk" JOSE header here, so a deployment
+	// that asks for "jwk" alone issues a CWT with no key in its header - which
+	// is what every CWT this registry has ever issued looks like.
 	cwtCfg := tokenstatuslist.CWTSigningConfig{
 		SigningKey: kmSigner.PrivateKey(),
+		X5Chain:    s.carriers.x5chainDER,
 	}
 
 	return sl.GenerateCWT(cwtCfg)
