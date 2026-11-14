@@ -439,23 +439,25 @@ func (c *SQLDatastoreColl) GetByIdentity(ctx context.Context, scope, identityMap
 	return docs, nil
 }
 
-// sqlWhere collects WHERE conditions with their positional arguments.
+// sqlWhere collects WHERE conditions with their positional arguments. Every
+// string column of the schema has a byte-exact collation, so "=" compares bytes
+// on each backend.
 type sqlWhere struct {
 	conditions []string
 	args       []any
 }
 
 // selected adds the equality condition of a selected value.
-func (w *sqlWhere) selected(dialect sqlstore.Dialect, column, value string) {
+func (w *sqlWhere) selected(column, value string) {
 	if value != "" {
-		w.conditions = append(w.conditions, dialect.ExactEquals(column))
+		w.conditions = append(w.conditions, column+" = ?")
 		w.args = append(w.args, value)
 	}
 }
 
 // withinReach adds the pair condition of reach. It returns false when reach
 // matches no document.
-func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach resourcereach.Reach, sourceColumn, scopeColumn string) bool {
+func (w *sqlWhere) withinReach(reach resourcereach.Reach, sourceColumn, scopeColumn string) bool {
 	if reach.Everything() {
 		return true
 	}
@@ -467,11 +469,11 @@ func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach resourcereach.Rea
 	for _, pair := range pairs {
 		var clause []string
 		if value, exact := pair.AuthenticSource.Exact(); exact {
-			clause = append(clause, dialect.ExactEquals(sourceColumn))
+			clause = append(clause, sourceColumn+" = ?")
 			w.args = append(w.args, value)
 		}
 		if value, exact := pair.Scope.Exact(); exact {
-			clause = append(clause, dialect.ExactEquals(scopeColumn))
+			clause = append(clause, scopeColumn+" = ?")
 			w.args = append(w.args, value)
 		}
 		anyPair = append(anyPair, "("+strings.Join(clause, " AND ")+")")
@@ -482,9 +484,9 @@ func (w *sqlWhere) withinReach(dialect sqlstore.Dialect, reach resourcereach.Rea
 
 // datastoreWhere adds the conditions of the selected values and the reach.
 func (c *SQLDatastoreColl) datastoreWhere(where *sqlWhere, source, scope string, reach resourcereach.Reach) bool {
-	where.selected(c.dialect, "d.authentic_source", source)
-	where.selected(c.dialect, "d.scope", scope)
-	return where.withinReach(c.dialect, reach, "d.authentic_source", "d.scope")
+	where.selected("d.authentic_source", source)
+	where.selected("d.scope", scope)
+	return where.withinReach(reach, "d.authentic_source", "d.scope")
 }
 
 // List returns matching document metadata, filtered by identity mapping and

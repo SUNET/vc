@@ -229,7 +229,7 @@ func (c *SQLIdentityMappingsColl) SearchMappings(ctx context.Context, query *Sea
 	defer span.End()
 
 	where := sqlWhere{}
-	where.selected(c.dialect, "authentic_source", query.AuthenticSource)
+	where.selected("authentic_source", query.AuthenticSource)
 	sources, everySource := query.Reach.SourcesForScope(resourcereach.IdentityMappingScope)
 	if !everySource {
 		if len(sources) == 0 {
@@ -237,7 +237,7 @@ func (c *SQLIdentityMappingsColl) SearchMappings(ctx context.Context, query *Sea
 		}
 		anySource := make([]string, len(sources))
 		for i, source := range sources {
-			anySource[i] = c.dialect.ExactEquals("authentic_source")
+			anySource[i] = "authentic_source = ?"
 			where.args = append(where.args, source)
 		}
 		where.conditions = append(where.conditions, "("+strings.Join(anySource, " OR ")+")")

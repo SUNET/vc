@@ -52,10 +52,6 @@ type Dialect interface {
 	// collation. Accents stay significant on every string column of this
 	// schema, because each one has a byte-exact collation.
 	CaseInsensitiveLike(column string) string
-	// ExactEquals returns a boolean SQL expression comparing column byte for
-	// byte with the next "?" placeholder. MariaDB's default collations ignore
-	// case and trailing spaces in a plain "=".
-	ExactEquals(column string) string
 }
 
 // PostgresDialect is the Dialect implementation for PostgreSQL.
@@ -122,10 +118,6 @@ func (postgresDialect) CaseInsensitiveLike(column string) string {
 	return column + " ILIKE ?"
 }
 
-func (postgresDialect) ExactEquals(column string) string {
-	return column + " = ?"
-}
-
 type mariaDBDialect struct{}
 
 func (mariaDBDialect) Name() string               { return "mariadb" }
@@ -179,8 +171,4 @@ func escapeMariaDBJSONPathKey(key string) string {
 
 func (mariaDBDialect) CaseInsensitiveLike(column string) string {
 	return "LOWER(" + column + ") LIKE LOWER(?)"
-}
-
-func (mariaDBDialect) ExactEquals(column string) string {
-	return column + " = BINARY ?"
 }
