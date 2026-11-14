@@ -2,10 +2,13 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/keyresolver"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 )
@@ -59,28 +62,35 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	}
 
 	for queryID, tokens := range documents {
-		// One credential per query unless the query said otherwise.
-		// CredentialQuery.Multiple defaults to false, and the claim
-		// extraction that follows MERGES every token returned under a query
-		// - so a wallet appending a second credential could overwrite the
-		// first one's claims in the session even though the request never
-		// permitted more than one. Each of them verifies; that is not the
-		// question.
-		if len(tokens) > 1 {
-			// requestedQueryExact, not requestedQuery: permission to
-			// return several credentials is a relaxation, and must not be
-			// read off a query the single-query fallback guessed at.
-			scope := c.oidcScopeFor(session, queryID)
-			requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
-			if !ok || !requested.AllowsMultiple() {
-				return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", len(tokens))
-			}
+		if err := c.requireMultiplePermitted(session, queryID, len(tokens)); err != nil {
+			return err
 		}
 		for _, token := range tokens {
 			if err := c.verifyOneVC20ForOIDC(ctx, resolver, session, queryID, token); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// requireMultiplePermitted refuses more than one credential under a query unless the
+// query said otherwise.
+//
+// CredentialQuery.Multiple defaults to false, and the claim extraction that follows
+// MERGES every token returned under a query - so a wallet appending a second credential
+// could overwrite the first one's claims in the session even though the request never
+// permitted more than one. Each of them verifies; that is not the question.
+func (c *Client) requireMultiplePermitted(session *cache.AuthorizationContext, queryID string, count int) error {
+	if count <= 1 {
+		return nil
+	}
+	// requestedQueryExact, not requestedQuery: permission to return several credentials is
+	// a relaxation, and must not be read off a query the single-query fallback guessed at.
+	scope := c.oidcScopeFor(session, queryID)
+	requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
+	if !ok || !requested.AllowsMultiple() {
+		return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", count)
 	}
 	return nil
 }
@@ -306,7 +316,10 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, resolver trust.KeyRes
 // false is honoured here too. A scope whose query cannot be recovered fails
 // closed: binding is REQUIRED, which is the OpenID4VP default.
 func (c *Client) vc20HandlerForOIDC(resolver trust.KeyResolver, session *cache.AuthorizationContext, scope string) (*openid4vp.VC20Handler, error) {
-	opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
+	opts := []openid4vp.VC20HandlerOption{
+		openid4vp.WithVC20KeyResolver(newIssuerKeyResolver(resolver)),
+		openid4vp.WithVC20HolderKeyResolver(newHolderKeyResolver(resolver)),
+	}
 
 	// requestedQueryExact, not requestedQuery. Turning binding OFF is a
 	// relaxation, so the query has to be one this scope actually names -
@@ -396,4 +409,58 @@ func (c *Client) oidcScopeFor(session *cache.AuthorizationContext, queryID strin
 		return queryID
 	}
 	return ""
+}
+
+// holderKeyResolver resolves the key that signed a presentation. A holder's
+// did:key or did:jwk holds its key in the identifier, so it is read from there:
+// the question for a holder is whether this key signed the exchange, which the
+// signature settles, and no trust registry lists a holder. Every other method
+// goes to the trust-backed resolver, which has to confirm that the DID document
+// authorizes the method for authentication and names the DID as its controller;
+// a resolver that cannot confirm that is refused. The issuer's key never comes
+// through here: it is always the trust resolver's.
+type holderKeyResolver struct {
+	local    openid4vp.VC20KeyResolver
+	fallback trust.KeyResolver
+}
+
+func newHolderKeyResolver(fallback trust.KeyResolver) *holderKeyResolver {
+	return &holderKeyResolver{
+		local:    keyresolver.NewVC20ResolverAdapter(keyresolver.NewLocalResolver()),
+		fallback: fallback,
+	}
+}
+
+func (r *holderKeyResolver) ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error) {
+	if strings.HasPrefix(verificationMethod, "did:key:") || strings.HasPrefix(verificationMethod, "did:jwk:") {
+		return r.local.ResolveKey(ctx, verificationMethod)
+	}
+	return resolveKeyFor(ctx, r.fallback, verificationMethod, trust.RelationshipAuthentication)
+}
+
+// issuerKeyResolver resolves the key that signed a credential. The trust resolver has to
+// confirm that the issuer's DID document authorizes the method for assertionMethod and
+// names the DID as its controller; a resolver that cannot confirm that is refused, so a
+// key listed only under keyAgreement or verificationMethod does not verify a credential.
+type issuerKeyResolver struct {
+	trust trust.KeyResolver
+}
+
+func newIssuerKeyResolver(resolver trust.KeyResolver) *issuerKeyResolver {
+	return &issuerKeyResolver{trust: resolver}
+}
+
+func (r *issuerKeyResolver) ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error) {
+	return resolveKeyFor(ctx, r.trust, verificationMethod, trust.RelationshipAssertionMethod)
+}
+
+// resolveKeyFor asks a trust resolver for a key under a verification relationship, and
+// refuses a resolver that cannot report relationships rather than falling back to a
+// plain lookup.
+func resolveKeyFor(ctx context.Context, resolver trust.KeyResolver, verificationMethod, relationship string) (crypto.PublicKey, error) {
+	relResolver, ok := resolver.(trust.RelationshipKeyResolver)
+	if !ok {
+		return nil, fmt.Errorf("cannot confirm that %s may be used for %s: the trust resolver does not report verification relationships", verificationMethod, relationship)
+	}
+	return relResolver.ResolveKeyFor(ctx, verificationMethod, relationship)
 }

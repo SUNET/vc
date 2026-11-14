@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -93,12 +94,7 @@ func (m *Manifest) ActiveCircuits(system, docType string) []CircuitDescriptor {
 }
 
 func declaresDocType(c *CircuitDescriptor, docType string) bool {
-	for _, d := range c.DocTypes {
-		if d == docType {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.DocTypes, docType)
 }
 
 // knowsSystem reports whether the manifest carries any circuit naming

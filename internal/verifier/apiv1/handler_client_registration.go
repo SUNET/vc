@@ -35,7 +35,7 @@ type ClientRegistrationRequest struct {
 	Contacts        []string `json:"contacts,omitempty"`
 	TosURI          string   `json:"tos_uri,omitempty" validate:"omitempty,httpsurl"`
 	PolicyURI       string   `json:"policy_uri,omitempty" validate:"omitempty,httpsurl"`
-	JWKSUri         string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
+	JWKSURI         string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
 	JWKS            any      `json:"jwks,omitempty"`
 	SoftwareID      string   `json:"software_id,omitempty"`
 	SoftwareVersion string   `json:"software_version,omitempty"`
@@ -80,7 +80,7 @@ type ClientRegistrationResponse struct {
 	Contacts                []string `json:"contacts,omitempty"`
 	TosURI                  string   `json:"tos_uri,omitempty"`
 	PolicyURI               string   `json:"policy_uri,omitempty"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty"`
+	JWKSURI                 string   `json:"jwks_uri,omitempty"`
 	JWKS                    any      `json:"jwks,omitempty"`
 	SoftwareID              string   `json:"software_id,omitempty"`
 	SoftwareVersion         string   `json:"software_version,omitempty"`
@@ -168,7 +168,7 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		TokenEndpointAuthMethod:     req.TokenEndpointAuthMethod,
 		AllowedScopes:               allowedScopes,
 		SubjectType:                 req.SubjectType,
-		JWKSUri:                     req.JWKSUri,
+		JWKSURI:                     req.JWKSURI,
 		JWKS:                        req.JWKS,
 		RequirePKCE:                 requirePKCE,
 		RequireCodeChallenge:        requireCodeChallenge,
@@ -221,7 +221,7 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		Contacts:                req.Contacts,
 		TosURI:                  req.TosURI,
 		PolicyURI:               req.PolicyURI,
-		JWKSUri:                 req.JWKSUri,
+		JWKSURI:                 req.JWKSURI,
 		JWKS:                    req.JWKS,
 		SoftwareID:              req.SoftwareID,
 		SoftwareVersion:         req.SoftwareVersion,
@@ -298,7 +298,7 @@ func (c *Client) GetClientInformation(ctx context.Context, req *GetClientInforma
 		Contacts:                client.Contacts,
 		TosURI:                  client.TosURI,
 		PolicyURI:               client.PolicyURI,
-		JWKSUri:                 client.JWKSUri,
+		JWKSURI:                 client.JWKSURI,
 		JWKS:                    client.JWKS,
 		SoftwareID:              client.SoftwareID,
 		SoftwareVersion:         client.SoftwareVersion,
@@ -400,8 +400,8 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 	if clientReg.SubjectType != "" {
 		client.SubjectType = clientReg.SubjectType
 	}
-	if clientReg.JWKSUri != "" {
-		client.JWKSUri = clientReg.JWKSUri
+	if clientReg.JWKSURI != "" {
+		client.JWKSURI = clientReg.JWKSURI
 	}
 	if clientReg.JWKS != nil {
 		client.JWKS = clientReg.JWKS
@@ -462,7 +462,7 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 		Contacts:                client.Contacts,
 		TosURI:                  client.TosURI,
 		PolicyURI:               client.PolicyURI,
-		JWKSUri:                 client.JWKSUri,
+		JWKSURI:                 client.JWKSURI,
 		JWKS:                    client.JWKS,
 		SoftwareID:              client.SoftwareID,
 		SoftwareVersion:         client.SoftwareVersion,

@@ -58,8 +58,8 @@ func SignWithSigner(ctx context.Context, header, body jwt.MapClaims, signer Sign
 	// and multipaz sources (lpidproto PLAN.md workstream 7 task 7.5, finding
 	// 17) after every other candidate (vct, claims, status, trust) checked
 	// out fine and the wallet still reported "document not available".
-	if cc, ok := signer.(certChainSigner); ok {
-		if chain := cc.GetCertificateChain(); len(chain) > 0 {
+	if chainSigner, ok := signer.(certChainSigner); ok {
+		if chain := chainSigner.GetCertificateChain(); len(chain) > 0 {
 			header["x5c"] = chain
 		}
 	}

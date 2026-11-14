@@ -24,7 +24,7 @@ The [W3C Digital Credentials API](https://wicg.github.io/digital-credentials/) i
          │ 1. Standard OIDC authorize           │
          │─────────────────────────────────────>│
          │                                      │
-         │ 2. Render authorize.html             │
+         │ 2. Render authorize_enhanced.html    │
          │<─────────────────────────────────────│
          │                                      │
     ┌────▼────────────────────────────────┐    │
@@ -103,22 +103,51 @@ verifier:
     title: "Employee Verification"
     subtitle: "Present your employee credential to access this service"
     theme: "blue"                    # light, dark, blue, purple
-    primary_color: "#1e40af"         # Override theme color
-    secondary_color: "#1e3a8a"
+    primary_color: "#1e40af"         # overrides the theme's primary
+    secondary_color: "#1e3a8a"       # overrides the theme's secondary
     logo_url: "https://example.com/logo.png"
-    custom_css: |
-      .container { max-width: 600px; }
-    # css_file: "/path/to/custom.css"
+    css_file: "https://static.example.com/verifier.css"
 ```
+
+`logo_url` and `css_file` are both fetched by the browser, so each has to be a
+URL the browser can reach - an absolute `https` URL, or a path this deployment
+serves. Neither is read from disk. `css_file` was previously documented as "a
+path to an external CSS file", with a filesystem path for an example; such a
+value is requested from the verifier and answered with a 404. The stylesheet is
+linked after the built-in one, so it can override it.
+
+`logo_url` applies to this page alone.
+
+The two logo settings do not overlap, and between them they still do not cover
+every page:
+
+| Page | Logo comes from |
+| ---- | --------------- |
+| this one (`authorize_enhanced.html`) | `logo_url` only |
+| consent, offers, callback, presentation-definition, dashboard, admin | `common.branding.logo_path`, served in place of `/static/logo.png` |
+| registry admin GUI, shared error page | `common.branding.logo_path` |
+| credential display, payment | no logo at all — neither setting reaches them |
+
+`common.branding.logo_path` names a PNG on disk; `logo_url` is a URL the
+browser fetches. Setting both brands every page that shows a logo. The
+credential display and payment pages show none, so there is nothing for either
+setting to replace there.
 
 ### Theming Options
 
-| Theme | Primary Color | Secondary Color | Best For |
-|-------|--------------|-----------------|----------|
-| `light` | `#3182ce` | `#2c5282` | Default, general purpose |
-| `dark` | `#3182ce` | `#2c5282` | Dark mode preference |
-| `blue` | `#3182ce` | `#2c5282` | Corporate, professional |
-| `purple` | `#805ad5` | `#553c9a` | Creative, modern |
+A theme picks the two brand colors and, for `dark`, the page's surface and
+text colors. `primary_color` and `secondary_color` override whichever pair the
+theme picked, independently of each other.
+
+| Theme | Primary | Secondary | Surfaces | Best for |
+|-------|---------|-----------|----------|----------|
+| `light` | `#3182ce` | `#2c5282` | light | default, general purpose |
+| `dark` | `#3182ce` | `#2c5282` | dark | dark mode preference |
+| `blue` | `#3182ce` | `#2c5282` | light | corporate, professional |
+| `purple` | `#805ad5` | `#553c9a` | light | creative, modern |
+
+`light` and `blue` are the same theme under two names; `blue` is kept because
+deployments configure it.
 
 ## Browser Support
 
