@@ -9,15 +9,10 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
-	"github.com/SUNET/vc/pkg/httphelpers"
-	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
-	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/vcclient"
 
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,39 +52,11 @@ func (a *svgAPI) SVGTemplateReply(context.Context, *apiv1.SVGTemplateRequest) (*
 // service.go puts it behind, and seeds the scope the handler reads.
 func svgTestEngine(t *testing.T, mockAPI Apiv1) *gin.Engine {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
-	log, err := logger.New("test", "", false)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	tracer, err := trace.NewForTesting(ctx, "test", log)
-	require.NoError(t, err)
-
-	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
-	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
-	require.NoError(t, err)
-
-	s := &Service{
-		cfg:         cfg,
-		log:         log.New("httpserver"),
-		apiv1:       mockAPI,
-		tracer:      tracer,
-		httpHelpers: helpers,
-	}
-
-	engine := gin.New()
-	rg := engine.Group("")
-	rg.Use(helpers.Middleware.UserSession("test_session",
-		"0123456789abcdef0123456789abcdef", "0123456789abcdef", sessions.Options{Path: "/"}))
-	rg.Use(func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Set("scope", "pid")
-		_ = session.Save()
-		c.Next()
-	})
-	helpers.Server.RegEndpoint(ctx, rg, http.MethodGet, "authorization/consent/svg-template",
-		http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
+	s, engine, rg := newSessionTestEngine(t, mockAPI)
+	rg.Use(seedSession(map[string]any{"scope": "pid"}))
+	s.httpHelpers.Server.RegEndpoint(context.Background(), rg, http.MethodGet,
+		"authorization/consent/svg-template", http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
 
 	return engine
 }

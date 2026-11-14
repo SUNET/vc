@@ -189,7 +189,7 @@ func looksLikeDNSName(value string) bool {
 	if value == "" || strings.ContainsAny(value, ":/ ") || !strings.Contains(value, ".") {
 		return false
 	}
-	for _, label := range strings.Split(value, ".") {
+	for label := range strings.SplitSeq(value, ".") {
 		if label == "" {
 			return false
 		}

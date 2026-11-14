@@ -37,7 +37,7 @@ type clientRow struct {
 	AllowedScopes               sqlstore.JSON[[]string] `db:"allowed_scopes"`
 	DefaultScopes               sqlstore.JSON[[]string] `db:"default_scopes"`
 	SubjectType                 string                  `db:"subject_type"`
-	JWKSUri                     string                  `db:"jwks_uri"`
+	JWKSURI                     string                  `db:"jwks_uri"`
 	JWKS                        sqlstore.JSON[any]      `db:"jwks"`
 	RequirePKCE                 bool                    `db:"require_pkce"`
 	RequireCodeChallenge        bool                    `db:"require_code_challenge"`
@@ -74,7 +74,7 @@ func rowFromClient(c *Client) clientRow {
 		AllowedScopes:               sqlstore.JSON[[]string]{V: c.AllowedScopes},
 		DefaultScopes:               sqlstore.JSON[[]string]{V: c.DefaultScopes},
 		SubjectType:                 c.SubjectType,
-		JWKSUri:                     c.JWKSUri,
+		JWKSURI:                     c.JWKSURI,
 		JWKS:                        sqlstore.JSON[any]{V: c.JWKS},
 		RequirePKCE:                 c.RequirePKCE,
 		RequireCodeChallenge:        c.RequireCodeChallenge,
@@ -112,7 +112,7 @@ func (row clientRow) toClient() *Client {
 		AllowedScopes:               row.AllowedScopes.V,
 		DefaultScopes:               row.DefaultScopes.V,
 		SubjectType:                 row.SubjectType,
-		JWKSUri:                     row.JWKSUri,
+		JWKSURI:                     row.JWKSURI,
 		JWKS:                        row.JWKS.V,
 		RequirePKCE:                 row.RequirePKCE,
 		RequireCodeChallenge:        row.RequireCodeChallenge,
@@ -182,7 +182,7 @@ func (c *SQLClientColl) Create(ctx context.Context, client *Client) error {
 
 	_, err := c.db.ExecContext(ctx, query,
 		row.ClientID, row.ClientSecretHash, row.RedirectURIs, row.GrantTypes, row.ResponseTypes,
-		row.TokenEndpointAuthMethod, row.AllowedScopes, row.DefaultScopes, row.SubjectType, row.JWKSUri, row.JWKS,
+		row.TokenEndpointAuthMethod, row.AllowedScopes, row.DefaultScopes, row.SubjectType, row.JWKSURI, row.JWKS,
 		row.RequirePKCE, row.RequireCodeChallenge, row.ClientName, row.ClientURI, row.LogoURI, row.Contacts, row.TosURI, row.PolicyURI,
 		row.SoftwareID, row.SoftwareVersion, row.ApplicationType, row.SectorIdentifierURI, row.IDTokenSignedResponseAlg,
 		row.DefaultMaxAge, row.RequireAuthTime, row.DefaultACRValues, row.InitiateLoginURI, row.RequestURIs,
@@ -213,7 +213,7 @@ func (c *SQLClientColl) Update(ctx context.Context, client *Client) error {
 
 	_, err := c.db.ExecContext(ctx, query,
 		row.ClientSecretHash, row.RedirectURIs, row.GrantTypes, row.ResponseTypes,
-		row.TokenEndpointAuthMethod, row.AllowedScopes, row.DefaultScopes, row.SubjectType, row.JWKSUri, row.JWKS,
+		row.TokenEndpointAuthMethod, row.AllowedScopes, row.DefaultScopes, row.SubjectType, row.JWKSURI, row.JWKS,
 		row.RequirePKCE, row.RequireCodeChallenge, row.ClientName, row.ClientURI, row.LogoURI, row.Contacts, row.TosURI, row.PolicyURI,
 		row.SoftwareID, row.SoftwareVersion, row.ApplicationType, row.SectorIdentifierURI, row.IDTokenSignedResponseAlg,
 		row.DefaultMaxAge, row.RequireAuthTime, row.DefaultACRValues, row.InitiateLoginURI, row.RequestURIs,

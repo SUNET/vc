@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strings"
 
 	"github.com/piprate/json-gold/ld"
@@ -158,6 +157,15 @@ func (rc *RDFCredential) CredentialWithoutProof() (*RDFCredential, error) {
 func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (*RDFCredential, error) {
 	if rc.dataset == nil {
 		return nil, fmt.Errorf("RDF dataset is nil")
+	}
+
+	// The document the holder signs has each embedded credential in its own graph (the
+	// verifiableCredential term is an @graph container). json-gold leaves it in the default
+	// graph, so every signer and verifier of a presentation has to put it there first, or the
+	// canonical form - and with it the signature - differs from every other implementation's.
+	// A no-op for a document without verifiableCredential links, and when already done.
+	if err := rc.NormalizeVerifiableCredentialGraph(); err != nil {
+		return nil, fmt.Errorf("placing embedded credentials in their graphs: %w", err)
 	}
 
 	// Map subject -> types
@@ -476,7 +484,7 @@ func (rc *RDFCredential) ToCompactJSON() ([]byte, error) {
 
 	// Fallback to W3C VC v2 context
 	context := map[string]any{
-		"@context": []any{
+		jsonLDContextKey: []any{
 			"https://www.w3.org/ns/credentials/v2",
 		},
 	}
@@ -518,7 +526,7 @@ func (rc *RDFCredential) Context() (any, error) {
 	if err := json.Unmarshal([]byte(rc.originalJSON), &doc); err != nil {
 		return nil, err
 	}
-	return doc["@context"], nil
+	return doc[jsonLDContextKey], nil
 }
 
 // NQuads returns the N-Quads representation without normalization
@@ -540,142 +548,156 @@ func (rc *RDFCredential) NQuads() (string, error) {
 	return nquadsStr, nil
 }
 
-// NormalizeVerifiableCredentialGraph fixes an issue where json-gold puts VerifiableCredential
-// in the default graph instead of a named graph when @context: null is used in the definition.
-// This function moves the VC quads to a new named graph to match the expected structure.
+// NormalizeVerifiableCredentialGraph puts each embedded credential in its own named
+// graph, where the verifiableCredential term's "@container": "@graph" says it belongs.
+// json-gold does not apply that container, so without this the whole presentation lands
+// in the default graph and the canonical form - and with it every signature over it -
+// differs from what any other implementation computes.
+//
+// The placement is made in the JSON document, by wrapping each embedded credential in an
+// explicit "@graph", and the dataset is rebuilt from that, so the processor draws the
+// graph boundaries itself. Walking the flattened dataset instead cannot be made right:
+// flattening has already merged descriptions, so two credentials that name the same
+// issuer, or a credential whose subject the presentation also describes, share one set of
+// quads with nothing left to say which graph each belongs to. Following them moved one
+// credential's issuer into the other's graph, and could pull the presentation's own
+// description of the holder in with it. Written as "@graph", a node described in two
+// credentials is described in both graphs, which is what the document says.
+//
+// A no-op for a document with no verifiableCredential links - a bare credential comes
+// out of it unchanged.
 func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 	if rc.dataset == nil {
 		return fmt.Errorf("RDF dataset is nil")
 	}
+	if rc.originalJSON == "" {
+		// Nothing to rewrite: the graphs can only be read off the document, and this
+		// credential was built from a dataset that has none.
+		return nil
+	}
 
-	// Find verifiableCredential links in default graph
-	defaultGraph, ok := rc.dataset.Graphs["@default"]
+	var doc any
+	if err := json.Unmarshal([]byte(rc.originalJSON), &doc); err != nil {
+		return fmt.Errorf("failed to unmarshal credential JSON: %w", err)
+	}
+	processor := rc.processor
+	if processor == nil {
+		processor = ld.NewJsonLdProcessor()
+	}
+	// Fresh options, not rc.options: a caller that set Format (N-Quads, say) would make
+	// ToRDF hand back a serialized string instead of the dataset this needs.
+	options := ld.NewJsonLdOptions("")
+	options.DocumentLoader = GetGlobalLoader()
+	if rc.options != nil {
+		options.Base = rc.options.Base
+		if rc.options.DocumentLoader != nil {
+			if _, isDefault := rc.options.DocumentLoader.(*ld.DefaultDocumentLoader); !isDefault {
+				options.DocumentLoader = rc.options.DocumentLoader
+			}
+		}
+	}
+	// Wrapping is done on the expanded document: there the term is its full IRI whatever
+	// alias the document used, its container is already settled, and a JSON literal is a
+	// plain @value this never looks inside.
+	expanded, err := processor.Expand(doc, options)
+	if err != nil {
+		return fmt.Errorf("failed to expand the document: %w", err)
+	}
+	if !wrapEmbeddedCredentialsInGraphs(expanded) {
+		return nil
+	}
+	rdfData, err := processor.ToRDF(expanded, options)
+	if err != nil {
+		return fmt.Errorf("failed to convert the rewritten document to RDF: %w", err)
+	}
+	dataset, ok := rdfData.(*ld.RDFDataset)
 	if !ok {
-		return nil
+		return fmt.Errorf("unexpected RDF data type: %T", rdfData)
 	}
-
-	vcPredicate := "https://www.w3.org/2018/credentials#verifiableCredential"
-
-	// Map of VC node -> new graph name
-	vcMoves := make(map[string]string)
-
-	// Identify VCs that need moving
-	for _, quad := range defaultGraph {
-		if quad.Predicate != nil && quad.Predicate.GetValue() == vcPredicate {
-			if quad.Object != nil {
-				obj := quad.Object.GetValue()
-				// Check if object is a blank node (if it's an IRI, it might still be a graph name, but usually blank node)
-				// If the object is a subject in the default graph, it means it's treated as a node, not a graph.
-				if isSubjectInGraph(obj, defaultGraph) {
-					// Generate new graph name
-					// Strip _: prefix if present to avoid double prefix
-					suffix := obj
-					if strings.HasPrefix(obj, "_:") {
-						suffix = obj[2:]
-					}
-					newGraphName := fmt.Sprintf("_:vc_graph_%s", suffix)
-					vcMoves[obj] = newGraphName
-				}
-			}
-		}
-	}
-
-	if len(vcMoves) == 0 {
-		return nil
-	}
-
-	// Perform moves
-	newDefaultGraph := make([]*ld.Quad, 0)
-	newGraphs := make(map[string][]*ld.Quad)
-
-	// Helper to check if a node should be moved to a specific graph
-	// We need to move the VC node and its subgraph (excluding other named graphs)
-	nodesToMove := make(map[string]string) // node -> targetGraph
-
-	// Initialize with VC roots
-	maps.Copy(nodesToMove, vcMoves)
-
-	// Iteratively find all reachable nodes to move
-	// This is a simplification: we assume VCs are trees rooted at the VC node
-	// and don't share nodes with the VP or other VCs (except IRIs).
-	// We only move blank nodes.
-	changed := true
-	for changed {
-		changed = false
-		for _, quad := range defaultGraph {
-			if quad.Subject == nil {
-				continue
-			}
-			sub := quad.Subject.GetValue()
-
-			// If subject is marked for move
-			if targetGraph, ok := nodesToMove[sub]; ok {
-				// Check object
-				if quad.Object != nil && strings.HasPrefix(quad.Object.GetValue(), "_:") {
-					obj := quad.Object.GetValue()
-					// If object is not already marked, mark it
-					if _, exists := nodesToMove[obj]; !exists {
-						nodesToMove[obj] = targetGraph
-						changed = true
-					}
-				}
-			}
-		}
-	}
-
-	// Rebuild graphs
-	for _, quad := range defaultGraph {
-		// 1. Update VC link
-		if quad.Predicate != nil && quad.Predicate.GetValue() == vcPredicate {
-			if quad.Object != nil {
-				obj := quad.Object.GetValue()
-				if newGraph, ok := vcMoves[obj]; ok {
-					// Update object to new graph name
-					newQuad := &ld.Quad{
-						Subject:   quad.Subject,
-						Predicate: quad.Predicate,
-						Object:    ld.NewBlankNode(newGraph),
-						Graph:     quad.Graph,
-					}
-					newDefaultGraph = append(newDefaultGraph, newQuad)
-					continue
-				}
-			}
-		}
-
-		// 2. Move quads
-		if quad.Subject != nil {
-			sub := quad.Subject.GetValue()
-			if targetGraph, ok := nodesToMove[sub]; ok {
-				// Move to new graph
-				newQuad := &ld.Quad{
-					Subject:   quad.Subject,
-					Predicate: quad.Predicate,
-					Object:    quad.Object,
-					Graph:     ld.NewBlankNode(targetGraph),
-				}
-				// Add to new graph list
-				newGraphs[targetGraph] = append(newGraphs[targetGraph], newQuad)
-				continue
-			}
-		}
-
-		// Keep in default graph
-		newDefaultGraph = append(newDefaultGraph, quad)
-	}
-
-	// Update dataset
-	rc.dataset.Graphs["@default"] = newDefaultGraph
-	maps.Copy(rc.dataset.Graphs, newGraphs)
-
+	rc.dataset = dataset
 	return nil
 }
 
-func isSubjectInGraph(subject string, quads []*ld.Quad) bool {
-	for _, q := range quads {
-		if q.Subject != nil && q.Subject.GetValue() == subject {
-			return true
-		}
+// verifiableCredentialIRI is the verifiableCredential property in an expanded document.
+const verifiableCredentialIRI = "https://www.w3.org/2018/credentials#verifiableCredential"
+
+// wrapEmbeddedCredentialsInGraphs works on an expanded document and rewrites each node
+// held under verifiableCredential into an explicit {"@graph": [<node>]}, reporting
+// whether it changed anything. Left alone: a value already in a graph (a context whose
+// container json-gold does apply, such as VC v1), a literal, and a bare node reference,
+// which names a graph the document defines elsewhere - what CredentialWithoutProofForTypes
+// produces through FromRDF. A literal's content, a JSON value included, is never entered.
+func wrapEmbeddedCredentialsInGraphs(node any) bool {
+	switch n := node.(type) {
+	case map[string]any:
+		return wrapInNode(n)
+	case []any:
+		return wrapInItems(n)
 	}
 	return false
+}
+
+// wrapInNode wraps the credentials held by one node object, and by everything below it.
+func wrapInNode(n map[string]any) bool {
+	if _, literal := n["@value"]; literal {
+		return false
+	}
+	changed := false
+	for key, child := range n {
+		if key == verifiableCredentialIRI {
+			if list, ok := child.([]any); ok {
+				changed = wrapCredentialList(list) || changed
+			}
+		}
+		changed = wrapEmbeddedCredentialsInGraphs(child) || changed
+	}
+	return changed
+}
+
+// wrapInItems wraps the credentials below each item of a list.
+func wrapInItems(items []any) bool {
+	changed := false
+	for _, item := range items {
+		changed = wrapEmbeddedCredentialsInGraphs(item) || changed
+	}
+	return changed
+}
+
+// wrapCredentialList wraps, in place, each node in a list of embedded credentials.
+func wrapCredentialList(list []any) bool {
+	changed := false
+	for i, item := range list {
+		cred, ok := item.(map[string]any)
+		if !ok || !needsGraph(cred) {
+			continue
+		}
+		list[i] = map[string]any{"@graph": []any{cred}}
+		changed = true
+	}
+	return changed
+}
+
+// needsGraph reports whether a value under verifiableCredential is a credential not yet
+// in a graph of its own.
+func needsGraph(value map[string]any) bool {
+	if _, inGraph := value["@graph"]; inGraph {
+		return false
+	}
+	if _, literal := value["@value"]; literal {
+		return false
+	}
+	return !isNodeReference(value)
+}
+
+// isNodeReference reports whether a node object says nothing but which node it is.
+func isNodeReference(node map[string]any) bool {
+	if _, hasID := node["@id"]; !hasID {
+		return false
+	}
+	for key := range node {
+		if key != "@id" && key != "@index" {
+			return false
+		}
+	}
+	return true
 }

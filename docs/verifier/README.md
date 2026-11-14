@@ -183,6 +183,22 @@ docker-compose up verifier
 | `/register` | POST | Dynamic client registration |
 | `/register/{client_id}` | GET/PUT/DELETE | Client configuration management |
 
+The two `/register` endpoints are served unless the deployment turns them off:
+
+```yaml
+verifier:
+  outbound:
+    oidc_provider:
+      dynamic_registration:
+        enabled: false
+```
+
+They then answer 404 and `registration_endpoint` is left out of the discovery
+document, so relying parties come from `static_clients` alone. Clients that
+registered while registration was open keep working. To keep registration but
+require a credential for it, use `dynamic_registration_auth` instead; that
+block has no effect once registration is closed.
+
 ### OpenID4VP Endpoints (for Wallets)
 
 | Endpoint | Method | Description |
