@@ -29,23 +29,16 @@
             --pending-color: #d68910;
         }
 
-        {{/* Theme variations */}}
+        {{/* Theme variations. Surfaces only: the brand colors above are
+             already the theme's, with primary_color/secondary_color applied
+             on top (model.AuthorizationPageCSSConfig.ThemeColors). Redefining
+             them here is what used to discard the operator's choice. */}}
         {{if eq .Theme "dark"}}
         :root {
             --container-bg: #1a202c;
             --text-primary: #e2e8f0;
             --text-secondary: #a0aec0;
             --border-color: #4a5568;
-        }
-        {{else if eq .Theme "blue"}}
-        :root {
-            --primary-color: #3182ce;
-            --secondary-color: #2c5282;
-        }
-        {{else if eq .Theme "purple"}}
-        :root {
-            --primary-color: #805ad5;
-            --secondary-color: #553c9a;
         }
         {{end}}
 
@@ -258,10 +251,10 @@
                 margin: 8px 0;
             }
         }
-
-        {{/* Custom CSS from configuration */}}
-        {{.CustomCSS}}
     </style>
+    {{/* An operator-supplied stylesheet, linked after the defaults above so it
+         can override them. Fetched by the browser from the URL as configured;
+         nothing here reads it from disk. */}}
     {{if .CSSFile}}
     <link rel="stylesheet" href="{{.CSSFile}}">
     {{end}}

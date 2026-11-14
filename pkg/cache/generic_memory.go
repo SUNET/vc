@@ -14,11 +14,32 @@ type MemoryCache[V any] struct {
 	ttl   time.Duration
 }
 
+// MemoryCacheOption configures a MemoryCache.
+type MemoryCacheOption func(*memoryCacheConfig)
+
+type memoryCacheConfig struct {
+	absoluteExpiry bool
+}
+
+// WithAbsoluteExpiry stops a Get from extending an entry's lifetime, so an
+// entry expires a fixed time after it was set however often it is read.
+func WithAbsoluteExpiry() MemoryCacheOption {
+	return func(c *memoryCacheConfig) { c.absoluteExpiry = true }
+}
+
 // NewMemoryCache creates a new in-memory generic cache with the given default TTL.
-func NewMemoryCache[V any](ttl time.Duration) *MemoryCache[V] {
-	c := ttlcache.New(
-		ttlcache.WithTTL[string, V](ttl),
-	)
+// By default a Get extends the entry's lifetime; see WithAbsoluteExpiry.
+func NewMemoryCache[V any](ttl time.Duration, opts ...MemoryCacheOption) *MemoryCache[V] {
+	var cfg memoryCacheConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	ttlOpts := []ttlcache.Option[string, V]{ttlcache.WithTTL[string, V](ttl)}
+	if cfg.absoluteExpiry {
+		ttlOpts = append(ttlOpts, ttlcache.WithDisableTouchOnHit[string, V]())
+	}
+	c := ttlcache.New(ttlOpts...)
 
 	go c.Start()
 

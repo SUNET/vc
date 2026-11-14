@@ -200,6 +200,35 @@ type OpenID4VPCompat struct {
 	// still has to reach a draft-era wallet, and expect conformance to fail
 	// for as long as it is on.
 	SendLegacyJARMEncryptionParams *bool `yaml:"send_legacy_jarm_encryption_params" default:"false"`
+
+	// CompactW3CTypeValues sends the type_values of an ldp_vc credential query
+	// to the wallet as compact terms ("IndividualIDCredential") instead of
+	// fully expanded IRIs ("https://schemas.example.org/vocab#IndividualIDCredential").
+	//
+	// Off by default, and deliberately: OpenID4VP 1.0 B.3.2 defines type_values
+	// as expanded IRIs, and a conformant wallet finds no credential for a
+	// compact name. Some deployed wallets match the credential's own compact
+	// `type` array instead, so they offer nothing for the conformant request.
+	// Turn this on only for a deployment that has to reach such a wallet.
+	//
+	// Only the request object sent to the wallet changes. Queries, templates,
+	// the session and the response check stay in expanded form, so a returned
+	// credential is still matched by its expanded types. The compact term sent
+	// is the part of the IRI after its last '#' or, without one, its last '/',
+	// which is the term a credential's context defines for it in the common
+	// case (the W3C base context, Accredify's vocab); a type whose context
+	// names it differently needs the wallet fixed instead.
+	CompactW3CTypeValues *bool `yaml:"compact_w3c_type_values" default:"false"`
+}
+
+// CompactW3CTypeValues reports whether request objects should carry compact
+// type_values for W3C credential queries. Nil-safe, like
+// SendLegacyJARMEncryptionParams.
+func (cfg *Cfg) CompactW3CTypeValues() bool {
+	if cfg == nil || cfg.Common == nil {
+		return false
+	}
+	return BoolVal(cfg.Common.OpenID4VPCompat.CompactW3CTypeValues, false)
 }
 
 // SendLegacyJARMEncryptionParams reports whether client_metadata should carry
@@ -1364,6 +1393,14 @@ type OIDCOP struct {
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty" validate:"omitempty,dive"`
 
+	// DynamicRegistration configures whether this OP offers OAuth 2.0
+	// Dynamic Client Registration (RFC 7591) and the client configuration
+	// endpoints that go with it (RFC 7592).
+	//
+	// Omitted, registration is offered, which is what this OP has always
+	// done.
+	DynamicRegistration *DynamicRegistrationConfig `yaml:"dynamic_registration,omitempty" validate:"omitempty"`
+
 	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
 	// Modes:
 	//   - open: no authorization required (default)
@@ -1372,6 +1409,57 @@ type OIDCOP struct {
 	//
 	// Future option (not implemented yet): introspection via external authorization server.
 	DynamicRegistrationAuth *DynamicRegistrationAuthConfig `yaml:"dynamic_registration_auth,omitempty" validate:"omitempty"`
+}
+
+// DynamicRegistrationConfig configures whether the verifier-OP offers dynamic client registration at all.
+//
+// How a registration request is authorized, once the endpoint is served, is
+// dynamic_registration_auth's business. The two stay separate blocks because
+// "nobody may register" and "whoever holds this token may register" are
+// separate decisions, and because folding the older block into this one would
+// silently drop the key from every deployment that already sets it: the config
+// loader ignores YAML keys it does not know.
+type DynamicRegistrationConfig struct {
+	// Enabled controls whether POST /register and GET/PUT/DELETE
+	// /register/{client_id} are served, and whether registration_endpoint
+	// is advertised in the discovery document.
+	//
+	// True by default, which is what the verifier has always done. When
+	// false, those routes are not registered at all, so they answer 404,
+	// and no client is invited to try one. Relying parties then come from
+	// static_clients alone, which is what a deployment with a fixed, known
+	// set of RPs wants: nothing reachable from the network can add one.
+	//
+	// It closes registration rather than undoing it. Clients registered
+	// while it was enabled keep working; what stops is registering new
+	// ones and reading or editing an existing one over RFC 7592.
+	//
+	// It also turns dynamic_registration_auth off, startup checks and all,
+	// so a deployment that has closed registration can retire its
+	// registration credential instead of keeping the file around to
+	// satisfy a check that now guards nothing.
+	//
+	// A POINTER, so that an explicit false survives: defaults.Set fills any
+	// field still at its zero value, and false is the zero value of a bool,
+	// so a plain bool with default:"true" could never be turned off at all
+	// (SUNET/vc#753).
+	Enabled *bool `yaml:"enabled" default:"true"`
+}
+
+// DynamicRegistrationEnabled reports whether the verifier-OP offers dynamic
+// client registration, so that the route table and the discovery document
+// answer that question from one place.
+//
+// A nil receiver, or no dynamic_registration block, answers true: those
+// deployments served the registration endpoints before this switch existed,
+// and adding the switch is not the moment to change what an untouched
+// configuration does. Closing registration is something an operator asks for.
+func (o *OIDCOP) DynamicRegistrationEnabled() bool {
+	if o == nil || o.DynamicRegistration == nil {
+		return true
+	}
+
+	return BoolVal(o.DynamicRegistration.Enabled, true)
 }
 
 // DynamicRegistrationAuthConfig configures how the verifier authorizes dynamic client registration requests.
@@ -1586,24 +1674,52 @@ type DigitalCredentialsConfig struct {
 	DeepLinkScheme string `yaml:"deep_link_scheme,omitempty" doc_example:"\"eudi-wallet://\""`
 }
 
-// AuthorizationPageCSSConfig allows deployers to customize the authorization page styling
+// AuthorizationPageCSSConfig allows deployers to customize the authorization page styling.
+//
+// A theme chooses the page's two brand colors, and primary_color and
+// secondary_color override whichever pair it chose. The override used to lose:
+// the template emitted the configured colors and then the theme's, two :root
+// rules of equal specificity in one stylesheet, so "blue" and "purple" silently
+// discarded an operator's primary_color - including in this repository's own
+// documented example, which set both. The pair is now resolved before the
+// template sees it, by ThemeColors.
+//
+// There is deliberately no inline-CSS member here. It existed and could never
+// apply: the CSS was interpolated into a `style` element as a plain string,
+// where html/template's CSS-context filter replaces anything that is not a
+// safe CSS value - a stylesheet very much included - with the literal
+// ZgotmplZ. Making it work would mean injecting operator-supplied CSS
+// unescaped into every authorization page, a configuration-controlled
+// injection sink in exchange for a knob no deployment can be relying on,
+// because it has never once applied. See SUNET/vc#930.
+//
+// CSSFile is a different story and stays: it renders as a `link` element with
+// an href, which works whenever the configured value is a URL the browser can
+// fetch. Only its documentation was wrong, calling it a path read from disk.
+//
+// Tag names are written in backticks deliberately: gen_config_docs renders
+// this comment as Markdown prose in docs/CONFIGURATION.md, where a bare
+// `<style>` is raw HTML rather than text.
 type AuthorizationPageCSSConfig struct {
-	// CustomCSS is inline CSS that will be injected into the authorization page
-	// Allows deployers to override default styling without modifying templates
-	CustomCSS string `yaml:"custom_css,omitempty"`
-
-	// CSSFile is a path to an external CSS file to include
-	// If both CustomCSS and CSSFile are provided, both are included
-	CSSFile string `yaml:"css_file,omitempty"`
-
-	// Theme sets predefined color scheme: "light" (default), "dark", "blue", "purple"
+	// Theme selects the color scheme the page starts from: "light" (default),
+	// "dark", "blue" or "purple". The colors below override it.
 	Theme string `yaml:"theme,omitempty" validate:"omitempty,oneof=light dark blue purple" default:"light"`
 
-	// PrimaryColor overrides the primary brand color
+	// PrimaryColor overrides the primary brand color the theme selected.
 	PrimaryColor string `yaml:"primary_color,omitempty" doc_example:"\"#667eea\""`
 
-	// SecondaryColor overrides the secondary brand color
+	// SecondaryColor overrides the secondary brand color the theme selected.
 	SecondaryColor string `yaml:"secondary_color,omitempty" doc_example:"\"#764ba2\""`
+
+	// CSSFile is the URL of a stylesheet to link from the authorization page.
+	//
+	// Fetched by the browser, not read by this service, so it has to be a URL
+	// the browser can reach: an absolute https URL, or a path this deployment
+	// serves. It was documented as "a path to an external CSS file" and its
+	// documented example was a filesystem path, which the browser duly
+	// requested from the verifier and got a 404 for; the member itself has
+	// always worked for a URL, which is why it is still here.
+	CSSFile string `yaml:"css_file,omitempty" doc_example:"\"https://static.example.com/verifier.css\""`
 
 	// LogoURL provides a URL to a custom logo image
 	LogoURL string `yaml:"logo_url,omitempty"`
@@ -1613,6 +1729,37 @@ type AuthorizationPageCSSConfig struct {
 
 	// Subtitle overrides the page subtitle
 	Subtitle string `yaml:"subtitle,omitempty"`
+}
+
+// ThemeColors returns the primary and secondary brand colors the authorization
+// page should use: the configured theme's pair, with PrimaryColor and
+// SecondaryColor overriding either of them independently.
+//
+// Resolving this here rather than in the template is what makes the override
+// an override. The template used to emit the configured colors first and the
+// theme's afterwards, two :root rules of equal specificity in one stylesheet,
+// so the theme won whatever the operator configured.
+//
+// An unrecognized or absent theme resolves as "light". defaults.Set fills the
+// field, and the validator restricts it to the four names, so neither case
+// should reach a running verifier; answering with the default pair rather than
+// with empty strings keeps a page that somehow does reach it readable.
+func (a *AuthorizationPageCSSConfig) ThemeColors() (primary string, secondary string) {
+	switch a.Theme {
+	case "purple":
+		primary, secondary = "#805ad5", "#553c9a"
+	default:
+		primary, secondary = "#3182ce", "#2c5282"
+	}
+
+	if a.PrimaryColor != "" {
+		primary = a.PrimaryColor
+	}
+	if a.SecondaryColor != "" {
+		secondary = a.SecondaryColor
+	}
+
+	return primary, secondary
 }
 
 // CredentialDisplayConfig controls whether and how credentials are displayed before being sent to RP
@@ -2528,6 +2675,19 @@ type TokenStatusLists struct {
 	SectionSize int64 `yaml:"section_size" default:"1000000"`
 	// RateLimitRequestsPerMinute is the maximum requests per minute per IP for token status list endpoints. Default: 60
 	RateLimitRequestsPerMinute int `yaml:"rate_limit_requests_per_minute" default:"60"`
+	// TokenKeyCarriers lists the header members every issued Status List Token
+	// uses to carry its signing key, so that a verifier can resolve that key
+	// from the token itself: "x5c" for the certificate chain loaded from
+	// key_config.chain_path (the JOSE x5c header, RFC 7515, and the COSE
+	// x5chain header, RFC 9360), "jwk" for the bare public key (the JOSE jwk
+	// header). Both by default, so a deployment need not know which carrier
+	// its verifiers accept; x5c rides only when a chain is configured, so a
+	// deployment with no chain_path keeps issuing exactly what it issued
+	// before. Narrow it to bind status lists to certificates alone (["x5c"])
+	// or to keys alone (["jwk"]). A list naming only carriers this deployment
+	// cannot produce is refused at startup rather than quietly issuing tokens
+	// with no key in them at all.
+	TokenKeyCarriers []string `yaml:"token_key_carriers,omitempty" default:"[\"x5c\", \"jwk\"]" validate:"omitempty,dive,oneof=x5c jwk"`
 }
 
 // OTEL holds the OpenTelemetry tracing configuration
@@ -2820,6 +2980,30 @@ type CredentialMetadata struct {
 	//
 	// Unset leaves the scope unrequestable rather than guessed at.
 	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
+
+	// DCQLClaims are the claim paths a verifier REQUESTS from this
+	// credential, in the same form a presentation request template writes
+	// them (OpenID4VP 1.0 6.4.1):
+	//
+	//	claims:
+	//	  - path: ["given_name"]
+	//	  - path: ["address", "locality"]
+	//	  - path: ["nationalities", null]
+	//
+	// Leaving this unset is not the same as letting the wallet choose. A
+	// query with no claims member requests no selectively disclosable claim
+	// at all, and a compliant wallet returns only what is mandatory to
+	// present (OpenID4VP 1.0 6.4.1). A dc+sd-jwt or mso_mdoc scope left
+	// unset is therefore asked for without any attributes, and only a
+	// lenient wallet discloses them anyway. The default is kept because it
+	// is what deployments already send; set this to ask for the subset the
+	// use case needs.
+	//
+	// Only read when the request is built from this config. A presentation
+	// request template (verifier.inbound.openid4vp.presentation_requests_dir)
+	// carries a whole DCQL query of its own, and wins whenever one matches
+	// the request's scopes.
+	DCQLClaims []openid4vp.ClaimQuery `yaml:"claims,omitempty" json:"-" validate:"omitempty,dive"`
 
 	// CredentialContexts are JSON-LD contexts appended after the VC 2.0 base
 	// context when this credential is issued.

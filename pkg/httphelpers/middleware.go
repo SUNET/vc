@@ -474,8 +474,16 @@ func (m *middlewareHandler) CSRFProtection(sessionKey string) gin.HandlerFunc {
 }
 
 // CustomBranding returns a middleware that serves custom logo and favicon files
-// when configured in common.branding. Requests not matching /static/logo.png or
-// /static/favicon.png are passed through unchanged.
+// when configured in common.branding. Requests for a path this does not name
+// are passed through unchanged.
+//
+// Both mount points are listed because the services do not agree on one. The
+// apigw and the verifier mount their assets at /static; the registry's admin
+// GUI mounts its own at /admin/static and references /admin/static/logo.png,
+// so for as long as this matched /static alone the registry admin stayed on
+// the built-in logo whatever the operator configured (SUNET/vc#930). Matching
+// an exact set rather than, say, any path ending in logo.png keeps a service
+// that serves an unrelated file of that name out of it.
 func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerFunc {
 	log := m.log.New("branding")
 	var logoOnce, faviconOnce sync.Once
@@ -521,11 +529,11 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 
 	return func(c *gin.Context) {
 		switch c.Request.URL.Path {
-		case "/static/logo.png":
+		case "/static/logo.png", "/admin/static/logo.png":
 			if serveIfReadable(c, branding.LogoPath, &logoOnce) {
 				return
 			}
-		case "/static/favicon.png":
+		case "/static/favicon.png", "/admin/static/favicon.png":
 			if serveIfReadable(c, branding.FaviconPath, &faviconOnce) {
 				return
 			}

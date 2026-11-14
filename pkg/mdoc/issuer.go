@@ -120,6 +120,8 @@ type IssuanceRequest struct {
 	// claims, and value encoding for this issuance (the mdoc analogue of an
 	// SD-JWT VCTM).
 	Schema *MDDLSchema
+	// Status, when set, is embedded in the signed MSO so verifiers can check revocation.
+	Status *MSOStatusList
 	// Custom validity period (optional)
 	ValidFrom  *time.Time
 	ValidUntil *time.Time
@@ -187,6 +189,9 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		WithDeviceKey(deviceKey).
 		WithSigner(i.signerKey, i.certChain).
 		WithSaltBytes(req.Schema.ZkSaltBytes)
+	if req.Status != nil {
+		builder.WithStatus(req.Status.URI, req.Status.Idx)
+	}
 
 	// Add every claim declared by the schema, across all of its namespaces.
 	// This one generic pass replaces per-doctype element lists: adding a new

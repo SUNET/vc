@@ -70,7 +70,6 @@ type AuthorizeResponse struct {
 	PrimaryColor     string       `json:"primary_color"`
 	SecondaryColor   string       `json:"secondary_color"`
 	Theme            string       `json:"theme"`
-	CustomCSS        string       `json:"custom_css"`
 	CSSFile          string       `json:"css_file"`
 	LogoURL          string       `json:"logo_url"`
 }
@@ -255,19 +254,14 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	if response.Subtitle == "" {
 		response.Subtitle = "Please present your digital credential to continue"
 	}
-	response.PrimaryColor = cssConfig.PrimaryColor
-	if response.PrimaryColor == "" {
-		response.PrimaryColor = "#3182ce"
-	}
-	response.SecondaryColor = cssConfig.SecondaryColor
-	if response.SecondaryColor == "" {
-		response.SecondaryColor = "#2c5282"
-	}
+	// The theme chooses the colors and the explicit members override them;
+	// model.ThemeColors owns that precedence so the credential display page
+	// resolves it the same way.
+	response.PrimaryColor, response.SecondaryColor = cssConfig.ThemeColors()
 	response.Theme = cssConfig.Theme
 	if response.Theme == "" {
 		response.Theme = "light"
 	}
-	response.CustomCSS = cssConfig.CustomCSS
 	response.CSSFile = cssConfig.CSSFile
 	response.LogoURL = cssConfig.LogoURL
 
@@ -567,9 +561,16 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	if err != nil {
 		return nil, err
 	}
-	registrationEndpoint, err := join("/register")
-	if err != nil {
-		return nil, err
+	// Left empty, and so omitted from the document, when the deployment has
+	// closed registration: the endpoint is not served, and advertising one
+	// that answers 404 sends every client that reads this document down a
+	// path that cannot work.
+	var registrationEndpoint string
+	if c.cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationEnabled() {
+		registrationEndpoint, err = join("/register")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	metadata := &DiscoveryMetadata{
