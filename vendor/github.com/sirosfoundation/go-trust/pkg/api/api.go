@@ -191,6 +191,9 @@ func RegisterAPIRoutes(r *gin.Engine, serverCtx *ServerContext) {
 	// AuthZEN evaluation endpoint
 	r.POST("/evaluation", AuthZENDecisionHandler(serverCtx))
 
+	// AuthZEN access evaluations (batch) endpoint
+	r.POST("/evaluations", AuthZENBatchDecisionHandler(serverCtx))
+
 	// Registry information endpoint
 	r.GET("/registries", RegistriesHandler(serverCtx))
 

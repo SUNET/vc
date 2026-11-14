@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sirosfoundation/g119612/pkg/logging"
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 )
@@ -89,6 +90,24 @@ func (m *RegistryManager) Register(registry TrustRegistry) {
 // according to the configured strategy. If a PolicyManager is set, it resolves the policy
 // from action.name and applies constraints.
 func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
+	resp, err := m.evaluate(ctx, req)
+	if err == nil && resp != nil {
+		// A unique id per decision, for audit correlation. Always generated
+		// here: an id a registry put on a response it also keeps would repeat
+		// across decisions. Copy before writing for the same reason.
+		out := *resp
+		var rc authzen.EvaluationResponseContext
+		if resp.Context != nil {
+			rc = *resp.Context
+		}
+		rc.ID = uuid.NewString()
+		out.Context = &rc
+		resp = &out
+	}
+	return resp, err
+}
+
+func (m *RegistryManager) evaluate(ctx context.Context, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
 	startTime := time.Now()
 	logger := m.getLogger()
 
@@ -228,21 +247,7 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 	logger.Debug("Evaluate: dispatching to strategy",
 		logging.F("strategy", string(m.strategy)))
 
-	// Route to appropriate strategy
-	var resp *authzen.EvaluationResponse
-	var err error
-	switch m.strategy {
-	case FirstMatch:
-		resp, err = m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
-	case AllRegistries:
-		resp, err = m.evaluateAllWithPolicy(ctx, req, policyCtx)
-	case BestMatch:
-		resp, err = m.evaluateBestMatchWithPolicy(ctx, req, policyCtx)
-	case Sequential:
-		resp, err = m.evaluateSequentialWithPolicy(ctx, req, policyCtx)
-	default:
-		resp, err = m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
-	}
+	resp, err := m.dispatch(ctx, req, policyCtx)
 
 	duration := time.Since(startTime)
 	if err != nil {
@@ -272,6 +277,36 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 	}
 
 	return resp, err
+}
+
+// dispatch routes the request to the configured strategy and attaches the
+// freshness of the registries consulted to the response.
+func (m *RegistryManager) dispatch(ctx context.Context, req *authzen.EvaluationRequest, policyCtx *PolicyContext) (*authzen.EvaluationResponse, error) {
+	// Snapshot freshness before the registries are consulted; see attachTrustData.
+	m.mu.RLock()
+	applicable := m.getApplicableRegistriesWithPolicy(req, policyCtx)
+	m.mu.RUnlock()
+	freshnessBefore := trustDataSnapshot(applicable)
+
+	var resp *authzen.EvaluationResponse
+	var err error
+	switch m.strategy {
+	case FirstMatch:
+		resp, err = m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
+	case AllRegistries:
+		resp, err = m.evaluateAllWithPolicy(ctx, req, policyCtx)
+	case BestMatch:
+		resp, err = m.evaluateBestMatchWithPolicy(ctx, req, policyCtx)
+	case Sequential:
+		resp, err = m.evaluateSequentialWithPolicy(ctx, req, policyCtx)
+	default:
+		resp, err = m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
+	}
+	if err != nil {
+		return resp, err
+	}
+	markEvaluationFailures(resp)
+	return attachTrustData(resp, freshnessBefore, trustDataSnapshot(applicable)), nil
 }
 
 // resolvePolicyContext resolves the policy for the request based on action.name.
@@ -426,6 +461,18 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		}
 		if e.PathLenOverride != nil {
 			req.Context["emrtd_path_len_override"] = *e.PathLenOverride
+		}
+		if e.CRLMode != "" {
+			req.Context["emrtd_crl_mode"] = e.CRLMode
+		}
+		if e.CRLMaxAge != 0 {
+			req.Context["emrtd_crl_max_age"] = e.CRLMaxAge.String()
+		}
+		if len(e.CRLCountries) > 0 {
+			req.Context["emrtd_crl_countries"] = append([]string(nil), e.CRLCountries...)
+		}
+		if len(e.CRLExemptCountries) > 0 {
+			req.Context["emrtd_crl_exempt_countries"] = append([]string(nil), e.CRLExemptCountries...)
 		}
 	}
 

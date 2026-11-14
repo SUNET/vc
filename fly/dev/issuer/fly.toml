@@ -23,6 +23,28 @@ primary_region = "arn"
   guest_path = "/pki/signing_ec_chain.pem"
   secret_name = "SIGNING_EC_CHAIN"
 
+# IDunion trusted-list certificate: the issuer's credential signing key. Needs
+# `./fly/deploy.sh idunion --profile dev` first; a missing secret makes the machine
+# fail to start. The signing_ec_* mounts above are kept only for rollback.
+[[files]]
+  guest_path = "/pki/issuer_signing_private.pem"
+  secret_name = "ISSUER_SIGNING_PRIVATE_KEY"
+
+[[files]]
+  guest_path = "/pki/issuer_signing_chain.pem"
+  secret_name = "ISSUER_SIGNING_CHAIN"
+
+# WeBuild access certificate for issuer metadata signing. Enable only after
+# `./fly/deploy.sh wrpac --profile dev --service issuer`; a missing secret
+# makes the machine fail to start.
+# [[files]]
+#   guest_path = "/pki/wrpac_private.pem"
+#   secret_name = "WRPAC_PRIVATE_KEY"
+#
+# [[files]]
+#   guest_path = "/pki/wrpac_chain.pem"
+#   secret_name = "WRPAC_CHAIN"
+
 [http_service]
   internal_port = 8080
   force_https = true

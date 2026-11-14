@@ -16,6 +16,8 @@
 #   launch     - Create Fly apps for all services (first time only)
 #   deploy     - Deploy all services (or specify --service <name>)
 #   secrets    - Print the secrets file path for the profile
+#   wrpac      - Push issued WRPAC key/chain (and WRPRC) as secrets (requires --service verifier|issuer)
+#   idunion    - Push the IDunion-issued issuer signing key/chain as secrets (issuer only)
 #   status     - Show status of all services
 #   logs       - Tail logs for a service (requires --service)
 #   destroy    - Destroy all Fly apps (requires --confirm)
@@ -552,6 +554,84 @@ cmd_secrets() {
     fi
 }
 
+# Push the WeBuild-issued access certificate material for one service.
+# Inputs in developer_tools/pki/webuild/ (see create_wrpac_csr.sh):
+#   <svc>-wrpac.key        private key from the CSR step
+#   <svc>-wrpac.chain.pem  issued leaf first, then intermediates
+#   <svc>-wrprc.jwt        optional registration certificate
+cmd_wrpac() {
+    require_flyctl
+    require_profile_vars
+    [[ ${#SERVICES[@]} -eq 1 ]] || die "Specify --service verifier or --service issuer"
+    local svc="${SERVICES[0]}"
+    case "$svc" in
+        verifier|issuer) ;;
+        *) die "wrpac supports --service verifier|issuer, got: $svc" ;;
+    esac
+
+    local dir="${ROOT_DIR}/developer_tools/pki/webuild"
+    local key="${dir}/${svc}-wrpac.key"
+    local chain="${dir}/${svc}-wrpac.chain.pem"
+    local rprc="${dir}/${svc}-wrprc.jwt"
+    [[ -f "$key" ]]   || die "missing $key (run developer_tools/scripts/create_wrpac_csr.sh)"
+    [[ -f "$chain" ]] || die "missing $chain (issued certificate, then intermediates)"
+
+    # Fail early if the key does not belong to the leaf certificate.
+    local key_pub cert_pub
+    key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null)" || die "cannot read $key"
+    cert_pub="$(openssl x509 -in "$chain" -pubkey -noout 2>/dev/null)" || die "cannot read leaf certificate in $chain"
+    [[ "$key_pub" == "$cert_pub" ]] || die "$key does not match the first certificate in $chain"
+
+    local app
+    app="$(app_name "$svc")"
+    local args=(
+        "WRPAC_PRIVATE_KEY=$(base64 < "$key" | tr -d '\n')"
+        "WRPAC_CHAIN=$(base64 < "$chain" | tr -d '\n')"
+    )
+    if [[ -f "$rprc" ]]; then
+        args+=("WRPRC_JWT=$(base64 < "$rprc" | tr -d '\n')")
+    fi
+    echo "==> Setting WRPAC secrets on $app"
+    # stdin keeps the private key out of the process list
+    printf '%s\n' "${args[@]}" | fly secrets import --stage --app "$app" >/dev/null
+    echo "    Staged. Mount via [[files]] in fly/${PROFILE:-dev}/${svc}/fly.toml, then deploy."
+    if [[ "$svc" == "issuer" ]]; then
+        echo "    Then redeploy apigw so it drops its cached issuer metadata."
+    fi
+}
+
+# Push the IDunion trusted-list certificate as the issuer's credential signing key.
+# Inputs in developer_tools/pki/webuild/ (see create_wrprc.sh):
+#   issuer-wrprc-idunion.key  private key from the CSR step
+#   issuer-wrprc-idunion.pem  issued leaf first, then the list CA
+cmd_idunion() {
+    require_flyctl
+    require_profile_vars
+
+    local dir="${ROOT_DIR}/developer_tools/pki/webuild"
+    local key="${dir}/issuer-wrprc-idunion.key"
+    local chain="${dir}/issuer-wrprc-idunion.pem"
+    [[ -f "$key" ]]   || die "missing $key (run developer_tools/scripts/create_wrprc.sh)"
+    [[ -f "$chain" ]] || die "missing $chain (certificate downloaded from IDunion)"
+
+    # Fail early if the key does not belong to the leaf certificate.
+    local key_pub cert_pub
+    key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null)" || die "cannot read $key"
+    cert_pub="$(openssl x509 -in "$chain" -pubkey -noout 2>/dev/null)" || die "cannot read leaf certificate in $chain"
+    [[ "$key_pub" == "$cert_pub" ]] || die "$key does not match the first certificate in $chain"
+
+    local app
+    app="$(app_name issuer)"
+    echo "==> Setting issuer signing secrets on $app"
+    # stdin keeps the private key out of the process list
+    printf '%s\n' \
+        "ISSUER_SIGNING_PRIVATE_KEY=$(base64 < "$key" | tr -d '\n')" \
+        "ISSUER_SIGNING_CHAIN=$(base64 < "$chain" | tr -d '\n')" |
+        fly secrets import --stage --app "$app" >/dev/null
+    echo "    Staged. Mounted via fly/${PROFILE:-dev}/issuer/fly.toml; deploy the issuer to apply,"
+    echo "    then redeploy apigw so it drops its cached issuer metadata (refreshed every 55 minutes)."
+}
+
 cmd_status() {
     require_flyctl
     require_profile_vars
@@ -620,6 +700,8 @@ case "${COMMAND}" in
     launch)  cmd_launch ;;
     deploy)  cmd_deploy ;;
     secrets) cmd_secrets ;;
+    wrpac)   cmd_wrpac ;;
+    idunion) cmd_idunion ;;
     status)  cmd_status ;;
     logs)    cmd_logs ;;
     destroy) cmd_destroy ;;

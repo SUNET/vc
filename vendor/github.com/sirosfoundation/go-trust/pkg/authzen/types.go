@@ -84,6 +84,26 @@ type EvaluationResponseContext struct {
 	// when the policy enables it (constraints.return_verifier_ids), the decision
 	// is true, and the identifier was verified. Informational, never critical.
 	VerifierIDs []VerifierID `json:"verifier_ids,omitempty"` // Verified verifier identifiers
+	// TrustData reports how fresh the data behind the decision is, one entry
+	// per registry consulted. Callers that cache decisions use next_update as
+	// an upper bound on how long the answer can be kept. Absence of the member,
+	// or of next_update in an entry, means "unknown": the caller applies its own
+	// conservative cap.
+	TrustData []TrustData `json:"trust_data,omitempty"`
+}
+
+// TrustData describes the freshness of one registry's data.
+// @Description Freshness of the data one registry decided from
+type TrustData struct {
+	// Registry is the registry's configured name.
+	Registry string `json:"registry" example:"etsi"`
+	// AsOf is when the registry last loaded its data (RFC 3339, UTC). Omitted
+	// when the registry has not loaded data or has no such notion.
+	AsOf string `json:"as_of,omitempty" example:"2026-10-19T00:00:00Z"`
+	// NextUpdate is the earliest moment the source data is due to be replaced
+	// (RFC 3339, UTC), for example an ETSI TSL NextUpdate or a VICAL nextUpdate.
+	// Omitted when the registry has no such notion (static, whitelist).
+	NextUpdate string `json:"next_update,omitempty" example:"2026-10-26T00:00:00Z"`
 }
 
 // Verifier identifier types a PDP can return in EvaluationResponseContext.VerifierIDs.

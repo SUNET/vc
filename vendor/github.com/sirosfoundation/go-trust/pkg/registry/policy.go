@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 )
@@ -202,6 +203,25 @@ type EMRTDPolicyConstraints struct {
 	// issuer on the path (CSCA and link certificates, including one with none)
 	// and implies "enforce". Must be >= 0.
 	PathLenOverride *int `json:"path_len_override,omitempty" yaml:"path_len_override,omitempty"`
+
+	// CRLMode is "best-effort" (default, also when empty) or
+	// "require-current". With "require-current" every issuing CA on the
+	// path needs a verified, current CRL, otherwise the document signer is
+	// denied as crl_unavailable or crl_stale.
+	CRLMode string `json:"crl_mode,omitempty" yaml:"crl_mode,omitempty"`
+
+	// CRLMaxAge, for "require-current", is the longest time since a CRL's
+	// thisUpdate that still counts as current (a CRL past nextUpdate is never
+	// current). Zero means only nextUpdate applies.
+	CRLMaxAge time.Duration `json:"crl_max_age,omitempty" yaml:"crl_max_age,omitempty"`
+
+	// CRLCountries limits "require-current" to these issuing states
+	// (ISO 3166-1 alpha-3, upper case). Empty means every state.
+	CRLCountries []string `json:"crl_countries,omitempty" yaml:"crl_countries,omitempty"`
+
+	// CRLExemptCountries are states for which "require-current" is not
+	// applied, for example states that publish no CRL.
+	CRLExemptCountries []string `json:"crl_exempt_countries,omitempty" yaml:"crl_exempt_countries,omitempty"`
 }
 
 // Validate rejects unknown modes, a negative override, and an explicit
@@ -223,7 +243,53 @@ func (c *EMRTDPolicyConstraints) Validate() error {
 			return fmt.Errorf("emrtd.path_len_override implies enforcement and conflicts with path_len_mode \"ignore\"")
 		}
 	}
+	return ValidateEMRTDCRL(c.CRLMode, c.CRLMaxAge, c.CRLCountries, c.CRLExemptCountries)
+}
+
+// ValidateEMRTDCRL checks the eMRTD CRL settings shared by the policy and
+// config layers: the mode must be known, the other CRL settings need
+// "require-current", the max age must not be negative, and the country lists
+// must hold upper-case alpha-3 shaped codes without overlap.
+func ValidateEMRTDCRL(mode string, maxAge time.Duration, countries, exempt []string) error {
+	switch mode {
+	case "", "best-effort", "require-current":
+	default:
+		return fmt.Errorf("emrtd.crl_mode %q is invalid: must be \"best-effort\" or \"require-current\"", mode)
+	}
+	if maxAge < 0 {
+		return fmt.Errorf("emrtd.crl_max_age must be >= 0, got %s", maxAge)
+	}
+	if mode != "require-current" && (maxAge != 0 || len(countries) > 0 || len(exempt) > 0) {
+		return fmt.Errorf("emrtd.crl_max_age, crl_countries and crl_exempt_countries need crl_mode \"require-current\"")
+	}
+	in := map[string]bool{}
+	for _, c := range countries {
+		if !isAlpha3Shape(c) {
+			return fmt.Errorf("emrtd.crl_countries: %q is not an upper-case alpha-3 code", c)
+		}
+		in[c] = true
+	}
+	for _, c := range exempt {
+		if !isAlpha3Shape(c) {
+			return fmt.Errorf("emrtd.crl_exempt_countries: %q is not an upper-case alpha-3 code", c)
+		}
+		if in[c] {
+			return fmt.Errorf("emrtd.crl_countries and crl_exempt_countries both list %q", c)
+		}
+	}
 	return nil
+}
+
+func isAlpha3Shape(s string) bool {
+	if len(s) != 3 {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if s[i] < 'A' || s[i] > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // FIDOMDS3PolicyConstraints contains FIDO Alliance MDS3-specific constraints,

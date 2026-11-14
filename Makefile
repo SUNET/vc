@@ -14,6 +14,9 @@ LDFLAGS                 := -ldflags "-w -s --extldflags '-static'"
 LDFLAGS_DYNAMIC         := -ldflags "-w -s"
 CGO_ENABLED_STATIC      := CGO_ENABLED=0
 CGO_ENABLED_DYNAMIC     := CGO_ENABLED=1
+# Go 1.27.4 refuses LLVM bitcode in cgo link inputs; the staged Rust staticlibs carry it.
+OBJCOPY                 ?= objcopy
+strip_bitcode            = $(OBJCOPY) --remove-section=.llvmbc --remove-section=.llvmcmd $(1)
 BUILD_OS                ?= linux
 # Follow the host arch so `make build-*` on arm64 dev machines produces
 # arm64 binaries whose staged cgo libs (built by bbs-native-lib et al.
@@ -143,6 +146,7 @@ comma                   := ,
 	release-check-issuer-jwks \
 	release-jwt-issuer build-jwt-issuer \
 	release-tsl-checker build-tsl-checker \
+	release-lol build-lol \
 	fly-launch-dev fly-launch-demo \
 	fly-deploy fly-deploy-dev fly-deploy-demo fly-deploy-dev-% fly-deploy-demo-% \
 	fly-status-dev fly-status-demo fly-status-dev-% fly-status-demo-% \
@@ -393,6 +397,7 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/" || exit 1; \
 	done
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
+	$(call strip_bitcode,"$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a")
 	@# The nym_auth vectors ship with the crate (the circuit artifact, a
 	@# real proof and the request values that produced it), and
 	@# pkg/nymauth/verifier's zknative test verifies that proof rather
@@ -448,6 +453,7 @@ bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issu
 	@mkdir -p "$(ZK_CRED_BBS_STAGE)/include" "$(ZK_CRED_BBS_STAGE)/lib" "$(ZK_CRED_BBS_STAGE)/test-vectors"
 	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi/zk_cred_bbs_go.h" "$(ZK_CRED_BBS_STAGE)/include/"
 	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi"/libzk_cred_bbs.* "$(ZK_CRED_BBS_STAGE)/lib/"
+	$(call strip_bitcode,"$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a")
 	@# The crate's own reference vectors, so pkg/bbs's tests check against
 	@# the same ground truth the Rust and TypeScript sides do rather than a
 	@# second copy that can drift.
@@ -483,6 +489,7 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_nymauth_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi"/libzk_cred_vega.* "$(ZK_CRED_VEGA_STAGE)/lib/"
+	$(call strip_bitcode,"$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a")
 	@# The crate's own nym_auth vectors - the published mdoc circuit's
 	@# shapes, a reference proof made against them, and the statement
 	@# that produced it. Staged beside the library, the same way the
@@ -717,6 +724,46 @@ build-tsl-checker: bbs-native-lib-ensure ## Build tsl_checker developer tool
 		$(BUILD_FLAGS) -o ./bin/tsl_checker \
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(TSL_CHECKER_VERSION)" \
 		./developer_tools/scripts/tsl_checker/
+
+build-lol: ## Build lol (list of lists checker) developer tool
+	$(info Building lol)
+	$(eval LOL_VERSION := $(or $(shell git tag -l "lol-v*" --sort=-v:refname | head -n1 | sed 's/^lol-//'),dev))
+	CGO_ENABLED=0 GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		-o ./bin/lol -ldflags "-w -s -X main.version=$(LOL_VERSION)" \
+		./developer_tools/scripts/lol/
+
+release-lol: check_current_branch ## Tag and push a release for lol (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "lol-v*" --sort=-v:refname | grep -E '^lol-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing lol tags found, starting at lol-v0.0.0"; \
+		LATEST="lol-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^lol-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="lol-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed. GitHub Actions will build lol binaries."; \
+	echo ""
 
 release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
 	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
@@ -1212,6 +1259,7 @@ vscode: test-env gh-install ## Set up VS Code development environment
 		netcat-openbsd \
 		plantuml \
 		cmake \
+		poppler-utils \
 		pkg-config
 	$(info Installing yq)
 	sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\

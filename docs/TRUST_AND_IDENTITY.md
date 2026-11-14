@@ -141,7 +141,7 @@ verifier:
     allowed_policy_oids: ["0.4.0.194118.1.3"]
 ```
 
-At startup the leaf must satisfy: `keyUsage` including `nonRepudiation` (contentCommitment), a `subjectAltName` carrying contact information (URI or email), and a `certificatePolicies` entry with a WRPAC policy OID. It must also be inside its own validity window. **Startup fails if it does not conform** — the point is to find out before wallets do.
+At startup the leaf must satisfy: a `subjectAltName` carrying contact information (URI or email), and a `certificatePolicies` entry with a WRPAC policy OID. `keyUsage` is not checked. It must also be inside its own validity window. **Startup fails if it does not conform** — the point is to find out before wallets do.
 
 The check is deliberately offline. Every rule reads the certificate's own attributes, so this is profile conformance, not a trust decision; deciding whether some *other* party's certificate is trusted belongs to the PDP.
 
@@ -196,6 +196,22 @@ Being explicit, because carrying a certificate is not the same as anything check
 
 - **Revocation.** A WRPAC is revoked through a CRL or OCSP and a WRPRC through the Token Status List in its `status` claim. go-trust ≥ v0.20.0 surfaces both references and owns the decision, but **nothing fetches them yet**, so a revoked certificate is presently indistinguishable from a valid one.
 - **Wallet-side verification.** No wallet surface reads `verifier_info` today. Until one does, these certificates are carried and unread — acceptable as sequencing, but it should not be mistaken for coverage. The control only exists once the wallet checks it.
+
+### Obtaining a WRPAC from the WeBuild pilot registry (Fly dev)
+
+1. Submit the participant registration form linked from the [Raidiam WE BUILD documentation](https://www.raidiam.com/developers/docs/raidiam-webuild-eudi-ecosystem-docs/register-as-participant/). The sandbox does not allow self-service sign-up. After the confirmation email, open `https://web.sandbox.eudi.raidiam.io/`. On the first visit there is no password yet, so use Register (or Forgot password) with the email address from the confirmation, then set up MFA. Then use the pre-created application (Organisation > Applications). Its role is Wallet Relying Party, and its application id is the `APP_ID` below.
+2. Create the key and CSR. The sandbox docs say RSA 2048, but the WRPAC profile rejects RSA keys ("specified certificate profile is not configured to accept RSA Keys"), and it accepts only the `secp256r1` curve, so the script defaults to an EC P-256 key (`KEY_TYPE=ec`, `CURVE=P-256`):
+   ```
+   APP_ID=<application-id> CN=SUNET developer_tools/scripts/create_wrpac_csr.sh \
+     verifier sunet-vc-verifier.fly.dev "SUNET" "VATSE-2021005208" SE
+   ```
+   The subject must match the registration data, or the registry rejects the CSR. The sandbox pre-fills country, organisation name, organisation identifier and organisational unit (the application id) on the Certificate Details step. Copy them from there. Output goes to `developer_tools/pki/webuild/` (gitignored).
+3. Upload `verifier-wrpac.csr` (App Certificates > New Certificate > WRPAC profile) and download the issued certificate.
+4. Save the issued leaf plus intermediates as `developer_tools/pki/webuild/verifier-wrpac.chain.pem`. Put a WRPRC, if one is issued, in `verifier-wrprc.jwt`. The portal download holds only the leaf, with no trailing newline, so join the files with a newline. The issuing CA (`EUDI Sandbox Issuing CA - G1`) is not in the leaf's AIA, the keystore or the WRPAC providers list, which carries only the root. Match it to the leaf by subject key identifier against the leaf's authority key identifier, and check the path with `openssl verify -CAfile raidiam-root-ca.pem -untrusted verifier-wrpac.chain.pem <leaf>`. Do not present the leaf alone, because a wallet cannot build the path to the root.
+5. Stage the secrets: `./fly/deploy.sh wrpac --profile dev --service verifier`. It refuses a key that does not match the leaf.
+6. Uncomment the `[[files]]` mounts in `fly/dev/verifier/fly.toml` and the WRPAC blocks in `fly/dev/config.yaml`, then deploy the verifier.
+
+The same flow works for the issuer with `--service issuer`, using the `issuer.access_certificate` block. Issuer onboarding to the WEBUILD Trusted Lists goes through the IDunion console (`https://console.dev.idunion.info/my-trusted-lists`). Its CSR is simpler (EC P-256, subject C/ST/L/O/CN, no organisation identifier): create it with `developer_tools/scripts/create_wrprc.sh` and upload it under "Request Onboarding" on the list's page, for example "WEBUILD - Pub-EAA Providers".
 
 ## Issuer Access Certificate (PR #617)
 

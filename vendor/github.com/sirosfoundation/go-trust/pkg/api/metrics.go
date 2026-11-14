@@ -127,6 +127,11 @@ func NewMetrics() *Metrics {
 	return m
 }
 
+// Register adds a collector (for example a registry's) to the /metrics output.
+func (m *Metrics) Register(c prometheus.Collector) error {
+	return m.registry.Register(c)
+}
+
 // MetricsMiddleware creates a Gin middleware that records API metrics
 func (m *Metrics) MetricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
