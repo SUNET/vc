@@ -190,21 +190,18 @@ func TestIssuerInitiated_ConcurrentResumesDoNotShareAnEncryptionKey(t *testing.T
 		wg     sync.WaitGroup
 	)
 	for range attempts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := initialChallenge(t)
 			req.Scope = ""
 			req.IssuerState = issuerState
 			_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
 
-			var challengeErr *AuthorizationChallengeError
-			if errors.As(err, &challengeErr) {
+			if challengeErr, ok := errors.AsType[*AuthorizationChallengeError](err); ok {
 				mu.Lock()
 				opened = append(opened, challengeErr)
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

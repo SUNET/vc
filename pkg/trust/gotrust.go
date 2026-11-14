@@ -201,6 +201,28 @@ func (e *GoTrustEvaluator) buildX5CRequest(req *EvaluationRequest) (*authzen.Eva
 
 // ResolveKey implements KeyResolver for DID-based resolution.
 func (e *GoTrustEvaluator) ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error) {
+	metadata, err := e.resolveMetadata(ctx, verificationMethod)
+	if err != nil {
+		return nil, err
+	}
+	// Extract key from trust metadata (DID document)
+	return extractKeyFromMetadata(metadata, verificationMethod)
+}
+
+// ResolveKeyFor implements RelationshipKeyResolver: the key is returned only when the DID
+// document authorizes the verification method for the relationship and names the DID as
+// its controller.
+func (e *GoTrustEvaluator) ResolveKeyFor(ctx context.Context, verificationMethod, relationship string) (crypto.PublicKey, error) {
+	metadata, err := e.resolveMetadata(ctx, verificationMethod)
+	if err != nil {
+		return nil, err
+	}
+	return extractKeyForRelationship(metadata, verificationMethod, relationship)
+}
+
+// resolveMetadata asks the PDP to resolve a verification method and returns the DID
+// document it answered with.
+func (e *GoTrustEvaluator) resolveMetadata(ctx context.Context, verificationMethod string) (any, error) {
 	resp, err := e.client.Resolve(ctx, verificationMethod)
 	if err != nil {
 		return nil, fmt.Errorf("resolution request failed: %w", err)
@@ -220,8 +242,7 @@ func (e *GoTrustEvaluator) ResolveKey(ctx context.Context, verificationMethod st
 		return nil, fmt.Errorf("no trust_metadata in response for %s", verificationMethod)
 	}
 
-	// Extract key from trust metadata (DID document)
-	return extractKeyFromMetadata(resp.Context.TrustMetadata, verificationMethod)
+	return resp.Context.TrustMetadata, nil
 }
 
 // addContextOptions adds TrustOptions to the AuthZEN request context.

@@ -225,10 +225,7 @@ func epochTime(v any) (time.Time, bool) {
 		// agreeing; sub-nanosecond precision is lost either way, and
 		// losing it downward is the only direction that cannot change
 		// the date.
-		nanos := int64(math.Floor((n - seconds) * float64(time.Second)))
-		if nanos > int64(time.Second)-1 {
-			nanos = int64(time.Second) - 1
-		}
+		nanos := min(int64(math.Floor((n-seconds)*float64(time.Second))), int64(time.Second)-1)
 		return time.Unix(int64(seconds), nanos).UTC(), true
 	}
 	return time.Time{}, false
@@ -603,9 +600,7 @@ func applyPresentedDocumentClaims(docs map[string]*model.CompleteDocument, claim
 		//
 		// MergeNestedClaims stays as it is: derivations rely on its
 		// recursive behaviour, and this was the wrong caller for it.
-		for dst, value := range claims {
-			data[dst] = value
-		}
+		maps.Copy(data, claims)
 		out[k] = &model.CompleteDocument{
 			Meta:               doc.Meta,
 			IdentityMappingIDs: doc.IdentityMappingIDs,

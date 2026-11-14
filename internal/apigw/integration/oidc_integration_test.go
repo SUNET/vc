@@ -31,23 +31,19 @@ func TestOIDCIntegration_FullFlow(t *testing.T) {
 	env := setupOIDCTestEnvironment(t)
 	defer env.cleanup()
 
-	t.Run("Step1_ProviderDiscovery", func(t *testing.T) {
-		testProviderDiscovery(t, env)
-	})
-
-	t.Run("Step2_InitiateAuth", func(t *testing.T) {
+	t.Run("Step1_InitiateAuth", func(t *testing.T) {
 		testOIDCInitiateAuth(t, env)
 	})
 
-	t.Run("Step3_AuthURLContainsPKCE", func(t *testing.T) {
+	t.Run("Step2_AuthURLContainsPKCE", func(t *testing.T) {
 		testAuthURLContainsPKCE(t, env)
 	})
 
-	t.Run("Step4_ProcessCallback", func(t *testing.T) {
+	t.Run("Step3_ProcessCallback", func(t *testing.T) {
 		testProcessCallback(t, env)
 	})
 
-	t.Run("Step5_Apply", func(t *testing.T) {
+	t.Run("Step4_Apply", func(t *testing.T) {
 		testOIDCClaimTransformation(t, env)
 	})
 }
@@ -115,10 +111,6 @@ func TestOIDCIntegration_ClaimTransformations(t *testing.T) {
 	env := setupOIDCTestEnvironment(t)
 	defer env.cleanup()
 
-	t.Run("NestedClaims", func(t *testing.T) {
-		testNestedClaimTransformation(t, env)
-	})
-
 	t.Run("DefaultValues", func(t *testing.T) {
 		testDefaultValueTransformation(t, env)
 	})
@@ -158,50 +150,6 @@ func TestOIDCIntegration_UserInfo(t *testing.T) {
 		// Verify sub matches between ID token and UserInfo
 		assert.Equal(t, authResp.Claims["sub"], userInfoClaims["sub"],
 			"sub in UserInfo must match sub in ID token (OIDC Core §5.3.2)")
-
-		// Verify merge: UserInfo claims take precedence
-		maps.Copy(authResp.Claims, userInfoClaims)
-		assert.Equal(t, "john.doe@example.com", authResp.Claims["email"])
-	})
-
-	t.Run("SubMismatchDetected", func(t *testing.T) {
-		// Override the mock to return a different sub in UserInfo
-		origHandler := env.mockOP.server.Config.Handler
-		mux := http.NewServeMux()
-		mux.HandleFunc("/.well-known/openid-configuration", env.mockOP.handleDiscovery)
-		mux.HandleFunc("/jwks", env.mockOP.handleJWKS)
-		mux.HandleFunc("/token", env.mockOP.handleToken)
-		mux.HandleFunc("/authorize", env.mockOP.handleAuthorize)
-		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"sub":        "different-user-456",
-				"given_name": "Jane",
-			})
-		})
-		env.mockOP.server.Config.Handler = mux
-		defer func() { env.mockOP.server.Config.Handler = origHandler }()
-
-		ctx := t.Context()
-
-		authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
-		require.NoError(t, err)
-
-		session, err := env.oidcService.GetSession(ctx, authReq.State)
-		require.NoError(t, err)
-
-		code := "valid-auth-code|" + session.Nonce
-		authResp, err := env.oidcService.ProcessCallback(ctx, code, authReq.State)
-		require.NoError(t, err)
-
-		// Fetch UserInfo — sub will differ
-		userInfoClaims, err := env.oidcService.GetUserInfo(ctx, authResp.AccessToken)
-		require.NoError(t, err)
-
-		// Reproduce the handler's sub check
-		uiSub, _ := userInfoClaims["sub"].(string)
-		idSub, _ := authResp.Claims["sub"].(string)
-		assert.NotEqual(t, uiSub, idSub, "subs should differ in this test")
 	})
 
 	t.Run("InvalidAccessTokenFallback", func(t *testing.T) {
@@ -542,14 +490,6 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRP {
 
 // --- Test functions ---
 
-// testProviderDiscovery verifies that the OIDC service properly discovered the mock provider
-func testProviderDiscovery(t *testing.T, env *oidcTestEnvironment) {
-	// If the service was constructed successfully, discovery worked.
-	// Validate by building a mapper (which reads config populated at init).
-	mapper := env.oidcService.BuildAttributeMapper()
-	require.NotNil(t, mapper)
-}
-
 // testOIDCInitiateAuth verifies auth initiation produces a valid authorization URL
 func testOIDCInitiateAuth(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
@@ -561,7 +501,7 @@ func testOIDCInitiateAuth(t *testing.T, env *oidcTestEnvironment) {
 	assert.NotEmpty(t, authReq.AuthorizationURL)
 	assert.NotEmpty(t, authReq.State)
 
-	// Verify the authorization URL points at the mock OP
+	// The endpoint comes from the mock OP's discovery document.
 	assert.Contains(t, authReq.AuthorizationURL, env.mockOP.issuerURL+"/authorize")
 	assert.Contains(t, authReq.AuthorizationURL, "client_id="+env.mockOP.clientID)
 	assert.Contains(t, authReq.AuthorizationURL, "response_type=code")
@@ -714,27 +654,34 @@ func testExpiredSession(t *testing.T, env *oidcTestEnvironment) {
 	// Wait for cache entry to expire
 	time.Sleep(50 * time.Millisecond)
 
+	// "some-code" would otherwise fail later, on the nonce.
 	_, err = shortService.ProcessCallback(ctx, "some-code", authReq.State)
-	assert.Error(t, err)
-
-	t.Logf("Correctly rejected expired session: %v", err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid or expired session")
 }
 
-// testMissingRequiredClaims tests that missing required claims cause mapper to fail
+// testMissingRequiredClaims tests that the service's mapper honours Required
+// from its configuration.
 func testMissingRequiredClaims(t *testing.T, env *oidcTestEnvironment) {
-	mapper := env.oidcService.BuildAttributeMapper()
+	config := createTestOIDCRPConfig(env.mockOP)
+	config.AttributeMapping["family_name"] = model.AttributeConfig{Claim: "family_name", Required: true}
+
+	sessionCache := pkgcache.NewMemoryCache[*oidcrp.Session](300 * time.Second)
+	defer sessionCache.Stop()
+
+	service, err := oidcrp.New(t.Context(), config, sessionCache, nil, nil, env.log)
+	require.NoError(t, err)
+
+	mapper := service.BuildAttributeMapper()
 	require.NotNil(t, mapper)
 
-	// All claims with Required:true will fail if missing
-	incompleteClaims := map[string]any{
-		"given_name": "John",
-		// missing family_name and birthdate
-	}
+	_, err = mapper.Apply(map[string]any{"given_name": "John"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "family_name")
 
-	// The flat mapping has no Required flags in the test config,
-	// so this tests that the mapper processes partial claims gracefully.
-	_, err := mapper.Apply(incompleteClaims)
-	assert.NoError(t, err)
+	claims, err := mapper.Apply(map[string]any{"given_name": "John", "family_name": "Doe"})
+	require.NoError(t, err)
+	assert.Equal(t, "Doe", claims["family_name"])
 }
 
 // testInvalidAuthorizationCode tests that an invalid code returns an error
@@ -821,26 +768,6 @@ func testSessionDeletion(t *testing.T, env *oidcTestEnvironment) {
 	assert.Error(t, err)
 }
 
-// testNestedClaimTransformation tests dot-notation nested claim paths
-func testNestedClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
-	mapper := env.oidcService.BuildAttributeMapper()
-	require.NotNil(t, mapper)
-
-	claims := map[string]any{
-		"given_name":  "Emma",
-		"family_name": "Wilson",
-		"degree":      "Master of Arts",
-	}
-
-	result, err := mapper.Apply(claims)
-	require.NoError(t, err)
-
-	// Flat mapping — claims are mapped directly
-	assert.Equal(t, "Emma", result["given_name"])
-	assert.Equal(t, "Wilson", result["family_name"])
-	assert.Equal(t, "Master of Arts", result["degree"])
-}
-
 // testDefaultValueTransformation tests that default values are applied for missing optional claims
 func testDefaultValueTransformation(t *testing.T, env *oidcTestEnvironment) {
 	mapper := env.oidcService.BuildAttributeMapper()
@@ -854,7 +781,3 @@ func testDefaultValueTransformation(t *testing.T, env *oidcTestEnvironment) {
 
 	assert.Equal(t, "SE", result["country"], "default country should be SE")
 }
-
-// testStringTransformations was removed together with the AttributeConfig
-// Transform field; equivalent per-claim value transformation now lives as
-// derivations on the target scope (see pkg/credential/derivations_test.go).

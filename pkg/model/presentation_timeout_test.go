@@ -61,10 +61,10 @@ func TestEveryOIDCOPDurationNamesItsReader(t *testing.T) {
 		"IDTokenDuration":     "internal/verifier/apiv1/handler_oidc.go: generateIDToken",
 	}
 
-	typ := reflect.TypeOf(OIDCOP{})
+	typ := reflect.TypeFor[OIDCOP]()
 	var found int
-	for i := range typ.NumField() {
-		name := typ.Field(i).Name
+	for field := range typ.Fields() {
+		name := field.Name
 		if !strings.HasSuffix(name, "Duration") && !strings.HasSuffix(name, "Timeout") {
 			continue
 		}

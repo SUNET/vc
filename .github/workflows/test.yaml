@@ -54,6 +54,21 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
         run: make test-pkcs11
 
+      # Compiles the tagged test files. internal/wallet/integration and
+      # internal/verifier/integration need a running stack, so CI only vets
+      # them.
+      - name: Vet the integration-tagged code
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
+        run: |
+          go vet -tags integration ./...
+          go vet -tags integration_cross_device ./...
+
+      - name: Run apigw integration tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
+        run: make test-apigw-integration
+
   config-docs:
     runs-on: ubuntu-latest
     steps:

@@ -1866,7 +1866,7 @@ func TestGetUserInfo(t *testing.T) {
 					CodeDuration:        600,
 					AccessTokenDuration: 3600,
 					IDTokenDuration:     3600,
-					EnableUserInfo:      boolPtr(true),
+					EnableUserInfo:      new(true),
 				},
 			},
 		},
@@ -2617,7 +2617,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	// plain bool - the configured default is true, so a real deployment
 	// always advertised userinfo_endpoint and this test pinned the
 	// opposite of what shipped (SUNET/vc#753).
-	cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = boolPtr(false)
+	cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = new(false)
 
 	client, _ := CreateTestClientWithMock(t, cfg)
 
@@ -2739,7 +2739,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 							Issuer:         tt.externalURL,
 							SubjectType:    "public",
 							SubjectSalt:    "test-salt",
-							EnableUserInfo: boolPtr(true),
+							EnableUserInfo: new(true),
 						},
 					},
 					Inbound: model.VerifierInbound{
@@ -3105,7 +3105,3 @@ func TestBuildOpenID4VPAuthzRequest(t *testing.T) {
 		})
 	}
 }
-
-// boolPtr is for the *bool config fields: a defaulted-true flag has to be a
-// pointer so an explicit false survives defaults.Set (SUNET/vc#753).
-func boolPtr(b bool) *bool { return &b }
