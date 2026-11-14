@@ -166,7 +166,9 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 		scopes := filterAllowedScopes(allScopes, reach)
 
 		// Determine if running without authentication (anonymous mode).
-		authEnabled := s.cfg.APIGW != nil && (s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable || s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable)
+		authEnabled := s.cfg.APIGW != nil && s.cfg.APIGW.APIServer.APIAuth.Enabled()
+		// A reset needs an operator: an anonymous session has none.
+		_, hasOperator := operatorOf(c)
 
 		// Scopes eligible for the datastore pre-authorized offer UI action.
 		preauthScopes := []string{}
@@ -194,7 +196,9 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			"has_identity_mapping":      reach.ReachesScope(resourcereach.IdentityMappingScope),
 			"csrf_token":                session.Get("csrf_token"),
 			"unrestricted":              !authEnabled,
+			"has_operator":              hasOperator,
 			"preauth_scopes":            preauthScopes,
+			"unique_commitment_entries": apiv1.ResettableEntries(s.cfg, scopes),
 		}, nil
 	}
 	return gin.H{"authenticated": false}, nil

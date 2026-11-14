@@ -46,6 +46,8 @@ type Client struct {
 	credentialOfferStore db.CredentialOfferStore
 	datastoreStore       db.DatastoreStore
 	identityMappingStore db.IdentityMappingStore
+	// uniqueCommitmentStore keeps one commitment per key value of each unique entry.
+	uniqueCommitmentStore db.UniqueCommitmentStore
 
 	// gRPC clients
 	issuerClient   apiv1_issuer.IssuerServiceClient
@@ -140,6 +142,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authP
 		credentialOfferStore:          db.CredentialOfferColl,
 		datastoreStore:                db.DatastoreColl,
 		identityMappingStore:          db.IdentityMappingsColl,
+		uniqueCommitmentStore:         db.UniqueCommitmentColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
 		vciMetrics:                    vciMetrics,
@@ -147,6 +150,8 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authP
 		cacheService:                  cacheService,
 		authProviderSelector:          authProviderSelector,
 	}
+
+	c.warnUnresettableCommitments()
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
 	// Unsigned metadata will be signed on-demand in the handler for freshness

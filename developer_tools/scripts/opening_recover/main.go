@@ -230,13 +230,16 @@ func (e *entry) collectOpenings(sources model.DataSources, scope, source string,
 		if src.Scope != scope || hc == nil || (source != "" && src.Where() != source) {
 			continue
 		}
+		if hc.Opening == nil {
+			return fmt.Errorf("%s: hash_commitment %q configures no opening", src.Where(), path)
+		}
 		if err := hc.Opening.Validate(); err != nil {
 			return fmt.Errorf("%s: %w", src.Where(), err)
 		}
 		if opening, ok := hc.Opening.Keyed(); ok {
 			e.keyed = append(e.keyed, keyedOpening{where: src.Where(), opening: opening})
 		} else {
-			e.underived = append(e.underived, underivedOpening{where: src.Where(), reason: nothingToDerive(hc.Opening)})
+			e.underived = append(e.underived, underivedOpening{where: src.Where(), reason: nothingToDerive(*hc.Opening)})
 		}
 	}
 	if len(e.keyed) == 0 {

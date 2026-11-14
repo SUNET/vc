@@ -45,10 +45,11 @@ common:
           - {type: hash_commitment, alg: sha-256, path: [eu.europa.ec.eudi.nym_auth.1, psc]}
 ```
 
-Every data source scope that serves the credential fulfils each `to_wallet`
-entry with one `hash_commitment` derivation, which names the entry by its
-`path` and says how the opening is produced. Here `nym_auth` is issued from
-a presented SD-JWT or mdoc PID:
+A `hash_commitment` derivation configures an entry in a data source scope
+that serves the credential, and names it by its `path`. Every source scope
+configures each `to_wallet` entry with an `opening`, which says how the
+issuer produces it. The wallet holds the opening of a `to_issuer` entry.
+Here `nym_auth` is issued from a presented SD-JWT or mdoc PID:
 
 ```yaml
 apigw:
@@ -104,6 +105,141 @@ The issuer reads the wallet's entries from its verified `jwt` and
 proof, where `auxiliary_data` is a property of the Verifiable Presentation
 (section 6.2 of the extension).
 
+A credential carries a `to_issuer` commitment only when the wallet sent
+it. For an optional entry the wallet leaves out, the issuer removes any
+value the source data holds at its path.
+
+## Unique commitments
+
+`unique` makes the issuer accept one commitment per value of a key, in
+either direction. `key` lists claims of the credential:
+
+- `key: []` accepts one commitment for the entry;
+- one claim accepts one commitment per value of that claim;
+- several claims accept one commitment per combination of their values.
+
+A key claim cannot be:
+
+- the entry, or an object or array that holds it, since every commitment
+  changes it;
+- a `to_issuer` entry whose claim the type metadata leaves optional;
+- in an SD-JWT VC, a claim the credential builder writes itself.
+
+The issuer records the first commitment for each key value, once the
+request has passed its checks and before it signs the credential. A
+different commitment for a recorded key value refuses the request:
+
+- on a `to_issuer` entry, whose commitment the wallet sent, with
+  `auxiliary_data_conflict`;
+- on a `to_wallet` entry, whose commitment the issuer derived, with
+  `credential_request_denied`.
+
+A refused request leaves no record: of a credential's unique entries, the
+issuer records all or none.
+
+With a `random` opening each issuance draws a new commitment, so a unique
+`to_wallet` entry issues once per key value until a reset.
+
+The nym_auth rulebook allows one `psc` per subject, and `ssc` identifies
+the subject, so each source scope of `nym_auth` adds:
+
+```yaml
+                - hash_commitment:
+                    path: [eu.europa.ec.eudi.nym_auth.1, psc]
+                    unique:
+                      key:
+                        - [eu.europa.ec.eudi.nym_auth.1, ssc]
+```
+
+Every source scope of a credential sets the same unique entries, with the
+same key, and the configuration is refused otherwise.
+
+The record lives in the apigw database (`unique_commitments`), which
+decides between replicas. It holds the SHA-256 of the key and its values.
+Each key of an entry has its own records.
+
+The shipped configs key the `psc` record by the issued `ssc`, which
+derives from the `hkdf` secret, `nym_auth_seed.key` (`NYM_AUTH_SEED` on
+Fly). Replacing the secret changes every subject's `ssc`, orphans every
+record, and lets every subject register a new `psc`.
+
+### Finding and resetting a commitment
+
+An operator resets the commitment on record for a key value, and the next
+issuance records a new one. For `nym_auth`, that is a person who lost
+their wallet account and was re-identified.
+
+In the admin UI, **Commitments** finds the commitment for the values an
+operator enters, shows when it was recorded, and resets it with a case
+reference. When a key claim's openings read different claims, **Identified
+by** picks the identifiers the operator holds. Reset needs an operator signed
+in through `apigw.api_server.api_auth.oidc`.
+Through the API, both calls take the entry and a value per key part:
+
+```
+POST /api/v1/auxiliary_data/lookup
+{
+  "scope": "nym_auth",
+  "path": ["eu.europa.ec.eudi.nym_auth.1", "psc"],
+  "key": [
+    {"path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"],
+     "inputs": {"issuing_country": "SE", "personal_administrative_number": "pan-200"}}
+  ]
+}
+
+POST /api/v1/auxiliary_data/reset
+{
+  "scope": "nym_auth",
+  "path": ["eu.europa.ec.eudi.nym_auth.1", "psc"],
+  "key": [
+    {"path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"],
+     "inputs": {"issuing_country": "SE", "personal_administrative_number": "pan-200"}}
+  ],
+  "evidence_ref": "case-1234"
+}
+```
+
+`key` names each key part by its `path`, in the configured order. A part
+takes the `value` the credential carries, as text, and a claim that holds
+bytes takes them in base64. A part that is a
+`to_wallet` entry with an `hkdf` or `hmac` opening also takes the `inputs`
+it derives from, each input claim with its value. The call derives with each
+opening that reads exactly those claims, so it finds a record through the
+claims of the opening that derived it. `pid` and `pid_mdoc` above share a
+secret and an input order, so the claims of either find a person's record.
+`evidence_ref` references the operator's
+case record. The reset is stored with it, and one reference resets one
+commitment.
+
+The lookup answers 200 with `recorded_at`, or 404 when nothing is on
+record. The reset answers:
+
+| Answer | Meaning |
+| --- | --- |
+| 204 | The commitment is reset. |
+| 400 | The scope has no unique entry with this path and key, or a part has no value, or its inputs fit no `hkdf` or `hmac` opening. |
+| 403 | The caller is anonymous: a reset needs an API token or an OIDC admin session. |
+| 404 | Nothing is on record for this key value, or a concurrent reset removed it first. |
+| 409 | The evidence reference already reset an earlier commitment. |
+
+Each call is logged with the scope, the entry, the operator and the
+outcome, and a reset with its evidence reference. A reset adds a row to
+`unique_commitment_resets` with the operator, the time, the evidence
+reference and the SHA-256 of the commitment, and then removes the
+commitment. The row stays: the table holds every approval, including one a
+concurrent reset beat, which answered 404. A retry with the same reference
+completes a reset interrupted between the two steps.
+
+Both are admin API routes. Where `apigw.api_server.api_auth.rules` are
+set, an operator needs a rule such as:
+
+```
+(vc (service apigw)(method POST)(path /api/v1/auxiliary_data/*)(subject <operator>)(authentic_source *)(scope nym_auth))
+```
+
+Resets need `apigw.api_server.api_auth`; the apigw warns at startup for
+each unique entry when it is absent.
+
 ## Openings
 
 `opening` sets one of:
@@ -146,7 +282,8 @@ Fly deploy provisions one per environment as the `NYM_AUTH_SEED` secret.
 **Back the secret up, and keep it.** Every opening this deployment issues
 is a function of it. A new secret gives every subject a new opening and a
 new commitment, and the lost secret takes the ability to reproduce any
-earlier opening with it.
+earlier opening with it. Records keyed by such a commitment are orphaned
+too ([Unique commitments](#unique-commitments)).
 
 ### `claim`
 

@@ -58,7 +58,7 @@ type Derivation struct {
 	// Copy writes an input claim's value, of any type, under another
 	// claim name.
 	Copy *CopyArgs `yaml:"copy,omitempty"`
-	// HashCommitment fulfils a to_wallet hash_commitment entry of the
+	// HashCommitment configures a hash_commitment entry of the
 	// credential's auxiliary_data.
 	HashCommitment *HashCommitmentArgs `yaml:"hash_commitment,omitempty"`
 }

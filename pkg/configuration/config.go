@@ -375,15 +375,79 @@ func checkAuxiliaryData(cfg *model.Cfg, serviceName string) error {
 	if err := checkToWalletEncryption(cfg); err != nil {
 		return err
 	}
-	return checkSourceOpenings(cfg)
+	if err := checkSourceOpenings(cfg); err != nil {
+		return err
+	}
+	return checkUniqueEntriesAgree(cfg)
+}
+
+// checkUniqueEntriesAgree requires the source scopes of a credential scope
+// to set the same unique hash_commitment entries, with the same key. The
+// record then binds a subject whichever source identified them.
+func checkUniqueEntriesAgree(cfg *model.Cfg) error {
+	first := map[string]model.SourceScope{}
+	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
+		other, seen := first[src.Scope]
+		if !seen {
+			first[src.Scope] = src
+			continue
+		}
+		if err := compareUniqueEntries(other, src); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// compareUniqueEntries refuses a hash_commitment entry that a and b set
+// different unique on.
+func compareUniqueEntries(a, b model.SourceScope) error {
+	inA, inB := uniqueDerivations(a), uniqueDerivations(b)
+	paths := map[string][]string{}
+	for key, hc := range inA {
+		paths[key] = hc.Path
+	}
+	for key, hc := range inB {
+		paths[key] = hc.Path
+	}
+	for _, key := range slices.Sorted(maps.Keys(paths)) {
+		hcA, hcB := inA[key], inB[key]
+		if hcA != nil && hcB != nil && slices.EqualFunc(hcA.Unique.Key, hcB.Unique.Key, slices.Equal[[]string]) {
+			continue
+		}
+		return fmt.Errorf("%s sets %s on hash_commitment %q, and %s sets %s; every source scope of credential scope %q sets the same",
+			a.Where(), uniqueSetting(hcA), paths[key], b.Where(), uniqueSetting(hcB), a.Scope)
+	}
+	return nil
+}
+
+// uniqueDerivations returns the hash_commitment derivations of src that set
+// unique, by claimsPathKey.
+func uniqueDerivations(src model.SourceScope) map[string]*primitives.HashCommitmentArgs {
+	unique := map[string]*primitives.HashCommitmentArgs{}
+	for _, d := range src.Derivations {
+		if d.HashCommitment != nil && d.HashCommitment.Unique != nil {
+			unique[claimsPathKey(d.HashCommitment.Path)] = d.HashCommitment
+		}
+	}
+	return unique
+}
+
+// uniqueSetting is the unique setting of a derivation from
+// uniqueDerivations, as the config writes it.
+func uniqueSetting(hc *primitives.HashCommitmentArgs) string {
+	if hc == nil {
+		return "no unique"
+	}
+	return fmt.Sprintf("unique.key %q", hc.Unique.Key)
 }
 
 // checkSourceOpenings checks the hash_commitment derivations of each data
-// source scope against its credential's to_wallet entries.
+// source scope against its credential's auxiliary_data entries.
 func checkSourceOpenings(cfg *model.Cfg) error {
 	for _, src := range cfg.APIGW.DataSources.SourceScopes() {
 		meta := cfg.Common.CredentialMetadata[src.Scope]
-		if err := checkHashCommitmentDerivations(src, toWalletPaths(meta)); err != nil {
+		if err := checkHashCommitmentDerivations(src, meta); err != nil {
 			return err
 		}
 		if err := checkOpeningClaims(src, meta); err != nil {
@@ -402,7 +466,7 @@ func checkToWalletEncryption(cfg *model.Cfg) error {
 		return nil
 	}
 	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
-		if len(toWalletPaths(cfg.Common.CredentialMetadata[scope])) > 0 {
+		if len(cfg.Common.CredentialMetadata[scope].AuxiliaryDataSupported().ToWallet) > 0 {
 			return fmt.Errorf("common.credential_metadata.%s.auxiliary_data.to_wallet: an opening travels only in an encrypted Credential Response, which needs a key under apigw.issuer_metadata.credential_encryption.keys", scope)
 		}
 	}
@@ -468,33 +532,36 @@ func deriveAuxiliaryDataRequired(cfg *model.Cfg) {
 	}
 }
 
-// toWalletPaths returns the to_wallet paths of a credential, by
+// entryPaths returns the paths of auxiliary_data entries, by
 // claimsPathKey.
-func toWalletPaths(meta *model.CredentialMetadata) map[string][]string {
+func entryPaths(entries []openid4vci.AuxiliaryDataEntry) map[string][]string {
 	paths := map[string][]string{}
-	if meta == nil || meta.AuxiliaryData == nil {
-		return paths
-	}
-	for _, entry := range meta.AuxiliaryData.ToWallet {
+	for _, entry := range entries {
 		paths[claimsPathKey(entry.Path)] = entry.Path
 	}
 	return paths
 }
 
-// checkHashCommitmentDerivations requires a source scope to fulfil each
-// to_wallet path with exactly one hash_commitment derivation.
-func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][]string) error {
-	fulfilled := map[string]bool{}
+// checkHashCommitmentDerivations checks the hash_commitment derivations of
+// a source scope: each configures an auxiliary_data entry once, and every
+// to_wallet entry has one.
+func checkHashCommitmentDerivations(src model.SourceScope, meta *model.CredentialMetadata) error {
+	supported := meta.AuxiliaryDataSupported()
+	toWallet, toIssuer := entryPaths(supported.ToWallet), entryPaths(supported.ToIssuer)
+	configured := map[string]bool{}
 	for i, d := range src.Derivations {
 		if d.HashCommitment == nil {
 			continue
 		}
-		if err := checkHashCommitmentDerivation(d.HashCommitment, toWallet, fulfilled); err != nil {
+		if err := checkHashCommitmentDerivation(d.HashCommitment, toWallet, toIssuer, configured); err != nil {
 			return fmt.Errorf("%s.derivations[%d].hash_commitment: %w", src.Where(), i, err)
+		}
+		if err := checkUniqueKey(meta, d.HashCommitment); err != nil {
+			return fmt.Errorf("%s.derivations[%d].hash_commitment.unique: %w", src.Where(), i, err)
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(toWallet)) {
-		if !fulfilled[key] {
+		if !configured[key] {
 			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %q of common.credential_metadata.%s.auxiliary_data",
 				src.Where(), toWallet[key], src.Scope)
 		}
@@ -502,17 +569,52 @@ func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][
 	return nil
 }
 
-func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string][]string, fulfilled map[string]bool) error {
+// checkHashCommitmentDerivation accepts an opening for a to_wallet entry.
+// The wallet holds the opening of a to_issuer entry.
+func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet, toIssuer map[string][]string, configured map[string]bool) error {
 	key := claimsPathKey(hc.Path)
-	if _, ok := toWallet[key]; !ok {
-		return fmt.Errorf("path %q is no to_wallet entry of the credential's auxiliary_data", hc.Path)
+	if configured[key] {
+		return fmt.Errorf("path %q is configured twice", hc.Path)
 	}
-	if fulfilled[key] {
-		return fmt.Errorf("path %q is fulfilled twice", hc.Path)
+	configured[key] = true
+	switch {
+	case toWallet[key] != nil && hc.Opening == nil:
+		return fmt.Errorf("path %q is a to_wallet entry, which takes an opening", hc.Path)
+	case toWallet[key] != nil:
+		if err := hc.Opening.Validate(); err != nil {
+			return fmt.Errorf("opening: %w", err)
+		}
+	case toIssuer[key] == nil:
+		return fmt.Errorf("path %q is no auxiliary_data entry of the credential", hc.Path)
+	case hc.Opening != nil:
+		return fmt.Errorf("path %q is a to_issuer entry, whose opening the wallet holds", hc.Path)
 	}
-	fulfilled[key] = true
-	if err := hc.Opening.Validate(); err != nil {
-		return fmt.Errorf("opening: %w", err)
+	return nil
+}
+
+// checkUniqueKey accepts key parts that are claims of the credential's type
+// metadata. It refuses a part that holds the entry, which every commitment
+// changes, an optional to_issuer entry, which a wallet may leave out, and an
+// SD-JWT claim the builder writes after the commitments are accepted.
+func checkUniqueKey(meta *model.CredentialMetadata, hc *primitives.HashCommitmentArgs) error {
+	if hc.Unique == nil {
+		return nil
+	}
+	toIssuer := entryPaths(meta.AuxiliaryDataSupported().ToIssuer)
+	for _, part := range hc.Unique.Key {
+		switch {
+		case slices.Equal(part, hc.Path[:min(len(part), len(hc.Path))]):
+			return fmt.Errorf("key part %q holds the entry %q, which every commitment changes", part, hc.Path)
+		case !claimDeclared(meta, part):
+			return fmt.Errorf("the type metadata declares no claim at key part %q", part)
+		case toIssuer[claimsPathKey(part)] != nil && !claimMandatory(meta, part):
+			return fmt.Errorf("key part %q is an optional to_issuer entry, which a wallet may leave out", part)
+		}
+		if meta.Format != openid4vp.FormatMsoMdoc {
+			if err := checkSDJWTClaimName(part); err != nil {
+				return fmt.Errorf("key part: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -1472,7 +1574,7 @@ func checkPreAuthOfferExposure(cfg *model.Cfg, serviceName string) error {
 	}
 	named := strings.Join(flagged, ", ")
 
-	if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+	if !cfg.APIGW.APIServer.APIAuth.Enabled() {
 		return fmt.Errorf(
 			"apigw.data_sources.datastore.scopes sets allow_preauth_offer on login-gated %s "+
 				"but apigw.api_server.api_auth configures neither jwks nor oidc: the flag lets "+
@@ -1556,7 +1658,7 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 	// is absent. There is no authenticated principal to require, so the
 	// only honest check is on the configuration that left none.
 	if model.BoolVal(ia.Enable, false) {
-		if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+		if !cfg.APIGW.APIServer.APIAuth.Enabled() {
 			return errors.New(
 				"apigw.delivery.interactive_authorization.enable is true but apigw.api_server.api_auth " +
 					"configures neither jwks nor oidc: enabling it exposes /api/v1/issuance/prepare, " +
@@ -1621,14 +1723,4 @@ func refuseLegacyZkpReqKeys(formats *openid4vp.VPFormatsSupported) error {
 		}
 	}
 	return nil
-}
-
-// apiAuthenticationConfigured reports whether a caller reaching the admin
-// API has to be anybody in particular.
-//
-// Only the two Bearer modes count. An admin session does not: it is
-// granted anonymously when OIDC is absent, so requiring one would be a
-// check that passes for everyone.
-func apiAuthenticationConfigured(apiAuth model.APIAuth) bool {
-	return apiAuth.JWKS.Enable || apiAuth.OIDC.Enable
 }

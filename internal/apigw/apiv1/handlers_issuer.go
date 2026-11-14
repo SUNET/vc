@@ -530,17 +530,12 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 	derivations, sourceClaims := c.sourceDerivations(scope, authContext, openingSource)
-	documentData, toWallet, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
+	applied, err := c.admitAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet, req.CredentialResponseEncryption != nil)
 	if err != nil {
 		c.log.Error(err, "failed to apply auxiliary data", "scope", scope)
 		return nil, err
 	}
-	if len(toWallet) > 0 && req.CredentialResponseEncryption == nil {
-		return nil, &openid4vci.Error{
-			Err:              openid4vci.ErrInvalidEncryptionParameters,
-			ErrorDescription: "this credential sends an opening: request credential_response_encryption",
-		}
-	}
+	documentData = applied.documentData
 
 	var credentials []openid4vci.Credential
 	var issueErr error
@@ -588,8 +583,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	response := c.newCredentialResponse(credentials, scope, configurationID)
-	if len(toWallet) > 0 {
-		response.AddAuxiliaryData(toWallet...)
+	if len(applied.toWallet) > 0 {
+		response.AddAuxiliaryData(applied.toWallet...)
 	}
 	return response, nil
 }

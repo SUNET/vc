@@ -1,17 +1,24 @@
 package apiv1
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential/primitives"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -23,64 +30,91 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// With nym_auth as the example: the issuer derives ssc's opening from the
-// presented identifiers and writes its SHA-256, and writes psc as the
-// wallet sends it.
-func TestAuxiliaryData(t *testing.T) {
-	schema := &mdoc.MDDLSchema{Claims: map[string]mdoc.NamespaceClaims{"eu.europa.ec.eudi.nym_auth.1": {
+// nymAuthClient serves the nym_auth example as an mso_mdoc credential, and
+// returns the derivations of its pid source. The issuer derives ssc's
+// opening with hkdf from the presented identifiers, and accepts one psc per
+// ssc. psc_required requires psc, and pid takes no auxiliary_data.
+func nymAuthClient(t *testing.T) (*Client, []primitives.Derivation) {
+	ns := "eu.europa.ec.eudi.nym_auth.1"
+	ssc, psc := []string{ns, "ssc"}, []string{ns, "psc"}
+	schema := &mdoc.MDDLSchema{Claims: map[string]mdoc.NamespaceClaims{ns: {
 		"birth_date": {Mandatory: true, ValueType: "full-date"},
 		"ssc":        {Mandatory: true, ValueType: "bstr"},
 		"psc":        {ValueType: "bstr"},
 	}}}
-
-	secret := []byte(strings.Repeat("s", 32))
 	secretPath := filepath.Join(t.TempDir(), "nym_auth_seed.key")
-	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))+"\n"), 0o600))
+	derivations := []primitives.Derivation{
+		{HashCommitment: &primitives.HashCommitmentArgs{
+			Path:    ssc,
+			Opening: &primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"issuing_country", "personal_administrative_number"}, Bytes: 16}},
+		}},
+		{HashCommitment: &primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{ssc}}}},
+	}
+	c := &Client{
+		log:                   logger.NewSimple("test"),
+		uniqueCommitmentStore: memoryCommitments{},
+		cfg: &model.Cfg{
+			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+				"nym_auth": {
+					Format: "mso_mdoc",
+					MDDL:   schema,
+					AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+						ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
+						ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}},
+					},
+				},
+				"psc_required": {
+					Format: "mso_mdoc",
+					MDDL:   schema,
+					AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+						ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Required: true}},
+					},
+				},
+				"pid": {Format: "dc+sd-jwt"},
+			}},
+			APIGW: &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
+				Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{"pid": {Derivations: derivations}}}},
+			}}},
+		},
+	}
+	return c, derivations
+}
 
+// nymAuthSubject is the identifiers a presentation gives for the person
+// with pan.
+func nymAuthSubject(pan string) map[string]any {
+	return map[string]any{"issuing_country": "SE", "personal_administrative_number": pan}
+}
+
+// issueAuxiliaryData admits scope's auxiliary_data for a request that asks
+// for an encrypted response.
+func issueAuxiliaryData(t *testing.T, c *Client, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) (appliedAuxiliaryData, error) {
+	return c.admitAuxiliaryData(t.Context(), scope, derivations, sourceClaims, documentData, fromWallet, true)
+}
+
+// With nym_auth as the example: the issuer derives ssc's opening from the
+// presented identifiers and writes its SHA-256, and writes psc as the
+// wallet sends it.
+func TestAuxiliaryData(t *testing.T) {
+	c, derivations := nymAuthClient(t)
 	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
 	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
-	inputs := []string{"issuing_country", "personal_administrative_number"}
-	c := &Client{
-		log: logger.NewSimple("test"),
-		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
-			"nym_auth": {
-				Format: "mso_mdoc",
-				MDDL:   schema,
-				AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
-					ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
-					ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc}},
-				},
-			},
-			"psc_required": {
-				Format: "mso_mdoc",
-				MDDL:   schema,
-				AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
-					ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Required: true}},
-				},
-			},
-			"pid": {Format: "dc+sd-jwt"},
-		}}},
-	}
-	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
-		Path:    ssc,
-		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: inputs, Bytes: 16}},
-	}}}
 
 	walletPSC := sha256.Sum256([]byte("the wallet's private seed"))
 	fromWallet := []openid4vci.AuxiliaryDataEntry{{
 		Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(walletPSC[:]),
 	}}
 	document := []byte(`{"birth_date":"2011-06-15"}`)
-	issue := func(pan string, entries []openid4vci.AuxiliaryDataEntry) (map[string]any, []openid4vci.AuxiliaryDataEntry) {
-		source := map[string]any{"issuing_country": "SE", "personal_administrative_number": pan}
-		out, toWallet, err := c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, document, entries)
+	issue := func(pan string, document []byte, entries []openid4vci.AuxiliaryDataEntry) (map[string]any, []openid4vci.AuxiliaryDataEntry) {
+		applied, err := c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, nymAuthSubject(pan), document, entries)
 		require.NoError(t, err)
 		var doc map[string]any
-		require.NoError(t, json.Unmarshal(out, &doc))
-		return doc, toWallet
+		require.NoError(t, json.Unmarshal(applied.documentData, &doc))
+		return doc, applied.toWallet
 	}
 
-	doc, toWallet := issue("pan-200", fromWallet)
+	doc, toWallet := issue("pan-200", document, fromWallet)
 	require.Len(t, toWallet, 1)
 	assert.Equal(t, ssc, toWallet[0].Path)
 	opening, err := base64.RawURLEncoding.DecodeString(toWallet[0].Opening)
@@ -89,10 +123,10 @@ func TestAuxiliaryData(t *testing.T) {
 	assert.Equal(t, base64.StdEncoding.EncodeToString(commitment[:]), doc["ssc"], "the opening opens ssc")
 	assert.Equal(t, base64.StdEncoding.EncodeToString(walletPSC[:]), doc["psc"])
 
-	again, _ := issue("pan-200", nil)
+	again, _ := issue("pan-200", document, nil)
 	assert.Equal(t, doc["ssc"], again["ssc"], "one person, one opening")
 	assert.NotContains(t, again, "psc")
-	other, _ := issue("pan-201", nil)
+	other, _ := issue("pan-201", document, nil)
 	assert.NotEqual(t, doc["ssc"], other["ssc"], "two people, two openings")
 
 	var vciErr *openid4vci.Error
@@ -115,21 +149,38 @@ func TestAuxiliaryData(t *testing.T) {
 		"the credential takes the entries":  {"pid", fromWallet},
 		"the wallet sends a required entry": {"psc_required", nil},
 	} {
-		source := map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-200"}
-		_, _, err = c.applyAuxiliaryData(t.Context(), request.scope, derivations, source, document, request.entries)
+		_, err = c.applyAuxiliaryData(t.Context(), request.scope, derivations, nymAuthSubject("pan-200"), document, request.entries)
 		require.ErrorAs(t, err, &vciErr, rule)
 		assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err, rule)
 	}
 
 	// The issuer already holds a commitment at a to_issuer path: the same one
-	// stands, a different one is auxiliary_data_conflict.
+	// stands, a different one is auxiliary_data_conflict, and without the
+	// wallet's entry the credential carries none.
+	held := func(commitment string) []byte {
+		return []byte(`{"birth_date":"2011-06-15","psc":"` + commitment + `"}`)
+	}
 	stored := base64.StdEncoding.EncodeToString(walletPSC[:])
-	source := map[string]any{"issuing_country": "SE", "personal_administrative_number": "pan-200"}
-	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"`+stored+`"}`), fromWallet)
+	_, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, nymAuthSubject("pan-200"), held(stored), fromWallet)
 	require.NoError(t, err, "the wallet sends the commitment the issuer holds")
-	_, _, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, source, []byte(`{"birth_date":"2011-06-15","psc":"AAAA"}`), fromWallet)
+	_, err = c.applyAuxiliaryData(t.Context(), "nym_auth", derivations, nymAuthSubject("pan-200"), held("AAAA"), fromWallet)
 	require.ErrorAs(t, err, &vciErr, "the wallet sends another commitment")
 	assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err)
+	unsent, _ := issue("pan-200", held(stored), nil)
+	assert.NotContains(t, unsent, "psc", "the wallet sends no entry")
+
+	// A to_wallet commitment is the issuer's own, so a conflict on one
+	// denies the request.
+	sscPerBirthDate := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+		Path:    ssc,
+		Opening: derivations[0].HashCommitment.Opening,
+		Unique:  &primitives.UniqueArgs{Key: [][]string{{"eu.europa.ec.eudi.nym_auth.1", "birth_date"}}},
+	}}}
+	_, err = issueAuxiliaryData(t, c, "nym_auth", sscPerBirthDate, nymAuthSubject("pan-200"), document, nil)
+	require.NoError(t, err)
+	_, err = issueAuxiliaryData(t, c, "nym_auth", sscPerBirthDate, nymAuthSubject("pan-201"), document, nil)
+	require.ErrorAs(t, err, &vciErr, "another person born the same day")
+	assert.Equal(t, openid4vci.ErrCredentialRequestDenied, vciErr.Err)
 
 	proof := func(payload string) openid4vci.ProofJWTToken {
 		return openid4vci.ProofJWTToken("e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".c2ln")
@@ -148,9 +199,225 @@ func TestAuxiliaryData(t *testing.T) {
 	assert.Equal(t, openid4vci.ErrInvalidProof, vciErr.Err)
 }
 
+// An operator names a subject by the identifiers ssc's opening derives
+// from. They derive the key the subject's issuance recorded, so the
+// operator's reset lets the subject's next wallet register its psc.
+func TestUniqueCommitmentReset(t *testing.T) {
+	c, derivations := nymAuthClient(t)
+	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
+	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
+	document := []byte(`{"birth_date":"2011-06-15"}`)
+	// wallet returns the psc claim of a wallet with seed, and its entry.
+	wallet := func(seed string) (string, []openid4vci.AuxiliaryDataEntry) {
+		commitment := sha256.Sum256([]byte(seed))
+		return base64.StdEncoding.EncodeToString(commitment[:]), []openid4vci.AuxiliaryDataEntry{{
+			Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(commitment[:]),
+		}}
+	}
+	_, first := wallet("the first wallet's private seed")
+	secondPSC, second := wallet("the second wallet's private seed")
+
+	_, err := c.admitAuxiliaryData(t.Context(), "nym_auth", derivations, nymAuthSubject("pan-200"), document, second, false)
+	var vciErr *openid4vci.Error
+	require.ErrorAs(t, err, &vciErr, "an opening needs an encrypted response")
+	assert.Equal(t, openid4vci.ErrInvalidEncryptionParameters, vciErr.Err)
+	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, first)
+	require.NoError(t, err, "the refused request recorded nothing")
+	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, second)
+	require.ErrorAs(t, err, &vciErr, "the record holds the first wallet's psc")
+	assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err)
+	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations[:1], nymAuthSubject("pan-200"), document, second)
+	require.NoError(t, err, "a commitment without unique is accepted")
+
+	query := func(path []string, key ...KeyValue) UniqueCommitmentQuery {
+		return UniqueCommitmentQuery{Scope: "nym_auth", Path: path, Key: key}
+	}
+	reset := func(path []string, key ...KeyValue) error {
+		return c.ResetUniqueCommitment(t.Context(), &ResetUniqueCommitmentRequest{UniqueCommitmentQuery: query(path, key...), EvidenceRef: "case-1"}, "operator")
+	}
+	identifiers := func(pan string) KeyValue {
+		return KeyValue{Path: ssc, Inputs: map[string]string{"issuing_country": "SE", "personal_administrative_number": pan}}
+	}
+	q := query(psc, identifiers("pan-200"))
+	found, err := c.LookupUniqueCommitment(t.Context(), &q)
+	require.NoError(t, err, "the subject's identifiers find the record")
+	assert.False(t, found.RecordedAt.IsZero())
+	require.NoError(t, reset(psc, identifiers("pan-200")))
+	_, err = c.LookupUniqueCommitment(t.Context(), &q)
+	var gone *helpers.Error
+	require.ErrorAs(t, err, &gone, "the reset removed the record")
+	assert.Equal(t, http.StatusNotFound, gone.HTTPStatus)
+	applied, err := issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, second)
+	require.NoError(t, err, "after the reset the second wallet's psc is accepted")
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(applied.documentData, &doc))
+	assert.Equal(t, secondPSC, doc["psc"])
+	carried := doc["ssc"].(string)
+	require.NoError(t, reset(psc, KeyValue{Path: ssc, Value: &carried}), "the value the credential carries names the same key")
+
+	for rule, refusal := range map[string]struct {
+		err    error
+		status int
+	}{
+		"the entry is unique per the key": {reset(ssc, identifiers("pan-200")), http.StatusBadRequest},
+		"the inputs fit an hkdf opening": {
+			reset(psc, KeyValue{Path: ssc, Inputs: map[string]string{"issuing_country": "SE"}}), http.StatusBadRequest,
+		},
+		"a commitment is on record": {reset(psc, identifiers("pan-999")), http.StatusNotFound},
+	} {
+		var detailed *helpers.Error
+		require.ErrorAs(t, refusal.err, &detailed, rule)
+		assert.Equal(t, refusal.status, detailed.HTTPStatus, rule)
+	}
+}
+
+// The reset form offers each set of identifiers the openings read, and a
+// value reaches an opening under the claim it was entered for.
+func TestUniqueCommitmentFormIdentifiers(t *testing.T) {
+	c, derivations := nymAuthClient(t)
+	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
+	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
+	from := c.cfg.APIGW.DataSources.Presentation.Scopes["nym_auth"].From
+	reading := func(inputs ...string) []primitives.Derivation {
+		hc, hkdf := *derivations[0].HashCommitment, *derivations[0].HashCommitment.Opening.HKDF
+		hkdf.Inputs = inputs
+		hc.Opening = &primitives.OpeningArgs{HKDF: &hkdf}
+		return []primitives.Derivation{{HashCommitment: &hc}, derivations[1]}
+	}
+	swapped := reading("personal_administrative_number", "issuing_country")
+	// Its own secret, as the message of an opening holds the values alone: two
+	// openings of one secret that read a set in two orders share a value.
+	ownSecret := filepath.Join(t.TempDir(), "own_seed.key")
+	require.NoError(t, os.WriteFile(ownSecret, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("o", 32)))), 0o600))
+	swapped[0].HashCommitment.Opening.HKDF.SecretPath = ownSecret
+	from["pid_a_swapped"] = model.PresentedCredential{Derivations: swapped}
+	from["pid_b_renamed"] = model.PresentedCredential{Derivations: reading("issuing_country", "document_number")}
+	from["pid_c_short"] = model.PresentedCredential{Derivations: reading("personal_administrative_number")}
+
+	entries := ResettableEntries(c.cfg, []string{"nym_auth"})
+	require.Len(t, entries, 1)
+	number := ResettableInput{Claim: "personal_administrative_number", Label: "Personal administrative number"}
+	country := ResettableInput{Claim: "issuing_country", Label: "Issuing country"}
+	document := ResettableInput{Claim: "document_number", Label: "Document number"}
+	assert.Equal(t, [][]ResettableInput{{country, number}, {country, document}, {number}}, entries[0].Key[0].Inputs,
+		"the sources in Where order, and the two orders of one set share a list")
+
+	commitment := sha256.Sum256([]byte("a wallet's private seed"))
+	entry := []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(commitment[:])}}
+	_, err := issueAuxiliaryData(t, c, "nym_auth", swapped, nymAuthSubject("pan-300"), []byte(`{"birth_date":"2011-06-15"}`), entry)
+	require.NoError(t, err)
+	lookup := func(countryValue, numberValue string) error {
+		inputs := map[string]string{"issuing_country": countryValue, "personal_administrative_number": numberValue}
+		_, err := c.LookupUniqueCommitment(t.Context(), &UniqueCommitmentQuery{Scope: "nym_auth", Path: psc, Key: []KeyValue{{Path: ssc, Inputs: inputs}}})
+		return err
+	}
+	assert.NoError(t, lookup("SE", "pan-300"), "each identifier under its claim finds the record of the swapped source")
+	var absent *helpers.Error
+	require.ErrorAs(t, lookup("pan-300", "SE"), &absent, "the values exchanged name another person")
+	assert.Equal(t, http.StatusNotFound, absent.HTTPStatus)
+}
+
+// The key decides which issuances share a record: an empty key makes one
+// commitment for the entry, a composite key one per combination.
+func TestUniqueCommitmentKey(t *testing.T) {
+	ns := "eu.europa.ec.eudi.nym_auth.1"
+	type issuance struct {
+		ssc, birth string
+		psc        byte
+		accepted   bool
+	}
+	type credential struct {
+		format, encoding string
+		psc, ssc, birth  []string
+		document         string
+	}
+	mdoc := credential{"mso_mdoc", "", []string{ns, "psc"}, []string{ns, "ssc"}, []string{ns, "birth_date"}, `{"ssc":%q,"birth_date":%q}`}
+	sdjwt := credential{"dc+sd-jwt", "base64url", []string{"commitments", "psc"}, []string{"commitments", "ssc"}, []string{"birth_date"}, `{"commitments":{"ssc":%q},"birth_date":%q}`}
+	for name, tc := range map[string]struct {
+		credential credential
+		key        func(credential) [][]string
+		issuances  []issuance
+	}{
+		"global": {mdoc, func(credential) [][]string { return [][]string{} },
+			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, false}}},
+		"per ssc": {mdoc, func(c credential) [][]string { return [][]string{c.ssc} },
+			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, true}, {"A", "2011-06-15", 2, false}}},
+		"per ssc and birth_date": {mdoc, func(c credential) [][]string { return [][]string{c.ssc, c.birth} },
+			[]issuance{{"A", "2011-06-15", 1, true}, {"A", "2012-01-01", 2, true}, {"A", "2011-06-15", 2, false}}},
+		"per a nested SD-JWT claim": {sdjwt, func(c credential) [][]string { return [][]string{c.ssc} },
+			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, true}, {"A", "2011-06-15", 2, false}}},
+	} {
+		cred := tc.credential
+		c := &Client{log: logger.NewSimple("test"), uniqueCommitmentStore: memoryCommitments{}, cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+			"nym_auth": {Format: cred.format, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+				ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: cred.psc, Encoding: cred.encoding}},
+			}},
+		}}}}
+		derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{Path: cred.psc, Unique: &primitives.UniqueArgs{Key: tc.key(cred)}}}}
+		for i, is := range tc.issuances {
+			document := fmt.Appendf(nil, cred.document, is.ssc, is.birth)
+			entries := []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: cred.psc,
+				Commitment: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{is.psc}, sha256.Size))}}
+			_, err := issueAuxiliaryData(t, c, "nym_auth", derivations, nil, document, entries)
+			if is.accepted {
+				assert.NoError(t, err, "%s: issuance %d", name, i)
+				continue
+			}
+			var vciErr *openid4vci.Error
+			require.ErrorAs(t, err, &vciErr, "%s: issuance %d", name, i)
+			assert.Equal(t, openid4vci.ErrAuxiliaryDataConflict, vciErr.Err, "%s: issuance %d", name, i)
+		}
+	}
+}
+
+// memoryCommitments is a UniqueCommitmentStore over a map.
+type memoryCommitments map[string]memoryRecord
+
+type memoryRecord struct {
+	commitment []byte
+	at         time.Time
+}
+
+func (m memoryCommitments) Accept(_ context.Context, commitments []db.UniqueCommitment, at time.Time) error {
+	var stored []string
+	for i, c := range commitments {
+		k := fmt.Sprint(c.Key)
+		record, ok := m[k]
+		switch {
+		case !ok:
+			m[k] = memoryRecord{commitment: c.Commitment, at: at}
+			stored = append(stored, k)
+		case !bytes.Equal(record.commitment, c.Commitment):
+			for _, k := range stored {
+				delete(m, k)
+			}
+			return &db.UniqueCommitmentConflict{Index: i}
+		}
+	}
+	return nil
+}
+
+func (m memoryCommitments) Find(_ context.Context, key db.UniqueCommitmentKey) (db.UniqueCommitmentRecord, error) {
+	record, ok := m[fmt.Sprint(key)]
+	if !ok {
+		return db.UniqueCommitmentRecord{}, db.ErrNoDocuments
+	}
+	return db.UniqueCommitmentRecord{AcceptedAt: record.at}, nil
+}
+
+func (m memoryCommitments) Reset(_ context.Context, key db.UniqueCommitmentKey, _ db.UniqueCommitmentReset) error {
+	k := fmt.Sprint(key)
+	if _, ok := m[k]; !ok {
+		return db.ErrNoDocuments
+	}
+	delete(m, k)
+	return nil
+}
+
 // An SD-JWT VC carries each commitment at its claims path, in the
 // encoding its entry configures, and the SD-JWT builder turns it into a
-// disclosure the holder can withhold.
+// disclosure the holder can withhold. An operator's identifiers name the
+// key the credential carries.
 func TestAuxiliaryDataSDJWT(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "secret.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
@@ -169,18 +436,26 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 			ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Encoding: "hex"}},
 		}},
 	}}}}
-	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
-		Path:    ssc,
-		Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16}},
+	derivations := []primitives.Derivation{
+		{HashCommitment: &primitives.HashCommitmentArgs{
+			Path:    ssc,
+			Opening: &primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16}},
+		}},
+		{HashCommitment: &primitives.HashCommitmentArgs{Path: psc, Unique: &primitives.UniqueArgs{Key: [][]string{ssc}}}},
+	}
+	c.cfg.APIGW = &model.APIGW{DataSources: model.DataSources{Presentation: model.PresentationConfig{
+		Scopes: map[string]model.PresentationScope{"example": {From: map[string]model.PresentedCredential{"pid": {Derivations: derivations}}}},
 	}}}
+	c.uniqueCommitmentStore = memoryCommitments{}
 	walletPSC := sha256.Sum256([]byte("the wallet's private seed"))
 	fromWallet := []openid4vci.AuxiliaryDataEntry{{
 		Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(walletPSC[:]),
 	}}
 
-	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations,
+	applied, err := issueAuxiliaryData(t, c, "example", derivations,
 		map[string]any{"personal_administrative_number": "pan-200"}, []byte(`{"given_name":"Alex"}`), fromWallet)
 	require.NoError(t, err)
+	toWallet := applied.toWallet
 	require.Len(t, toWallet, 1)
 	assert.Equal(t, openid4vci.AuxiliaryDataEntry{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Opening: toWallet[0].Opening},
 		toWallet[0], "a response entry carries type, alg, path and opening")
@@ -192,8 +467,11 @@ func TestAuxiliaryDataSDJWT(t *testing.T) {
 		"psc": hex.EncodeToString(walletPSC[:]),
 	}
 	var doc map[string]any
-	require.NoError(t, json.Unmarshal(out, &doc))
+	require.NoError(t, json.Unmarshal(applied.documentData, &doc))
 	assert.Equal(t, want, doc["commitments"], "each commitment is at its claims path, in its entry's encoding")
+	q := UniqueCommitmentQuery{Scope: "example", Path: psc, Key: []KeyValue{{Path: ssc, Inputs: map[string]string{"personal_administrative_number": "pan-200"}}}}
+	_, err = c.LookupUniqueCommitment(t.Context(), &q)
+	require.NoError(t, err, "the identifiers derive ssc in its entry's encoding")
 
 	payload, disclosures, err := sdjwtvc.New().MakeCredential(sha256.New(), doc, vctm, 0)
 	require.NoError(t, err)
@@ -234,7 +512,7 @@ func TestSourceDerivationsReadsClaimsFromTheMongoStore(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString(secret)+"\n"), 0o600))
 	opening := primitives.HKDFOpeningArgs{SecretPath: secretPath, Inputs: []string{"subject.pan"}, Bytes: 16}
-	hc := primitives.HashCommitmentArgs{Path: []string{"commitments", "ssc"}, Opening: primitives.OpeningArgs{HKDF: &opening}}
+	hc := primitives.HashCommitmentArgs{Path: []string{"commitments", "ssc"}, Opening: &primitives.OpeningArgs{HKDF: &opening}}
 	_, err = hc.NewOpening(claims)
 	require.NoError(t, err, "subject.pan resolves in the normalised claims")
 	assert.IsType(t, []any{}, claims["subject"].(map[string]any)["list"])
@@ -306,15 +584,15 @@ func TestAuxiliaryDataClaimOpening(t *testing.T) {
 	}}}}
 	derivations := []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 		Path:    ssc,
-		Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: "nym_auth_opening"}},
+		Opening: &primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: "nym_auth_opening"}},
 	}}}
 	const claim = "AAECAwQFBgcICQoLDA0ODw"
 
-	out, toWallet, err := c.applyAuxiliaryData(t.Context(), "example", derivations, map[string]any{"nym_auth_opening": claim}, []byte(`{}`), nil)
+	applied, err := c.applyAuxiliaryData(t.Context(), "example", derivations, map[string]any{"nym_auth_opening": claim}, []byte(`{}`), nil)
 	require.NoError(t, err)
-	require.Len(t, toWallet, 1)
-	assert.Equal(t, claim, toWallet[0].Opening, "the opening is the claim's bytes")
+	require.Len(t, applied.toWallet, 1)
+	assert.Equal(t, claim, applied.toWallet[0].Opening, "the opening is the claim's bytes")
 	var doc map[string]any
-	require.NoError(t, json.Unmarshal(out, &doc))
+	require.NoError(t, json.Unmarshal(applied.documentData, &doc))
 	assert.Equal(t, map[string]any{"ssc": "be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991"}, doc["commitments"])
 }
