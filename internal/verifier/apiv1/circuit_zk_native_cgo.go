@@ -74,6 +74,31 @@ func (c *Client) verifyCircuitZkPresentation(
 				fmt.Sprintf("no pseudonym for handle %q", item.Return), nil)
 		}
 
+		var claimedArray [32]byte
+		if len(claimed) != len(claimedArray) {
+			// NOT a refusal, and not a truncation either.
+			//
+			// The shared validator sizes a pseudonym by the item's prf,
+			// and hashdh-bls12381g1 is 48 bytes - which this build's
+			// backend interface has nowhere to put: Verify takes and
+			// returns [32]byte. copy() would have silently compared the
+			// first 32 and ignored the rest, so a proof over a 32-byte
+			// value could be accepted for a request that asked for a
+			// different pseudonym function, and the published pseudonym
+			// would be the truncation.
+			//
+			// 5xx and unclassified, per the doctrine at the top of
+			// circuit_zk_refusal.go: the request is this verifier's own,
+			// so a prf it cannot verify is a misconfiguration here and
+			// not a bad presentation. Telling the wallet its
+			// presentation was refused would send its author hunting for
+			// a defect that is not there.
+			prf, _ := item.Params["prf"].(string)
+			return nil, fmt.Errorf(
+				"zkp_req: the %q request item asks for prf %q, whose pseudonym is %d bytes, and this build verifies %d-byte pseudonyms only",
+				item.Return, prf, len(claimed), len(claimedArray))
+		}
+
 		config, err := circuitZkConfigOf(item)
 		if err != nil {
 			return nil, err
@@ -83,7 +108,6 @@ func (c *Client) verifyCircuitZkPresentation(
 			return nil, err
 		}
 
-		var claimedArray [32]byte
 		copy(claimedArray[:], claimed)
 		pseudonym, err := backend.Verify(request, claimedArray, presentation.Proof)
 		if err != nil {

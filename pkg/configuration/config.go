@@ -621,7 +621,16 @@ func checkNymAuthVerifier(cfg *model.Cfg) error {
 		return err
 	}
 	if !cfg.Verifier.NymAuth.Enable {
+		// The envelope check below is deliberately NOT reached here.
+		// A verifier is also the tool wallets are tested with, and the
+		// envelope form exists so an operator can send a shape this
+		// build does not model. With nym_auth off nothing comes back
+		// to be bound to the offer, so the escape hatch costs nothing.
 		return nil
+	}
+
+	if err := refuseUnbindableZkpReqOffer(cfg.Verifier.PreferredVPFormats); err != nil {
+		return err
 	}
 
 	if err := nymauth.CheckVerifierID(cfg.Verifier.NymAuth.VerifierID); err != nil {
@@ -1645,6 +1654,50 @@ func refuseLegacyZkpReqKeys(formats *openid4vp.VPFormatsSupported) error {
 		if _, legacy := formats.ZkpReq.Extra[old]; legacy {
 			return fmt.Errorf("verifier.preferred_vp_formats.zkp_req.%s is the pre-v0.4 name; rename it to %s",
 				old, replacement)
+		}
+	}
+	return nil
+}
+
+// refuseUnbindableZkpReqOffer stops a verifier whose offered circuits
+// are in a shape it cannot read back.
+//
+// The envelope form - {"fn_id": ..., "input": base64(json)} - is carried
+// through to the wallet unchanged, by design: the verifier is the tool
+// wallets are tested with, and an operator must be able to send a shape
+// this build does not model. But the response side builds its allowlist
+// from system_id_values alone, so an offer that names its circuits only
+// inside that base64 blob reaches the wallet complete and then refuses
+// every presentation it produces, as naming a system the request never
+// offered.
+//
+// Startup rather than first presentation, for the reason
+// refuseLegacyZkpReqKeys gives: refused at the response it reads as a
+// wallet problem, and the wallet is the one thing that was right.
+//
+// Parsing the envelope instead was the alternative and is deliberately
+// not done. Its contents are not modelled - the one example in the tree
+// spells its members the pre-v0.4 way - and teaching the builder to read
+// what it was built to pass through unexamined would make a serialiser
+// into a validator.
+func refuseUnbindableZkpReqOffer(formats *openid4vp.VPFormatsSupported) error {
+	if formats == nil || formats.ZkpReq == nil {
+		return nil
+	}
+	if formats.ZkpReq.SystemIDValues != nil {
+		// Present, possibly empty. An explicitly empty list is a
+		// filter that matches nothing, which is a thing an operator
+		// may legitimately mean.
+		return nil
+	}
+	for _, member := range []string{"fn_id", "input"} {
+		if _, envelope := formats.ZkpReq.Extra[member]; envelope {
+			return fmt.Errorf(
+				"verifier.preferred_vp_formats.zkp_req names its circuits only through the %q envelope member, "+
+					"and verifier.nym_auth.enable is true: the request would go to the wallet complete, and every "+
+					"presentation it returns would then be refused as naming a system the request never offered. "+
+					"List them in system_id_values, or turn verifier.nym_auth.enable off to send the envelope as a test shape",
+				member)
 		}
 	}
 	return nil

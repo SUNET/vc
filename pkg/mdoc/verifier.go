@@ -350,6 +350,18 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 	return nil
 }
 
+// ErrTrustEvaluation reports that the trust decision could not be MADE,
+// as distinct from a decision that the issuer is not trusted.
+//
+// A PDP that is unreachable, a timed-out evaluation and a verifier with
+// no evaluator at all all fail closed - nothing is accepted on the back
+// of them - but they are this deployment's failure, not the
+// credential's. A caller that turns an error into a status code owes the
+// client the difference: "your credential's issuer is not trusted" sends
+// a wallet author hunting for a defect that is not there, where a 5xx
+// says what actually happened and can be retried.
+var ErrTrustEvaluation = errors.New("trust evaluation failed")
+
 // VerifyIssuerChain checks an issuer certificate chain's validity dates
 // and asks go-trust whether the issuer is trusted for this docType.
 //
@@ -372,8 +384,10 @@ func VerifyIssuerChain(ctx context.Context, evaluator trust.TrustEvaluator, chai
 	if evaluator == nil {
 		// Fail closed. An evaluator-less verifier cannot say whether
 		// an issuer is trusted, and "cannot say" must not read as
-		// "yes".
-		return errors.New("no trust evaluator configured, so no issuer can be trusted")
+		// "yes". ErrTrustEvaluation for the same reason as below: this
+		// is a deployment that cannot judge, not a credential that
+		// failed to be trusted.
+		return fmt.Errorf("%w: no trust evaluator configured, so no issuer can be trusted", ErrTrustEvaluation)
 	}
 
 	dsCert := chain[0]
@@ -402,7 +416,13 @@ func VerifyIssuerChain(ctx context.Context, evaluator trust.TrustEvaluator, chai
 		DocType:   docType,
 	})
 	if err != nil {
-		return fmt.Errorf("trust evaluation failed: %w", err)
+		// An evaluation that could not be MADE - the PDP is unreachable,
+		// the request timed out - is not a decision that the issuer is
+		// untrusted. Both fail closed here, and must: "cannot say" never
+		// reads as "yes". But a caller that reports them to a client has
+		// to tell them apart, because one is the credential's fault and
+		// the other is this deployment's.
+		return fmt.Errorf("%w: %w", ErrTrustEvaluation, err)
 	}
 
 	if !decision.Trusted {
