@@ -486,7 +486,7 @@
                                                 <template x-for="(input, j) in part.inputs[hc.inputs[k]]" :key="hc.entry + '-' + k + '-' + hc.inputs[k] + '-' + j">
                                                     <div class="mb-3">
                                                         <label class="form-label" :for="'hc-key-' + k + '-' + j" x-text="input.label"></label>
-                                                        <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required autocomplete="off">
+                                                        <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required pattern=".*\S.*" title="Enter at least one visible character." autocomplete="off">
                                                     </div>
                                                 </template>
                                             </div>
@@ -494,7 +494,7 @@
                                         <template x-if="!part.inputs">
                                             <div class="mb-3">
                                                 <label class="form-label" :for="'hc-key-' + k" x-text="part.label"></label>
-                                                <input class="form-control" :id="'hc-key-' + k" x-model="hc.values[k]" required autocomplete="off">
+                                                <input class="form-control" :id="'hc-key-' + k" x-model="hc.values[k]" required pattern=".*\S.*" title="Enter at least one visible character." autocomplete="off">
                                             </div>
                                         </template>
                                     </div>
