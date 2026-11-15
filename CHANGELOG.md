@@ -171,6 +171,9 @@
   - `required_claims` is a list of `{path, values}`, `defaults` a list of
     `{path, value}`, `identity_attributes` a list of `{path, attribute}`
     and `document_claims` a list of `{from, to}`.
+  - The apigw stops at startup when an `auth_claims` entry or a
+    `document_claims` `from` of an mdoc auth scope is no
+    `[namespace, element]` pointer.
   - A presentation request template's `claim_mappings` is `"*"`, or a map
     from DCQL credential query id to `{path, claim}` entries that maps each
     presentation through the entries of the query it answers.
