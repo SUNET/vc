@@ -258,6 +258,8 @@ func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 		"list of pointers":                      {`[{"path":["given_name"],"equals":"Alice"}]`, false, http.StatusOK, false, "", ""},
 		"dotted string in the list":             {`[{"path":"given_name","equals":"Alice"}]`, false, http.StatusBadRequest, false, "", "invalid_claims_path"},
 		"number in the list":                    {`[{"path":7,"equals":"Alice"}]`, false, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"null in the list":                      {`[{"path":null,"equals":"Alice"}]`, false, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"null after a pointer in the list":      {`[{"path":["given_name"],"path":null,"equals":"Alice"}]`, false, http.StatusBadRequest, false, "", "invalid_claims_path"},
 		"object of dotted names in a form body": {`{"given_name":{"equals":"Alice"}}`, true, http.StatusOK, true, "@1793836800", ""},
 		"list of pointers in a form body":       {`[{"path":["given_name"],"equals":"Alice"}]`, true, http.StatusOK, false, "", ""},
 	} {

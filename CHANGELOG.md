@@ -175,8 +175,8 @@
     from DCQL credential query id to `{path, claim}` entries that maps each
     presentation through the entries of the query it answers.
   - `identity_match.claims` of `POST /api/v1/issuance/prepare` is a list of
-    `{path, equals}`. A malformed pointer is answered with `400
-    invalid_claims_path`.
+    `{path, equals}`. A malformed pointer, `null` included, is answered
+    with `400 invalid_claims_path`.
   - The admin UI's claim template builds an array for `null` and for an
     index. A claim a VCTM declares as an object and as an array stays an
     object, and logs a warning that names it. The document form keeps a

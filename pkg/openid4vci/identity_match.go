@@ -410,17 +410,17 @@ func (m *StoredIdentityMatch) UnmarshalJSON(data []byte) error {
 	}
 	m.claims = make([]storedClaim, 0, len(entries))
 	for _, entry := range entries {
-		var name string
-		if err := json.Unmarshal(entry.Path, &name); err == nil {
+		if bytes.HasPrefix(bytes.TrimSpace(entry.Path), []byte(`"`)) {
+			var name string
+			if err := json.Unmarshal(entry.Path, &name); err != nil {
+				return err
+			}
 			m.claims = append(m.claims, storedClaim{path: namedPath(name), test: entry.Test})
 			continue
 		}
 		var path claimpath.Pointer
 		if err := json.Unmarshal(entry.Path, &path); err != nil {
-			return err
-		}
-		if path.IsZero() {
-			return errors.New("identity match: a stored claim has no path")
+			return fmt.Errorf("identity match: a stored claim path: %w", err)
 		}
 		m.claims = append(m.claims, storedClaim{path: pointerPath{path}, test: entry.Test})
 	}
