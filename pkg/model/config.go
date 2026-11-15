@@ -113,9 +113,10 @@ type Mongo struct {
 	// VerifierDatabaseName, RegistryDatabaseName and HA.CacheDatabaseName.
 	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017\""`
 	// APIGWDatabaseName is the MongoDB database the apigw keeps its
-	// datastore, identity mappings, credential offers and dynamic client
-	// registrations in. Deployments sharing one MongoDB server must each set
-	// their own, or they read and write each other's documents.
+	// datastore, identity mappings, credential offers, dynamic client
+	// registrations and unique commitment records in. Deployments sharing
+	// one MongoDB server must each set their own, or they read and write
+	// each other's documents.
 	APIGWDatabaseName string `yaml:"apigw_database_name" default:"vc"`
 	// VerifierDatabaseName is the MongoDB database the verifier keeps its
 	// OIDC client registrations in. Deployments sharing one MongoDB server
@@ -2046,6 +2047,25 @@ type APIAuth struct {
 	// RulesFile is an optional path to a file containing SPOCP rules (one per line)
 	// Rules from this file are loaded in addition to the inline Rules list
 	RulesFile string `yaml:"rules_file,omitempty"`
+}
+
+// AuxiliaryDataSupported returns the credential's auxiliary_data, empty for a
+// credential without it.
+func (m *CredentialMetadata) AuxiliaryDataSupported() openid4vci.AuxiliaryDataSupported {
+	if m == nil || m.AuxiliaryData == nil {
+		return openid4vci.AuxiliaryDataSupported{}
+	}
+	return *m.AuxiliaryData
+}
+
+// Enabled reports whether a caller reaching the admin API has to be
+// anybody in particular.
+//
+// Only the two Bearer modes count. An admin session does not: it is
+// granted anonymously when OIDC is absent, so requiring one would be a
+// check that passes for everyone.
+func (a APIAuth) Enabled() bool {
+	return a.JWKS.Enable || a.OIDC.Enable
 }
 
 // APIAuthJWKS holds the configuration for static JWKS Bearer token authentication
@@ -4016,13 +4036,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					if len(meta.Display) > 0 {
 						display := make([]openid4vci.ClaimDisplayProperties, len(meta.Display))
 						for j, d := range meta.Display {
-							label := d.Label
-							if label == "" {
-								label = d.Name
-							}
 							display[j] = openid4vci.ClaimDisplayProperties{
 								Name:   d.Name,
-								Label:  label,
+								Label:  d.LabelOrName(),
 								Locale: d.Locale,
 							}
 						}
