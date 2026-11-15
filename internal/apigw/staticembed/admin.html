@@ -456,60 +456,65 @@
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <form @submit.prevent="findCommitment($el)" @input="commitmentEdited()">
-                                <template x-if="uniqueCommitmentEntries.length > 1">
-                                    <div class="mb-3">
-                                        <label class="form-label" for="hc-entry">Credential</label>
-                                        <select id="hc-entry" class="form-select" x-model.number="hc.entry" @change="clearCommitmentForm()">
-                                            <template x-for="(e, i) in uniqueCommitmentEntries" :key="i">
-                                                <option :value="i" x-text="e.label"></option>
+                                <!-- Both forms are locked while a lookup or a reset runs, so its reply applies to the values on screen. -->
+                                <fieldset :disabled="hc.busy">
+                                    <template x-if="uniqueCommitmentEntries.length > 1">
+                                        <div class="mb-3">
+                                            <label class="form-label" for="hc-entry">Credential</label>
+                                            <select id="hc-entry" class="form-select" x-model.number="hc.entry" @change="clearCommitmentForm()">
+                                                <template x-for="(e, i) in uniqueCommitmentEntries" :key="i">
+                                                    <option :value="i" x-text="e.label"></option>
+                                                </template>
+                                            </select>
+                                        </div>
+                                    </template>
+                                    <template x-if="uniqueCommitmentEntries.length === 1">
+                                        <p class="fw-semibold mb-3" x-text="uniqueCommitmentEntries[0].label"></p>
+                                    </template>
+                                    <template x-for="(part, k) in uniqueCommitmentEntries[hc.entry].key" :key="hc.entry + '-' + k">
+                                        <div>
+                                            <template x-if="part.inputs">
+                                                <div>
+                                                    <template x-if="part.inputs.length > 1">
+                                                        <div class="mb-3">
+                                                            <label class="form-label" :for="'hc-inputs-' + k">Identified by</label>
+                                                            <select class="form-select" :id="'hc-inputs-' + k" x-model.number="hc.inputs[k]" @change="commitmentInputsSelected(k)">
+                                                                <template x-for="(inputs, i) in part.inputs" :key="i">
+                                                                    <option :value="i" x-text="inputs.map(input => input.label).join(' + ')"></option>
+                                                                </template>
+                                                            </select>
+                                                        </div>
+                                                    </template>
+                                                    <template x-for="(input, j) in part.inputs[hc.inputs[k]]" :key="hc.entry + '-' + k + '-' + hc.inputs[k] + '-' + j">
+                                                        <div class="mb-3">
+                                                            <label class="form-label" :for="'hc-key-' + k + '-' + j" x-text="input.label"></label>
+                                                            <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required pattern=".*\S.*" title="Enter at least one visible character." autocomplete="off">
+                                                        </div>
+                                                    </template>
+                                                </div>
                                             </template>
-                                        </select>
-                                    </div>
-                                </template>
-                                <template x-if="uniqueCommitmentEntries.length === 1">
-                                    <p class="fw-semibold mb-3" x-text="uniqueCommitmentEntries[0].label"></p>
-                                </template>
-                                <template x-for="(part, k) in uniqueCommitmentEntries[hc.entry].key" :key="hc.entry + '-' + k">
-                                    <div>
-                                        <template x-if="part.inputs">
-                                            <div>
-                                                <template x-if="part.inputs.length > 1">
-                                                    <div class="mb-3">
-                                                        <label class="form-label" :for="'hc-inputs-' + k">Identified by</label>
-                                                        <select class="form-select" :id="'hc-inputs-' + k" x-model.number="hc.inputs[k]" @change="commitmentInputsSelected(k)">
-                                                            <template x-for="(inputs, i) in part.inputs" :key="i">
-                                                                <option :value="i" x-text="inputs.map(input => input.label).join(' + ')"></option>
-                                                            </template>
-                                                        </select>
-                                                    </div>
-                                                </template>
-                                                <template x-for="(input, j) in part.inputs[hc.inputs[k]]" :key="hc.entry + '-' + k + '-' + hc.inputs[k] + '-' + j">
-                                                    <div class="mb-3">
-                                                        <label class="form-label" :for="'hc-key-' + k + '-' + j" x-text="input.label"></label>
-                                                        <input class="form-control" :id="'hc-key-' + k + '-' + j" x-model="hc.values[k][j]" required pattern=".*\S.*" title="Enter at least one visible character." autocomplete="off">
-                                                    </div>
-                                                </template>
-                                            </div>
-                                        </template>
-                                        <template x-if="!part.inputs">
-                                            <div class="mb-3">
-                                                <label class="form-label" :for="'hc-key-' + k" x-text="part.label"></label>
-                                                <input class="form-control" :id="'hc-key-' + k" x-model="hc.values[k]" required pattern=".*\S.*" title="Enter at least one visible character." autocomplete="off">
-                                            </div>
-                                        </template>
-                                    </div>
-                                </template>
-                                <button class="btn btn-primary" type="submit" :disabled="hc.busy">Find</button>
+                                            <template x-if="!part.inputs">
+                                                <div class="mb-3">
+                                                    <label class="form-label" :for="'hc-key-' + k" x-text="part.label"></label>
+                                                    <input class="form-control" :id="'hc-key-' + k" x-model="hc.values[k]" required pattern=".*\S.*" title="Enter at least one visible character." autocomplete="off">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <button class="btn btn-primary" type="submit">Find</button>
+                                </fieldset>
                             </form>
                             <template x-if="hc.found">
                                 <form class="border-top mt-3 pt-3" @submit.prevent="resetCommitment($el)">
-                                    <p class="mb-3">Recorded <span x-text="hc.found.recordedAt"></span></p>
-                                    <div class="mb-3">
-                                        <label class="form-label" for="hc-evidence">Case reference</label>
-                                        <input id="hc-evidence" class="form-control" x-model="hc.evidence" required maxlength="256" autocomplete="off">
-                                    </div>
-                                    <button class="btn btn-danger" type="submit" :disabled="!hasOperator || hc.busy">Reset commitment</button>
-                                    <button class="btn btn-link" type="button" @click="hc.found = null">Cancel</button>
+                                    <fieldset :disabled="hc.busy">
+                                        <p class="mb-3">Recorded <span x-text="hc.found.recordedAt"></span></p>
+                                        <div class="mb-3">
+                                            <label class="form-label" for="hc-evidence">Case reference</label>
+                                            <input id="hc-evidence" class="form-control" x-model="hc.evidence" required maxlength="256" autocomplete="off">
+                                        </div>
+                                        <button class="btn btn-danger" type="submit" :disabled="!hasOperator">Reset commitment</button>
+                                        <button class="btn btn-link" type="button" @click="hc.found = null">Cancel</button>
+                                    </fieldset>
                                 </form>
                             </template>
                             <template x-if="hc.message">
