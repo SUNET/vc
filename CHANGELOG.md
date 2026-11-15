@@ -151,8 +151,8 @@
 - **Unique hash commitments**: `unique` on a `hash_commitment` derivation
   makes the issuer accept one commitment per value of a key. The shipped
   nym_auth configs accept one `psc` per subject, keyed by the issued `ssc`.
-  A different commitment for a recorded value refuses the request. An
-  operator finds and resets a record with `POST /api/v1/auxiliary_data/lookup`
+  A different commitment for a recorded value refuses the request, and a
+  record stays once its credential is issued. An operator finds and resets a record with `POST /api/v1/auxiliary_data/lookup`
   and `POST /api/v1/auxiliary_data/reset`, or in the admin UI's
   **Commitments** view. The records live in the apigw database, and SQL
   backends create their tables with migration 000010. See

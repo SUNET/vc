@@ -557,6 +557,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	if issueErr == nil && len(credentials) == 0 {
 		issueErr = errors.New("no credentials were issued")
 	}
+	issueErr = c.settleUniqueCommitments(ctx, applied, issueErr)
 
 	formatAttr := metric.WithAttributes(attribute.String("format", format))
 	if issueErr != nil {

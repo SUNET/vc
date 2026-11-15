@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -90,7 +91,29 @@ func nymAuthSubject(pan string) map[string]any {
 // issueAuxiliaryData admits scope's auxiliary_data for a request that asks
 // for an encrypted response.
 func issueAuxiliaryData(t *testing.T, c *Client, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry) (appliedAuxiliaryData, error) {
-	return c.admitAuxiliaryData(t.Context(), scope, derivations, sourceClaims, documentData, fromWallet, true)
+	applied, err := c.admitAuxiliaryData(t.Context(), scope, derivations, sourceClaims, documentData, fromWallet, true)
+	if err != nil {
+		return appliedAuxiliaryData{}, err
+	}
+	return applied, c.settleUniqueCommitments(t.Context(), applied, nil)
+}
+
+// TestUniqueCommitmentFailedIssuance: an issuance whose credential fails
+// leaves no record, so the person's next wallet registers.
+func TestUniqueCommitmentFailedIssuance(t *testing.T) {
+	c, derivations := nymAuthClient(t)
+	psc := []string{"eu.europa.ec.eudi.nym_auth.1", "psc"}
+	document := []byte(`{"birth_date":"2011-06-15"}`)
+	wallet := func(seed string) []openid4vci.AuxiliaryDataEntry {
+		commitment := sha256.Sum256([]byte(seed))
+		return []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Commitment: base64.RawURLEncoding.EncodeToString(commitment[:])}}
+	}
+	applied, err := c.admitAuxiliaryData(t.Context(), "nym_auth", derivations, nymAuthSubject("pan-200"), document, wallet("the first wallet's private seed"), true)
+	require.NoError(t, err)
+	failed := errors.New("the issuer failed")
+	require.ErrorIs(t, c.settleUniqueCommitments(t.Context(), applied, failed), failed)
+	_, err = issueAuxiliaryData(t, c, "nym_auth", derivations, nymAuthSubject("pan-200"), document, wallet("the second wallet's private seed"))
+	assert.NoError(t, err, "the failed issuance left no record")
 }
 
 // With nym_auth as the example: the issuer derives ssc's opening from the
@@ -399,22 +422,39 @@ type memoryRecord struct {
 	at         time.Time
 }
 
-func (m memoryCommitments) Accept(_ context.Context, commitments []db.UniqueCommitment, at time.Time) error {
-	var stored []string
+func (m memoryCommitments) Reserve(_ context.Context, commitments []db.UniqueCommitment, at time.Time) (db.UniqueCommitmentReservation, error) {
+	reserved := memoryReservation{m: m}
 	for i, c := range commitments {
 		k := fmt.Sprint(c.Key)
 		record, ok := m[k]
 		switch {
 		case !ok:
 			m[k] = memoryRecord{commitment: c.Commitment, at: at}
-			stored = append(stored, k)
+			reserved.keys = append(reserved.keys, k)
 		case !bytes.Equal(record.commitment, c.Commitment):
-			for _, k := range stored {
-				delete(m, k)
-			}
-			return &db.UniqueCommitmentConflict{Index: i}
+			reserved.release()
+			return nil, &db.UniqueCommitmentConflict{Index: i}
 		}
 	}
+	return reserved, nil
+}
+
+// memoryReservation holds the keys a Reserve stored.
+type memoryReservation struct {
+	m    memoryCommitments
+	keys []string
+}
+
+func (r memoryReservation) release() {
+	for _, k := range r.keys {
+		delete(r.m, k)
+	}
+}
+
+func (memoryReservation) Keep(context.Context) error { return nil }
+
+func (r memoryReservation) Release(context.Context) error {
+	r.release()
 	return nil
 }
 
