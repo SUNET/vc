@@ -132,7 +132,27 @@ settle_secrets_candidate() {
         remove_secrets_candidate
     fi
 }
-trap settle_secrets_candidate EXIT
+
+# Directories that exit removes, so a generated key leaves no copy behind when
+# a call stops the script.
+temp_dirs=()
+
+# Creates a directory that exit removes, and stores its path in the variable
+# named $1.
+make_temp_dir() {
+    local _dir
+    _dir="$(mktemp -d)" || die "creating a temporary directory failed"
+    temp_dirs+=("$_dir")
+    printf -v "$1" '%s' "$_dir"
+}
+
+on_exit() {
+    settle_secrets_candidate
+    if ((${#temp_dirs[@]} > 0)); then
+        rm -rf -- "${temp_dirs[@]}"
+    fi
+}
+trap on_exit EXIT
 
 # Creates the candidate for secrets file $1. Its purpose $2 is the Fly app it
 # provisions, or reconcile. Returns 1 when the directory refuses it.
@@ -573,7 +593,7 @@ provision_apigw_saml_sp_keypair() {
         return 0
     fi
     echo "==> Provisioning SAML SP keypair for $apigw_app"
-    saml_tmp="$(mktemp -d)"
+    make_temp_dir saml_tmp
     # Self-signed cert; SP metadata publishes the pubkey, IdPs pin it out-of-band.
     # 10 years is well beyond dev/demo rotation cadence.
     if openssl req -x509 -newkey rsa:2048 -nodes \
