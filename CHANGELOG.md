@@ -75,7 +75,9 @@
   error text holds. Truncated or whitespace-only bodies carry the title
   `json_syntax_error`. Values refused by a decoder, such as a malformed time,
   carry the new title `json_value_error`. Both titles replace
-  `internal_server_error`.
+  `internal_server_error`. A body that ends before its `Content-Length` or its
+  last chunk reaches no handler and answers 400 with the title
+  `incomplete_request_body`.
 - **Request bodies with no declared length are read**: a chunked request or an
   HTTP/2 request with no `content-length` binds its JSON or form body, and the
   authorization middleware checks the resource pairs in its JSON body. Such a
