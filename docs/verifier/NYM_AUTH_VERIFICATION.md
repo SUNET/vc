@@ -188,6 +188,28 @@ Nothing is normalised, case included: `X509_SAN_DNS:` is refused too. The
 only other values refused are ones naming no verifier at all — an empty
 string, or a marker with nothing after it.
 
+**Where to get the published value.** The startup check reads the *form* and
+nothing else: it cannot tell whether the identifier after the prefix is the
+one this deployment actually publishes. Copying the `verifier.example` above
+onto a verifier that publishes something else starts cleanly and hashes a
+different identity, and every proof a wallet produces then fails to verify —
+with nothing pointing at the configuration.
+
+For an `x509_san_dns` verifier the published value is derived from
+`verifier.public_url`, and it is `x509_san_dns:` + the URL's **host**, which
+**includes the port** when there is one:
+
+| `verifier.public_url` | configure `verifier_id` as |
+|---|---|
+| `https://verifier.example` | `x509_san_dns:verifier.example` |
+| `https://verifier.example:8443` | `x509_san_dns:verifier.example:8443` |
+
+The other two schemes do not derive from the URL at all: with
+`client_id_scheme: x509_hash` the published `client_id` is the base64url
+SHA-256 of the signing certificate, and with `did` it is the configured DID.
+A `semantic_id:` verifier publishes whatever its registry says; take the
+value from there, in full.
+
 ### The circuit allowlist — nothing outside it is ever loaded
 
 An entry states what a build *is*: which pseudonym configuration it
@@ -519,9 +541,18 @@ a wallet author its presentation is bad when the fault is ours.
 ## What this does not do
 
 - **It does not link a pseudonym to a person.** That is the issuer's side,
-  and deliberately so — see `docs/issuer/AUXILIARY_DATA.md`. Whoever can
-  run the recovery tool can link any pseudonym to a person; this verifier
-  cannot.
+  and deliberately so — see `docs/issuer/AUXILIARY_DATA.md`. This verifier
+  cannot, and neither can the recovery tool on its own: `opening_recover`
+  reproduces **commitments**, and its `-expect` compares one commitment
+  against another. It never sees a pseudonym. Two of the opening kinds it
+  cannot derive at all — a `claim` opening has to be read from the source
+  data, and a `random` one is held only by the wallet, which the tool says
+  rather than guesses.
+
+  Comparing a reported pseudonym against a known person is a different
+  operation again, needing the holder's own seed, the pseudonym
+  configuration and the verifier's published `verifier_id` — which is
+  what scopes a pseudonym to one verifier in the first place.
 - **It does not decide policy from the response.** Every input to the check
   is this verifier's own: the transcript from its session, the age bounds
   from its request, `verifier_input` from its configuration, the `docType`
