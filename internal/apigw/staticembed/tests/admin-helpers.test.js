@@ -17,6 +17,7 @@ describe("unflattenEntries(flattenObject(document))", () => {
         "an indexed claim template": { elm: { credentialSubject: { hasClaim: [{ title: "" }] } } },
         "the member name of vctm_elm.json": { elm: { credentialSubject: { "hasClaim[0]": { title: "" } } } },
         "an array under a member name with brackets": { "m[1]": ["a", "b"] },
+        "an array under the empty member name": { "": [""], a: { "": [{ b: "" }] } },
         "member names with a backslash": { "a\\": { b: "" }, "c\\[0]": "" },
         "member names with dots": { "eu.europa.ec.eudi.pid.1.family_name": "a", b: { "c.d[0]": "e", "f\\.g": "h" } },
         "empty objects and arrays": { a: {}, b: [], c: [{}, [], { d: {} }, "e", {}] },
