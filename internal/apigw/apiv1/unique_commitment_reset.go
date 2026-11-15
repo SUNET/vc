@@ -38,8 +38,8 @@ type ResetUniqueCommitmentRequest struct {
 // KeyValue is the value of a key part: Value as the credential carries
 // it, or the Inputs a to_wallet part with an hkdf or hmac opening derives
 // from, each input claim with its value. Value is the exact text: a string as
-// it is, a number as the shortest JSON of the float64 the credential holds,
-// any other value as JSON.
+// it is, bytes in padded standard base64, a number as the shortest JSON of the
+// float64 the credential holds, any other value as JSON.
 type KeyValue struct {
 	Path   []string          `json:"path" validate:"required,min=1"`
 	Value  *string           `json:"value,omitempty"`
@@ -186,7 +186,7 @@ func (c *Client) derivedTexts(scope string, part model.KeyPart, inputs map[strin
 	if toWallet == nil {
 		return nil, fmt.Errorf("scope %q: key part %q is no to_wallet entry", scope, part.Path)
 	}
-	carrier, err := commitmentCarrierOf(meta.Format)
+	carrier, err := commitmentCarrierOf(meta)
 	if err != nil {
 		return nil, err
 	}

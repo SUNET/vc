@@ -805,7 +805,7 @@ func TestConvertElementValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := convertElementValue(ClaimMetadata{ValueType: tt.valueType}, tt.raw)
+			got, err := ConvertElementValue(ClaimMetadata{ValueType: tt.valueType}, tt.raw)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got none")
@@ -856,7 +856,7 @@ func TestConvertElementValue_NestedArraySchema(t *testing.T) {
 		},
 	}
 
-	got, err := convertElementValue(meta, raw)
+	got, err := ConvertElementValue(meta, raw)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -908,7 +908,7 @@ func TestConvertElementValue_NestedArraySchema_MissingMandatoryField(t *testing.
 		},
 	}
 
-	_, err := convertElementValue(meta, raw)
+	_, err := ConvertElementValue(meta, raw)
 	if err == nil {
 		t.Fatal("expected an error for missing mandatory nested field, got none")
 	}

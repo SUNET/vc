@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential/primitives"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -78,7 +79,7 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 	if len(supported.ToWallet) == 0 && len(supported.ToIssuer) == 0 {
 		return appliedAuxiliaryData{documentData: documentData}, nil
 	}
-	doc, err := newCommitmentDocument(c.cfg.GetCredentialMetadata(scope).Format, documentData)
+	doc, err := newCommitmentDocument(c.cfg.GetCredentialMetadata(scope), documentData)
 	if err != nil {
 		return appliedAuxiliaryData{}, fmt.Errorf("scope %q: %w", scope, err)
 	}
@@ -193,7 +194,7 @@ func newUniqueCommitment(scope string, hc *primitives.HashCommitmentArgs, commit
 	if err != nil {
 		return uniqueCommitment{}, fmt.Errorf("scope %q: %w", scope, err)
 	}
-	texts, err := keyTexts(doc, hc.Unique.Key)
+	texts, err := doc.keyTexts(hc.Unique.Key)
 	if err != nil {
 		return uniqueCommitment{}, fmt.Errorf("scope %q: %w", scope, err)
 	}
@@ -256,15 +257,15 @@ func (c *Client) recordUniqueCommitments(ctx context.Context, unique []uniqueCom
 	}
 }
 
-// keyTexts returns the text of each key part's value in doc.
-func keyTexts(doc *commitmentDocument, key [][]string) ([]string, error) {
+// keyTexts returns the text of each key part's value in d.
+func (d *commitmentDocument) keyTexts(key [][]string) ([]string, error) {
 	texts := make([]string, 0, len(key))
 	for _, part := range key {
-		value, present := doc.claim(part)
+		value, present := d.claim(part)
 		if !present {
 			return nil, fmt.Errorf("the credential carries no value at unique key part %q", part)
 		}
-		text, err := keyText(value)
+		text, err := d.keyText(part, value)
 		if err != nil {
 			return nil, fmt.Errorf("unique key part %q: %w", part, err)
 		}
@@ -273,15 +274,14 @@ func keyTexts(doc *commitmentDocument, key [][]string) ([]string, error) {
 	return texts, nil
 }
 
-// keyText is a key part's value as the credential carries it, which is how an
-// operator enters it: a string as it is, any other value as JSON. The
-// credential builders decode the document with encoding/json, which reads each
-// number as a float64, so the text does too: 1.0 reads 1, and integers beyond
-// 2^53 round as the signed claim does.
-func keyText(value any) (string, error) {
-	if text, ok := value.(string); ok {
-		return text, nil
-	}
+// keyText is the value at path as the credential carries it, which is how an
+// operator enters it: text as it is, bytes in padded standard base64, any
+// other value as JSON. The credential builders decode the document with
+// encoding/json, which reads each number as a float64, so the text does too:
+// 1.0 reads 1, and integers beyond 2^53 round as the signed claim does. An
+// mso_mdoc element then converts as the builder converts it, so base64
+// spellings of the same bytes read as one.
+func (d *commitmentDocument) keyText(path []string, value any) (string, error) {
 	literal, err := json.Marshal(value)
 	if err != nil {
 		return "", err
@@ -289,6 +289,23 @@ func keyText(value any) (string, error) {
 	var carried any
 	if err := json.Unmarshal(literal, &carried); err != nil {
 		return "", err
+	}
+	if d.schema != nil {
+		if element, declared := d.schema.Claims[path[0]][path[len(path)-1]]; declared {
+			if carried, err = mdoc.ConvertElementValue(element, carried); err != nil {
+				return "", err
+			}
+		}
+	}
+	switch v := carried.(type) {
+	case string:
+		return v, nil
+	case mdoc.FullDate:
+		return string(v), nil
+	case mdoc.TDate:
+		return string(v), nil
+	case []byte:
+		return base64.StdEncoding.EncodeToString(v), nil
 	}
 	encoded, err := json.Marshal(carried)
 	return string(encoded), err
@@ -329,23 +346,27 @@ func clearUnsent(doc *commitmentDocument, toIssuer, fromWallet []openid4vci.Auxi
 // commitmentCarrier is how a credential format carries a commitment in
 // its document data.
 type commitmentCarrier struct {
-	// mdoc keys a claim by its element identifier, and carries bytes as
-	// the standard base64 the mso_mdoc signer decodes into a bstr. A
-	// JSON-based credential nests a claim at its path, and its claims
-	// hold text.
-	mdoc bool
+	// schema is the MDDL of an mso_mdoc credential, which keys a claim by
+	// its element identifier and carries bytes as the standard base64 the
+	// signer decodes into a bstr. It is nil for a JSON-based credential,
+	// which nests a claim at its path and whose claims hold text.
+	schema *mdoc.MDDLSchema
 }
 
-// commitmentCarrierOf returns how a credential format carries a
+// commitmentCarrierOf returns how the credential of meta carries a
 // commitment.
-func commitmentCarrierOf(format string) (commitmentCarrier, error) {
+func commitmentCarrierOf(meta *model.CredentialMetadata) (commitmentCarrier, error) {
 	switch {
-	case format == openid4vp.FormatMsoMdoc:
-		return commitmentCarrier{mdoc: true}, nil
-	case openid4vp.IsSDJWTVCCredentialFormat(format):
+	case meta.Format == openid4vp.FormatMsoMdoc:
+		schema := meta.GetMDDL()
+		if schema == nil {
+			return commitmentCarrier{}, errors.New("the mso_mdoc credential has no MDDL schema loaded")
+		}
+		return commitmentCarrier{schema: schema}, nil
+	case openid4vp.IsSDJWTVCCredentialFormat(meta.Format):
 		return commitmentCarrier{}, nil
 	}
-	return commitmentCarrier{}, fmt.Errorf("a %q credential carries no hash commitment", format)
+	return commitmentCarrier{}, fmt.Errorf("a %q credential carries no hash commitment", meta.Format)
 }
 
 // claimText is a commitment as the claim represents it: text in the
@@ -354,7 +375,7 @@ func (c commitmentCarrier) claimText(encoding string, commitment []byte) (string
 	switch {
 	case encoding != "":
 		return openid4vci.EncodeCommitment(encoding, commitment)
-	case c.mdoc:
+	case c.schema != nil:
 		return base64.StdEncoding.EncodeToString(commitment), nil
 	}
 	return "", errors.New("a claim of a JSON-based credential holds text, so the entry needs an encoding")
@@ -369,8 +390,8 @@ type commitmentDocument struct {
 	written []pathCommitment
 }
 
-func newCommitmentDocument(format string, documentData []byte) (*commitmentDocument, error) {
-	carrier, err := commitmentCarrierOf(format)
+func newCommitmentDocument(meta *model.CredentialMetadata, documentData []byte) (*commitmentDocument, error) {
+	carrier, err := commitmentCarrierOf(meta)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +441,7 @@ func (d *commitmentDocument) writtenAt(path []string) ([]byte, bool) {
 // key in it, creating the objects a nested path passes through.
 func (d *commitmentDocument) parent(path []string) (map[string]any, string, error) {
 	key := path[len(path)-1]
-	if d.mdoc {
+	if d.schema != nil {
 		return d.claims, key, nil
 	}
 	node := d.claims
@@ -442,7 +463,7 @@ func (d *commitmentDocument) parent(path []string) (map[string]any, string, erro
 // clear removes the claim at path.
 func (d *commitmentDocument) clear(path []string) {
 	key := path[len(path)-1]
-	if d.mdoc {
+	if d.schema != nil {
 		delete(d.claims, key)
 		return
 	}
@@ -459,7 +480,7 @@ func (d *commitmentDocument) clear(path []string) {
 
 // claim returns the value of the claim at path.
 func (d *commitmentDocument) claim(path []string) (any, bool) {
-	if d.mdoc {
+	if d.schema != nil {
 		value := d.claims[path[len(path)-1]]
 		return value, value != nil
 	}

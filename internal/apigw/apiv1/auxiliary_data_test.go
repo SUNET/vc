@@ -330,21 +330,25 @@ func TestUniqueCommitmentKey(t *testing.T) {
 		format, encoding string
 		psc, ssc, birth  []string
 		document         string
+		// sscType is the MDDL value_type of ssc in an mso_mdoc credential.
+		sscType string
 	}
-	mdoc := credential{"mso_mdoc", "", []string{ns, "psc"}, []string{ns, "ssc"}, []string{ns, "birth_date"}, `{"ssc":%q,"birth_date":%q}`}
-	sdjwt := credential{"dc+sd-jwt", "base64url", []string{"commitments", "psc"}, []string{"commitments", "ssc"}, []string{"birth_date"}, `{"commitments":{"ssc":%q},"birth_date":%q}`}
-	numeric := mdoc
-	numeric.document = `{"ssc":%s,"birth_date":%q}`
+	mdocCredential := credential{"mso_mdoc", "", []string{ns, "psc"}, []string{ns, "ssc"}, []string{ns, "birth_date"}, `{"ssc":%q,"birth_date":%q}`, "tstr"}
+	sdjwt := credential{"dc+sd-jwt", "base64url", []string{"commitments", "psc"}, []string{"commitments", "ssc"}, []string{"birth_date"}, `{"commitments":{"ssc":%q},"birth_date":%q}`, ""}
+	numeric := mdocCredential
+	numeric.document, numeric.sscType = `{"ssc":%s,"birth_date":%q}`, "uint"
+	bytesCredential := mdocCredential
+	bytesCredential.sscType = "bstr"
 	for name, tc := range map[string]struct {
 		credential credential
 		key        func(credential) [][]string
 		issuances  []issuance
 	}{
-		"global": {mdoc, func(credential) [][]string { return [][]string{} },
+		"global": {mdocCredential, func(credential) [][]string { return [][]string{} },
 			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, false}}},
-		"per ssc": {mdoc, func(c credential) [][]string { return [][]string{c.ssc} },
+		"per ssc": {mdocCredential, func(c credential) [][]string { return [][]string{c.ssc} },
 			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, true}, {"A", "2011-06-15", 2, false}}},
-		"per ssc and birth_date": {mdoc, func(c credential) [][]string { return [][]string{c.ssc, c.birth} },
+		"per ssc and birth_date": {mdocCredential, func(c credential) [][]string { return [][]string{c.ssc, c.birth} },
 			[]issuance{{"A", "2011-06-15", 1, true}, {"A", "2012-01-01", 2, true}, {"A", "2011-06-15", 2, false}}},
 		"per a nested SD-JWT claim": {sdjwt, func(c credential) [][]string { return [][]string{c.ssc} },
 			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, true}, {"A", "2011-06-15", 2, false}}},
@@ -353,10 +357,20 @@ func TestUniqueCommitmentKey(t *testing.T) {
 		"per a numeric claim": {numeric, func(c credential) [][]string { return [][]string{c.ssc} },
 			[]issuance{{"9007199254740992", "2011-06-15", 1, true}, {"9007199254740993", "2011-06-15", 2, false},
 				{"1", "2011-06-15", 3, true}, {"1.0", "2011-06-15", 4, false}, {"2", "2011-06-15", 4, true}}},
+		// The signer decodes a bstr from lenient base64, so QQ== and QR== sign
+		// the same byte.
+		"per a bstr claim": {bytesCredential, func(c credential) [][]string { return [][]string{c.ssc} },
+			[]issuance{{"QQ==", "2011-06-15", 1, true}, {"QR==", "2011-06-15", 2, false}, {"Qg==", "2011-06-15", 2, true}}},
 	} {
 		cred := tc.credential
+		var schema *mdoc.MDDLSchema
+		if cred.format == "mso_mdoc" {
+			schema = &mdoc.MDDLSchema{Format: "mso_mdoc", DocType: ns, Claims: map[string]mdoc.NamespaceClaims{ns: {
+				"psc": {ValueType: "bstr"}, "ssc": {ValueType: cred.sscType}, "birth_date": {ValueType: "full-date"},
+			}}}
+		}
 		c := &Client{log: logger.NewSimple("test"), uniqueCommitmentStore: memoryCommitments{}, cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
-			"nym_auth": {Format: cred.format, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
+			"nym_auth": {Format: cred.format, MDDL: schema, AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
 				ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: cred.psc, Encoding: cred.encoding}},
 			}},
 		}}}}
