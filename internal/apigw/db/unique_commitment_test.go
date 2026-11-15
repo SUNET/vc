@@ -18,7 +18,8 @@ import (
 
 // testUniqueCommitmentStoreContract: one commitment per key, whichever
 // writer reaches the database first; a refused accept leaves no commitment
-// it stored, and a commitment another accept relies on stays; a reset
+// it stored, and a commitment another accept relies on stays; a reservation
+// holds its keys until it is kept or released; a reset
 // needs a commitment on record, and its evidence reference resets one
 // commitment.
 func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
@@ -29,7 +30,7 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 	}
 	key := keyOf("a person")
 	first, second := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
-	accept := func(commitments ...UniqueCommitment) error { return store.Accept(ctx, commitments, now) }
+	accept := func(commitments ...UniqueCommitment) error { return reserveAndKeep(ctx, store, commitments, now) }
 	conflictAt := func(t *testing.T, err error, index int, msg string) {
 		t.Helper()
 		var conflict *UniqueCommitmentConflict
@@ -156,9 +157,9 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 		}
 		firstOther := other("first", tc.firstFails)
 		during := func() {
-			outcome(t, tc.secondFails, store.Accept(ctx, []UniqueCommitment{{shared, first}, other("second", tc.secondFails)}, now))
+			outcome(t, tc.secondFails, reserveAndKeep(ctx, store, []UniqueCommitment{{shared, first}, other("second", tc.secondFails)}, now))
 		}
-		outcome(t, tc.firstFails, interleaved(t, store, firstOther.Key, during).Accept(ctx, []UniqueCommitment{{shared, first}, firstOther}, now))
+		outcome(t, tc.firstFails, reserveAndKeep(ctx, interleaved(t, store, firstOther.Key, during), []UniqueCommitment{{shared, first}, firstOther}, now))
 		_, err = store.Find(ctx, shared)
 		if tc.stays {
 			assert.NoError(t, err, "the row stays when an accept succeeded: %+v", tc)
@@ -167,10 +168,21 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 		}
 	}
 
+	// A reservation holds its key until it is kept or released, and a
+	// released one leaves the key to another commitment.
+	released := keyOf("a person whose issuance failed")
+	reserved, err := store.Reserve(ctx, []UniqueCommitment{{released, first}}, now)
+	require.NoError(t, err)
+	conflictAt(t, accept(UniqueCommitment{released, second}), 0, "the reservation holds the key")
+	require.NoError(t, reserved.Release(ctx))
+	_, err = store.Find(ctx, released)
+	assert.ErrorIs(t, err, ErrNoDocuments, "the released reservation leaves nothing")
+	require.NoError(t, accept(UniqueCommitment{released, second}), "another commitment takes the released key")
+
 	// A keep that fails refuses the batch and leaves no row of it.
 	batch := []UniqueCommitment{{keyOf("a person of a failed keep"), first}, {keyOf("another person of a failed keep"), first}}
 	failedKeep := &UniqueCommitments{Service: store.Service, backend: failedKeepBackend{store.backend}}
-	assert.ErrorIs(t, failedKeep.Accept(ctx, batch, now), errKeepFailed)
+	assert.ErrorIs(t, reserveAndKeep(ctx, failedKeep, batch, now), errKeepFailed)
 	for _, c := range batch {
 		_, err = store.Find(ctx, c.Key)
 		assert.ErrorIs(t, err, ErrNoDocuments, "the failed keep leaves nothing")
@@ -182,7 +194,7 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 	during := func() {
 		require.NoError(t, store.Reset(ctx, removed, UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "case-during", At: now}))
 	}
-	require.NoError(t, interleaved(t, store, later, during).Accept(ctx, []UniqueCommitment{{removed, first}, {later, first}}, now))
+	require.NoError(t, reserveAndKeep(ctx, interleaved(t, store, later, during), []UniqueCommitment{{removed, first}, {later, first}}, now))
 	_, err = store.Find(ctx, removed)
 	assert.NoError(t, err, "the accept stored the removed row again")
 	conflictAt(t, accept(UniqueCommitment{removed, second}), 0, "the row stored again is kept")
@@ -236,6 +248,16 @@ func (b *interleavedBackend) deleteCommitment(ctx context.Context, key storedKey
 }
 
 // interleaved is store with during run at the first write to key.
+// reserveAndKeep reserves the commitments and keeps them, as an issuance that
+// succeeds does.
+func reserveAndKeep(ctx context.Context, store *UniqueCommitments, commitments []UniqueCommitment, at time.Time) error {
+	reserved, err := store.Reserve(ctx, commitments, at)
+	if err != nil {
+		return err
+	}
+	return reserved.Keep(ctx)
+}
+
 func interleaved(t *testing.T, store *UniqueCommitments, key UniqueCommitmentKey, during func()) *UniqueCommitments {
 	t.Helper()
 	k, err := storedKeyOf(key)

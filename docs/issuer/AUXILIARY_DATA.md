@@ -125,17 +125,20 @@ A key claim cannot be:
 - a `to_issuer` entry whose claim the type metadata leaves optional;
 - in an SD-JWT VC, a claim the credential builder writes itself.
 
-The issuer records the first commitment for each key value, once the
-request has passed its checks and before it signs the credential. A
-different commitment for a recorded key value refuses the request:
+The issuer reserves the first commitment for each key value once the
+request has passed its checks, before it signs the credential, and keeps
+the record once the credential is issued. A different commitment for a
+reserved or recorded key value refuses the request:
 
 - on a `to_issuer` entry, whose commitment the wallet sent, with
   `auxiliary_data_conflict`;
 - on a `to_wallet` entry, whose commitment the issuer derived, with
   `credential_request_denied`.
 
-A refused request leaves no record: of a credential's unique entries, the
-issuer records all or none.
+A refused request leaves no record, an issuance that fails included: of a
+credential's unique entries, the issuer records all or none. On MongoDB,
+which keeps a credential's records one document at a time, a database
+failure while it keeps them can leave some kept; they stay until a reset.
 
 With a `random` opening each issuance draws a new commitment, so a unique
 `to_wallet` entry issues once per key value until a reset.
@@ -157,9 +160,9 @@ same key, and the configuration is refused otherwise.
 The record lives in the apigw database (`unique_commitments`), which
 decides between replicas. It holds the SHA-256 of the key and its values.
 Each key of an entry has its own records.
-An issuance that stops between storing a record and keeping it, as a crash
-stops it, leaves the record unkept, and after 10 minutes the next issuance
-for that key value replaces it.
+An issuance that stops between reserving a record and keeping it, as a
+crash stops it, leaves the record unkept, and after 10 minutes the next
+issuance for that key value replaces it.
 
 The shipped configs key the `psc` record by the issued `ssc`, which
 derives from the `hkdf` secret, `nym_auth_seed.key` (`NYM_AUTH_SEED` on

@@ -63,9 +63,9 @@ type uniqueCommitmentRow struct {
 	KeyHash    string    `bson:"key_hash" db:"key_hash"`
 	Commitment string    `bson:"commitment" db:"commitment"`
 	AcceptedAt time.Time `bson:"accepted_at" db:"accepted_at"`
-	// ReleasableBy names the unfinished Accept call that stored the row, which
-	// removes the row when it fails. It is empty once an Accept succeeded: the
-	// row then stays until a reset.
+	// ReleasableBy names the reservation that stored the row, which removes
+	// the row when it is released. It is empty once a reservation was kept:
+	// the row then stays until a reset.
 	ReleasableBy string `bson:"releasable_by" db:"releasable_by"`
 }
 
@@ -87,69 +87,107 @@ type uniqueCommitmentResetRow struct {
 	ApprovedAt     time.Time `bson:"approved_at"`
 }
 
-// Accept implements UniqueCommitmentStore.
-func (h *UniqueCommitments) Accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error {
-	ctx, span := h.Service.tracer.Start(ctx, "db:vc:unique_commitment:accept")
+// Reserve implements UniqueCommitmentStore.
+func (h *UniqueCommitments) Reserve(ctx context.Context, commitments []UniqueCommitment, at time.Time) (UniqueCommitmentReservation, error) {
+	ctx, span := h.Service.tracer.Start(ctx, "db:vc:unique_commitment:reserve")
 	defer span.End()
 
-	err := h.accept(ctx, commitments, at)
+	reserved, err := h.reserve(ctx, commitments, at)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
-	return err
+	return reserved, nil
 }
 
 // acceptRounds bounds the rounds of acceptRow and of keep. Each concurrent
 // removal of a row takes one more.
 const acceptRounds = 4
 
-// releasableLease is how long a releasable row stays its storer's. An accept
-// that ends without keeping or removing its rows, as a crash ends it, leaves
-// them releasable, and past the lease they give way to the next accept. An
-// accept that outlives the lease can lose its rows that way, and its keep then
-// refuses it. Ten minutes is far beyond the server's 30-second write timeout
-// and the clock skew between replicas.
+// releasableLease is how long a releasable row stays its reservation's. A
+// reservation neither kept nor released, as a crash leaves it, leaves its rows
+// releasable, and past the lease they give way to the next reservation. A
+// reservation kept after the lease can lose its rows that way, and its keep
+// then refuses it. Ten minutes is far beyond the server's 30-second write
+// timeout and the clock skew between replicas.
 const releasableLease = 10 * time.Minute
 
 // errAcceptRounds is returned when concurrent removals of a row left every
 // round undecided.
 var errAcceptRounds = errors.New("the commitment on record changed during every round of the accept")
 
-// accept stores the commitments as releasable by a random call name, and
-// keeps them all once it has accepted them, so a row outlasts its accepts
-// only when one of them succeeds. On a failure it removes the rows that name
-// may still remove.
-func (h *UniqueCommitments) accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error {
-	if len(commitments) == 0 {
-		return nil
-	}
+// reservation is the rows a Reserve stored as releasable by call.
+type reservation struct {
+	store *UniqueCommitments
+	rows  []uniqueCommitmentRow
+	call  string
+}
+
+// reserve stores the commitments as releasable by a random call name. On a
+// failure it removes the rows that name may still remove.
+func (h *UniqueCommitments) reserve(ctx context.Context, commitments []UniqueCommitment, at time.Time) (*reservation, error) {
 	call := rand.Text()
 	rows := make([]uniqueCommitmentRow, 0, len(commitments))
 	for _, c := range commitments {
 		k, err := storedKeyOf(c.Key)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		rows = append(rows, uniqueCommitmentRow{Scope: k.Scope, Path: k.Path, KeyHash: k.KeyHash,
 			Commitment: base64.RawURLEncoding.EncodeToString(c.Commitment), AcceptedAt: at.UTC(), ReleasableBy: call})
 	}
 	for i, row := range rows {
 		if err := h.acceptRow(ctx, row, i); err != nil {
-			return h.refuse(ctx, rows[:i+1], call, err)
+			return nil, h.refuse(ctx, rows[:i+1], call, err)
 		}
 	}
+	return &reservation{store: h, rows: rows, call: call}, nil
+}
+
+// Keep implements UniqueCommitmentReservation. Of the rows of a reservation,
+// a row outlasts it only when it or another reservation of the row's
+// commitment is kept. On MongoDB the keep updates the rows one document at a
+// time, so a database failure during it can keep some rows of a refused
+// reservation.
+func (r *reservation) Keep(ctx context.Context) error {
+	ctx, span := r.store.Service.tracer.Start(ctx, "db:vc:unique_commitment:keep")
+	defer span.End()
+
+	err := r.keep(ctx)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
+}
+
+func (r *reservation) keep(ctx context.Context) error {
+	if len(r.rows) == 0 {
+		return nil
+	}
 	if err := ctx.Err(); err != nil {
-		return h.refuse(ctx, rows, call, err)
+		return r.store.refuse(ctx, r.rows, r.call, err)
 	}
 	// The keep decides the batch, so a cancelled request cannot stop it.
-	if err := h.keep(context.WithoutCancel(ctx), rows); err != nil {
-		return h.refuse(ctx, rows, call, err)
+	if err := r.store.keep(context.WithoutCancel(ctx), r.rows); err != nil {
+		return r.store.refuse(ctx, r.rows, r.call, err)
 	}
 	return nil
 }
 
-// refuse removes what a refused accept may still remove, and returns why it
-// was refused. A failed removal is the error returned, so the caller cannot
+// Release implements UniqueCommitmentReservation.
+func (r *reservation) Release(ctx context.Context) error {
+	ctx, span := r.store.Service.tracer.Start(ctx, "db:vc:unique_commitment:release")
+	defer span.End()
+
+	err := r.store.release(ctx, r.rows, r.call)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
+}
+
+// refuse removes what a refused reservation may still remove, and returns why
+// it was refused. A failed removal is the error returned, so the caller cannot
 // take it for a conflict.
 func (h *UniqueCommitments) refuse(ctx context.Context, rows []uniqueCommitmentRow, call string, reason error) error {
 	if released := h.release(ctx, rows, call); released != nil {
@@ -188,7 +226,7 @@ func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentR
 	return errAcceptRounds
 }
 
-// keep makes the accepted rows stay, and returns once every row is kept. A
+// keep makes the reserved rows stay, and returns once every row is kept. A
 // row that a failed call's release or a reset removed before the keep is
 // stored again. A different commitment in its place refuses the call, and the
 // rows already kept stay until a reset.
@@ -235,7 +273,7 @@ func (h *UniqueCommitments) release(ctx context.Context, rows []uniqueCommitment
 	ctx = context.WithoutCancel(ctx)
 	for _, row := range rows {
 		if err := h.backend.releaseCommitment(ctx, row.key(), call); err != nil {
-			return fmt.Errorf("removing the commitments of a refused accept: %w", err)
+			return fmt.Errorf("removing the commitments of a refused reservation: %w", err)
 		}
 	}
 	return nil

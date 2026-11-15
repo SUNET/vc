@@ -84,13 +84,15 @@ type DynamicRegistrationStore interface {
 // The database arbitrates between replicas: the first commitment stored for a
 // key is the one every replica reads back.
 type UniqueCommitmentStore interface {
-	// Accept stores each commitment for its key when the key holds none. It
-	// returns nil when every key holds its commitment, which stays until a
-	// reset. It returns a *UniqueCommitmentConflict when a key holds another
+	// Reserve stores each commitment for its key when the key holds none, and
+	// returns the reservation that holds them until it is kept or released.
+	// It returns a *UniqueCommitmentConflict when a key holds another
 	// commitment. On an error it removes the commitments this call stored,
 	// and leaves those that other calls stored; when that removal fails, the
-	// error returned is the removal's.
-	Accept(ctx context.Context, commitments []UniqueCommitment, at time.Time) error
+	// error returned is the removal's. A reservation neither kept nor
+	// released, as a crash leaves it, gives way to the next Reserve of its
+	// keys after a lease.
+	Reserve(ctx context.Context, commitments []UniqueCommitment, at time.Time) (UniqueCommitmentReservation, error)
 	// Find returns the record key holds, or ErrNoDocuments.
 	Find(ctx context.Context, key UniqueCommitmentKey) (UniqueCommitmentRecord, error)
 	// Reset records the operator approval and removes the commitment key
@@ -98,6 +100,16 @@ type UniqueCommitmentStore interface {
 	// removed it first; ErrResetEvidenceUsed when the approval's evidence
 	// reference already reset another commitment.
 	Reset(ctx context.Context, key UniqueCommitmentKey, approval UniqueCommitmentReset) error
+}
+
+// UniqueCommitmentReservation holds the commitments of a Reserve.
+type UniqueCommitmentReservation interface {
+	// Keep makes the commitments stay until a reset. It returns a
+	// *UniqueCommitmentConflict when a key holds another commitment by then.
+	// On an error it releases the reservation, as Release does.
+	Keep(ctx context.Context) error
+	// Release removes the commitments that only this reservation holds.
+	Release(ctx context.Context) error
 }
 
 // UniqueCommitmentKey names the commitment of one key value for one entry.
@@ -115,8 +127,8 @@ type UniqueCommitment struct {
 	Commitment []byte
 }
 
-// UniqueCommitmentConflict refuses an Accept: the key of its commitments'
-// element Index holds another commitment.
+// UniqueCommitmentConflict refuses a Reserve or a Keep: the key of the
+// commitments' element Index holds another commitment.
 type UniqueCommitmentConflict struct {
 	Index int
 }

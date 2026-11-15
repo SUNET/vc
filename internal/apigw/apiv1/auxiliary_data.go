@@ -65,7 +65,18 @@ type appliedAuxiliaryData struct {
 	// unique are the commitments VCICredential records once the request
 	// has passed its checks.
 	unique []uniqueCommitment
+	// reservation holds the unique commitments from the last check until
+	// the credential is issued, which keeps them, or fails, which releases
+	// them.
+	reservation db.UniqueCommitmentReservation
 }
+
+// noReservation is the reservation of a credential without unique
+// commitments.
+type noReservation struct{}
+
+func (noReservation) Keep(context.Context) error    { return nil }
+func (noReservation) Release(context.Context) error { return nil }
 
 // applyAuxiliaryData writes the commitments of scope's auxiliary_data into
 // the document data. A to_issuer path holds the commitment the wallet sent,
@@ -103,9 +114,11 @@ func (c *Client) applyAuxiliaryData(ctx context.Context, scope string, derivatio
 }
 
 // admitAuxiliaryData applies scope's Credential Auxiliary Data to
-// documentData, and records the unique commitments as the last check before
+// documentData, and reserves the unique commitments as the last check before
 // signing. A request refused here records no commitment, and of two
-// concurrent requests for one key value the store admits one.
+// concurrent requests for one key value the store admits one. The caller
+// keeps the reservation once the credential is issued, and releases it when
+// the issuance fails.
 func (c *Client) admitAuxiliaryData(ctx context.Context, scope string, derivations []primitives.Derivation, sourceClaims map[string]any, documentData []byte, fromWallet []openid4vci.AuxiliaryDataEntry, responseEncrypted bool) (appliedAuxiliaryData, error) {
 	applied, err := c.applyAuxiliaryData(ctx, scope, derivations, sourceClaims, documentData, fromWallet)
 	if err != nil {
@@ -117,10 +130,25 @@ func (c *Client) admitAuxiliaryData(ctx context.Context, scope string, derivatio
 			ErrorDescription: "this credential sends an opening: request credential_response_encryption",
 		}
 	}
-	if err := c.recordUniqueCommitments(ctx, applied.unique); err != nil {
+	reservation, err := c.reserveUniqueCommitments(ctx, applied.unique)
+	if err != nil {
 		return appliedAuxiliaryData{}, err
 	}
+	applied.reservation = reservation
 	return applied, nil
+}
+
+// settleUniqueCommitments keeps the unique commitments of an issued
+// credential, and releases those of an issuance that failed with issueErr,
+// which it returns.
+func (c *Client) settleUniqueCommitments(ctx context.Context, applied appliedAuxiliaryData, issueErr error) error {
+	if issueErr != nil {
+		if err := applied.reservation.Release(ctx); err != nil {
+			return fmt.Errorf("%w, after: %v", err, issueErr)
+		}
+		return issueErr
+	}
+	return uniqueCommitmentError(applied.unique, applied.reservation.Keep(ctx))
 }
 
 // deliverOpenings fulfils each to_wallet entry with the source's
@@ -222,21 +250,30 @@ func sentByWallet(supported openid4vci.AuxiliaryDataSupported, path []string) (b
 	return false, fmt.Errorf("path %q is no auxiliary_data entry of the credential", path)
 }
 
-// recordUniqueCommitments records each unique commitment for its key value
-// (section 6.4, step 5), or none. Another commitment on record for a key
-// value refuses the request. A to_issuer entry is the wallet's, so that is
-// auxiliary_data_conflict (section 6.4, steps 1 and 5). A to_wallet entry is
-// the issuer's own value, so the request is denied (OpenID4VCI 1.0 section
-// 8.3.1.2).
-func (c *Client) recordUniqueCommitments(ctx context.Context, unique []uniqueCommitment) error {
+// reserveUniqueCommitments reserves each unique commitment for its key value
+// (section 6.4, step 5), or none.
+func (c *Client) reserveUniqueCommitments(ctx context.Context, unique []uniqueCommitment) (db.UniqueCommitmentReservation, error) {
 	if len(unique) == 0 {
-		return nil
+		return noReservation{}, nil
 	}
 	commitments := make([]db.UniqueCommitment, 0, len(unique))
 	for _, u := range unique {
 		commitments = append(commitments, db.UniqueCommitment{Key: u.key, Commitment: u.commitment})
 	}
-	err := c.uniqueCommitmentStore.Accept(ctx, commitments, time.Now())
+	reservation, err := c.uniqueCommitmentStore.Reserve(ctx, commitments, time.Now())
+	if err != nil {
+		return nil, uniqueCommitmentError(unique, err)
+	}
+	return reservation, nil
+}
+
+// uniqueCommitmentError is the answer to a store error of the unique
+// commitments. Another commitment on record for a key value refuses the
+// request. A to_issuer entry is the wallet's, so that is
+// auxiliary_data_conflict (section 6.4, steps 1 and 5). A to_wallet entry is
+// the issuer's own value, so the request is denied (OpenID4VCI 1.0 section
+// 8.3.1.2).
+func uniqueCommitmentError(unique []uniqueCommitment, err error) error {
 	var conflict *db.UniqueCommitmentConflict
 	switch {
 	case err == nil:
