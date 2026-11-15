@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -25,7 +26,8 @@ import (
 func TestCheckAuxiliaryData(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
-	ssc := []string{"eu.europa.ec.eudi.nym_auth.1", "ssc"}
+	const ns = "eu.europa.ec.eudi.nym_auth.1"
+	ssc := claimpath.Keys(ns, "ssc")
 	encryption := model.CredentialEncryption{Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: p256KeyPath(t)}}}
 
 	base := func() *model.Cfg {
@@ -41,15 +43,15 @@ func TestCheckAuxiliaryData(t *testing.T) {
 				AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
 					ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc}},
 				},
-			}}},
+			}, "pid": {Format: "dc+sd-jwt"}}},
 			APIGW: &model.APIGW{
 				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
 				DataSources: model.DataSources{Presentation: model.PresentationConfig{
 					Scopes: map[string]model.PresentationScope{"nym_auth": {From: map[string]model.PresentedCredential{
-						"pid": {RequiredClaims: map[string][]string{"personal_administrative_number": nil, "nym_auth_opening": nil}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("personal_administrative_number")}}, {Path: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-								SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
+								SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16,
 							}},
 						}}}},
 					}}},
@@ -68,14 +70,14 @@ func TestCheckAuxiliaryData(t *testing.T) {
 
 	t.Run("a tstr element holds an encoded commitment", func(t *testing.T) {
 		cfg := base()
-		cfg.Common.CredentialMetadata["nym_auth"].MDDL.Claims[ssc[0]]["text"] = mdoc.ClaimMetadata{ValueType: "tstr"}
-		entry(cfg).Path, entry(cfg).Encoding = []string{ssc[0], "text"}, "hex"
-		derivation(cfg).Path = []string{ssc[0], "text"}
+		cfg.Common.CredentialMetadata["nym_auth"].MDDL.Claims[ns]["text"] = mdoc.ClaimMetadata{ValueType: "tstr"}
+		entry(cfg).Path, entry(cfg).Encoding = claimpath.Keys(ns, "text"), "hex"
+		derivation(cfg).Path = claimpath.Keys(ns, "text")
 		require.NoError(t, checkAuxiliaryData(cfg, "apigw"))
 	})
 
 	claimOpening := func(c *model.Cfg, claim string) {
-		derivation(c).Opening = primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claim}}
+		derivation(c).Opening = primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys(claim)}}}
 	}
 	t.Run("a claim opening whose claim the credential withholds", func(t *testing.T) {
 		cfg := base()
@@ -86,8 +88,8 @@ func TestCheckAuxiliaryData(t *testing.T) {
 	t.Run("required comes from mandatory", func(t *testing.T) {
 		cfg := base()
 		cfg.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{
-			{Type: "hash_commitment", Alg: "sha-256", Path: []string{ssc[0], "psc"}},
-			{Type: "hash_commitment", Alg: "sha-256", Path: []string{ssc[0], "opt"}},
+			{Type: "hash_commitment", Alg: "sha-256", Path: claimpath.Keys(ns, "psc")},
+			{Type: "hash_commitment", Alg: "sha-256", Path: claimpath.Keys(ns, "opt")},
 		}
 		require.NoError(t, checkAuxiliaryData(cfg, "apigw"))
 		deriveAuxiliaryDataRequired(cfg)
@@ -103,14 +105,14 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		"an unknown type":      {func(c *model.Cfg) { entry(c).Type = "x" }, `type "x"`},
 		"an unknown alg":       {func(c *model.Cfg) { entry(c).Alg = "sha-512" }, `alg "sha-512"`},
 		"an opening in config": {func(c *model.Cfg) { entry(c).Opening = "AA" }, "carries no opening"},
-		"a non-bstr element":   {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "birth_date"} }, "full-date element"},
-		"an undeclared path":   {func(c *model.Cfg) { entry(c).Path = []string{ssc[0], "nope"} }, "declares no element"},
+		"a non-bstr element":   {func(c *model.Cfg) { entry(c).Path = claimpath.Keys(ns, "birth_date") }, "full-date element"},
+		"an undeclared path":   {func(c *model.Cfg) { entry(c).Path = claimpath.Keys(ns, "nope") }, "declares no element"},
 		"an element id in two namespaces": {func(c *model.Cfg) {
 			c.Common.CredentialMetadata["nym_auth"].MDDL.Claims["other.ns"] = mdoc.NamespaceClaims{"ssc": {ValueType: "bstr"}}
 		}, "also declares element"},
 		"an encoding on a bstr element": {func(c *model.Cfg) { entry(c).Encoding = "hex" }, "a commitment in hex text needs a tstr element"},
 		"required set in config": {func(c *model.Cfg) {
-			c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: []string{ssc[0], "psc"}, Required: true}}
+			c.Common.CredentialMetadata["nym_auth"].AuxiliaryData.ToIssuer = []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: claimpath.Keys(ns, "psc"), Required: true}}
 		}, "comes from the type metadata"},
 		"an unfulfilled to_wallet entry": {func(c *model.Cfg) {
 			c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = model.PresentedCredential{}
@@ -119,7 +121,7 @@ func TestCheckAuxiliaryData(t *testing.T) {
 			c.APIGW.IssuerMetadata.CredentialEncryption = model.CredentialEncryption{}
 		}, "needs a key under apigw.issuer_metadata.credential_encryption.keys"},
 		"a derivation for a path outside to_wallet": {func(c *model.Cfg) {
-			derivation(c).Path = []string{ssc[0], "birth_date"}
+			derivation(c).Path = claimpath.Keys(ns, "birth_date")
 		}, "is no to_wallet entry"},
 		"an unreadable secret": {func(c *model.Cfg) {
 			derivation(c).Opening.HKDF.SecretPath = filepath.Join(t.TempDir(), "absent")
@@ -132,29 +134,29 @@ func TestCheckAuxiliaryData(t *testing.T) {
 		}, "exactly one of hkdf, hmac, random and claim"},
 		"an hmac opening longer than the HMAC": {func(c *model.Cfg) {
 			derivation(c).Opening = primitives.OpeningArgs{HMAC: &primitives.HMACOpeningArgs{
-				SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 33,
+				SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 33,
 			}}
 		}, "hmac: an opening has 16 to 32 bytes, got 33"},
 		"a claim opening whose claim the MDDL declares": {func(c *model.Cfg) {
 			claimOpening(c, "birth_date")
-		}, `the credential carries claim "birth_date": the MDDL declares element "birth_date"`},
+		}, `the credential carries claim ["birth_date"]: the MDDL declares element "birth_date"`},
 		"an hkdf input the presentation does not require": {func(c *model.Cfg) {
-			derivation(c).Opening.HKDF.Inputs = []string{"issuing_country"}
-		}, `from.pid.derivations[0].hash_commitment.opening.hkdf: input "issuing_country" is no key of required_claims`},
+			derivation(c).Opening.HKDF.Inputs = []claimpath.Ref{{Path: claimpath.Keys("issuing_country")}}
+		}, `from.pid.derivations[0].hash_commitment.opening.hkdf: input ["issuing_country"] is the path of no required_claims entry`},
 		"an hmac input the presentation does not require": {func(c *model.Cfg) {
 			derivation(c).Opening = primitives.OpeningArgs{HMAC: &primitives.HMACOpeningArgs{
-				SecretPath: secretPath, Inputs: []string{"personal_administrative_number", "issuing_country"}, Bytes: 16,
+				SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}, {Path: claimpath.Keys("issuing_country")}}, Bytes: 16,
 			}}
-		}, `from.pid.derivations[0].hash_commitment.opening.hmac: input "issuing_country" is no key of required_claims`},
+		}, `from.pid.derivations[0].hash_commitment.opening.hmac: input ["issuing_country"] is the path of no required_claims entry`},
 		"a claim input the presentation does not require": {func(c *model.Cfg) {
 			claimOpening(c, "other_opening")
-		}, `from.pid.derivations[0].hash_commitment.opening.claim: input "other_opening" is no key of required_claims`},
+		}, `from.pid.derivations[0].hash_commitment.opening.claim: input ["other_opening"] is the path of no required_claims entry`},
 		"a claim opening whose claim another derivation reads": {func(c *model.Cfg) {
 			claimOpening(c, "nym_auth_opening")
 			pid := c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"]
-			pid.Derivations = append(pid.Derivations, primitives.Derivation{Copy: &primitives.CopyArgs{Input: "nym_auth_opening", Output: "copied"}})
+			pid.Derivations = append(pid.Derivations, primitives.Derivation{Copy: &primitives.CopyArgs{Input: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}, Output: claimpath.Keys("copied")}})
 			c.APIGW.DataSources.Presentation.Scopes["nym_auth"].From["pid"] = pid
-		}, `derivations[1] reads claim "nym_auth_opening"`},
+		}, `derivations[1] reads claim ["nym_auth_opening"]`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := base()
@@ -172,14 +174,10 @@ func TestCheckAuxiliaryData(t *testing.T) {
 func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 	secretPath := filepath.Join(t.TempDir(), "seed.key")
 	require.NoError(t, os.WriteFile(secretPath, []byte(base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))), 0o600))
-	ssc, psc := []string{"commitments", "ssc"}, []string{"commitments", "psc"}
+	ssc, psc := claimpath.Keys("commitments", "ssc"), claimpath.Keys("commitments", "psc")
 	encryption := model.CredentialEncryption{Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: p256KeyPath(t)}}}
-	claim := func(sd string, mandatory bool, path ...string) sdjwtvc.Claim {
-		segments := make([]*string, len(path))
-		for i := range path {
-			segments[i] = &path[i]
-		}
-		return sdjwtvc.Claim{Path: segments, SD: sd, Mandatory: mandatory}
+	claim := func(sd string, mandatory bool, path claimpath.Pointer) sdjwtvc.Claim {
+		return sdjwtvc.Claim{Path: path, SD: sd, Mandatory: mandatory}
 	}
 
 	base := func() *model.Cfg {
@@ -187,21 +185,21 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{"example": {
 				Format: "dc+sd-jwt",
 				VCTM: &sdjwtvc.VCTM{VCT: "https://example.org/example", Claims: []sdjwtvc.Claim{
-					claim("always", false, ssc...), claim("always", true, psc...), claim("", false, "given_name"),
+					claim("always", false, ssc), claim("always", true, psc), claim("", false, claimpath.Keys("given_name")),
 				}},
 				AuxiliaryData: &openid4vci.AuxiliaryDataSupported{
 					ToWallet: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: ssc, Encoding: "base64url"}},
 					ToIssuer: []openid4vci.AuxiliaryDataEntry{{Type: "hash_commitment", Alg: "sha-256", Path: psc, Encoding: "hex"}},
 				},
-			}}},
+			}, "pid": {Format: "dc+sd-jwt"}}},
 			APIGW: &model.APIGW{
 				IssuerMetadata: model.IssuerMetadata{CredentialEncryption: encryption},
 				DataSources: model.DataSources{Presentation: model.PresentationConfig{
 					Scopes: map[string]model.PresentationScope{"example": {From: map[string]model.PresentedCredential{
-						"pid": {RequiredClaims: map[string][]string{"personal_administrative_number": nil}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
+						"pid": {RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("personal_administrative_number")}}}, Derivations: []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 							Path: ssc,
 							Opening: primitives.OpeningArgs{HKDF: &primitives.HKDFOpeningArgs{
-								SecretPath: secretPath, Inputs: []string{"personal_administrative_number"}, Bytes: 16,
+								SecretPath: secretPath, Inputs: []claimpath.Ref{{Path: claimpath.Keys("personal_administrative_number")}}, Bytes: 16,
 							}},
 						}}}},
 					}}},
@@ -213,7 +211,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 	claimOpening := func(claim string) []primitives.Derivation {
 		return []primitives.Derivation{{HashCommitment: &primitives.HashCommitmentArgs{
 			Path:    ssc,
-			Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claim}},
+			Opening: primitives.OpeningArgs{Claim: &primitives.ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys(claim)}}},
 		}}}
 	}
 
@@ -224,7 +222,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 
 	cfg = base()
 	cfg.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{
-		RequiredClaims: map[string][]string{"nym_auth_opening": nil}, Derivations: claimOpening("nym_auth_opening"),
+		RequiredClaims: model.RequiredClaims{{Path: claimpath.Ref{Path: claimpath.Keys("nym_auth_opening")}}}, Derivations: claimOpening("nym_auth_opening"),
 	}
 	require.NoError(t, checkAuxiliaryData(cfg, "apigw"), "a presentation's claim the VCTM leaves out stays out of the credential")
 
@@ -233,22 +231,22 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		want   string
 	}{
 		"a path the VCTM does not declare": {func(c *model.Cfg) {
-			meta(c).AuxiliaryData.ToIssuer[0].Path = []string{"commitments", "other"}
+			meta(c).AuxiliaryData.ToIssuer[0].Path = claimpath.Keys("commitments", "other")
 		}, "the VCTM declares no claim"},
 		"an empty path": {func(c *model.Cfg) {
-			meta(c).AuxiliaryData.ToIssuer[0].Path = nil
+			meta(c).AuxiliaryData.ToIssuer[0].Path = claimpath.Pointer{}
 		}, "the path is empty"},
 		"a claim the holder cannot withhold": {func(c *model.Cfg) {
 			meta(c).VCTM.Claims[1].SD = "allowed"
 		}, `needs sd "always"`},
 		"a claim declared beneath the commitment": {func(c *model.Cfg) {
-			meta(c).VCTM.Claims = append(meta(c).VCTM.Claims, claim("always", false, "commitments", "psc", "x"))
+			meta(c).VCTM.Claims = append(meta(c).VCTM.Claims, claim("always", false, claimpath.Keys("commitments", "psc", "x")))
 		}, "declares a claim beneath"},
 		"a claim the builder writes": {func(c *model.Cfg) {
-			meta(c).AuxiliaryData.ToIssuer[0].Path = []string{"cnf"}
+			meta(c).AuxiliaryData.ToIssuer[0].Path = claimpath.Keys("cnf")
 		}, `the SD-JWT builder writes "cnf"`},
 		"a disclosure member": {func(c *model.Cfg) {
-			meta(c).AuxiliaryData.ToIssuer[0].Path = []string{"commitments", "_sd"}
+			meta(c).AuxiliaryData.ToIssuer[0].Path = claimpath.Keys("commitments", "_sd")
 		}, `"_sd" names no claim`},
 		"a format without a commitment carrier": {func(c *model.Cfg) {
 			meta(c).Format = "ldp_vc"
@@ -261,7 +259,7 @@ func TestCheckAuxiliaryDataSDJWT(t *testing.T) {
 		}, `encoding "base32" is none of`},
 		"a claim opening whose claim the VCTM declares": {func(c *model.Cfg) {
 			c.APIGW.DataSources.Presentation.Scopes["example"].From["pid"] = model.PresentedCredential{Derivations: claimOpening("given_name")}
-		}, `the credential carries claim "given_name": the VCTM declares it`},
+		}, `the credential carries claim ["given_name"]: the VCTM declares it`},
 		"a claim opening on an SD-JWT VC from the datastore": {func(c *model.Cfg) {
 			c.APIGW.DataSources.Presentation = model.PresentationConfig{}
 			c.APIGW.DataSources.Datastore.Scopes = map[string]model.DatastoreScope{"example": {Derivations: claimOpening("nym_auth_opening")}}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -45,7 +46,7 @@ func circuitZkPresetConfig(t *testing.T, scopeCfg *model.VerificationPresetScope
 	}
 }
 
-var nymNamespace = func() *string { s := "eu.europa.ec.eudi.nym_auth.1"; return &s }()
+const nymNamespace = "eu.europa.ec.eudi.nym_auth.1"
 
 var nymReq = []openid4vp.ReqItem{{
 	FnID:   openid4vp.FunctionPseudonym,
@@ -140,7 +141,7 @@ func TestCircuitZkPresetCarriesNoClaims(t *testing.T) {
 		vctm   *sdjwtvc.VCTM
 	}{
 		{"with claims configured, which for this format is a mistake", []model.VerificationPresetClaim{
-			{Path: []string{"eu.europa.ec.eudi.nym_auth.1", "secret_seed_commitment"}},
+			{Path: claimpath.Keys("eu.europa.ec.eudi.nym_auth.1", "secret_seed_commitment")},
 		}, nil},
 		// The fall-back reads GetVCTM(), which an mdoc scope normally has
 		// nothing in - so this case gives it one. Not idle: the fall-back
@@ -150,7 +151,7 @@ func TestCircuitZkPresetCarriesNoClaims(t *testing.T) {
 		{"with none, where the metadata document would supply them", nil, &sdjwtvc.VCTM{
 			VCT: "urn:eudi:nym_auth:1",
 			Claims: []sdjwtvc.Claim{
-				{Path: []*string{nymNamespace}},
+				{Path: claimpath.Keys(nymNamespace)},
 			},
 		}},
 	} {

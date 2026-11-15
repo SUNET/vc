@@ -1,0 +1,60 @@
+# EUDI PID (Personal Identification Data) Presentation Request
+# Compliant with EU Digital Identity Wallet Architecture Reference Framework
+# PID Rulebook v1.0 (ARF 1.7.1) / VCTM pid_v1.4.json — VCT: urn:eudi:pid:1
+#
+# Note: age verification attributes were removed from PID in CIR 2024/2977.
+# They are now expected to come from a separate Age Verification Attestation
+# (ARF 1.7.1 Annex 3.07), not from the PID credential.
+templates:
+  - id: "eudi_pid_basic"
+    name: "EUDI PID - Basic Profile"
+    description: "Request basic personal identification data from EUDI wallet"
+    version: "1.0"
+    oidc_scopes:
+      - "pid"
+      - "profile"
+    dcql:
+      credentials:
+        - id: "eudi_pid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eudi:pid:1"
+          claims:
+            - path: ["given_name"]
+            - path: ["family_name"]
+            - path: ["birthdate"]
+            - path: ["nationalities", null]
+    claim_mappings:
+      given_name: "given_name"
+      family_name: "family_name"
+      birthdate: "birthdate"
+      nationalities: "nationalities"
+    enabled: true
+
+  - id: "eudi_pid_full"
+    name: "EUDI PID - Full Profile"
+    description: "Request complete personal identification data"
+    version: "1.0"
+    oidc_scopes:
+      - "pid_full"
+    dcql:
+      credentials:
+        - id: "eudi_pid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eudi:pid:1"
+          claims:
+            - path: ["given_name"]
+            - path: ["family_name"]
+            - path: ["birthdate"]
+            - path: ["place_of_birth"]
+            - path: ["nationalities", null]
+            - path: ["sex"]
+            - path: ["address"]
+            - path: ["issuing_country"]
+            - path: ["issuing_authority"]
+    claim_mappings:
+      "*": "*"  # Map all claims through unchanged
+    enabled: true

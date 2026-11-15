@@ -1,6 +1,7 @@
 package oidcrp
 
 import (
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -9,7 +10,8 @@ import (
 // Delegates to the shared credential.AttributeMapper.
 type AttributeMapper = credential.AttributeMapper
 
-// NewAttributeMapper creates a new attribute mapper from an attribute mapping.
+// NewAttributeMapper creates a new attribute mapper from an attribute
+// mapping. The provider's claims are a JSON object.
 func NewAttributeMapper(mapping model.AttributeMapping) *AttributeMapper {
-	return credential.NewAttributeMapper(mapping)
+	return credential.NewAttributeMapper(mapping, claimpath.Nested())
 }

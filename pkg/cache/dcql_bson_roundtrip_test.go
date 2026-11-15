@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -397,7 +398,7 @@ func TestAuthorizationContextKeepsExactClaimValuesThroughBSON(t *testing.T) {
 			query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
 				ID: "pid", Format: "dc+sd-jwt",
 				Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:x"}},
-				Claims: []openid4vp.ClaimQuery{{Path: openid4vp.StringPath("age"), Values: []any{tc.value}}},
+				Claims: []openid4vp.ClaimQuery{{Path: claimpath.Keys("age"), Values: []any{tc.value}}},
 			}}}
 
 			stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: query})

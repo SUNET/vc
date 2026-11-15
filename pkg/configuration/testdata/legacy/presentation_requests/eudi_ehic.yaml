@@ -1,0 +1,37 @@
+# EUDI EHIC (European Health Insurance Card) Presentation Request
+templates:
+  - id: "eudi_ehic_standard"
+    name: "EUDI EHIC - Standard Request"
+    description: "Request European Health Insurance Card data for healthcare services"
+    version: "1.0"
+    oidc_scopes:
+      - "ehic"
+    dcql:
+      credentials:
+        - id: "eudi_ehic"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eudi:ehic:1"
+              - "urn:eu.europa.ec.eudi:ehic:1"
+          claims:
+            - path: ["card_number"]
+            - path: ["personal_identification_number"]
+            - path: ["forename"]
+            - path: ["family_name"]
+            - path: ["date_of_birth"]
+            - path: ["institution_id"]
+            - path: ["institution_name"]
+            - path: ["institution_country"]
+            - path: ["expiry_date"]
+    claim_mappings:
+      card_number: "ehic_card_number"
+      personal_identification_number: "pin"
+      forename: "given_name"
+      family_name: "family_name"
+      date_of_birth: "birthdate"
+      institution_id: "competent_institution_id"
+      institution_name: "competent_institution"
+      institution_country: "issuing_country"
+      expiry_date: "card_expiry"
+    enabled: true

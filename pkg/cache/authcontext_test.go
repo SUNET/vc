@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -819,7 +820,7 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		{
 			name: "valid validations pass",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			wantErr: false,
 		},
@@ -831,7 +832,7 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		{
 			name: "empty rule rejected",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			wantErr:     true,
 			errContains: "rule",
@@ -839,23 +840,15 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		{
 			name: "unknown rule rejected",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "unknown_rule", Path: []string{"birthdate"}, Value: 18}},
+				"pid": {{Rule: "unknown_rule", Path: claimpath.Keys("birthdate"), Value: 18}},
 			},
 			wantErr:     true,
 			errContains: "rule",
 		},
 		{
-			name: "empty path rejected",
+			name: "unset path rejected",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{}, Value: 18}},
-			},
-			wantErr:     true,
-			errContains: "path",
-		},
-		{
-			name: "nil path rejected",
-			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: nil, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Pointer{}, Value: 18}},
 			},
 			wantErr:     true,
 			errContains: "path",
@@ -863,7 +856,7 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		{
 			name: "nil value rejected",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: nil}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: nil}},
 			},
 			wantErr:     true,
 			errContains: "value",
@@ -871,8 +864,8 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		{
 			name: "multiple scopes validated independently",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid":  {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
-				"ehic": {{Rule: "", Path: []string{"x"}, Value: 1}}, // invalid
+				"pid":  {{Rule: "age_over", Path: claimpath.Keys("birthdate"), Value: 18}},
+				"ehic": {{Rule: "", Path: claimpath.Keys("x"), Value: 1}}, // invalid
 			},
 			wantErr:     true,
 			errContains: "rule",
@@ -880,7 +873,7 @@ func TestSave_ValidationsFieldValidation(t *testing.T) {
 		{
 			name: "path element empty string rejected",
 			validations: map[string][]openid4vp.ClaimValidation{
-				"pid": {{Rule: "age_over", Path: []string{""}, Value: 18}},
+				"pid": {{Rule: "age_over", Path: claimpath.Keys(""), Value: 18}},
 			},
 			wantErr:     true,
 			errContains: "path",

@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 )
 
@@ -1188,8 +1190,7 @@ type ClaimQuery struct {
 
 	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer
 	// that specifies the path to a claim within the Credential, as defined in Section 7.
-	// Elements are strings (object keys) or nil (representing null for array element access).
-	Path []*string `json:"-" yaml:"-" validate:"required,min=1"`
+	Path claimpath.Pointer `json:"-" yaml:"-" validate:"required"`
 
 	// Values OPTIONAL A non-empty array of strings, integers or boolean values that
 	// specifies the expected values of the claim. If present, the Wallet SHOULD return
@@ -1199,7 +1200,6 @@ type ClaimQuery struct {
 }
 
 // MarshalJSON implements custom JSON marshaling for ClaimQuery.
-// Nil path elements are serialized as JSON null (for DCQL array element access).
 // A non-nil Values slice is validated against OpenID4VP §6.3; use nil to omit.
 func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 	if err := validateClaimPath(cq.Path); err != nil {
@@ -1210,30 +1210,20 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 			return nil, err
 		}
 	}
-	path := make([]any, len(cq.Path))
-	for i, p := range cq.Path {
-		if p == nil {
-			path[i] = nil
-		} else {
-			path[i] = *p
-		}
-	}
 	type wire struct {
-		ID     string `json:"id,omitempty"`
-		Path   []any  `json:"path"`
-		Values []any  `json:"values,omitempty"`
+		ID     string            `json:"id,omitempty"`
+		Path   claimpath.Pointer `json:"path"`
+		Values []any             `json:"values,omitempty"`
 	}
-	return json.Marshal(wire{ID: cq.ID, Path: path, Values: cq.Values})
+	return json.Marshal(wire{ID: cq.ID, Path: cq.Path, Values: cq.Values})
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
-// JSON null path elements are deserialized as nil pointers; non-string/non-null
-// elements cause an unmarshal error (Go's json package rejects them for *string).
 func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID     string          `json:"id"`
-		Path   []*string       `json:"path"`
-		Values json.RawMessage `json:"values"`
+		ID     string            `json:"id"`
+		Path   claimpath.Pointer `json:"path"`
+		Values json.RawMessage   `json:"values"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -1279,28 +1269,18 @@ func (cq ClaimQuery) MarshalYAML() (any, error) {
 			return nil, err
 		}
 	}
-	path := make([]any, len(cq.Path))
-	for i, p := range cq.Path {
-		if p == nil {
-			path[i] = nil
-		} else {
-			path[i] = *p
-		}
-	}
 	return struct {
-		ID     string `yaml:"id,omitempty"`
-		Path   []any  `yaml:"path"`
-		Values []any  `yaml:"values,omitempty"`
-	}{ID: cq.ID, Path: path, Values: cq.Values}, nil
+		ID     string            `yaml:"id,omitempty"`
+		Path   claimpath.Pointer `yaml:"path"`
+		Values []any             `yaml:"values,omitempty"`
+	}{ID: cq.ID, Path: cq.Path, Values: cq.Values}, nil
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for ClaimQuery.
-// YAML null path elements are deserialized as nil pointers; non-string/non-null
-// elements cause an unmarshal error.
 func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw struct {
-		ID   string    `yaml:"id"`
-		Path []*string `yaml:"path"`
+		ID   string            `yaml:"id"`
+		Path claimpath.Pointer `yaml:"path"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -1336,14 +1316,14 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	return nil
 }
 
-// validateClaimPath checks that the path is non-empty and that non-nil elements are not empty strings.
-// Nil elements are valid (they represent JSON null for array element access).
-func validateClaimPath(path []*string) error {
-	if len(path) == 0 {
-		return fmt.Errorf("claim path must not be empty")
+// validateClaimPath refuses an unset path and an empty key.
+func validateClaimPath(path claimpath.Pointer) error {
+	components, err := path.Components()
+	if err != nil {
+		return errors.New("claim path must not be empty")
 	}
-	for i, p := range path {
-		if p != nil && *p == "" {
+	for i, c := range components {
+		if key, ok := c.KeyName(); ok && key == "" {
 			return fmt.Errorf("claim path element at index %d must not be empty", i)
 		}
 	}
@@ -1457,29 +1437,6 @@ func checkIntegralFloat(f float64, i int) error {
 		return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 	}
 	return nil
-}
-
-// StringPath creates a []*string path from string arguments.
-// This is a convenience for constructing ClaimQuery paths.
-func StringPath(parts ...string) []*string {
-	path := make([]*string, len(parts))
-	for i := range parts {
-		s := parts[i]
-		path[i] = &s
-	}
-	return path
-}
-
-// ArrayElementPath creates a []*string path ending with nil (null) for array element access.
-// Example: ArrayElementPath("nationalities") → ["nationalities", null]
-func ArrayElementPath(parts ...string) []*string {
-	path := make([]*string, len(parts)+1)
-	for i := range parts {
-		s := parts[i]
-		path[i] = &s
-	}
-	path[len(parts)] = nil // null for array element access
-	return path
 }
 
 // Credential format identifiers as defined in OpenID4VP Appendix B.

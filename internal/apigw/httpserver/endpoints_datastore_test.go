@@ -299,6 +299,10 @@ func (u unimplementedApiv1) PrepareIssuance(context.Context, *apiv1.PrepareIssua
 	panic("not implemented")
 }
 
+func (u unimplementedApiv1) PrepareLegacyIssuance(context.Context, *apiv1.LegacyPrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) OAuthAuthorizationChallenge(context.Context, *apiv1.AuthorizationChallengeRequest) (*apiv1.AuthorizationChallengeResponse, error) {
 	panic("not implemented")
 }

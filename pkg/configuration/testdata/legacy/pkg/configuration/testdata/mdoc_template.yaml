@@ -1,0 +1,24 @@
+# mdoc template for testing mso_mdoc format support in DCQL
+
+templates:
+  - id: "mdoc_mdl"
+    name: "mDL via mdoc"
+    description: "Mobile driving licence using ISO mdoc"
+    version: "1.0"
+    oidc_scopes:
+      - "mdl"
+    dcql:
+      credentials:
+        - id: "mdl_credential"
+          format: "mso_mdoc"
+          meta:
+            doctype_value: "org.iso.18013.5.1.mDL"
+          claims:
+            - path: ["org.iso.18013.5.1", "family_name"]
+            - path: ["org.iso.18013.5.1", "given_name"]
+    claim_mappings:
+      family_name: "family_name"
+      given_name: "given_name"
+    enabled: true
+
+default_template: "mdoc_mdl"

@@ -35,7 +35,7 @@ To stop everything: `make stop`
 
 ### Configuration
 
-The main configuration file is `config.yaml`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for details.
+The main configuration file is `config.yaml`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for details. A field that names a claim of a credential takes a claims path pointer: [docs/CLAIM_PATHS.md](docs/CLAIM_PATHS.md) lists these fields, the deprecated spellings and the `migrate_claim_paths` converter.
 
 ### Prerequisites
 

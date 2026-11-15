@@ -366,28 +366,28 @@ apigw:
         diploma:
           attributes:
             "primaryName.givenName":
-              claim: "given_name"
+              claim: [given_name]
               required: true
             "primaryName.familyName":
-              claim: "family_name"
+              claim: [family_name]
               required: true
             "dateOfBirth":
-              claim: "birth_date"
+              claim: [birth_date]
               required: true
             "primaryEmail.email":
-              claim: "email"
+              claim: [email]
               required: false
 
         eduid:
           attributes:
             "primaryName.givenName":
-              claim: "given_name"
+              claim: [given_name]
               required: true
             "primaryName.familyName":
-              claim: "family_name"
+              claim: [family_name]
               required: true
             "primaryEmail.email":
-              claim: "email"
+              claim: [email]
               required: true
 ```
 

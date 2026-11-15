@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -117,7 +118,7 @@ type AuthorizationContext struct {
 	// session. Nil means no such rule was given, which is a different
 	// thing from a rule that matches anything - IdentityMatch.Validate
 	// refuses the latter.
-	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match,omitempty" bson:"identity_match,omitempty" validate:"omitempty"`
+	IdentityMatch *openid4vci.StoredIdentityMatch `json:"identity_match,omitempty" bson:"identity_match,omitempty" validate:"omitempty"`
 
 	// AuthSessionDPoPThumbprint binds the Interactive Authorization
 	// exchange to the DPoP key that began it, when DPoP is in use.
@@ -287,6 +288,9 @@ type AuthorizationContext struct {
 // Validate checks the AuthorizationContext against its struct validation tags.
 func (a *AuthorizationContext) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())
+	if err := claimpath.RegisterValidation(v); err != nil {
+		return err
+	}
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name, _, _ := strings.Cut(fld.Tag.Get("json"), ",")
 		if name == "-" {

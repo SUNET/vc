@@ -11,6 +11,7 @@ import (
 	"hash"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/jose"
 )
 
@@ -28,11 +29,11 @@ func TestComprehensiveCoverage(t *testing.T) {
 			Name: "Test Credential",
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 				{
-					Path: []*string{&email},
+					Path: claimpath.Keys(email),
 					SD:   "always",
 				},
 			},
@@ -78,7 +79,7 @@ func TestComprehensiveCoverage(t *testing.T) {
 		vctm := &VCTM{
 			Claims: []Claim{
 				{
-					Path: []*string{&name},
+					Path: claimpath.Keys(name),
 					SD:   "always",
 				},
 			},
@@ -129,44 +130,6 @@ func TestComprehensiveCoverage(t *testing.T) {
 					if len(disclosures) != 1 {
 						t.Errorf("Expected 1 disclosure, got %d", len(disclosures))
 					}
-				}
-			})
-		}
-	})
-
-	t.Run("processClaimPath_with_various_value_types", func(t *testing.T) {
-		testCases := []struct {
-			name  string
-			value any
-		}{
-			{"string_value", "test-string"},
-			{"int_value", 123},
-			{"float_value", 45.67},
-			{"bool_value", true},
-			{"array_value", []any{1, 2, 3}},
-			{"object_value", map[string]any{"nested": "value"}},
-			{"null_value", nil},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				data := map[string]any{
-					"claim": tc.value,
-				}
-
-				claim := "claim"
-				path := []*string{&claim}
-
-				disclosure, hash, err := client.processClaimPath(data, path, sha256.New())
-				if err != nil {
-					t.Fatalf("processClaimPath failed: %v", err)
-				}
-
-				if disclosure == "" {
-					t.Error("Expected non-empty disclosure")
-				}
-				if hash == "" {
-					t.Error("Expected non-empty hash")
 				}
 			})
 		}
@@ -322,8 +285,7 @@ func TestComprehensiveCoverage(t *testing.T) {
 		}
 	})
 
-	t.Run("MakeCredential_with_addHashToPath_error", func(t *testing.T) {
-		// This should trigger the error path in addHashToPath
+	t.Run("MakeCredential_with_missing_parent", func(t *testing.T) {
 		parent := "parent"
 		child := "child"
 
@@ -331,7 +293,7 @@ func TestComprehensiveCoverage(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Try to add to a non-existent parent path
-					Path: []*string{&parent, &child},
+					Path: claimpath.Keys(parent, child),
 					SD:   "always",
 				},
 			},

@@ -1,0 +1,34 @@
+templates:
+  - name: "No ID template 1"
+    description: "Missing id"
+    version: "1.0"
+    oidc_scopes:
+      - "scope1"
+    dcql:
+      credentials:
+        - id: "cred1"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:test:1"
+          claims:
+            - path: ["name"]
+    claim_mappings:
+      name: "name"
+
+  - name: "No ID template 2"
+    description: "Also missing id"
+    version: "1.0"
+    oidc_scopes:
+      - "scope2"
+    dcql:
+      credentials:
+        - id: "cred2"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:test:2"
+          claims:
+            - path: ["value"]
+    claim_mappings:
+      value: "value"

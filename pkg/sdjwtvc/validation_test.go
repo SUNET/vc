@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,17 +20,17 @@ func TestValidateDocument_Success(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&givenName},
+				Path:      claimpath.Keys(givenName),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&familyName},
+				Path:      claimpath.Keys(familyName),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&birthdate},
+				Path:      claimpath.Keys(birthdate),
 				SD:        "allowed",
 				Mandatory: false,
 			},
@@ -58,12 +60,12 @@ func TestValidateDocument_MissingMandatoryClaim(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&givenName},
+				Path:      claimpath.Keys(givenName),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&familyName},
+				Path:      claimpath.Keys(familyName),
 				SD:        "always",
 				Mandatory: true,
 			},
@@ -98,17 +100,17 @@ func TestValidateDocument_MultipleMissingClaims(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&givenName},
+				Path:      claimpath.Keys(givenName),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&familyName},
+				Path:      claimpath.Keys(familyName),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&birthdate},
+				Path:      claimpath.Keys(birthdate),
 				SD:        "always",
 				Mandatory: true,
 			},
@@ -139,12 +141,12 @@ func TestValidateDocument_NestedClaims(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&address, &street},
+				Path:      claimpath.Keys(address, street),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&address, &city},
+				Path:      claimpath.Keys(address, city),
 				SD:        "always",
 				Mandatory: true,
 			},
@@ -176,12 +178,12 @@ func TestValidateDocument_MissingNestedClaim(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&address, &street},
+				Path:      claimpath.Keys(address, street),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&address, &city},
+				Path:      claimpath.Keys(address, city),
 				SD:        "always",
 				Mandatory: true,
 			},
@@ -216,12 +218,12 @@ func TestValidateDocument_OptionalClaimsMissing(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&givenName},
+				Path:      claimpath.Keys(givenName),
 				SD:        "always",
 				Mandatory: true,
 			},
 			{
-				Path:      []*string{&nickname},
+				Path:      claimpath.Keys(nickname),
 				SD:        "allowed",
 				Mandatory: false,
 			},
@@ -254,10 +256,10 @@ func TestValidateDocument_IssuerSuppliedMandatoryClaimsExempt(t *testing.T) {
 	vctm := &VCTM{
 		VCT: "test:credential:1",
 		Claims: []Claim{
-			{Path: []*string{&iss}, Mandatory: true},
-			{Path: []*string{&exp}, Mandatory: true},
-			{Path: []*string{&cnf}, Mandatory: true},
-			{Path: []*string{&givenName}, SD: "always", Mandatory: true},
+			{Path: claimpath.Keys(iss), Mandatory: true},
+			{Path: claimpath.Keys(exp), Mandatory: true},
+			{Path: claimpath.Keys(cnf), Mandatory: true},
+			{Path: claimpath.Keys(givenName), SD: "always", Mandatory: true},
 		},
 	}
 
@@ -315,10 +317,10 @@ func TestValidateClaims_RequiresMandatoryEnvelopeClaims(t *testing.T) {
 	vctm := &VCTM{
 		VCT: "test:credential:1",
 		Claims: []Claim{
-			{Path: []*string{&iss}, Mandatory: true},
-			{Path: []*string{&exp}, Mandatory: true},
-			{Path: []*string{&cnf}, Mandatory: true},
-			{Path: []*string{&givenName}, SD: "always", Mandatory: true},
+			{Path: claimpath.Keys(iss), Mandatory: true},
+			{Path: claimpath.Keys(exp), Mandatory: true},
+			{Path: claimpath.Keys(cnf), Mandatory: true},
+			{Path: claimpath.Keys(givenName), SD: "always", Mandatory: true},
 		},
 	}
 
@@ -349,7 +351,7 @@ func TestValidateClaims_ArrayValues(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path:      []*string{&nationality},
+				Path:      claimpath.Keys(nationality),
 				SD:        "always",
 				Mandatory: false,
 			},
@@ -374,9 +376,9 @@ func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
 	vctm := &VCTM{
 		VCT: "test:credential:1",
 		Claims: []Claim{
-			{Path: []*string{&outcomes}, SD: "always", Mandatory: true},
-			{Path: []*string{&outcomes, nil, &title}, SD: "never", Mandatory: true},
-			{Path: []*string{&outcomes, nil, &description}, SD: "never", Mandatory: true},
+			{Path: claimpath.Keys(outcomes), SD: "always", Mandatory: true},
+			{Path: claimpath.New(claimpath.Key(outcomes), claimpath.All(), claimpath.Key(title)), SD: "never", Mandatory: true},
+			{Path: claimpath.New(claimpath.Key(outcomes), claimpath.All(), claimpath.Key(description)), SD: "never", Mandatory: true},
 		},
 	}
 
@@ -423,24 +425,69 @@ func TestValidateDocument_MandatoryClaimInArrayElements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			docData, err := json.Marshal(map[string]any{"learningOutcomes": tt.outcomes})
-			require.NoError(t, err)
-
-			err = ValidateDocument(docData, vctm)
-			if len(tt.missing) == 0 {
-				assert.NoError(t, err)
-				return
-			}
-
-			var verrs *ValidationErrors
-			require.ErrorAs(t, err, &verrs)
-			var fields []string
-			for _, e := range verrs.Errors {
-				fields = append(fields, e.Field)
-			}
-			assert.ElementsMatch(t, tt.missing, fields)
+			assertMissingOutcomeClaims(t, vctm, tt.outcomes, tt.missing)
 		})
 	}
+}
+
+// A mandatory claim at an index is present when the element at that index
+// holds it, whatever the other elements hold.
+func TestValidateDocument_MandatoryClaimAtIndex(t *testing.T) {
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: claimpath.New(claimpath.Key("learningOutcomes"), claimpath.Index(1), claimpath.Key("title")), SD: "never", Mandatory: true},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		outcomes []any
+		missing  []string
+	}{
+		{
+			name:     "element at the index holds the claim",
+			outcomes: []any{map[string]any{}, map[string]any{"title": "a"}},
+		},
+		{
+			name:     "element at the index lacks the claim",
+			outcomes: []any{map[string]any{"title": "a"}, map[string]any{}},
+			missing:  []string{"$.learningOutcomes[1].title"},
+		},
+		{
+			name:     "index beyond the array",
+			outcomes: []any{map[string]any{"title": "a"}},
+			missing:  []string{"$.learningOutcomes[1].title"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertMissingOutcomeClaims(t, vctm, tt.outcomes, tt.missing)
+		})
+	}
+}
+
+// assertMissingOutcomeClaims validates a document whose learningOutcomes
+// are outcomes, and checks that the claims missing are exactly missing.
+func assertMissingOutcomeClaims(t *testing.T, vctm *VCTM, outcomes []any, missing []string) {
+	t.Helper()
+	docData, err := json.Marshal(map[string]any{"learningOutcomes": outcomes})
+	require.NoError(t, err)
+
+	err = ValidateDocument(docData, vctm)
+	if len(missing) == 0 {
+		assert.NoError(t, err)
+		return
+	}
+
+	var verrs *ValidationErrors
+	require.ErrorAs(t, err, &verrs)
+	var fields []string
+	for _, e := range verrs.Errors {
+		fields = append(fields, e.Field)
+	}
+	assert.ElementsMatch(t, missing, fields)
 }
 
 func TestValidateClaimPaths_StrictMode_Success(t *testing.T) {
@@ -451,10 +498,10 @@ func TestValidateClaimPaths_StrictMode_Success(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path: []*string{&givenName},
+				Path: claimpath.Keys(givenName),
 			},
 			{
-				Path: []*string{&familyName},
+				Path: claimpath.Keys(familyName),
 			},
 		},
 	}
@@ -477,7 +524,7 @@ func TestValidateClaimPaths_StrictMode_ExtraClaims(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path: []*string{&givenName},
+				Path: claimpath.Keys(givenName),
 			},
 		},
 	}
@@ -514,7 +561,7 @@ func TestValidateClaimPaths_NonStrictMode_ExtraClaims(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path: []*string{&givenName},
+				Path: claimpath.Keys(givenName),
 			},
 		},
 	}
@@ -537,7 +584,7 @@ func TestValidateClaimPaths_StandardClaimsAllowed(t *testing.T) {
 		VCT: "test:credential:1",
 		Claims: []Claim{
 			{
-				Path: []*string{&givenName},
+				Path: claimpath.Keys(givenName),
 			},
 		},
 	}

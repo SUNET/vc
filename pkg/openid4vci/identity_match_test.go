@@ -1,7 +1,10 @@
 package openid4vci
 
 import (
+	"encoding/json"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,47 +36,80 @@ func TestIdentityMatchRefusalNamesTheRightAlternative(t *testing.T) {
 }
 
 // Dotted claim paths must not become BSON field names; MongoDB < 5.0
-// refuses "." in them.
+// refuses "." in them. A stored rule holds dotted names, which a replica
+// of the earlier release reads, or pointers.
 func TestIdentityMatchBSONKeepsDottedPathsOutOfFieldNames(t *testing.T) {
-	m := &IdentityMatch{Claims: map[string]ClaimTest{
-		"org.iso.18013.5.1.family_name": {Equals: "Andersson"},
-		"given_name":                    {Equals: "Anna"},
+	rule := &IdentityMatch{Claims: []ClaimMatch{
+		{Path: claimpath.Keys("org.iso.18013.5.1", "family_name"), ClaimTest: ClaimTest{Equals: "Andersson"}},
+		{Path: claimpath.Keys("given_name"), ClaimTest: ClaimTest{Equals: "Anna"}},
 	}}
+	named := rule.Store(func(p claimpath.Pointer) (string, bool) {
+		keys, _ := p.KeyNames()
+		name := keys[0]
+		for _, key := range keys[1:] {
+			name += "." + key
+		}
+		return name, true
+	})
+	for form, stored := range map[string]*StoredIdentityMatch{"names": named, "pointers": rule.Store(nil)} {
+		data, err := bson.Marshal(struct {
+			M *StoredIdentityMatch `bson:"identity_match"`
+		}{stored})
+		require.NoError(t, err, form)
 
-	data, err := bson.Marshal(struct {
-		M *IdentityMatch `bson:"identity_match"`
-	}{m})
-	require.NoError(t, err)
-
-	var walk func(raw bson.Raw)
-	walk = func(raw bson.Raw) {
-		elems, err := raw.Elements()
-		require.NoError(t, err)
-		for _, e := range elems {
-			assert.NotContains(t, e.Key(), ".", "field name %q", e.Key())
-			if doc, ok := e.Value().DocumentOK(); ok {
-				walk(doc)
-			}
-			if arr, ok := e.Value().ArrayOK(); ok {
-				walk(bson.Raw(arr))
+		var walk func(raw bson.Raw)
+		walk = func(raw bson.Raw) {
+			elems, err := raw.Elements()
+			require.NoError(t, err)
+			for _, e := range elems {
+				assert.NotContains(t, e.Key(), ".", "%s: field name %q", form, e.Key())
+				if doc, ok := e.Value().DocumentOK(); ok {
+					walk(doc)
+				}
+				if arr, ok := e.Value().ArrayOK(); ok {
+					walk(bson.Raw(arr))
+				}
 			}
 		}
-	}
-	walk(data)
+		walk(data)
 
-	var got struct {
-		M *IdentityMatch `bson:"identity_match"`
+		var got struct {
+			M *StoredIdentityMatch `bson:"identity_match"`
+		}
+		require.NoError(t, bson.Unmarshal(data, &got), form)
+		assert.Equal(t, stored, got.M, form)
 	}
-	require.NoError(t, bson.Unmarshal(data, &got))
-	assert.Equal(t, m, got.M)
 }
 
-// A context stored before the entry-list shape still loads.
+// A context stored before the entry-list shape still loads, and its names
+// read in the shape of the presented credential.
 func TestIdentityMatchBSONReadsTheMapShape(t *testing.T) {
 	data, err := bson.Marshal(bson.M{"claims": bson.M{"given_name": bson.M{"equals": "Anna"}}})
 	require.NoError(t, err)
 
-	var got IdentityMatch
+	var got StoredIdentityMatch
 	require.NoError(t, bson.Unmarshal(data, &got))
-	assert.Equal(t, map[string]ClaimTest{"given_name": {Equals: "Anna"}}, got.Claims)
+	rule, err := got.Rule(func(name string) (claimpath.Pointer, error) { return claimpath.Keys("read", name), nil })
+	require.NoError(t, err)
+	assert.Equal(t, []ClaimMatch{{Path: claimpath.Keys("read", "given_name"), ClaimTest: ClaimTest{Equals: "Anna"}}}, rule.Claims)
+}
+
+// A stored claim names a claim.
+func TestIdentityMatchBSONRefusesAnEmptyPath(t *testing.T) {
+	data, err := bson.Marshal(bson.M{"claims": bson.A{bson.M{"path": bson.A{}, "test": bson.M{"equals": "Anna"}}}})
+	require.NoError(t, err)
+	var got StoredIdentityMatch
+	assert.ErrorContains(t, bson.Unmarshal(data, &got), "a stored claim has no path")
+}
+
+// A request lists claims as pointers. The dotted string inside the list
+// form was never released, so it is refused.
+func TestIdentityMatchJSON(t *testing.T) {
+	var got IdentityMatch
+	require.NoError(t, json.Unmarshal([]byte(`{"claims": [{"path": ["address", null, 0], "equals": "x"}]}`), &got))
+	assert.Equal(t, []ClaimMatch{{Path: claimpath.New(claimpath.Key("address"), claimpath.All(), claimpath.Index(0)), ClaimTest: ClaimTest{Equals: "x"}}}, got.Claims)
+
+	err := json.Unmarshal([]byte(`{"claims": [{"path": "family_name", "equals": "Andersson"}]}`), &got)
+	var stringErr *claimpath.StringError
+	assert.ErrorAs(t, err, &stringErr)
 }
