@@ -103,6 +103,14 @@ func (h *UniqueCommitments) Accept(ctx context.Context, commitments []UniqueComm
 // removal of a row takes one more.
 const acceptRounds = 4
 
+// releasableLease is how long a releasable row stays its storer's. An accept
+// that ends without keeping or removing its rows, as a crash ends it, leaves
+// them releasable, and past the lease they give way to the next accept. An
+// accept that outlives the lease can lose its rows that way, and its keep then
+// refuses it. Ten minutes is far beyond the server's 30-second write timeout
+// and the clock skew between replicas.
+const releasableLease = 10 * time.Minute
+
 // errAcceptRounds is returned when concurrent removals of a row left every
 // round undecided.
 var errAcceptRounds = errors.New("the commitment on record changed during every round of the accept")
@@ -151,7 +159,9 @@ func (h *UniqueCommitments) refuse(ctx context.Context, rows []uniqueCommitmentR
 }
 
 // acceptRow stores row when its key holds no row, and accepts a row that
-// holds the same commitment, whichever call stored it.
+// holds the same commitment, whichever call stored it. A different row still
+// releasable past releasableLease is removed, and row takes its place. The
+// removal names the row's call, so a row its storer kept meanwhile stays.
 func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentRow, index int) error {
 	for range acceptRounds {
 		if err := h.backend.insertCommitment(ctx, row); err != nil {
@@ -165,6 +175,11 @@ func (h *UniqueCommitments) acceptRow(ctx context.Context, row uniqueCommitmentR
 			continue
 		case err != nil:
 			return err
+		case stored.Commitment != row.Commitment && stored.ReleasableBy != "" && row.AcceptedAt.Sub(stored.AcceptedAt) > releasableLease:
+			if err := h.backend.releaseCommitment(ctx, row.key(), stored.ReleasableBy); err != nil {
+				return err
+			}
+			continue
 		case stored.Commitment != row.Commitment:
 			return &UniqueCommitmentConflict{Index: index}
 		}
