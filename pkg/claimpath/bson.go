@@ -29,10 +29,11 @@ func (p Pointer) MarshalBSONValue() (byte, []byte, error) {
 }
 
 // UnmarshalBSONValue reads a BSON array, and an empty one as EmptyArray.
-// BSON null leaves the pointer unset.
+// BSON null unsets the pointer, as the driver sets a Go slice to nil.
 func (p *Pointer) UnmarshalBSONValue(typ byte, data []byte) error {
 	switch bson.Type(typ) {
 	case bson.TypeNull:
+		*p = Pointer{}
 		return nil
 	case bson.TypeArray:
 	case bson.TypeString:

@@ -135,6 +135,30 @@ func TestBSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBSONNullUnsets reads BSON null as an unset pointer, into a document
+// that held one and after an earlier member "path".
+func TestBSONNullUnsets(t *testing.T) {
+	type stored struct {
+		Path Pointer `bson:"path"`
+	}
+	for name, doc := range map[string]bson.D{
+		"null":                {{Key: "path", Value: nil}},
+		"null after an array": {{Key: "path", Value: bson.A{"a"}}, {Key: "path", Value: nil}},
+	} {
+		data, err := bson.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := stored{Path: Keys("held")}
+		if err := bson.Unmarshal(data, &read); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !read.Path.IsZero() {
+			t.Errorf("%s: read %s, want an unset pointer", name, read.Path)
+		}
+	}
+}
+
 // TestStringPointerRefused refuses a claims path pointer written as a
 // string, in JSON and in YAML.
 func TestStringPointerRefused(t *testing.T) {
