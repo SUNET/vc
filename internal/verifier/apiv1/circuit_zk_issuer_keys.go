@@ -157,6 +157,20 @@ func (c *Client) circuitZkIssuerKey(
 	// leaf's SAN, as the SDKs and the deployed PDP request shape
 	// expect - and the docType is the request's.
 	if err := mdoc.VerifyIssuerChain(ctx, c.trustEvaluator, chain, docType, "", now); err != nil {
+		if errors.Is(err, mdoc.ErrTrustEvaluation) {
+			// The decision could not be MADE - the PDP is unreachable,
+			// the evaluation timed out, or this deployment has no
+			// evaluator at all. Nothing is accepted on the back of it,
+			// but it is not a judgement about this presentation.
+			//
+			// 5xx and unclassified, per the doctrine at the top of
+			// circuit_zk_refusal.go. A refusal here would tell a wallet
+			// that its credential's issuer is untrusted during one of
+			// our outages, and its author would go looking for a defect
+			// that is not there - while the operator, who could have
+			// read the 5xx, never hears about the outage.
+			return nil, fmt.Errorf("zkp_req: the issuer key set could not be evaluated for docType %q: %w", docType, err)
+		}
 		return nil, refuseZkpReq(CodeZkpReqIssuerNotTrusted,
 			fmt.Sprintf("the issuer key set is not trusted for docType %q", docType), err)
 	}

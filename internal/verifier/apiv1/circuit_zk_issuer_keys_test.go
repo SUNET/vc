@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
 	"net/url"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
@@ -177,13 +179,15 @@ func TestCircuitZkIssuerKeyRefusals(t *testing.T) {
 		},
 		contains: "is not trusted for docType",
 	}, {
-		// A PDP that could not answer is not a PDP that said no, and
-		// either way nothing is trusted.
+		// A PDP that could not answer is not a PDP that said no.
+		// Either way nothing is trusted - but the two are reported
+		// differently, and TestCircuitZkIssuerKeyReportsAnUnreachablePDPAsAServerFailure
+		// is where that difference is pinned.
 		name: "the PDP could not be reached",
 		client: func(*testing.T) *Client {
 			return issuerKeyClient(&fakeTrustEvaluator{err: assert.AnError})
 		},
-		contains: "is not trusted for docType",
+		contains: "could not be evaluated for docType",
 	}, {
 		// The circuit's arithmetic is over P-256. A key on another
 		// curve cannot be a public input to it.
@@ -311,4 +315,35 @@ func testKey(t *testing.T) *ecdsa.PublicKey {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	return &key.PublicKey
+}
+
+// A PDP that cannot answer is a server failure, not an untrusted issuer.
+//
+// Both fail closed - nothing is accepted on the back of an evaluation
+// that did not happen - but they are reported differently, because one
+// is the credential's fault and the other is this deployment's. Told
+// "issuer not trusted" during an outage, a wallet author goes looking
+// for a defect that is not there, and the operator who could have read
+// the 5xx never hears about the outage.
+func TestCircuitZkIssuerKeyReportsAnUnreachablePDPAsAServerFailure(t *testing.T) {
+	presentation, _ := testP256Chain(t)
+	outage := errors.New("dial tcp 10.0.0.1:443: i/o timeout")
+
+	got, err := issuerKeyClient(&fakeTrustEvaluator{err: outage}).circuitZkIssuerKey(
+		t.Context(), presentation, "eu.europa.ec.eudi.nym_auth.1", time.Now())
+	require.Error(t, err)
+	assert.Nil(t, got, "nothing is accepted on the back of an evaluation that did not happen")
+	assert.ErrorIs(t, err, mdoc.ErrTrustEvaluation)
+	assert.ErrorIs(t, err, outage, "and the operator can still see what actually failed")
+
+	_, isRefusal := zkpReqRefusalFrom(err)
+	assert.False(t, isRefusal, "an outage is not a judgement about this presentation")
+
+	// An explicit negative decision still IS one, so this separates the
+	// two rather than widening the refusal into everything.
+	_, err = issuerKeyClient(&fakeTrustEvaluator{trusted: false, reason: "not in the trust list"}).circuitZkIssuerKey(
+		t.Context(), presentation, "eu.europa.ec.eudi.nym_auth.1", time.Now())
+	refusal, isRefusal := zkpReqRefusalFrom(err)
+	require.True(t, isRefusal, "an issuer the PDP answered about is still a refusal")
+	assert.Equal(t, CodeZkpReqIssuerNotTrusted, refusal.Code)
 }

@@ -100,3 +100,40 @@ func TestCircuitZkNoIssuerKeyIsRefused(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no issuer key")
 }
+
+// A pseudonym this build has nowhere to put is refused, not truncated.
+//
+// The shared validator sizes a pseudonym by the item's prf, and
+// hashdh-bls12381g1 is 48 bytes; the backend interface takes and returns
+// [32]byte. A plain copy() compared the first 32 bytes and ignored the
+// rest, so a proof over a 32-byte value could be accepted for a request
+// that asked for a different pseudonym function - and the pseudonym
+// published for the session would be the truncation.
+//
+// Not a zkpReqRefusal: the request is this verifier's own, so a prf it
+// cannot verify is a fault here and the wallet must not be told its
+// presentation was bad.
+func TestCircuitZkPseudonymWiderThanTheBackendIsRefused(t *testing.T) {
+	session, issuerKey := zknativeTestSession(t)
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
+
+	items := []openid4vp.ReqItem{{
+		FnID:   openid4vp.FunctionPseudonym,
+		Return: "nym",
+		Params: map[string]any{"prf": openid4vp.PrfHashDHBLS12381G1, "config": "nym_auth_1"},
+	}}
+	presentation := openid4vp.ZkpPresentation{
+		SystemID:   "urn:circuits:longfellow:nym_auth:v1",
+		Proof:      []byte("not a proof"),
+		Pseudonyms: map[string][]byte{"nym": make([]byte, 48)},
+	}
+
+	verified, err := client.verifyCircuitZkPresentation(t.Context(), presentation, session, items, issuerKey)
+	require.Error(t, err)
+	assert.Nil(t, verified)
+	assert.Contains(t, err.Error(), openid4vp.PrfHashDHBLS12381G1)
+	assert.Contains(t, err.Error(), "48 bytes")
+
+	_, isRefusal := zkpReqRefusalFrom(err)
+	assert.False(t, isRefusal, "a prf this build cannot verify is our fault, not the wallet's")
+}
