@@ -96,10 +96,11 @@ func UpgradeConfig(d *Document, shapes Shapes, convert bool) error {
 
 // UpgradeShared rewrites the claim spellings outside apigw.data_sources,
 // which read no credential schema: the auth provider attribute mappings,
-// the verifier presets and binding attributes, the auxiliary_data paths
-// and the credential attributes. An empty path of a preset, an
-// auxiliary_data entry or an attribute becomes null without convert, and
-// stays as written with convert; its record says why.
+// the verifier presets and binding attributes, the claims the verifier
+// requests of each credential, the auxiliary_data paths and the credential
+// attributes. An empty path of a preset, an auxiliary_data entry or an
+// attribute becomes null without convert, and stays as written with
+// convert; its record says why.
 func UpgradeShared(d *Document, convert bool) error {
 	if d.root == nil {
 		return nil
@@ -108,6 +109,7 @@ func UpgradeShared(d *Document, convert bool) error {
 		d.upgradeAuthProviders,
 		func() error { return d.upgradePresets(convert) },
 		d.upgradeBindingAttributes,
+		d.upgradeCredentialClaims,
 		func() error { return d.upgradeAuxiliaryData(convert) },
 		func() error { return d.upgradeCredentialAttributes(convert) },
 	}
@@ -473,6 +475,26 @@ func (d *Document) upgradeBindingAttributes() error {
 			if _, _, err := d.pointer(claim, Nested().Dotted); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// upgradeCredentialClaims upgrades the path of each claim the verifier
+// requests of each credential, as the path of a claim of a template's
+// credential query.
+func (d *Document) upgradeCredentialClaims() error {
+	metadata, err := descend(d.root, "common", "credential_metadata")
+	if err != nil {
+		return err
+	}
+	scopes, err := entries(metadata)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		if err := d.queryClaims(scope.Value); err != nil {
+			return err
 		}
 	}
 	return nil

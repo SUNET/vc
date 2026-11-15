@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -14,10 +15,10 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// claimsScope is a dc+sd-jwt scope that asks for the given claim paths. A nil
-// element is a claims path pointer's null, which selects every element of an
-// array (OpenID4VP 1.0 6.4.1), so it has to survive into the query unchanged.
-func claimsScope(vct string, paths ...[]*string) *model.CredentialMetadata {
+// claimsScope is a dc+sd-jwt scope that asks for the given claim paths. A
+// null component selects every element of an array (OpenID4VP 1.0 6.4.1), so
+// it has to survive into the query unchanged.
+func claimsScope(vct string, paths ...claimpath.Pointer) *model.CredentialMetadata {
 	meta := &model.CredentialMetadata{
 		Format: "dc+sd-jwt",
 		VCTM:   &sdjwtvc.VCTM{VCT: vct},
@@ -28,17 +29,9 @@ func claimsScope(vct string, paths ...[]*string) *model.CredentialMetadata {
 	return meta
 }
 
-func claimPath(parts ...string) []*string {
-	out := make([]*string, 0, len(parts))
-	for _, part := range parts {
-		out = append(out, &part)
-	}
-	return out
-}
-
 // elementPath is a path whose last element is null: ["nationalities", null].
-func elementPath(parent string) []*string {
-	return append(claimPath(parent), nil)
+func elementPath(parent string) claimpath.Pointer {
+	return claimpath.New(claimpath.Key(parent), claimpath.All())
 }
 
 func claimsClient(t *testing.T, credMeta map[string]*model.CredentialMetadata) *Client {
@@ -51,7 +44,7 @@ func claimsClient(t *testing.T, credMeta map[string]*model.CredentialMetadata) *
 
 func TestConfiguredClaimsReachTheQuery(t *testing.T) {
 	client := claimsClient(t, map[string]*model.CredentialMetadata{
-		"pid": claimsScope("urn:eudi:pid:1", claimPath("given_name"), claimPath("address", "locality"), elementPath("nationalities")),
+		"pid": claimsScope("urn:eudi:pid:1", claimpath.Keys("given_name"), claimpath.Keys("address", "locality"), elementPath("nationalities")),
 	})
 
 	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid"})
@@ -60,8 +53,8 @@ func TestConfiguredClaimsReachTheQuery(t *testing.T) {
 
 	assert.Equal(t,
 		[]openid4vp.ClaimQuery{
-			{Path: claimPath("given_name")},
-			{Path: claimPath("address", "locality")},
+			{Path: claimpath.Keys("given_name")},
+			{Path: claimpath.Keys("address", "locality")},
 			{Path: elementPath("nationalities")},
 		},
 		dcql.Credentials[0].Claims,
@@ -70,7 +63,7 @@ func TestConfiguredClaimsReachTheQuery(t *testing.T) {
 
 func TestClaimsStayWithTheScopeThatConfiguredThem(t *testing.T) {
 	client := claimsClient(t, map[string]*model.CredentialMetadata{
-		"pid":  claimsScope("urn:eudi:pid:1", claimPath("given_name")),
+		"pid":  claimsScope("urn:eudi:pid:1", claimpath.Keys("given_name")),
 		"ehic": claimsScope("urn:eudi:ehic:1"),
 	})
 
@@ -82,7 +75,7 @@ func TestClaimsStayWithTheScopeThatConfiguredThem(t *testing.T) {
 	for _, cred := range dcql.Credentials {
 		byID[cred.ID] = cred.Claims
 	}
-	assert.Equal(t, []openid4vp.ClaimQuery{{Path: claimPath("given_name")}}, byID["pid"])
+	assert.Equal(t, []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name")}}, byID["pid"])
 	assert.Nil(t, byID["ehic"],
 		"a scope that configures no claims keeps the member absent, as before")
 }
@@ -93,7 +86,7 @@ func TestClaimsStayWithTheScopeThatConfiguredThem(t *testing.T) {
 // leftovers.
 func TestBuildingAQueryDoesNotEditTheConfig(t *testing.T) {
 	credMeta := map[string]*model.CredentialMetadata{
-		"pid": claimsScope("urn:eudi:pid:1", claimPath("given_name")),
+		"pid": claimsScope("urn:eudi:pid:1", claimpath.Keys("given_name")),
 	}
 	client := claimsClient(t, credMeta)
 
@@ -102,14 +95,14 @@ func TestBuildingAQueryDoesNotEditTheConfig(t *testing.T) {
 	require.Len(t, first.Credentials[0].Claims, 1)
 
 	// What augmentDCQLFromVCTM does to a query it is given.
-	first.Credentials[0].Claims[0] = openid4vp.ClaimQuery{Path: claimPath("family_name")}
+	first.Credentials[0].Claims[0] = openid4vp.ClaimQuery{Path: claimpath.Keys("family_name")}
 
-	assert.Equal(t, []openid4vp.ClaimQuery{{Path: claimPath("given_name")}}, credMeta["pid"].DCQLClaims,
+	assert.Equal(t, []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name")}}, credMeta["pid"].DCQLClaims,
 		"the configuration a query was built from is unchanged")
 
 	second, err := client.buildDCQLQueryFromConfig([]string{"pid"})
 	require.NoError(t, err)
-	assert.Equal(t, []openid4vp.ClaimQuery{{Path: claimPath("given_name")}}, second.Credentials[0].Claims,
+	assert.Equal(t, []openid4vp.ClaimQuery{{Path: claimpath.Keys("given_name")}}, second.Credentials[0].Claims,
 		"the next request asks for what is configured, not what the last one was mutated into")
 }
 
