@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
@@ -313,10 +314,13 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 
 	newClientBody := func() any { return &clientBody{} }
 	for _, tc := range []struct {
-		name       string
-		body       string
-		target     func() any
-		maxBytes   int64
+		name     string
+		body     string
+		target   func() any
+		maxBytes int64
+		// incomplete: the body ends with io.ErrUnexpectedEOF, short of its
+		// Content-Length, as net/http reads a cut connection.
+		incomplete bool
 		typeOnly   bool
 		wantStatus int
 		wantTitle  string
@@ -331,6 +335,7 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 		{name: "malformed time", body: `{"when":"yesterday"}`, target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_value_error"},
 		{name: "custom decoder refusal", body: `{"rejecting":1}`, target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_value_error"},
 		{name: "over the size limit", body: `{"name":"x"}`, target: newClientBody, maxBytes: 4, wantStatus: http.StatusRequestEntityTooLarge, wantTitle: "internal_server_error"},
+		{name: "incomplete after a valid value", body: `{"name":"x"}`, target: newClientBody, incomplete: true, wantStatus: http.StatusBadRequest, wantTitle: "incomplete_request_body"},
 	} {
 		for _, binder := range binders {
 			if binder.typeOnly && !tc.typeOnly {
@@ -355,6 +360,10 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 					}
 
 					req := httptest.NewRequest(http.MethodPost, "/bind", strings.NewReader(tc.body))
+					if tc.incomplete {
+						req.Body = io.NopCloser(io.MultiReader(strings.NewReader(tc.body), iotest.ErrReader(io.ErrUnexpectedEOF)))
+						req.ContentLength = int64(len(tc.body)) + 1
+					}
 					req.Header.Set("Content-Type", "application/json")
 					w := httptest.NewRecorder()
 					engine.ServeHTTP(w, req)

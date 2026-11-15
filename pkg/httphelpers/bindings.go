@@ -35,8 +35,9 @@ func (b *bindingHandler) FastAndSimple(ctx context.Context, c *gin.Context, v an
 }
 
 // JSONBody decodes and validates the JSON request body into v. A body the
-// client got wrong returns a *helpers.RequestBodyError. A failure to read the
-// body returns as it is: *http.MaxBytesError answers 413.
+// client got wrong or sent incomplete returns a *helpers.RequestBodyError. Any
+// other failure to read the body returns as it is: *http.MaxBytesError answers
+// 413.
 func (b *bindingHandler) JSONBody(ctx context.Context, c *gin.Context, v any) error {
 	_, span := b.client.tracer.Start(ctx, "httpserver:bindJSONBody")
 	defer span.End()
@@ -47,8 +48,9 @@ func (b *bindingHandler) JSONBody(ctx context.Context, c *gin.Context, v any) er
 }
 
 // decodeBody reads the whole body before decode runs, so every error decode
-// returns describes the client's bytes. io.ErrUnexpectedEOF from the read is a
-// body shorter than its Content-Length: decode judges the bytes that arrived.
+// returns describes the client's bytes. A body that ends before its
+// Content-Length or its last chunk is an incomplete message (RFC 9112 section
+// 6.3), and decode never sees it.
 func decodeBody(c *gin.Context, decode func(body []byte) error) error {
 	reader := c.Request.Body
 	if reader == nil {
@@ -56,7 +58,11 @@ func decodeBody(c *gin.Context, decode func(body []byte) error) error {
 	}
 
 	body, err := io.ReadAll(reader)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return &helpers.RequestBodyError{Err: helpers.NewErrorDetails("incomplete_request_body",
+			"the request body ended before the end its framing declares")}
+	}
+	if err != nil {
 		return err
 	}
 
