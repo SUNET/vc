@@ -19,16 +19,27 @@
  * Flattens a document into key-value pairs. A non-empty object or array adds
  * one pair per member or element.
  * @param {Record<string, any>} obj
- * @param {string} prefix
  * @returns {Pair[]}
  */
-export function flattenObject(obj, prefix) {
+export function flattenObject(obj) {
+    /** @type {Pair[]} */
     const entries = [];
+    flattenMembers(entries, obj, null);
+    return entries;
+}
+
+/**
+ * Adds the pairs of the members of obj. key is the key of obj, or null for
+ * the document, so the member "a" of the member "" has the key ".a".
+ * @param {Pair[]} entries
+ * @param {Record<string, any>} obj
+ * @param {string|null} key
+ */
+function flattenMembers(entries, obj, key) {
     for (const [k, v] of Object.entries(obj)) {
         const name = k.replace(/[\\[\].]/g, "\\$&");
-        flattenValue(entries, prefix ? prefix + "." + name : name, v);
+        flattenValue(entries, key === null ? name : key + "." + name, v);
     }
-    return entries;
 }
 
 /**
@@ -40,7 +51,7 @@ function flattenValue(entries, key, v) {
     if (Array.isArray(v) && v.length > 0) {
         v.forEach((element, i) => flattenValue(entries, key + "[" + i + "]", element));
     } else if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length > 0) {
-        entries.push(...flattenObject(v, key));
+        flattenMembers(entries, v, key);
     } else {
         entries.push({ key, value: pairText(v), read: JSON.stringify(v) });
     }

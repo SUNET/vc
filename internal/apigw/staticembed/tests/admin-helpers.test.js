@@ -18,6 +18,7 @@ describe("unflattenEntries(flattenObject(document))", () => {
         "the member name of vctm_elm.json": { elm: { credentialSubject: { "hasClaim[0]": { title: "" } } } },
         "an array under a member name with brackets": { "m[1]": ["a", "b"] },
         "an array under the empty member name": { "": [""], a: { "": [{ b: "" }] } },
+        "members under the empty member name": { "": { "": "x", a: "y" }, a: "z" },
         "member names with a backslash": { "a\\": { b: "" }, "c\\[0]": "" },
         "member names with dots": { "eu.europa.ec.eudi.pid.1.family_name": "a", b: { "c.d[0]": "e", "f\\.g": "h" } },
         "empty objects and arrays": { a: {}, b: [], c: [{}, [], { d: {} }, "e", {}] },
@@ -26,17 +27,17 @@ describe("unflattenEntries(flattenObject(document))", () => {
     };
     for (const [name, document] of Object.entries(documents)) {
         it(`returns ${name}`, () => {
-            assert.deepEqual(unflattenEntries(flattenObject(document, "")), document);
+            assert.deepEqual(unflattenEntries(flattenObject(document)), document);
         });
     }
 
     it("leaves Object.prototype alone", () => {
-        unflattenEntries(flattenObject(documents["a member named __proto__"], ""));
+        unflattenEntries(flattenObject(documents["a member named __proto__"]));
         assert.equal(/** @type {any} */ ({}).x, undefined);
     });
 
     it("returns the text of an edited pair, and each other value as read", () => {
-        const pairs = flattenObject({ age: 30, empty: {}, gap: null, keep: 7 }, "");
+        const pairs = flattenObject({ age: 30, empty: {}, gap: null, keep: 7 });
         for (const pair of pairs.filter(pair => pair.key !== "keep")) {
             pair.value = "typed";
         }
