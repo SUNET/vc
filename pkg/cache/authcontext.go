@@ -838,6 +838,118 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 		})
 }
 
+// ClaimOutcome records a final outcome on a still-unanswered session.
+// See AuthContextStore.ClaimOutcome.
+//
+// One mutation under the lock: the stored document is read, checked and
+// replaced without releasing it, so a second caller finds the outcome
+// already there and is told it lost.
+func (c *MemoryStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error) {
+	if doc == nil {
+		return false, errors.New("document cannot be nil")
+	}
+	if doc.SessionID == "" {
+		return false, errors.New("sessionID is required")
+	}
+	// Validated before anything is touched, as MongoStore does, so a
+	// malformed replacement leaves the session claimable. The wallet's
+	// error_description reaches here as wallet-controlled input.
+	if err := doc.Validate(); err != nil {
+		return false, fmt.Errorf("validation failed: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(doc.SessionID)
+	if item == nil {
+		// A lost claim, not an error, and the same answer MongoStore
+		// gives for the same thing. The session can vanish while a
+		// presentation is being verified - a TTL expiry is exactly as
+		// long as verification takes - and a caller that got a 500 here
+		// and ErrSessionAlreadyAnswered from the other backend would be
+		// debugging the cache rather than the race. What the caller needs
+		// to know is whether it recorded an outcome; it did not. Re-read
+		// the session to tell "gone" from "answered" apart.
+		return false, nil
+	}
+	if HasOutcome(item.Value()) {
+		return false, nil
+	}
+
+	// The display preferences come from the STORE, not from the caller's
+	// copy. See MongoStore.ClaimOutcome: the caller read this context
+	// before verification ran, and a preference POST can land while it
+	// runs - the browser fires it without awaiting it on its way to the
+	// wallet - so committing the caller's copy wholesale puts the
+	// preference back the way it was found. For wallet_follows_redirect
+	// that is the difference between a same-device presentation
+	// redirecting and dead-ending.
+	committed := *doc
+	committed.ShowCredentialDetails = item.Value().ShowCredentialDetails
+	committed.WalletFollowsRedirect = item.Value().WalletFollowsRedirect
+
+	// Stale indices go first, exactly as Update does it.
+	c.deleteIndices(item.Value())
+	c.cache.Set(doc.SessionID, &committed, ttlcache.DefaultTTL)
+	c.updateIndices(&committed)
+
+	// And the caller is told what was committed, so the redirect
+	// decision it makes next reads the preference that won rather than
+	// the one it brought.
+	*doc = committed
+
+	return true, nil
+}
+
+// SetDisplayPreferences writes only the display preferences, on the stored
+// document, under the lock. See AuthContextStore.SetDisplayPreferences.
+//
+// The stored pointer is re-read here rather than taken from the caller:
+// ClaimOutcome replaces it with the copy that carries the outcome, so a caller
+// holding the pointer it read earlier would be writing into a document the
+// store has already discarded - and persisting that one back is exactly how the
+// outcome was being lost.
+func (c *MemoryStore) SetDisplayPreferences(_ context.Context, sessionID string, showCredentialDetails bool, walletFollowsRedirect *bool) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	// Copy-on-write, not a mutation in place.
+	//
+	// Get hands back the STORED pointer, and the verification handlers
+	// copy the whole struct out of it (`updated := *authCtx`) without
+	// holding this lock - they cannot, the lock is the store's. Writing
+	// these fields into that same struct is an unsynchronised write
+	// beside an unsynchronised read: a Go data race, which the race
+	// detector will call and whose result is undefined, not merely
+	// stale. Swapping in a new document instead leaves every pointer a
+	// caller already holds immutable, so the worst outcome is a reader
+	// that sees the preference as it was a moment ago.
+	updated := *item.Value()
+	updated.ShowCredentialDetails = showCredentialDetails
+	if walletFollowsRedirect != nil {
+		updated.WalletFollowsRedirect = *walletFollowsRedirect
+	}
+
+	// No indexed field changes here, but the swap goes through the same
+	// pair as every other replacement so that stays true by construction
+	// rather than by inspection.
+	c.deleteIndices(item.Value())
+	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.updateIndices(&updated)
+
+	return nil
+}
+
 // ClaimIssuerState atomically replaces the issuer-initiated handle with the
 // exchange that claims it. See AuthContextStore.ClaimIssuerState.
 //

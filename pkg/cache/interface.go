@@ -58,11 +58,57 @@ type AuthContextStore interface {
 	// Update updates an existing authorization context.
 	Update(ctx context.Context, doc *AuthorizationContext) error
 
+	// SetDisplayPreferences writes only the session's display preferences,
+	// leaving every other field of the stored context as it is.
+	//
+	// Read-modify-write through Get + Update cannot be used for these: the
+	// preference request reads the whole context, the user may decline (or a
+	// presentation may complete) while the browser is deciding, and writing the
+	// read-back context then replaces the recorded outcome with the pending
+	// session it was read from. ClaimOutcome exists so the first outcome wins;
+	// this is what keeps a preference from being the second.
+	//
+	// walletFollowsRedirect is left alone when nil. A session that is gone is
+	// ErrNoDocuments.
+	SetDisplayPreferences(ctx context.Context, sessionID string, showCredentialDetails bool, walletFollowsRedirect *bool) error
+
 	// Delete removes an authorization context by session ID.
 	Delete(ctx context.Context, id string) error
 
 	// ForfeitAuthorizationCode marks an authorization code as used and returns the updated context.
 	ForfeitAuthorizationCode(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
+
+	// ClaimOutcome atomically records a FINAL outcome on a session that
+	// does not already have one, and reports whether this call is the one
+	// that recorded it.
+	//
+	// The caller passes the whole document it wants stored, as
+	// ClaimIssuerState does. false with a nil error means the session had
+	// already reached an outcome and nothing was written - the caller
+	// lost the race and must not act as though it won: no notification,
+	// because the browser has already been told something else.
+	//
+	// A session that is GONE is false with a nil error too, not an error.
+	// A session can expire while a presentation is being verified, and
+	// both backends have to answer that the same way or the same race
+	// produces a 500 on one and a clean refusal on the other. The caller
+	// is being told it did not record an outcome, which is what it needs;
+	// one that must tell "gone" from "already answered" re-reads.
+	//
+	// Checking HasOutcome and then calling Save cannot do this. The two
+	// are separated by the whole of credential verification in one of the
+	// callers, and nothing holds the session across them: the memory
+	// store hands out the stored pointer and the Mongo store replaces
+	// unconditionally, so the loser's write lands on top of the winner's.
+	//
+	// The DISPLAY PREFERENCES are the one thing the caller's document
+	// does NOT decide: they are taken from the stored context, because
+	// SetDisplayPreferences can land in that same window and a claim
+	// that carried the caller's copy would undo it. On a win the
+	// caller's document is updated to what was committed, so the
+	// decision it makes next - whether to hand back a redirect - reads
+	// the preference that won rather than the one it brought.
+	ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error)
 
 	// ClaimAuthSession atomically takes the Interactive Authorization handle
 	// off the context it names and returns that context as it was BEFORE

@@ -111,3 +111,39 @@ func stripComments(body string) string {
 	}
 	return strings.Join(kept, "\n")
 }
+
+// Every consumer of /ui/completion handles a decline.
+//
+// The endpoint answers "pending" until the wallet replies, then "complete" with
+// a response_code - or "declined" once the user has refused, which carries no
+// response_code. A consumer that knows only "complete" reads a decline as
+// pending and polls out its whole budget, so a user who pressed "no" is shown a
+// timeout five minutes later and the relying party waits for an answer already
+// given. One of the two consumers was written that way; this is what finds the
+// third.
+func TestStaticAssetsHandleADeclinedCompletion(t *testing.T) {
+	assets, err := fs.Glob(staticembed.FS, "*")
+	require.NoError(t, err)
+
+	var consumers int
+	for _, name := range assets {
+		switch filepath.Ext(name) {
+		case ".html", ".js":
+		default:
+			continue
+		}
+
+		body, err := staticembed.FS.ReadFile(name)
+		require.NoError(t, err)
+		source := stripComments(string(body))
+		if !strings.Contains(source, "/ui/completion") {
+			continue
+		}
+		consumers++
+
+		assert.Contains(t, source, `"declined"`,
+			"%s polls /ui/completion but never acts on a declined session", name)
+	}
+
+	require.NotZero(t, consumers, "no embedded asset polls /ui/completion any more - this test has stopped checking anything")
+}
