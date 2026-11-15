@@ -103,6 +103,9 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 	conflictAt(t, accept(UniqueCommitment{key, first}), 0, "a refused reset leaves the commitment on record")
 	assert.NoError(t, store.Reset(ctx, key, UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "Case-1", At: now}),
 		"evidence references that differ in case are distinct")
+	require.NoError(t, accept(UniqueCommitment{key, first}))
+	assert.NoError(t, store.Reset(ctx, key, UniqueCommitmentReset{ApprovedBy: "operator", EvidenceRef: "Case-1 ", At: now}),
+		"evidence references that differ by a trailing space are distinct")
 
 	// Of two accepts that share a fresh row, the second runs while the first
 	// stores its other commitment. The row outlasts them when either succeeds.
