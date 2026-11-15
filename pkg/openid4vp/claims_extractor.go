@@ -69,7 +69,7 @@ func (ce *ClaimsExtractor) ExtractPresentations(ctx context.Context, vpToken str
 	// not on the OIDC one, which extracts claims through here.
 	// A leading '[' is expanded JSON-LD, which detectCredentialFormat
 	// accepts as a W3C credential - it falls through to
-	// extractClaimsFromSingleToken below, which handles both JSON shapes.
+	// extractSingleToken below, which handles both JSON shapes.
 	trimmed := strings.TrimSpace(vpToken)
 	if len(trimmed) > 0 && trimmed[0] == '{' {
 		if isW3CDocument(trimmed) {
