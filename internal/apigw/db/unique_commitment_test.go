@@ -3,6 +3,7 @@ package db
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"sync"
@@ -73,6 +74,28 @@ func testUniqueCommitmentStoreContract(t *testing.T, store *UniqueCommitments) {
 	require.NoError(t, store.backend.releaseCommitment(ctx, unkept, "storer"))
 	_, err = store.backend.record(ctx, unkept)
 	assert.ErrorIs(t, err, ErrNoDocuments, "the storer releases a row nobody kept")
+
+	// A row an accept left releasable past its lease, as a crash leaves it,
+	// gives way to the next accept. A row within its lease conflicts.
+	for _, tc := range []struct {
+		person   string
+		age      time.Duration
+		replaced bool
+	}{
+		{person: "a person whose accept crashed", age: releasableLease + time.Minute, replaced: true},
+		{person: "a person whose accept runs", age: releasableLease - time.Minute},
+	} {
+		left, err := storedKeyOf(keyOf(tc.person))
+		require.NoError(t, err)
+		require.NoError(t, store.backend.insertCommitment(ctx, uniqueCommitmentRow{Scope: left.Scope, Path: left.Path, KeyHash: left.KeyHash,
+			Commitment: base64.RawURLEncoding.EncodeToString(first), AcceptedAt: now.Add(-tc.age).UTC(), ReleasableBy: "left"}))
+		if !tc.replaced {
+			conflictAt(t, accept(UniqueCommitment{keyOf(tc.person), second}), 0, "a row within its lease conflicts")
+			continue
+		}
+		require.NoError(t, accept(UniqueCommitment{keyOf(tc.person), second}), "the next accept replaces a row past its lease")
+		conflictAt(t, accept(UniqueCommitment{keyOf(tc.person), first}), 0, "the commitment that replaced it is kept")
+	}
 
 	// Of concurrent writers on a fresh key, one is accepted and the others
 	// conflict with its commitment.

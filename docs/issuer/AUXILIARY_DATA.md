@@ -157,6 +157,9 @@ same key, and the configuration is refused otherwise.
 The record lives in the apigw database (`unique_commitments`), which
 decides between replicas. It holds the SHA-256 of the key and its values.
 Each key of an entry has its own records.
+An issuance that stops between storing a record and keeping it, as a crash
+stops it, leaves the record unkept, and after 10 minutes the next issuance
+for that key value replaces it.
 
 The shipped configs key the `psc` record by the issued `ssc`, which
 derives from the `hkdf` secret, `nym_auth_seed.key` (`NYM_AUTH_SEED` on
