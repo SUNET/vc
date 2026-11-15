@@ -116,13 +116,14 @@ export function unflattenEntries(entries) {
 }
 
 /**
- * Splits a key segment such as "m[1][0]" into "m", 1 and 0. Only indices
- * that end the segment and that no backslash keeps literal are indices.
+ * Splits a key segment such as "m[1][0]" into "m", 1 and 0, and "[0]" into
+ * the empty name and 0. Only indices that end the segment and that no
+ * backslash keeps literal are indices.
  * @param {string} segment
  * @returns {(string|number)[]}
  */
 function splitIndices(segment) {
-    const match = /^((?:\\.|[^\\])+?)((?:\[\d+\])+)$/s.exec(segment);
+    const match = /^((?:\\.|[^\\])*?)((?:\[\d+\])+)$/s.exec(segment);
     if (!match) {
         return [segmentName(segment)];
     }
