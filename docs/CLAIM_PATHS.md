@@ -277,12 +277,16 @@ the earlier spellings, this release stores them as the earlier release did:
   `{"identity.pnr": "199001011234"}`.
 - The verified claims hold a required claim spelled as a bare mdoc element
   identifier under that identifier.
-- A deprecated `identity_match` object is stored as its dotted names.
+- An `identity_match` is stored as dotted names when the earlier release
+  reads each name as the same claim under every format the scope accepts.
 
-This release reads that form and its own. Run `migrate_claim_paths` once
-every replica runs this release: a converted file stores the verified claim
-of a bare identifier under its namespace-qualified name, which the earlier
-release misreads.
+This release reads that form and its own. A replica of the earlier release
+cannot read an authorization context whose `identity_match` holds any other
+path, such as one with an index or a key that contains a dot, and the
+issuance fails there. Send such paths once every replica runs this release.
+Run `migrate_claim_paths` once every replica runs this release: a converted
+file stores the verified claim of a bare identifier under its
+namespace-qualified name, which the earlier release misreads.
 
 ### `migrate_claim_paths`
 
