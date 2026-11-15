@@ -273,13 +273,24 @@ func keyTexts(doc *commitmentDocument, key [][]string) ([]string, error) {
 	return texts, nil
 }
 
-// keyText is a key part's value as an operator enters it: a string as it
-// is, any other value as JSON.
+// keyText is a key part's value as the credential carries it, which is how an
+// operator enters it: a string as it is, any other value as JSON. The
+// credential builders decode the document with encoding/json, which reads each
+// number as a float64, so the text does too: 1.0 reads 1, and integers beyond
+// 2^53 round as the signed claim does.
 func keyText(value any) (string, error) {
 	if text, ok := value.(string); ok {
 		return text, nil
 	}
-	encoded, err := json.Marshal(value)
+	literal, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	var carried any
+	if err := json.Unmarshal(literal, &carried); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(carried)
 	return string(encoded), err
 }
 

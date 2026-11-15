@@ -333,6 +333,8 @@ func TestUniqueCommitmentKey(t *testing.T) {
 	}
 	mdoc := credential{"mso_mdoc", "", []string{ns, "psc"}, []string{ns, "ssc"}, []string{ns, "birth_date"}, `{"ssc":%q,"birth_date":%q}`}
 	sdjwt := credential{"dc+sd-jwt", "base64url", []string{"commitments", "psc"}, []string{"commitments", "ssc"}, []string{"birth_date"}, `{"commitments":{"ssc":%q},"birth_date":%q}`}
+	numeric := mdoc
+	numeric.document = `{"ssc":%s,"birth_date":%q}`
 	for name, tc := range map[string]struct {
 		credential credential
 		key        func(credential) [][]string
@@ -346,6 +348,11 @@ func TestUniqueCommitmentKey(t *testing.T) {
 			[]issuance{{"A", "2011-06-15", 1, true}, {"A", "2012-01-01", 2, true}, {"A", "2011-06-15", 2, false}}},
 		"per a nested SD-JWT claim": {sdjwt, func(c credential) [][]string { return [][]string{c.ssc} },
 			[]issuance{{"A", "2011-06-15", 1, true}, {"B", "2011-06-15", 2, true}, {"A", "2011-06-15", 2, false}}},
+		// The signed claim holds the float64 the builders decode, so numbers
+		// that decode alike are one key value.
+		"per a numeric claim": {numeric, func(c credential) [][]string { return [][]string{c.ssc} },
+			[]issuance{{"9007199254740992", "2011-06-15", 1, true}, {"9007199254740993", "2011-06-15", 2, false},
+				{"1", "2011-06-15", 3, true}, {"1.0", "2011-06-15", 4, false}, {"2", "2011-06-15", 4, true}}},
 	} {
 		cred := tc.credential
 		c := &Client{log: logger.NewSimple("test"), uniqueCommitmentStore: memoryCommitments{}, cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{

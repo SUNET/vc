@@ -258,9 +258,8 @@ window.adminApp = function () {
             this.hc.generation++;
         },
 
-        /** Trim the entered values, so the browser refuses a blank one as missing. */
+        /** Trim the case reference, so the browser refuses a blank one as missing. Key values keep their exact text, and their pattern refuses a blank one. */
         async commitmentFormValid(form) {
-            this.hc.values = this.hc.values.map(v => Array.isArray(v) ? v.map(s => s.trim()) : v.trim());
             this.hc.evidence = this.hc.evidence.trim();
             await this.$nextTick();
             return form.reportValidity();
