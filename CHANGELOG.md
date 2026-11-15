@@ -222,7 +222,10 @@
     presentation through the entries of the query it answers.
   - `identity_match.claims` of `POST /api/v1/issuance/prepare` is a list of
     `{path, equals}`. A malformed pointer, `null` included, is answered
-    with `400 invalid_claims_path`.
+    with `400 invalid_claims_path`. A replica of the earlier release
+    cannot read the session of a match whose path has no dotted name, such
+    as one with an index: send such paths once every replica runs this
+    release.
   - The admin UI's claim template builds an array for `null` and for an
     index. A claim a VCTM declares as an object and as an array stays an
     object, and logs a warning that names it. The document form keeps a
