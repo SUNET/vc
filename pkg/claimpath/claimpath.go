@@ -367,10 +367,11 @@ func (p Pointer) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.values())
 }
 
-// UnmarshalJSON reads a JSON array. JSON null leaves the pointer unset.
+// UnmarshalJSON reads a JSON array. It refuses any other JSON value, null
+// included, with ErrMalformed.
 func (p *Pointer) UnmarshalJSON(data []byte) error {
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		return nil
+		return fmt.Errorf("%w: a claims path pointer is a JSON array; the value is null", ErrMalformed)
 	}
 	var text string
 	if err := json.Unmarshal(data, &text); err == nil {

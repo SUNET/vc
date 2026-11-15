@@ -128,7 +128,8 @@ must match, each a pointer and an exact value:
 }
 ```
 
-A malformed pointer is answered with `400` and `invalid_claims_path`.
+A malformed pointer, `null` included, is answered with `400` and
+`invalid_claims_path`.
 
 ## Deprecated spellings
 
