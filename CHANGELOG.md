@@ -257,7 +257,10 @@
   read the whole name as one top-level key first. It leaves a file with a YAML alias,
   merge key or repeated key as written, and prints a line, when an alias
   stands where it reads claims, or when a rewrite in place would change
-  what the file loads. Run it once every replica runs this release: a
+  what the file loads. It leaves a file whose YAML it cannot parse, such
+  as a mapping key that is a sequence, as written, and prints the
+  parser's error; the services load such a file as written, with no
+  warning. Run it once every replica runs this release: a
   converted file stores the verified claim of a bare mdoc element
   identifier under its namespace-qualified name, which the earlier release
   misreads.

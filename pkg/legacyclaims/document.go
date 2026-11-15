@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
+	"gopkg.in/yaml.v2"
 )
 
 // Document is the YAML text of one file and the edits that upgrade it.
@@ -63,11 +64,33 @@ type Rewrite struct {
 	Note string
 }
 
+// UnreadableError is a YAML text that gopkg.in/yaml.v2 reads and the
+// upgrade's parser refuses, such as a text with a mapping key that is a
+// sequence or a mapping. The upgrade reads none of its claim spellings.
+type UnreadableError struct {
+	// File is the file of the text.
+	File string
+	// Err is the parser's error.
+	Err error
+}
+
+func (e *UnreadableError) Error() string {
+	return fmt.Sprintf("%s: the claim spelling upgrade cannot parse this YAML, which gopkg.in/yaml.v2 reads, and upgrades no claim spelling of it: %v", e.File, e.Err)
+}
+
+func (e *UnreadableError) Unwrap() error { return e.Err }
+
+// unread decodes no value, so that gopkg.in/yaml.v2 only parses a text.
+type unread struct{}
+
+func (*unread) UnmarshalYAML(func(any) error) error { return nil }
+
 // Parse parses the YAML text of file. Like gopkg.in/yaml.v2, it reads the
 // text in the encoding of its byte order mark, reads the line breaks
 // yaml.v2 reads, and reads the first document of a stream; a mapping may
 // repeat a key. Comments before the first "---" belong to no document,
-// and a document of comments holds nothing.
+// and a document of comments holds nothing. A text yaml.v2 reads and the
+// parser refuses is an *UnreadableError.
 func Parse(file string, src []byte) (*Document, error) {
 	w, text, err := readFile(src)
 	if err != nil {
@@ -75,6 +98,9 @@ func Parse(file string, src []byte) (*Document, error) {
 	}
 	parsed, err := parser.ParseBytes(text, parser.ParseComments, parser.AllowDuplicateMapKey())
 	if err != nil {
+		if yaml.Unmarshal(src, &unread{}) == nil {
+			return nil, &UnreadableError{File: file, Err: err}
+		}
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	d := &Document{file: file, written: w, src: text, lines: lineStarts(text)}

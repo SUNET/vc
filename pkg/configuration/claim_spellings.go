@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -31,9 +32,19 @@ type fileDataSources struct {
 // decodeShared decodes a configuration file into cfg. The claim spellings
 // of earlier releases outside apigw.data_sources are upgraded, and
 // apigw.data_sources is emptied: decodeDataSources reads it once the
-// credential schemas are loaded.
+// credential schemas are loaded. A file whose YAML the upgrade cannot
+// parse decodes as written.
 func decodeShared(file string, src []byte, cfg *model.Cfg) ([]legacyclaims.Rewrite, error) {
 	doc, err := legacyclaims.Resolve(file, src, configType)
+	if unreadable, ok := errors.AsType[*legacyclaims.UnreadableError](err); ok {
+		if err := decodeAsWritten(src, cfg, unreadable); err != nil {
+			return nil, err
+		}
+		if cfg.APIGW != nil {
+			cfg.APIGW.DataSources = model.DataSources{}
+		}
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -55,9 +66,17 @@ func decodeShared(file string, src []byte, cfg *model.Cfg) ([]legacyclaims.Rewri
 
 // decodeDataSources decodes apigw.data_sources of a configuration file.
 // Each claim spelling of an earlier release is upgraded in the shape of
-// the credential that holds it, which cfg's credential metadata gives.
+// the credential that holds it, which cfg's credential metadata gives. A
+// file whose YAML the upgrade cannot parse decodes as written.
 func decodeDataSources(file string, src []byte, cfg *model.Cfg) (model.DataSources, []legacyclaims.Rewrite, error) {
 	doc, err := legacyclaims.Resolve(file, src, reflect.TypeFor[fileDataSources]())
+	if unreadable, ok := errors.AsType[*legacyclaims.UnreadableError](err); ok {
+		var decoded fileDataSources
+		if err := decodeAsWritten(src, &decoded, unreadable); err != nil {
+			return model.DataSources{}, nil, err
+		}
+		return decoded.APIGW.DataSources, nil, nil
+	}
 	if err != nil {
 		return model.DataSources{}, nil, err
 	}
@@ -73,6 +92,16 @@ func decodeDataSources(file string, src []byte, cfg *model.Cfg) (model.DataSourc
 		return model.DataSources{}, nil, err
 	}
 	return decoded.APIGW.DataSources, doc.Rewrites(), nil
+}
+
+// decodeAsWritten decodes into v the text of a file whose claim spellings
+// the upgrade cannot read, as gopkg.in/yaml.v2 reads it. A decode error
+// joins the reason the file's claim spellings stay as written.
+func decodeAsWritten(src []byte, v any, unreadable *legacyclaims.UnreadableError) error {
+	if err := yaml.Unmarshal(src, v); err != nil {
+		return errors.Join(err, unreadable)
+	}
+	return nil
 }
 
 // credentialShapes reads the shapes of the credentials of
@@ -117,7 +146,9 @@ func (s credentialShapes) Document(scope string) (legacyclaims.Shape, error) {
 // read, and nil reads each path as written. The rewrite of a file with a
 // YAML alias, merge key or repeated key must decode as the file does and
 // hold no earlier spelling it upgrades; otherwise UpgradeFile refuses the
-// file with legacyclaims.ErrInPlace.
+// file with legacyclaims.ErrInPlace. It returns the
+// *legacyclaims.UnreadableError of a file whose YAML the upgrade cannot
+// parse.
 func UpgradeFile(ctx context.Context, file string, src []byte, schemaPath func(string) string) ([]byte, []legacyclaims.Rewrite, error) {
 	doc, err := legacyclaims.Parse(file, src)
 	if err != nil {
@@ -212,7 +243,8 @@ func loadSchema(ctx context.Context, cfg *model.Cfg, scope string, meta *model.C
 // cfg.Deprecations. It loads the schema of a credential only when a data
 // source claim needs its document shape; schemaPath maps the schema file
 // path of the credential metadata to the file to read, and nil reads each
-// path as written. DecodeFile applies no defaults and no secrets.
+// path as written. A file whose YAML the upgrade cannot parse decodes as
+// written. DecodeFile applies no defaults and no secrets.
 func DecodeFile(ctx context.Context, file string, schemaPath func(string) string) (*model.Cfg, error) {
 	src, err := os.ReadFile(filepath.Clean(file))
 	if err != nil {
@@ -225,6 +257,13 @@ func DecodeFile(ctx context.Context, file string, schemaPath func(string) string
 // decodes the file.
 func decodeConfig(ctx context.Context, file string, src []byte, schemaPath func(string) string) (*model.Cfg, error) {
 	doc, err := legacyclaims.Resolve(file, src, configType)
+	if unreadable, ok := errors.AsType[*legacyclaims.UnreadableError](err); ok {
+		cfg := &model.Cfg{}
+		if err := decodeAsWritten(src, cfg, unreadable); err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", file, err)
+		}
+		return cfg, nil
+	}
 	if err != nil {
 		return nil, err
 	}
