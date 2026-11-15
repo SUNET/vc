@@ -280,7 +280,7 @@ window.adminApp = function () {
             const scope = this.ds.create.scope;
             const template = this.scopeTemplates[scope];
             if (template && Object.keys(template).length > 0) {
-                this.ds.create.document_data = flattenObject(template, '');
+                this.ds.create.document_data = flattenObject(template);
                 this.ds.create.document_data_json = JSON.stringify(template, null, 2);
             }
         },
@@ -477,7 +477,7 @@ window.adminApp = function () {
             const dd = doc.document_data || {};
             this.ds.edit = {
                 identity_mapping_ids_str: (doc.identity_mapping_ids || []).join(', '),
-                document_data: flattenObject(dd, '')
+                document_data: flattenObject(dd)
             };
             this.ds.editError = '';
             this.ds.editIdx = idx;
