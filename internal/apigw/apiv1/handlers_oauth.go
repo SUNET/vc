@@ -1190,6 +1190,10 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 			"internal error during token rotation", 500, err)
 	}
 
+	// This grant returns before the token-issued hook in OAuthToken, so the
+	// renewed access token's lifetime has to reach the status record here.
+	c.extendIssuanceDeadline(ctx, rotated.IssuanceID, rotated.Token.ExpiresAt)
+
 	reply := &openid4vci.TokenResponse{
 		AccessToken:           newAccessToken,
 		TokenType:             "DPoP",
