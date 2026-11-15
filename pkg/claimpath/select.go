@@ -123,7 +123,10 @@ func (p Pointer) get(root map[string]any) (any, bool, error) {
 
 // set writes value at a pointer of keys and indices, creating the objects
 // a key passes through. With replace, a key also replaces a null, a scalar
-// or an array it passes through with a new object.
+// or an array it passes through with a new object. An index writes into
+// a []any: an array that another slice type holds, such as the []string
+// of an attribute mapping, is replaced by a new []any of its elements,
+// and the slice itself is left unchanged.
 func (p Pointer) set(root map[string]any, value any, replace bool) error {
 	n := len(p.components) - 1
 	var container any = root
@@ -152,7 +155,7 @@ func (c Component) child(container any, next Component, replace bool) (any, erro
 	switch {
 	case len(children) == 1:
 		if _, object := children[0].(map[string]any); object || !replace || next.kind != keyKind {
-			return children[0], nil
+			return c.writable(container, children[0], next)
 		}
 	case c.kind != keyKind || next.kind != keyKind:
 		return nil, fmt.Errorf("%s selects no element to write into", c)
@@ -162,6 +165,27 @@ func (c Component) child(container any, next Component, replace bool) (any, erro
 		return nil, err
 	}
 	return created, nil
+}
+
+// writable returns child, which the component selects in container, for
+// the next component to write into. Before an index, an array that a slice
+// type other than []any holds is put in container as a new []any of its
+// elements.
+func (c Component) writable(container, child any, next Component) (any, error) {
+	if next.kind != indexKind {
+		return child, nil
+	}
+	if _, ok := child.([]any); ok {
+		return child, nil
+	}
+	elements, ok := asArray(child)
+	if !ok {
+		return child, nil
+	}
+	if err := c.put(container, elements); err != nil {
+		return nil, err
+	}
+	return elements, nil
 }
 
 // put writes value at the component in container.

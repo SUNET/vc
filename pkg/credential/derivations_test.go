@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -77,6 +78,14 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 			wantKey: "email_trimmed",
 			wantVal: "USER@example.com",
 		},
+		{
+			name: "uppercase in place on an element of a []string",
+			list: []primitives.Derivation{{
+				Uppercase: &primitives.UppercaseArgs{Input: claimpath.Ref{Path: claimpath.New(claimpath.Key("countries_list"), claimpath.Index(0))}},
+			}},
+			wantKey: "countries_list",
+			wantVal: []string{"SWEDEN", "Norway"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,20 +93,16 @@ func TestApplyDerivations_StringPrimitivesElementwise(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if slice, ok := tc.wantVal.([]string); ok {
-				gotSlice, ok := got[tc.wantKey].([]string)
-				if !ok || len(gotSlice) != len(slice) {
-					t.Fatalf("%s: got %v, want %v", tc.wantKey, got[tc.wantKey], tc.wantVal)
-				}
-				for i := range slice {
-					if gotSlice[i] != slice[i] {
-						t.Errorf("%s[%d] = %q, want %q", tc.wantKey, i, gotSlice[i], slice[i])
-					}
-				}
-				return
+			gotJSON, err := json.Marshal(got[tc.wantKey])
+			if err != nil {
+				t.Fatal(err)
 			}
-			if got[tc.wantKey] != tc.wantVal {
-				t.Errorf("%s = %v, want %v", tc.wantKey, got[tc.wantKey], tc.wantVal)
+			wantJSON, err := json.Marshal(tc.wantVal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("%s = %s, want %s", tc.wantKey, gotJSON, wantJSON)
 			}
 		})
 	}
