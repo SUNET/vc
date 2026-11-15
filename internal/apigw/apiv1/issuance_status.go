@@ -151,6 +151,16 @@ func (c *Client) extendIssuanceDeadline(ctx context.Context, issuanceID string, 
 	}
 }
 
+// preAuthDeadline caps a token's expiry at the life of the document the offer
+// cached, after which the credential request cannot succeed. The document is
+// written with the pre-authorized context, which is why its start is CreatedAt.
+func preAuthDeadline(authCtx *cache.AuthorizationContext, tokenExpiresAt int64) int64 {
+	if authCtx.CreatedAt.IsZero() {
+		return tokenExpiresAt
+	}
+	return min(tokenExpiresAt, authCtx.CreatedAt.Add(cache.DocumentTTL).Unix())
+}
+
 func truncateEventDescription(s string) string {
 	runes := []rune(s)
 	if len(runes) > maxEventDescriptionLen {

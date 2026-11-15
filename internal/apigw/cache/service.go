@@ -116,6 +116,10 @@ type Service struct {
 // TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the sums to it.
 const AuthContextTTL = 15 * time.Minute
 
+// DocumentTTL is how long a cached credential document survives. A pre-authorized
+// offer writes it together with its context, so no issuance outlives it.
+const DocumentTTL = 5 * time.Minute
+
 // IssuanceStatusTTL is how long a customer service can poll an issuance after it was created.
 const IssuanceStatusTTL = 24 * time.Hour
 
@@ -141,7 +145,7 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: svg_templates: %w", err)
 	}
 
-	if s.Document, err = pkgcache.NewGenericCache[map[string]*model.CompleteDocument](cs, ctx, "apigw_documents", 5*time.Minute); err != nil {
+	if s.Document, err = pkgcache.NewGenericCache[map[string]*model.CompleteDocument](cs, ctx, "apigw_documents", DocumentTTL); err != nil {
 		return nil, fmt.Errorf("cache: documents: %w", err)
 	}
 

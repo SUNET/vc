@@ -339,3 +339,87 @@ func TestIssuanceStatus_RefreshTokenGrantExtendsDeadline(t *testing.T) {
 	assert.Equal(t, IssuanceStatusTokenIssued, effectiveStatus(record, time.Now().Add(2*time.Minute)),
 		"still token_issued after the original token's expiry")
 }
+
+func TestPreAuthDeadline(t *testing.T) {
+	created := time.Now()
+	docLife := created.Add(cache.DocumentTTL).Unix()
+	ctx := &cache.AuthorizationContext{CreatedAt: created}
+
+	assert.Equal(t, docLife, preAuthDeadline(ctx, created.Add(time.Hour).Unix()), "capped at the document's life")
+	soon := created.Add(time.Minute).Unix()
+	assert.Equal(t, soon, preAuthDeadline(ctx, soon), "an earlier token expiry wins")
+	assert.Equal(t, soon, preAuthDeadline(&cache.AuthorizationContext{}, soon), "no creation time, no cap")
+}
+
+func newPreAuthStatusClient(t *testing.T, sessionID string) (*Client, *cache.AuthorizationContext) {
+	t.Helper()
+	c := newStatusTestClient(t)
+	store := cache.NewTestMemoryStore(10 * time.Minute)
+	c.cfg = &model.Cfg{APIGW: &model.APIGW{Delivery: model.APIGWDelivery{OpenID4VCI: model.OAuthServer{
+		TokenEndpoint:        iaTokenEndpoint,
+		GrantTypes:           []string{"refresh_token"},
+		RefreshTokenDuration: 3600,
+	}}}}
+	c.cacheService.AuthContext = store
+	c.cacheService.DPopJTI = cache.NewTestMemoryCache[bool](time.Minute)
+
+	offer := &cache.AuthorizationContext{
+		SessionID:     sessionID,
+		Code:          sessionID,
+		IssuanceID:    "id-1",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(cache.DocumentTTL).Unix(),
+		Scopes:        []string{"pid"},
+		PreAuthorized: true,
+	}
+	require.NoError(t, store.Save(t.Context(), offer))
+	require.NoError(t, c.createIssuanceStatus(t.Context(), "id-1", "pid", "SUNET", offer.ExpiresAt))
+	return c, offer
+}
+
+func TestIssuanceStatus_PreAuthDeadlineStopsWhenTheDocumentDoes(t *testing.T) {
+	ctx := t.Context()
+	c, offer := newPreAuthStatusClient(t, "pre-auth-code")
+
+	// The token is good for an hour, the cached document for five minutes.
+	_, err := c.OAuthToken(ctx, &openid4vci.TokenRequest{
+		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+		PreAuthorizedCode: offer.Code,
+	})
+	require.NoError(t, err)
+
+	record, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+	assert.Equal(t, offer.CreatedAt.Add(cache.DocumentTTL).Unix(), record.Deadline)
+	assert.Equal(t, IssuanceStatusTokenIssued, effectiveStatus(record, offer.CreatedAt.Add(time.Minute)))
+	assert.Equal(t, IssuanceStatusExpired, effectiveStatus(record, offer.CreatedAt.Add(cache.DocumentTTL+time.Minute)),
+		"once the document is gone the credential request cannot succeed")
+}
+
+func TestIssuanceStatus_PreAuthRefreshDoesNotOutliveTheDocument(t *testing.T) {
+	ctx := t.Context()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	c, offer := newPreAuthStatusClient(t, "pre-auth-code")
+	granted, err := c.OAuthToken(ctx, &openid4vci.TokenRequest{
+		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+		PreAuthorizedCode: offer.Code,
+		DPOP:              tokenDPoPProof(t, key),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, granted.RefreshToken)
+	before, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+
+	_, err = c.OAuthToken(ctx, &openid4vci.TokenRequest{
+		GrantType:    "refresh_token",
+		RefreshToken: granted.RefreshToken,
+		DPOP:         tokenDPoPProof(t, key),
+	})
+	require.NoError(t, err)
+
+	after, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+	assert.Equal(t, before.Deadline, after.Deadline, "a new token does not bring the document back")
+}
