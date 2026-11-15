@@ -204,6 +204,39 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Nil(t, stored.DCQLQuery, "and the next read must not find the prepared one")
 	})
 
+	// And a resume whose query holds a number no backend can store in
+	// its structured form still resumes, with the number intact.
+	//
+	// 1e400 is past int64 and float64 both, so the document-valued copy
+	// cannot hold it at all - which is what the exact text copy is for.
+	// A backend that lets that copy's encoder decide the fate of the
+	// whole update refuses the resume outright, and a prepared session
+	// becomes unresumable because of a req param the operator was
+	// entitled to configure.
+	t.Run("ResumeIssuerStateWithAnUnstorableNumber", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-x",
+			IssuerState: "contract-issuer-state-x",
+			DCQLQuery:   dcqlWithParam("prepared", "7"),
+		}))
+
+		resume := dcqlWithParam("resumed", "1e400")
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-x", &IssuerStateResume{
+			AuthSession: "contract-auth-session-x",
+			DCQLQuery:   resume,
+			ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+			CreatedAt:   time.Now(),
+		})
+		require.NoError(t, err, "a req param beyond float64 must not make the resume fail")
+		require.NotNil(t, resumed.DCQLQuery)
+		assertQueryIs(t, resume, resumed.DCQLQuery, "the resumed query is what the call returns")
+
+		stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-resume-x"})
+		require.NoError(t, err)
+		require.NotNil(t, stored.DCQLQuery)
+		assertQueryIs(t, resume, stored.DCQLQuery, "and what the next read finds")
+	})
+
 	t.Run("GetByQueryFields", func(t *testing.T) {
 		result, err := store.Get(ctx, &AuthorizationContext{State: "state-1"})
 		require.NoError(t, err)
@@ -916,12 +949,20 @@ func dcqlWithParam(returns, literal string) *openid4vp.DCQL {
 	}}}
 }
 
-// assertQueryIs compares two queries as JSON text.
+// assertQueryIs compares two queries as JSON text, byte for byte.
+//
+// Not JSONEq: that decodes both sides into interface{}, where every
+// number becomes a float64, and a req param rounded from
+// 123456789012345678901234567890 to 1.2345678901234568e+29 compares
+// equal to the literal it lost. Rounding a req param is the defect
+// these tests exist to catch, so the comparison has to be the one that
+// can see it. Both sides come from json.Marshal of the same struct
+// type, so field order is fixed and string equality is well defined.
 func assertQueryIs(t *testing.T, want, got *openid4vp.DCQL, msg string) {
 	t.Helper()
 	wantJSON, err := json.Marshal(want)
 	require.NoError(t, err)
 	gotJSON, err := json.Marshal(got)
 	require.NoError(t, err)
-	assert.JSONEq(t, string(wantJSON), string(gotJSON), msg)
+	assert.Equal(t, string(wantJSON), string(gotJSON), msg)
 }
