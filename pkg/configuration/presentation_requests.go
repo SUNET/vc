@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -263,8 +264,16 @@ func (c *PresentationRequestConfig) check() error {
 // written as the map from dotted claim names. With list, it upgrades the
 // entries of a non-empty "templates" list. Otherwise, and for a file
 // without such a list, it upgrades one template from the top-level keys.
+// It returns a file whose YAML the upgrade cannot parse as written, once
+// that text decodes.
 func upgradeTemplates(filePath string, src []byte, list bool) ([]byte, []legacyclaims.Rewrite, error) {
 	doc, err := legacyclaims.Parse(filePath, src)
+	if unreadable, ok := errors.AsType[*legacyclaims.UnreadableError](err); ok {
+		if err := decodeAsWritten(src, reflect.New(templateRoot(src, list)).Interface(), unreadable); err != nil {
+			return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+		}
+		return src, nil, nil
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
@@ -291,11 +300,17 @@ func upgradeTemplates(filePath string, src []byte, list bool) ([]byte, []legacyc
 // presentation request file: a list of templates when list is set and the
 // file holds a non-empty "templates" list, and one template otherwise.
 func resolveTemplates(filePath string, src []byte, list bool) (*legacyclaims.Document, error) {
-	root := reflect.TypeFor[PresentationRequestTemplate]()
+	return legacyclaims.Resolve(filePath, src, templateRoot(src, list))
+}
+
+// templateRoot returns the type gopkg.in/yaml.v2 decodes a presentation
+// request file into: a list of templates when list is set and the file
+// holds a non-empty "templates" list, and one template otherwise.
+func templateRoot(src []byte, list bool) reflect.Type {
 	if list && hasTemplateList(src) {
-		root = reflect.TypeFor[PresentationRequestConfig]()
+		return reflect.TypeFor[PresentationRequestConfig]()
 	}
-	return legacyclaims.Resolve(filePath, src, root)
+	return reflect.TypeFor[PresentationRequestTemplate]()
 }
 
 // UpgradeTemplateFile rewrites the claim spellings of earlier releases in
@@ -305,7 +320,9 @@ func resolveTemplates(filePath string, src []byte, list bool) (*legacyclaims.Doc
 // to decode as a list of templates. The rewrite of a file with a YAML
 // alias, merge key or repeated key must load as the rewrite of the text
 // gopkg.in/yaml.v2 reads from the file loads; otherwise UpgradeTemplateFile
-// refuses the file with legacyclaims.ErrInPlace.
+// refuses the file with legacyclaims.ErrInPlace. It returns the
+// *legacyclaims.UnreadableError of a file whose YAML the upgrade cannot
+// parse.
 func UpgradeTemplateFile(filePath string, src []byte) ([]byte, []legacyclaims.Rewrite, error) {
 	// A file the loader refuses keeps the refusal through the rewrite.
 	if loaded, err := readTemplateFile(filePath, src); err == nil && loaded.fallback != nil {

@@ -19,6 +19,10 @@
 // templates as written, and prints a line with the error: the file loads
 // as one template from its top-level keys.
 //
+// It leaves as written a file whose YAML gopkg.in/yaml.v2 reads and the
+// rewrite cannot parse, such as a mapping key that is a sequence or a
+// mapping, and prints a line with the parser's error.
+//
 // A configuration names its credential schemas by deployment paths, such
 // as /metadata/pid_mdoc.mdoc.json. -schemas maps such a prefix to a local
 // directory: -schemas /metadata=./metadata.
@@ -90,6 +94,10 @@ func migrate(ctx context.Context, file string, schemas prefixes, dryRun bool, ou
 	upgraded, rewrites, err := upgrade(ctx, file, src, schemas.apply)
 	if errors.Is(err, legacyclaims.ErrInPlace) {
 		_, err := fmt.Fprintf(out, "%s: left as written: %v; rewrite the claim spellings its warnings at load name\n", file, legacyclaims.ErrInPlace)
+		return err
+	}
+	if unreadable, ok := errors.AsType[*legacyclaims.UnreadableError](err); ok {
+		_, err := fmt.Fprintf(out, "%s: left as written: the rewrite cannot parse its YAML, which gopkg.in/yaml.v2 reads; rewrite its claim spellings by hand: %v\n", file, unreadable.Err)
 		return err
 	}
 	var fallback *configuration.TemplateFallback

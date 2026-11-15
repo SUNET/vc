@@ -143,6 +143,12 @@ config.yaml:37: $.apigw.data_sources.presentation.scopes.nym_auth.from.pid.requi
 A spelling that a YAML alias or merge key reads warns once per read, at
 the line that holds it.
 
+A file whose YAML gopkg.in/yaml.v2 reads and the upgrade cannot parse,
+such as a file with a mapping key that is a sequence or a mapping, loads
+as written and logs no warning. An earlier spelling in it that the current
+form refuses fails the load, and the error names the YAML the upgrade
+cannot parse.
+
 A later release refuses them. Rewrite each file with `migrate_claim_paths`
 before then.
 
@@ -332,3 +338,6 @@ prints what to write. Such a path keeps loading with its warning.
 
 It leaves a presentation request file that fails to decode as a list of
 templates as written, and prints the error.
+
+It leaves a file whose YAML the upgrade cannot parse as written, and
+prints the parser's error.
