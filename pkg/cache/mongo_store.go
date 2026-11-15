@@ -803,6 +803,37 @@ func (s *MongoStore) ResumeIssuerState(ctx context.Context, issuerState string, 
 		unset["dcql_query_exact"] = ""
 	}
 
+	// And a req param BSON cannot hold at all must not take the resume
+	// down with it.
+	//
+	// The $set above carries the structured copy, so the driver encodes
+	// it when the update is sent - and a literal past int64 and float64
+	// both, 1e400 say, fails that encoder. Without this the whole
+	// update is rejected and the issuance cannot resume, which is the
+	// case the exact copy was added to survive: MarshalBSON already
+	// drops the legacy document-valued copy and keeps the text (see
+	// authcontext_bson.go), and an update that did not do the same
+	// would make a prepared session resumable only until someone
+	// configured such a param.
+	//
+	// Dropped rather than approximated, for the reason given there:
+	// BSON would take the value as +Inf, and an old replica reading
+	// that would compute a pseudonym from a number nobody configured.
+	// Unset, not merely left out, because the prepared query's legacy
+	// copy is still in the document and would otherwise outlive the
+	// query it belongs to.
+	if _, err := bson.Marshal(set); err != nil {
+		if resume.DCQLQuery == nil {
+			return nil, fmt.Errorf("failed to resume issuer_state: encoding the update: %w", err)
+		}
+		delete(set, "dcql_query")
+		if _, retryErr := bson.Marshal(set); retryErr != nil {
+			// The query was not the cause. Report what actually failed.
+			return nil, fmt.Errorf("failed to resume issuer_state: encoding the update: %w", err)
+		}
+		unset["dcql_query"] = ""
+	}
+
 	update := bson.M{mongoUnset: unset, "$set": set}
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
