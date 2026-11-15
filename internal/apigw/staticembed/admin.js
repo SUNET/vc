@@ -2,12 +2,16 @@
 import Alpine from '/static/alpinejs.esm.min.js';
 
 window.adminApp = function () {
-    /** The message of a failed API response: {"error": {"title", "details"}} or {"error": "..."}. */
+    /** The message of a failed API response: {"error": {"title", "details"}} or {"error": "..."}. Text details read as they are; structured details, such as a validation report, as JSON after the title. */
     async function errorMessage(resp) {
         const body = await resp.json().catch(() => ({}));
         const err = body.error;
-        if (err && typeof err === 'object') return err.details || err.title || resp.statusText;
-        return err || body.detail || resp.statusText;
+        if (err && typeof err === 'object') {
+            if (typeof err.details === 'string' && err.details) return err.details;
+            const title = err.title || resp.statusText;
+            return err.details == null ? title : `${title}: ${JSON.stringify(err.details)}`;
+        }
+        return (typeof err === 'string' && err) || body.detail || resp.statusText;
     }
 
     /** Flatten a nested object into dot-notation key-value pairs */
