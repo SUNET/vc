@@ -70,14 +70,13 @@ type PrepareIssuanceRequest struct {
 
 // LegacyPrepareIssuanceRequest is a PrepareIssuanceRequest in the earlier
 // release's form, whose identity_match.claims is an object from dotted
-// claim names to tests. Its fields are `header:"-"` for the reason
-// PrepareIssuanceRequest gives.
+// claim names to tests. Its fields bind as those of PrepareIssuanceRequest.
 type LegacyPrepareIssuanceRequest struct {
-	Scope                   string                          `json:"scope" header:"-" validate:"required"`
-	IdentityMatch           *openid4vci.LegacyIdentityMatch `json:"identity_match" header:"-" validate:"required"`
-	AuthenticSourcePersonID string                          `json:"authentic_source_person_id,omitempty" header:"-" validate:"omitempty,max=256,printascii"`
-	AuthenticSource         string                          `json:"authentic_source,omitempty" header:"-" validate:"omitempty"`
-	TTLSeconds              int                             `json:"ttl_seconds,omitempty" header:"-" validate:"omitempty,gt=0"`
+	Scope                   string                          `json:"scope" validate:"required"`
+	IdentityMatch           *openid4vci.LegacyIdentityMatch `json:"identity_match" validate:"required"`
+	AuthenticSourcePersonID string                          `json:"authentic_source_person_id,omitempty" validate:"omitempty,max=256,printascii"`
+	AuthenticSource         string                          `json:"authentic_source,omitempty" validate:"omitempty"`
+	TTLSeconds              int                             `json:"ttl_seconds,omitempty" validate:"omitempty,gt=0"`
 }
 
 // PrepareIssuanceReply is the prepared issuance.

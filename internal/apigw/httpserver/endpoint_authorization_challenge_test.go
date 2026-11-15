@@ -234,8 +234,9 @@ func (a *prepareAPI) PrepareLegacyIssuance(_ context.Context, req *apiv1.LegacyP
 // reaches PrepareLegacyIssuance and is answered with the RFC 9745
 // Deprecation header. The list of claims path pointers reaches
 // PrepareIssuance without it, and a malformed pointer inside the list is
-// refused with invalid_claims_path, whatever JSON type it has. Both forms
-// carry authentic_source_person_id.
+// refused with invalid_claims_path, whatever JSON type it has. A form body
+// is read as Binding.Request reads it. Both forms carry
+// authentic_source_person_id.
 func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 	ctx := t.Context()
 	log, err := logger.New("prepare-forms-test", t.TempDir(), true)
@@ -248,15 +249,18 @@ func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 
 	for name, tc := range map[string]struct {
 		claims      string
+		form        bool
 		status      int
 		legacy      bool
 		deprecation string
 		title       string
 	}{
-		"object of dotted names":    {`{"given_name":{"equals":"Alice"}}`, http.StatusOK, true, "@1793836800", ""},
-		"list of pointers":          {`[{"path":["given_name"],"equals":"Alice"}]`, http.StatusOK, false, "", ""},
-		"dotted string in the list": {`[{"path":"given_name","equals":"Alice"}]`, http.StatusBadRequest, false, "", "invalid_claims_path"},
-		"number in the list":        {`[{"path":7,"equals":"Alice"}]`, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"object of dotted names":                {`{"given_name":{"equals":"Alice"}}`, false, http.StatusOK, true, "@1793836800", ""},
+		"list of pointers":                      {`[{"path":["given_name"],"equals":"Alice"}]`, false, http.StatusOK, false, "", ""},
+		"dotted string in the list":             {`[{"path":"given_name","equals":"Alice"}]`, false, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"number in the list":                    {`[{"path":7,"equals":"Alice"}]`, false, http.StatusBadRequest, false, "", "invalid_claims_path"},
+		"object of dotted names in a form body": {`{"given_name":{"equals":"Alice"}}`, true, http.StatusOK, true, "@1793836800", ""},
+		"list of pointers in a form body":       {`[{"path":["given_name"],"equals":"Alice"}]`, true, http.StatusOK, false, "", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := &prepareAPI{}
@@ -264,9 +268,14 @@ func TestEndpointPrepareIssuance_ReadsBothIdentityMatchForms(t *testing.T) {
 			engine := gin.New()
 			helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
 
-			body := `{"identity_match":{"claims":` + tc.claims + `},"scope":"allowed_scope","authentic_source_person_id":"p-1"}`
+			match := `{"claims":` + tc.claims + `}`
+			body, contentType := `{"identity_match":`+match+`,"scope":"allowed_scope","authentic_source_person_id":"p-1"}`, "application/json"
+			if tc.form {
+				body = url.Values{"IdentityMatch": {match}, "Scope": {"allowed_scope"}, "AuthenticSourcePersonID": {"p-1"}}.Encode()
+				contentType = "application/x-www-form-urlencoded"
+			}
 			req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", contentType)
 			w := httptest.NewRecorder()
 			engine.ServeHTTP(w, req)
 

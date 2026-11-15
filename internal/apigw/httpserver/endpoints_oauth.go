@@ -753,10 +753,10 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
-	legacy, err := legacyIdentityMatchBody(c)
+	legacy, err := s.legacyIdentityMatch(ctx, c)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "unreadable request body")
+		s.log.Error(err, "binding error")
 		return nil, err
 	}
 	var reply *apiv1.PrepareIssuanceReply
@@ -837,35 +837,56 @@ func (s *Service) endpointIssuanceStatus(ctx context.Context, c *gin.Context) (a
 	return reply, nil
 }
 
-// legacyIdentityMatchBody reports whether the body's identity_match.claims
-// is a JSON object, the earlier release's form. Members are matched the
-// way the binding matches them, and the body is left in place for it.
-func legacyIdentityMatchBody(c *gin.Context) (bool, error) {
+// legacyIdentityMatch reports whether the request's identity_match.claims
+// is a JSON object, the earlier release's form. It binds identity_match
+// from every place Binding.Request binds PrepareIssuanceRequest from, and
+// leaves the body in place for the binding that follows.
+func (s *Service) legacyIdentityMatch(ctx context.Context, c *gin.Context) (bool, error) {
 	body, err := io.ReadAll(c.Request.Body)
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 	if err != nil {
 		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
 	}
-	var request struct {
-		IdentityMatch json.RawMessage `json:"identity_match"`
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	var request identityMatchForm
+	err = s.httpHelpers.Binding.Request(ctx, c, &request)
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false, err
 	}
-	if err := json.Unmarshal(body, &request); err != nil {
-		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "the request body is not a JSON object", 400, err)
-	}
-	if !isJSONObject(request.IdentityMatch) {
-		return false, nil
+	return request.IdentityMatch != nil && request.IdentityMatch.legacy, nil
+}
+
+// identityMatchForm binds identity_match as PrepareIssuanceRequest and
+// LegacyPrepareIssuanceRequest bind it: the field name and the json tag
+// are theirs.
+type identityMatchForm struct {
+	IdentityMatch *claimsForm `json:"identity_match"`
+}
+
+// claimsForm records the form of an identity_match.
+type claimsForm struct {
+	// legacy reports that claims is a JSON object.
+	legacy bool
+}
+
+// UnmarshalJSON reads an identity_match. A value other than an object is in
+// neither form, and the binding of the current form refuses it.
+func (f *claimsForm) UnmarshalJSON(data []byte) error {
+	if !isJSONObject(data) {
+		return nil
 	}
 	var match struct {
 		Claims json.RawMessage `json:"claims"`
 	}
-	if err := json.Unmarshal(request.IdentityMatch, &match); err != nil {
-		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "identity_match is not a JSON object", 400, err)
+	if err := json.Unmarshal(data, &match); err != nil {
+		return err
 	}
-	return isJSONObject(match.Claims), nil
+	f.legacy = isJSONObject(match.Claims)
+	return nil
 }
 
 // isJSONObject reports whether raw is a JSON object.
-func isJSONObject(raw json.RawMessage) bool {
+func isJSONObject(raw []byte) bool {
 	return bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{"))
 }
 
