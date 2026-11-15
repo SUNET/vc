@@ -312,7 +312,7 @@ func (i *Issuer) addElements(builder *MSOBuilder, schema *MDDLSchema, doc map[st
 				continue
 			}
 
-			value, err := convertElementValue(meta, raw)
+			value, err := ConvertElementValue(meta, raw)
 			if err != nil {
 				return fmt.Errorf("convert claim %q: %w", elementID, err)
 			}
@@ -324,7 +324,7 @@ func (i *Issuer) addElements(builder *MSOBuilder, schema *MDDLSchema, doc map[st
 	return nil
 }
 
-// convertElementValue converts a JSON-decoded value into the Go
+// ConvertElementValue converts a JSON-decoded value into the Go
 // representation fxamacker/cbor needs to encode it per ISO 18013-5: full-date
 // and tdate values are tagged strings, bstr values are raw bytes (accepted as
 // base64 in the source JSON). "array"/"map" claims recurse into meta.Elements
@@ -332,7 +332,7 @@ func (i *Issuer) addElements(builder *MSOBuilder, schema *MDDLSchema, doc map[st
 // full-date) get the same conversion applied. Any value_type without
 // declared Elements, and any other value_type (tstr, bool, ...), passes
 // through unchanged.
-func convertElementValue(meta ClaimMetadata, raw any) (any, error) {
+func ConvertElementValue(meta ClaimMetadata, raw any) (any, error) {
 	switch meta.ValueType {
 	case "array":
 		if len(meta.Elements) == 0 {
@@ -430,7 +430,7 @@ func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any)
 			}
 			continue
 		}
-		converted, err := convertElementValue(fieldMeta, val)
+		converted, err := ConvertElementValue(fieldMeta, val)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", key, err)
 		}

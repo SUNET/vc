@@ -201,9 +201,10 @@ POST /api/v1/auxiliary_data/reset
 
 `key` names each key part by its `path`, in the configured order. A part
 takes the `value` the credential carries, as its exact text, surrounding
-whitespace included. A claim that holds bytes takes them in base64. A number
-takes the shortest JSON of the 64-bit float the credential holds: `1.0` is
-`1`, and `9007199254740993` is `9007199254740992`. A part that is a
+whitespace included. A claim that holds bytes takes them in padded standard
+base64: `QQ==` for the byte `0x41`, which source data may also spell `QR==`. A
+number takes the shortest JSON of the 64-bit float the credential holds: `1.0`
+is `1`, and `9007199254740993` is `9007199254740992`. A part that is a
 `to_wallet` entry with an `hkdf` or `hmac` opening also takes the `inputs`
 it derives from, each input claim with its value. The call derives with each
 opening that reads exactly those claims, so it finds a record through the
