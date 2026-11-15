@@ -39,7 +39,8 @@ type ResetUniqueCommitmentRequest struct {
 // it, or the Inputs a to_wallet part with an hkdf or hmac opening derives
 // from, each input claim with its value. Value is the exact text: a string as
 // it is, bytes in padded standard base64, a number as the shortest JSON of the
-// float64 the credential holds, any other value as JSON.
+// float64 the credential holds, an mdoc int or uint element as the decimal
+// digits of the integer that float64 equals, any other value as JSON.
 type KeyValue struct {
 	Path   []string          `json:"path" validate:"required,min=1"`
 	Value  *string           `json:"value,omitempty"`

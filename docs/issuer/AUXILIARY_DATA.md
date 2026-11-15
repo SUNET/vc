@@ -207,9 +207,11 @@ takes the `value` the credential carries, as its exact text, surrounding
 whitespace included. A claim that holds bytes takes them in padded standard
 base64: `QQ==` for the byte `0x41`, which source data may also spell `QR==`. A
 number takes the shortest JSON of the 64-bit float the credential holds: `1.0`
-is `1`, and `9007199254740993` is `9007199254740992`. A part that is a
-`to_wallet` entry with an `hkdf` or `hmac` opening also takes the `inputs`
-it derives from, each input claim with its value. The call derives with each
+is `1`, and `9007199254740993` is `9007199254740992`. An mdoc element the
+MDDL declares as `int` or `uint` holds the integer that float equals, and
+takes its decimal digits: `1152921504606846977` is `1152921504606846976`, and
+`-0` is `0`. A part that is a `to_wallet` entry with an `hkdf` or `hmac`
+opening also takes the `inputs` it derives from, each input claim with its value. The call derives with each
 opening that reads exactly those claims, so it finds a record through the
 claims of the opening that derived it. `pid` and `pid_mdoc` above share a
 secret and an input order, so the claims of either find a person's record.
