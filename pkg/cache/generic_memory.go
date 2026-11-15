@@ -132,12 +132,20 @@ func (m *MemoryCache[V]) Update(_ context.Context, key string, fn func(V) (V, ti
 	if item == nil {
 		return false, ErrNoDocuments
 	}
+	expiresAt := item.ExpiresAt()
 	next, ttl, write := fn(item.Value())
 	if !write {
 		return false, nil
 	}
 	if ttl <= 0 {
 		ttl = ttlcache.PreviousOrDefaultTTL
+		if !expiresAt.IsZero() {
+			// An explicit remaining lifetime: if the entry was evicted while fn ran,
+			// Set would otherwise recreate it with the full default TTL.
+			if ttl = time.Until(expiresAt); ttl <= 0 {
+				return false, ErrNoDocuments
+			}
+		}
 	}
 	m.cache.Set(key, next, ttl)
 	return true, nil

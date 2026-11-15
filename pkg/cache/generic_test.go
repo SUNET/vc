@@ -382,6 +382,22 @@ func TestFixedLifetimeMemoryCache_UpdateKeepsRemainingLife(t *testing.T) {
 	assert.False(t, ok, "an update must not restart the lifetime")
 }
 
+func TestFixedLifetimeMemoryCache_UpdateDoesNotRecreateExpiredEntry(t *testing.T) {
+	ctx := context.Background()
+	c := NewFixedLifetimeMemoryCache[string](100 * time.Millisecond)
+	c.Set(ctx, "k", "v1")
+
+	wrote, err := c.Update(ctx, "k", func(string) (string, time.Duration, bool) {
+		time.Sleep(300 * time.Millisecond) // the entry expires while fn runs
+		return "v2", 0, true
+	})
+	assert.ErrorIs(t, err, ErrNoDocuments)
+	assert.False(t, wrote)
+
+	_, ok := c.Get(ctx, "k")
+	assert.False(t, ok, "an update must not give an expired entry a new lifetime")
+}
+
 func TestMemoryCache_UpdateIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	c := NewMemoryCache[int](time.Minute)
@@ -583,6 +599,36 @@ func TestMongoCache_SetWithTTL_SameAsDefault(t *testing.T) {
 	// No shift; created_at should be ~now.
 	assert.InDelta(t, 0, age, float64(5*time.Second),
 		"created_at should be approximately now when TTL equals default")
+}
+
+func TestMongoCache_Update_RetriesOnConcurrentTTLChange(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_update_ttl_cas", 10*time.Minute, nil)
+	require.NoError(t, err)
+	c.Set(ctx, "k", "same")
+
+	calls := 0
+	wrote, err := c.Update(ctx, "k", func(cur string) (string, time.Duration, bool) {
+		calls++
+		if calls == 1 {
+			// Another writer changes only the lifetime; the value stays "same".
+			c.SetWithTTL(ctx, "k", "same", 2*time.Minute)
+		}
+		return "updated", 0, true
+	})
+	require.NoError(t, err)
+	require.True(t, wrote)
+	assert.Equal(t, 2, calls, "a TTL-only change must force a re-read")
+
+	var doc bson.M
+	require.NoError(t, client.Database("test_generic").Collection("cache_update_ttl_cas").
+		FindOne(ctx, bson.M{"_id": "k"}).Decode(&doc))
+	age := time.Since(doc["created_at"].(bson.DateTime).Time())
+	assert.InDelta(t, 8*time.Minute, age, float64(5*time.Second),
+		"the other writer's shortened lifetime must survive the update")
 }
 
 func TestMongoCache_SetNXWithTTL_CreatedAtShift(t *testing.T) {

@@ -239,7 +239,9 @@ func (m *MongoCache[V]) Update(ctx context.Context, key string, fn func(V) (V, t
 			return false, fmt.Errorf("mongo cache update marshal failed (cache=%s): %w", m.collection, err)
 		}
 
-		res, err := m.coll.ReplaceOne(ctx, bson.M{"_id": key, "json_value": entry.JSONValue}, updated)
+		// created_at is part of the match so a concurrent TTL-only change forces a retry.
+		filter := bson.M{"_id": key, "json_value": entry.JSONValue, "created_at": entry.CreatedAt}
+		res, err := m.coll.ReplaceOne(ctx, filter, updated)
 		if err != nil {
 			return false, fmt.Errorf("mongo cache update failed (cache=%s): %w", m.collection, err)
 		}
