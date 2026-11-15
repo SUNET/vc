@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -396,21 +397,21 @@ func TestUnknownLengthBodyReachesMiddlewareAndBinding(t *testing.T) {
 	type target struct {
 		AuthenticSource string `json:"authentic_source" form:"authentic_source"`
 	}
+	bind := func(_ context.Context, c *gin.Context) (any, error) {
+		pairs := extractResourcePairs(c)
+		v := &target{}
+		if err := client.Binding.Request(ctx, c, v); err != nil {
+			return nil, err
+		}
+		authorized := ""
+		if len(pairs) > 0 {
+			authorized = pairs[0].authenticSource
+		}
+		return map[string]string{"bound": v.AuthenticSource, "authorized": authorized}, nil
+	}
 	engine := gin.New()
 	engine.Use(client.Middleware.MaxBodySize(64))
-	client.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "bind", http.StatusOK,
-		func(_ context.Context, c *gin.Context) (any, error) {
-			pairs := extractResourcePairs(c)
-			v := &target{}
-			if err := client.Binding.Request(ctx, c, v); err != nil {
-				return nil, err
-			}
-			authorized := ""
-			if len(pairs) > 0 {
-				authorized = pairs[0].authenticSource
-			}
-			return map[string]string{"bound": v.AuthenticSource, "authorized": authorized}, nil
-		})
+	client.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "bind", http.StatusOK, bind)
 	server := httptest.NewServer(engine)
 	defer server.Close()
 
@@ -458,6 +459,37 @@ func TestUnknownLengthBodyReachesMiddlewareAndBinding(t *testing.T) {
 			}
 		})
 	}
+
+	// A body cut short of its Content-Length fails the middleware's read, and
+	// the binding must see that failure: the server's body reads
+	// io.ErrUnexpectedEOF once, then io.EOF. The engine has no MaxBodySize,
+	// whose reader repeats the failure itself. Only a raw connection sends
+	// such a request.
+	t.Run("cut short of its Content-Length", func(t *testing.T) {
+		bare := gin.New()
+		client.Server.RegEndpoint(ctx, bare.Group(""), http.MethodPost, "bind", http.StatusOK, bind)
+		server := httptest.NewServer(bare)
+		defer server.Close()
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		require.NoError(t, err)
+		defer conn.Close()
+		body := `{"authentic_source":"a"}`
+		_, err = fmt.Fprintf(conn, "POST /bind HTTP/1.1\r\nHost: test\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body)+1, body)
+		require.NoError(t, err)
+		require.NoError(t, conn.(*net.TCPConn).CloseWrite())
+
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		var reply struct {
+			Bound string         `json:"bound"`
+			Error map[string]any `json:"error"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&reply))
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		assert.Equal(t, "incomplete_request_body", reply.Error["title"])
+		assert.Empty(t, reply.Bound)
+	})
 }
 
 // The OAuth and OpenID4VCI branches return before publicError, so moving
