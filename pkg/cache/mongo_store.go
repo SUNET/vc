@@ -764,7 +764,50 @@ func (s *MongoStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContext
 		"verifier_response_code": bson.M{"$in": bson.A{nil, ""}},
 	}
 
-	err := s.coll.FindOneAndReplace(ctx, filter, *doc).Err()
+	// A replace would carry the caller's copy of the DISPLAY PREFERENCES
+	// too, and that copy is old.
+	//
+	// The caller read this context before credential verification ran,
+	// and verification takes as long as it takes. The browser posts the
+	// preference on its way to the wallet without awaiting the response
+	// (see wallet-handoff.js), so the write can land inside that window
+	// - and a wholesale replace then puts the session back the way it
+	// was found. For wallet_follows_redirect that is a same-device
+	// presentation that completes and then dead-ends instead of
+	// redirecting; for show_credential_details it is the user's choice
+	// quietly reverting.
+	//
+	// So: replace everything the claim brings, then merge the STORED
+	// preferences back over it, in one update. $literal keeps the
+	// replacement a document rather than an expression - without it a
+	// wallet-supplied error_description beginning with "$" would be read
+	// as a field path - and $ifNull normalises the omitempty absence of
+	// a false to an explicit false, so the merge carries a preference
+	// that was turned OFF as faithfully as one turned on.
+	replacement, err := bson.Marshal(doc)
+	if err != nil {
+		return false, fmt.Errorf("failed to claim the session outcome: encoding the outcome: %w", err)
+	}
+	var replacementDoc bson.D
+	if err := bson.Unmarshal(replacement, &replacementDoc); err != nil {
+		return false, fmt.Errorf("failed to claim the session outcome: encoding the outcome: %w", err)
+	}
+
+	update := mongo.Pipeline{bson.D{{Key: "$replaceWith", Value: bson.D{{Key: "$mergeObjects", Value: bson.A{
+		bson.D{{Key: "$literal", Value: replacementDoc}},
+		bson.D{
+			{Key: "_id", Value: "$_id"},
+			{Key: "show_credential_details", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$show_credential_details", false}}}},
+			{Key: "wallet_follows_redirect", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$wallet_follows_redirect", false}}}},
+		},
+	}}}}}}
+
+	// After-image, so the caller is told what was COMMITTED and the
+	// redirect decision it makes next reads the preference that won
+	// rather than the one it brought. The memory store does the same.
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var committed AuthorizationContext
+	err = s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&committed)
 	switch {
 	case errors.Is(err, mongo.ErrNoDocuments):
 		// Either the session is gone or it already has an outcome. Both
@@ -774,6 +817,7 @@ func (s *MongoStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContext
 	case err != nil:
 		return false, fmt.Errorf("failed to claim the session outcome: %w", err)
 	}
+	*doc = committed
 	return true, nil
 }
 
