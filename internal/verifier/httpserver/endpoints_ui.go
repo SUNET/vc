@@ -2,7 +2,6 @@ package httpserver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/oauth2"
 
 	"github.com/gin-contrib/sessions"
@@ -173,11 +173,9 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 
 	request := &apiv1.UIInteractionRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		// A body of the wrong shape (a payment amount that is a boolean, say)
-		// or with no complete JSON value answers in the OAuth error shape.
-		var typeErr *json.UnmarshalTypeError
-		var syntaxErr *json.SyntaxError
-		if errors.As(err, &typeErr) || errors.As(err, &syntaxErr) {
+		// A body the client got wrong (a payment amount that is a boolean, a
+		// body cut short) answers in the OAuth error shape the page reads.
+		if helpers.IsClientJSONError(err) {
 			return nil, &oauth2.OAuthError{ErrorCode: apiv1.ErrCodeInvalidRequest, ErrorDescription: "request body is not valid for this endpoint", HTTPStatus: http.StatusBadRequest, Cause: err}
 		}
 		return nil, err
