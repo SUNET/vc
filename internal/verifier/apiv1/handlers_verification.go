@@ -1174,10 +1174,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	reply := &VerificationDirectPostResponse{}
 
-	// WalletFollowsRedirect is committed by the browser tab BEFORE it leaves
-	// for the wallet (see /verification/session-preference callers), so it
+	// WalletFollowsRedirect is committed by the browser tab on its way to
+	// the wallet (see /verification/session-preference callers), so it
 	// survives native wallets and web wallets alike; DC API responses arrive
 	// from in-tab JS, so they are same-device by construction.
+	//
+	// Read from the CLAIMED context, which is why ClaimOutcome hands back
+	// what it committed: the tab fires that POST without awaiting it, so it
+	// can land while this presentation is being verified, and the copy read
+	// at the top of the handler would still say false.
 	sameDevice := authCtx.WalletFollowsRedirect || req.DCAPI
 	if sameDevice {
 		c.log.Debug("Same-device flow", "session_id", authCtx.SessionID, "wallet_follows_redirect", authCtx.WalletFollowsRedirect, "dc_api", req.DCAPI)

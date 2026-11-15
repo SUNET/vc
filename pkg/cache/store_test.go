@@ -381,6 +381,78 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 				assert.Empty(t, stored.Error)
 			}
 		})
+
+		// Read, preference write, claim - in that order, which is the
+		// order the real flow produces.
+		//
+		// The verification handler reads the context, credential
+		// verification runs, and the browser posts the preference on
+		// its way to the wallet without awaiting it, so the write lands
+		// in between. A claim that committed the caller's copy would
+		// put wallet_follows_redirect back to the false it was read as,
+		// and the completed same-device presentation would answer
+		// without its redirect.
+		t.Run("a preference written after the read survives the claim", func(t *testing.T) {
+			open(t, "contract-outcome-pref", "contract-outcome-state-pref")
+
+			// What the handler holds: the context as it was BEFORE the
+			// preference was posted.
+			inHand, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref"})
+			require.NoError(t, err)
+			require.False(t, inHand.WalletFollowsRedirect, "the premise: not set when the handler read it")
+
+			follows := true
+			require.NoError(t, store.SetDisplayPreferences(ctx, "contract-outcome-pref", true, &follows))
+
+			claim := *inHand
+			claim.Status = SessionStatusCompleted
+			claim.VerifierResponseCode = "contract-response-pref"
+			won, err := store.ClaimOutcome(ctx, &claim)
+			require.NoError(t, err)
+			require.True(t, won)
+
+			assert.True(t, claim.WalletFollowsRedirect,
+				"the winner is told what was committed, because that is what decides the redirect")
+			assert.True(t, claim.ShowCredentialDetails)
+
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref"})
+			require.NoError(t, err)
+			assert.True(t, stored.WalletFollowsRedirect, "and the stored preference is the one that was posted")
+			assert.True(t, stored.ShowCredentialDetails)
+			assert.Equal(t, SessionStatusCompleted, stored.Status, "while the outcome is still the claimed one")
+			assert.Equal(t, "contract-response-pref", stored.VerifierResponseCode)
+		})
+
+		// And the other direction, which omitempty makes a separate
+		// case: a preference turned OFF is absent from a document
+		// store, so a claim that only merged fields it could see would
+		// write the caller's true straight back over it.
+		t.Run("a preference turned off after the read survives the claim", func(t *testing.T) {
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID:             "contract-outcome-pref-off",
+				State:                 "contract-outcome-state-pref-off",
+				Status:                SessionStatusAwaitingPresentation,
+				ShowCredentialDetails: true,
+			}))
+
+			inHand, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref-off"})
+			require.NoError(t, err)
+			require.True(t, inHand.ShowCredentialDetails, "the premise: on when the handler read it")
+
+			require.NoError(t, store.SetDisplayPreferences(ctx, "contract-outcome-pref-off", false, nil))
+
+			claim := *inHand
+			claim.Status = SessionStatusCompleted
+			claim.VerifierResponseCode = "contract-response-pref-off"
+			won, err := store.ClaimOutcome(ctx, &claim)
+			require.NoError(t, err)
+			require.True(t, won)
+			assert.False(t, claim.ShowCredentialDetails)
+
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref-off"})
+			require.NoError(t, err)
+			assert.False(t, stored.ShowCredentialDetails, "the preference that was turned off stays off")
+		})
 	})
 
 	t.Run("GetByQueryFields", func(t *testing.T) {
@@ -1267,4 +1339,62 @@ func TestSetDisplayPreferencesRacingAnOutcome(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, HasOutcome(stored), "round %d: the outcome must survive the preferences written around it", round)
 	}
+}
+
+// And a preference write must not race a caller that is holding the context
+// Get handed it.
+//
+// Get returns the STORED pointer - that is deliberate, and documented on
+// GetSnapshot - so the verification handlers copy the whole struct out of it
+// (`updated := *authCtx`) with no lock of the store's. A preference write that
+// assigned into that same struct would be an unsynchronised write beside an
+// unsynchronised read: a Go data race, whose result is undefined rather than
+// merely stale.
+//
+// Only -race can see this. Without it the test passes either way, which is why
+// the reader copies the whole struct rather than asserting on a value.
+func TestSetDisplayPreferencesDoesNotRaceAReaderHoldingTheContext(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	const sessionID = "preference-reader-session"
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "preference-reader-state",
+		Status:    SessionStatusAwaitingPresentation,
+	}))
+
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: sessionID})
+	require.NoError(t, err)
+
+	var start sync.WaitGroup
+	var done sync.WaitGroup
+	start.Add(1)
+	done.Add(2)
+
+	go func() {
+		defer done.Done()
+		start.Wait()
+		for range 256 {
+			// What the verification handlers do with the context they
+			// read before verification ran.
+			snapshot := *held
+			_ = snapshot.WalletFollowsRedirect
+		}
+	}()
+	go func() {
+		defer done.Done()
+		follows := true
+		start.Wait()
+		for range 256 {
+			assert.NoError(t, store.SetDisplayPreferences(ctx, sessionID, true, &follows))
+		}
+	}()
+
+	start.Done()
+	done.Wait()
+
+	stored, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.True(t, stored.WalletFollowsRedirect, "and the preference still lands")
 }

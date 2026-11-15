@@ -900,10 +900,27 @@ func (c *MemoryStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContex
 		return false, nil
 	}
 
+	// The display preferences come from the STORE, not from the caller's
+	// copy. See MongoStore.ClaimOutcome: the caller read this context
+	// before verification ran, and a preference POST can land while it
+	// runs - the browser fires it without awaiting it on its way to the
+	// wallet - so committing the caller's copy wholesale puts the
+	// preference back the way it was found. For wallet_follows_redirect
+	// that is the difference between a same-device presentation
+	// redirecting and dead-ending.
+	committed := *doc
+	committed.ShowCredentialDetails = item.Value().ShowCredentialDetails
+	committed.WalletFollowsRedirect = item.Value().WalletFollowsRedirect
+
 	// Stale indices go first, exactly as Update does it.
 	c.deleteIndices(item.Value())
-	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
-	c.updateIndices(doc)
+	c.cache.Set(doc.SessionID, &committed, ttlcache.DefaultTTL)
+	c.updateIndices(&committed)
+
+	// And the caller is told what was committed, so the redirect
+	// decision it makes next reads the preference that won rather than
+	// the one it brought.
+	*doc = committed
 
 	return true, nil
 }
@@ -928,11 +945,31 @@ func (c *MemoryStore) SetDisplayPreferences(_ context.Context, sessionID string,
 	if item == nil {
 		return ErrNoDocuments
 	}
-	doc := item.Value()
-	doc.ShowCredentialDetails = showCredentialDetails
+
+	// Copy-on-write, not a mutation in place.
+	//
+	// Get hands back the STORED pointer, and the verification handlers
+	// copy the whole struct out of it (`updated := *authCtx`) without
+	// holding this lock - they cannot, the lock is the store's. Writing
+	// these fields into that same struct is an unsynchronised write
+	// beside an unsynchronised read: a Go data race, which the race
+	// detector will call and whose result is undefined, not merely
+	// stale. Swapping in a new document instead leaves every pointer a
+	// caller already holds immutable, so the worst outcome is a reader
+	// that sees the preference as it was a moment ago.
+	updated := *item.Value()
+	updated.ShowCredentialDetails = showCredentialDetails
 	if walletFollowsRedirect != nil {
-		doc.WalletFollowsRedirect = *walletFollowsRedirect
+		updated.WalletFollowsRedirect = *walletFollowsRedirect
 	}
+
+	// No indexed field changes here, but the swap goes through the same
+	// pair as every other replacement so that stays true by construction
+	// rather than by inspection.
+	c.deleteIndices(item.Value())
+	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.updateIndices(&updated)
+
 	return nil
 }
 

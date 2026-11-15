@@ -100,6 +100,14 @@ type AuthContextStore interface {
 	// callers, and nothing holds the session across them: the memory
 	// store hands out the stored pointer and the Mongo store replaces
 	// unconditionally, so the loser's write lands on top of the winner's.
+	//
+	// The DISPLAY PREFERENCES are the one thing the caller's document
+	// does NOT decide: they are taken from the stored context, because
+	// SetDisplayPreferences can land in that same window and a claim
+	// that carried the caller's copy would undo it. On a win the
+	// caller's document is updated to what was committed, so the
+	// decision it makes next - whether to hand back a redirect - reads
+	// the preference that won rather than the one it brought.
 	ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error)
 
 	// ClaimAuthSession atomically takes the Interactive Authorization handle
