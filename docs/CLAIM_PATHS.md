@@ -9,7 +9,9 @@ within what the elements before it selected:
 - A non-negative integer selects the element of an array at that index.
 
 An mdoc claim is `[namespace, element]`, such as
-`[org.iso.18013.5.1, given_name]` (section 7.2).
+`[org.iso.18013.5.1, given_name]` (section 7.2). The apigw stops at startup
+when an `auth_claims` entry or a `document_claims` `from` of an mdoc auth
+scope is any other pointer.
 
 ```yaml
 - path: [given_name]
