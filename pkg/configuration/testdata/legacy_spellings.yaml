@@ -5,6 +5,8 @@ common:
     pid:
       format: dc+sd-jwt
       vctm_file_path: /metadata/vctm_pid.json
+      claims:
+        - path: [address, true] # legacy
     ehic:
       format: dc+sd-jwt
       vctm_file_path: /metadata/vctm_ehic.json

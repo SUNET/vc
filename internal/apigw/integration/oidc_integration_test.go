@@ -665,7 +665,7 @@ func testExpiredSession(t *testing.T, env *oidcTestEnvironment) {
 // from its configuration.
 func testMissingRequiredClaims(t *testing.T, env *oidcTestEnvironment) {
 	config := createTestOIDCRPConfig(env.mockOP)
-	config.AttributeMapping["family_name"] = model.AttributeConfig{Claim: "family_name", Required: true}
+	config.AttributeMapping["family_name"] = model.AttributeConfig{Claim: claimpath.Keys("family_name"), Required: true}
 
 	sessionCache := pkgcache.NewMemoryCache[*oidcrp.Session](300 * time.Second)
 	defer sessionCache.Stop()

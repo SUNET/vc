@@ -47,6 +47,7 @@ discloses `date_awarded` in every element of `degrees`.
 
 | Field | Form |
 | --- | --- |
+| `common.credential_metadata.*.claims[].path` | pointer |
 | `common.credential_metadata.*.auxiliary_data.{to_wallet,to_issuer}[].path` | pointer |
 | `apigw.auth_providers.{oidc,saml}.attribute_mapping.*.claim` | pointer into the claims the mapping writes |
 | `apigw.data_sources.external_api.scopes.*.attribute_mapping.*.claim` | pointer into the scope's credential document |
