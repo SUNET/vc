@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -142,6 +144,97 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		})
 		require.ErrorIs(t, err, ErrNoDocuments)
 		assert.Nil(t, second)
+	})
+
+	// A resume REPLACES the prepared query, and the replacement is what
+	// comes back - from the call and from a later read.
+	//
+	// The query is stored twice (dcql_query and dcql_query_exact, which
+	// is preferred on read), so a backend that moves only one of them
+	// answers with the query the resume replaced while reporting
+	// success. Asserted as JSON text because the exact copy is text: a
+	// comparison that goes through float64 is the one thing that cannot
+	// see a rounded req param.
+	t.Run("ResumeIssuerStateReplacesTheQuery", func(t *testing.T) {
+		prepared := dcqlWithParam("prepared", "1.00000000000000001")
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-q",
+			IssuerState: "contract-issuer-state-q",
+			DCQLQuery:   prepared,
+		}))
+
+		resume := dcqlWithParam("resumed", "123456789012345678901234567890")
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-q", &IssuerStateResume{
+			AuthSession: "contract-auth-session-q",
+			DCQLQuery:   resume,
+			ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+			CreatedAt:   time.Now(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resumed.DCQLQuery)
+		assertQueryIs(t, resume, resumed.DCQLQuery, "the resumed query is what the call returns")
+
+		stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-resume-q"})
+		require.NoError(t, err)
+		require.NotNil(t, stored.DCQLQuery)
+		assertQueryIs(t, resume, stored.DCQLQuery, "and what the next read finds")
+	})
+
+	// And a resume carrying NO query leaves none behind. Same defect,
+	// the other way round: an exact copy that outlives the query it was
+	// derived from is read back in preference to the absence, so the
+	// session resolves to a query nobody resumed it with.
+	t.Run("ResumeIssuerStateWithoutAQueryClearsIt", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-n",
+			IssuerState: "contract-issuer-state-n",
+			DCQLQuery:   dcqlWithParam("prepared", "7"),
+		}))
+
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-n", &IssuerStateResume{
+			AuthSession: "contract-auth-session-n",
+			ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+			CreatedAt:   time.Now(),
+		})
+		require.NoError(t, err)
+		assert.Nil(t, resumed.DCQLQuery, "a resume with no query resumes to no query")
+
+		stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-resume-n"})
+		require.NoError(t, err)
+		assert.Nil(t, stored.DCQLQuery, "and the next read must not find the prepared one")
+	})
+
+	// And a resume whose query holds a number no backend can store in
+	// its structured form still resumes, with the number intact.
+	//
+	// 1e400 is past int64 and float64 both, so the document-valued copy
+	// cannot hold it at all - which is what the exact text copy is for.
+	// A backend that lets that copy's encoder decide the fate of the
+	// whole update refuses the resume outright, and a prepared session
+	// becomes unresumable because of a req param the operator was
+	// entitled to configure.
+	t.Run("ResumeIssuerStateWithAnUnstorableNumber", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-resume-x",
+			IssuerState: "contract-issuer-state-x",
+			DCQLQuery:   dcqlWithParam("prepared", "7"),
+		}))
+
+		resume := dcqlWithParam("resumed", "1e400")
+		resumed, err := store.ResumeIssuerState(ctx, "contract-issuer-state-x", &IssuerStateResume{
+			AuthSession: "contract-auth-session-x",
+			DCQLQuery:   resume,
+			ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+			CreatedAt:   time.Now(),
+		})
+		require.NoError(t, err, "a req param beyond float64 must not make the resume fail")
+		require.NotNil(t, resumed.DCQLQuery)
+		assertQueryIs(t, resume, resumed.DCQLQuery, "the resumed query is what the call returns")
+
+		stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-resume-x"})
+		require.NoError(t, err)
+		require.NotNil(t, stored.DCQLQuery)
+		assertQueryIs(t, resume, stored.DCQLQuery, "and what the next read finds")
 	})
 
 	t.Run("GetByQueryFields", func(t *testing.T) {
@@ -841,4 +934,35 @@ func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
 	assert.True(t, after.Forfeited,
 		"a consumed code must not be resurrected by a caller that read before it was consumed")
 	assert.Equal(t, "some-provider", after.AuthProvider, "and the caller's own change must still land")
+}
+
+// dcqlWithParam builds a query distinguishable by both its return name
+// and a req param literal that only the exact copy can carry.
+func dcqlWithParam(returns, literal string) *openid4vp.DCQL {
+	return &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "nym", Format: openid4vp.FormatZkpReq,
+		Meta: openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
+		Req: []openid4vp.ReqItem{{
+			FnID: openid4vp.FunctionPseudonym, Return: returns,
+			Params: map[string]any{"p": json.Number(literal)},
+		}},
+	}}}
+}
+
+// assertQueryIs compares two queries as JSON text, byte for byte.
+//
+// Not JSONEq: that decodes both sides into interface{}, where every
+// number becomes a float64, and a req param rounded from
+// 123456789012345678901234567890 to 1.2345678901234568e+29 compares
+// equal to the literal it lost. Rounding a req param is the defect
+// these tests exist to catch, so the comparison has to be the one that
+// can see it. Both sides come from json.Marshal of the same struct
+// type, so field order is fixed and string equality is well defined.
+func assertQueryIs(t *testing.T, want, got *openid4vp.DCQL, msg string) {
+	t.Helper()
+	wantJSON, err := json.Marshal(want)
+	require.NoError(t, err)
+	gotJSON, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.Equal(t, string(wantJSON), string(gotJSON), msg)
 }
