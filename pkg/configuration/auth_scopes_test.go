@@ -16,8 +16,9 @@ import (
 // because the struct-level validation sees only the DataSources stanza.
 func TestCheckAuthScopes(t *testing.T) {
 	credentialMetadata := map[string]*model.CredentialMetadata{
-		"pid":   {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
-		"eduid": {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:eduid:1"}},
+		"pid":      {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+		"eduid":    {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:eduid:1"}},
+		"pid_mdoc": {Format: "mso_mdoc"},
 	}
 
 	cfgWith := func(scopes map[string]model.DatastoreScope) *model.Cfg {
@@ -73,6 +74,38 @@ func TestCheckAuthScopes(t *testing.T) {
 		// Sorted, so the same config reports the same message every time.
 		assert.Regexp(t, `ehic\.auth_scopes\.aaa, ehic\.auth_scopes\.zzz`, err.Error())
 	})
+
+	// OpenID4VP 1.0 section 7.2: an mdoc claim is [namespace, element].
+	for name, entry := range map[string]struct {
+		entry model.AuthScopeEntry
+		where string
+	}{
+		"an mdoc auth claim below an element": {
+			model.AuthScopeEntry{AuthClaims: []claimpath.Pointer{
+				claimpath.Keys("eu.europa.ec.eudi.pid.1", "given_name"),
+				claimpath.New(claimpath.Key("eu.europa.ec.eudi.pid.1"), claimpath.Key("nationality"), claimpath.Index(0)),
+			}},
+			"ehic.auth_scopes.pid_mdoc.auth_claims[1]",
+		},
+		"an mdoc document claim source of one key": {
+			model.AuthScopeEntry{
+				AuthClaims:     []claimpath.Pointer{claimpath.Keys("eu.europa.ec.eudi.pid.1", "given_name")},
+				DocumentClaims: model.DocumentClaims{{From: claimpath.Keys("birth_date"), To: claimpath.Keys("birth_date")}},
+			},
+			"ehic.auth_scopes.pid_mdoc.document_claims[0].from",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := checkAuthScopes(cfgWith(map[string]model.DatastoreScope{
+				"ehic": {
+					AuthProvider: model.AuthProviderOpenID4VP,
+					AuthScopes:   map[string]model.AuthScopeEntry{"pid_mdoc": entry.entry},
+				},
+			}))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), entry.where+": claimpath:")
+		})
+	}
 
 	t.Run("only openid4vp scopes are checked", func(t *testing.T) {
 		// auth_scopes has no meaning for a SAML/OIDC-authenticated credential,

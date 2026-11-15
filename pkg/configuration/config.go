@@ -1248,6 +1248,37 @@ func checkAuthScopes(cfg *model.Cfg) error {
 	if len(problems) > 0 {
 		return fmt.Errorf("apigw.data_sources.datastore.scopes: %s name no scope in common.credential_metadata, so no credential can be requested for them", strings.Join(problems, ", "))
 	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Datastore.Scopes)) {
+		credential := cfg.APIGW.DataSources.Datastore.Scopes[scope]
+		if credential.AuthProvider != model.AuthProviderOpenID4VP {
+			continue
+		}
+		for _, authScope := range slices.Sorted(maps.Keys(credential.AuthScopes)) {
+			where := fmt.Sprintf("apigw.data_sources.datastore.scopes.%s.auth_scopes.%s", scope, authScope)
+			if err := checkPresentedClaims(where, cfg.GetFormatForScope(authScope), credential.AuthScopes[authScope]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkPresentedClaims refuses a claim of the presented credential that a
+// presentation of format holds at no location, such as an mdoc claim other
+// than [namespace, element]: it is never present, so its auth scope would
+// refuse every presentation.
+func checkPresentedClaims(where, format string, entry model.AuthScopeEntry) error {
+	shape := openid4vp.PresentedShape(format)
+	for i, claim := range entry.AuthClaims {
+		if _, err := shape.Locate(claim); err != nil {
+			return fmt.Errorf("%s.auth_claims[%d]: %w", where, i, err)
+		}
+	}
+	for i, claim := range entry.DocumentClaims {
+		if _, err := shape.Locate(claim.From); err != nil {
+			return fmt.Errorf("%s.document_claims[%d].from: %w", where, i, err)
+		}
+	}
 	return nil
 }
 
