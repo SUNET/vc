@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,5 +136,46 @@ func TestGetURL(t *testing.T) {
 		if _, _, err := c.GetURL(context.Background(), u); err == nil {
 			t.Errorf("GetURL(%q): expected cross-origin error", u)
 		}
+	}
+}
+
+func TestRedirectToOtherOriginIsRefused(t *testing.T) {
+	var leaked atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Store(true)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer other.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "test-token", "expires_in": 3600})
+	})
+	// Same hostname, different port: Go would keep the Authorization header.
+	mux.HandleFunc("/base/other-port", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/base/resource", http.StatusFound)
+	})
+	mux.HandleFunc("/base/same-origin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/base/resource", http.StatusFound)
+	})
+	mux.HandleFunc("/base/resource", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	_, err := c.Get(context.Background(), "/other-port", nil)
+	if err == nil {
+		t.Fatal("expected the cross-origin redirect to be refused")
+	}
+	if leaked.Load() {
+		t.Error("Authorization header reached the other origin")
+	}
+
+	if _, err := c.Get(context.Background(), "/same-origin", nil); err != nil {
+		t.Errorf("same-origin redirect must still work: %v", err)
 	}
 }

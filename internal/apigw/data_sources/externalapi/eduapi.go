@@ -24,6 +24,9 @@ type EduAPI struct {
 // and the external_api scopes that reference it. Each scope's AttributeMapping
 // is wired into a per-credential-type mapper.
 func NewEduAPI(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*EduAPI, error) {
+	if len(remote.Scopes) == 0 {
+		remote.Scopes = []string{eduapi.DefaultScope}
+	}
 	base, err := newService(remote, scopes, "application/json", "eduapi", docCache, tokenCache, log)
 	if err != nil {
 		return nil, err

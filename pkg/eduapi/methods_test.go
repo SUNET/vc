@@ -97,9 +97,26 @@ func TestGetCourseOfferingOrganizationAcademicSession(t *testing.T) {
 	assert.Equal(t, "term", as.SessionType)
 }
 
+// linkStyle is how the test server writes the target of a next link.
+type linkStyle int
+
+const (
+	linkRootRelative linkStyle = iota // </path?query>
+	linkAbsolute                      // <https://host/path?query>
+	linkQueryOnly                     // <?query>
+	linkSibling                       // <enrollments?query>
+)
+
+var linkStyles = map[string]linkStyle{
+	"root-relative": linkRootRelative,
+	"absolute":      linkAbsolute,
+	"query-only":    linkQueryOnly,
+	"sibling":       linkSibling,
+}
+
 // enrollmentServer pages enrollments two at a time, advertising each next page
-// with the given link style (relative or absolute).
-func enrollmentServer(t *testing.T, all []Enrollment, absolute bool, gotFilters *[]string) (*httptest.Server, *Client) {
+// with the given link style.
+func enrollmentServer(t *testing.T, all []Enrollment, style linkStyle, gotFilters *[]string) (*httptest.Server, *Client) {
 	t.Helper()
 	mux := http.NewServeMux()
 	var srv *httptest.Server
@@ -110,12 +127,20 @@ func enrollmentServer(t *testing.T, all []Enrollment, absolute bool, gotFilters 
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		end := min(offset+2, len(all))
 		if end < len(all) {
-			q := url.Values{"filter": {r.URL.Query().Get("filter")}, "offset": {strconv.Itoa(end)}}
-			target := basePath + "/enrollments?" + q.Encode()
-			if absolute {
-				target = srv.URL + target
+			query := url.Values{"filter": {r.URL.Query().Get("filter")}, "offset": {strconv.Itoa(end)}}.Encode()
+			var target string
+			switch style {
+			case linkAbsolute:
+				target = srv.URL + basePath + "/enrollments?" + query
+			case linkQueryOnly:
+				target = "?" + query
+			case linkSibling:
+				target = "enrollments?" + query
+			default:
+				target = basePath + "/enrollments?" + query
 			}
-			w.Header().Set("Link", fmt.Sprintf(`<%s>; rel="next", <%s>; rel="last"`, target, target))
+			// The comma inside the quoted title is not a link separator (RFC 8288).
+			w.Header().Set("Link", fmt.Sprintf(`<%s>; title="Semester, spring"; rel="next", <%s>; rel="last"`, target, target))
 		}
 		writeJSON(w, all[offset:end])
 	})
@@ -134,10 +159,10 @@ func sampleEnrollments() []Enrollment {
 }
 
 func TestListActiveEnrollmentsFollowsNextAndFiltersInactive(t *testing.T) {
-	for _, absolute := range []bool{false, true} {
-		t.Run(fmt.Sprintf("absolute=%v", absolute), func(t *testing.T) {
+	for name, style := range linkStyles {
+		t.Run(name, func(t *testing.T) {
 			var filters []string
-			_, client := enrollmentServer(t, sampleEnrollments(), absolute, &filters)
+			_, client := enrollmentServer(t, sampleEnrollments(), style, &filters)
 
 			got, err := client.ListActiveEnrollments(context.Background(), "p-lisa")
 			require.NoError(t, err)
@@ -156,7 +181,7 @@ func TestListActiveEnrollmentsFollowsNextAndFiltersInactive(t *testing.T) {
 }
 
 func TestListActiveEnrollmentsEmpty(t *testing.T) {
-	_, client := enrollmentServer(t, []Enrollment{}, false, nil)
+	_, client := enrollmentServer(t, []Enrollment{}, linkRootRelative, nil)
 
 	got, err := client.ListActiveEnrollments(context.Background(), "p-none")
 	require.NoError(t, err)
@@ -165,7 +190,7 @@ func TestListActiveEnrollmentsEmpty(t *testing.T) {
 
 func TestListActiveEnrollmentsRejectsQuote(t *testing.T) {
 	var filters []string
-	_, client := enrollmentServer(t, sampleEnrollments(), false, &filters)
+	_, client := enrollmentServer(t, sampleEnrollments(), linkRootRelative, &filters)
 
 	for _, id := range []string{"x' OR person!='y", `a\b`} {
 		_, err := client.ListActiveEnrollments(context.Background(), id)
@@ -216,6 +241,11 @@ func TestNextLink(t *testing.T) {
 		{"case-insensitive", []string{`</a?o=2>; REL="Next"`}, "/a?o=2"},
 		{"malformed", []string{`not a link`}, ""},
 		{"prefix not next", []string{`</a>; rel="nextish"`}, ""},
+		{"comma in quoted param", []string{`</a?o=2>; title="Semester, spring"; rel="next"`}, "/a?o=2"},
+		{"comma in quoted param of earlier link", []string{`</f>; title="a, b"; rel="first", </a?o=2>; rel="next"`}, "/a?o=2"},
+		{"escaped quote in param", []string{`</a?o=2>; title="say \"hi, there\""; rel="next"`}, "/a?o=2"},
+		{"semicolon in quoted param", []string{`</a>; title="x; rel=next"; rel="last"`}, ""},
+		{"comma in target", []string{`</a?ids=1,2>; rel="next"`}, "/a?ids=1,2"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

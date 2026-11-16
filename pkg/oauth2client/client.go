@@ -7,6 +7,7 @@ package oauth2client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,7 +70,7 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 		baseURL:      cfg.BaseURL,
 		accept:       accept,
 		name:         cfg.Name,
-		httpClient:   &http.Client{Timeout: cfg.Timeout},
+		httpClient:   &http.Client{Timeout: cfg.Timeout, CheckRedirect: sameOriginRedirect},
 		log:          log.New(cfg.Name),
 		tokenURL:     cfg.TokenURL,
 		clientID:     cfg.ClientID,
@@ -77,6 +78,20 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 		scopes:       cfg.Scopes,
 		tokenCache:   cfg.TokenCache,
 	}, nil
+}
+
+// sameOriginRedirect stops a redirect from carrying credentials to another origin.
+// Go's default policy keeps the Authorization header across a port or scheme change
+// on the same hostname.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	first := via[0].URL
+	if req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return fmt.Errorf("refusing redirect from %s://%s to %s://%s: different origin", first.Scheme, first.Host, req.URL.Scheme, req.URL.Host)
+	}
+	return nil
 }
 
 // tokenResponse is the OAuth 2.0 token endpoint response.
@@ -172,32 +187,55 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte
 	return body, err
 }
 
-// GetWithHeaders is Get that also returns the response headers.
-func (c *Client) GetWithHeaders(ctx context.Context, path string, query url.Values) ([]byte, http.Header, error) {
+// URL returns the absolute URL that Get and GetWithHeaders request for path and query.
+func (c *Client) URL(path string, query url.Values) string {
 	u := c.baseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
-	return c.do(ctx, u, path)
+	return u
+}
+
+// GetWithHeaders is Get that also returns the response headers.
+func (c *Client) GetWithHeaders(ctx context.Context, path string, query url.Values) ([]byte, http.Header, error) {
+	return c.do(ctx, c.URL(path, query), path)
+}
+
+// Resolve resolves ref against from, the URL of the response that carried it
+// (RFC 8288), and refuses a result whose scheme or host differs from the base
+// URL so the bearer token is never sent to another origin.
+func (c *Client) Resolve(from, ref string) (string, error) {
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse base URL: %w", c.name, err)
+	}
+	fromURL, err := url.Parse(from)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse URL %q: %w", c.name, from, err)
+	}
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse URL %q: %w", c.name, ref, err)
+	}
+	target := fromURL.ResolveReference(refURL)
+	if target.Scheme != base.Scheme || target.Host != base.Host {
+		return "", fmt.Errorf("%s: refusing URL %q: different origin than base URL", c.name, ref)
+	}
+	return target.String(), nil
 }
 
 // GetURL performs an authenticated GET to rawURL, which may be relative to the
-// base URL's host or absolute. An absolute URL must share scheme and host with
-// the base URL so the bearer token is never sent to another origin.
+// base URL or absolute. It is refused when it leaves the base URL's origin.
 func (c *Client) GetURL(ctx context.Context, rawURL string) ([]byte, http.Header, error) {
-	base, err := url.Parse(c.baseURL)
+	target, err := c.Resolve(c.baseURL, rawURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: parse base URL: %w", c.name, err)
+		return nil, nil, err
 	}
-	ref, err := url.Parse(rawURL)
+	u, err := url.Parse(target)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: parse URL %q: %w", c.name, rawURL, err)
+		return nil, nil, fmt.Errorf("%s: parse URL %q: %w", c.name, target, err)
 	}
-	target := base.ResolveReference(ref)
-	if target.Scheme != base.Scheme || target.Host != base.Host {
-		return nil, nil, fmt.Errorf("%s: refusing URL %q: different origin than base URL", c.name, rawURL)
-	}
-	return c.do(ctx, target.String(), target.Path)
+	return c.do(ctx, target, u.Path)
 }
 
 // do performs the authenticated GET to u; errPath is used in error messages.

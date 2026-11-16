@@ -42,6 +42,7 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 	}
 
 	q := url.Values{"filter": {"person='" + personID + "'"}}
+	pageURL := c.http.URL("/enrollments", q)
 	data, header, err := c.http.GetWithHeaders(ctx, "/enrollments", q)
 
 	var active []Enrollment
@@ -66,7 +67,12 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 		if page >= maxEnrollmentPages {
 			return nil, fmt.Errorf("eduapi: enrollments exceed %d pages", maxEnrollmentPages)
 		}
-		data, header, err = c.http.GetURL(ctx, next)
+		// A relative link is relative to the page that carried it, not to the base URL.
+		pageURL, err = c.http.Resolve(pageURL, next)
+		if err != nil {
+			return nil, err
+		}
+		data, header, err = c.http.GetURL(ctx, pageURL)
 	}
 }
 
@@ -102,16 +108,16 @@ func nextLink(h http.Header) string {
 	for _, v := range h.Values("Link") {
 		for v != "" {
 			start := strings.IndexByte(v, '<')
-			end := strings.IndexByte(v, '>')
-			if start < 0 || end < start {
+			if start < 0 {
 				break
 			}
-			target, rest := v[start+1:end], v[end+1:]
-			params := rest
-			v = ""
-			if i := strings.IndexByte(rest, ','); i >= 0 {
-				params, v = rest[:i], rest[i+1:]
+			end := strings.IndexByte(v[start:], '>')
+			if end < 0 {
+				break
 			}
+			target := v[start+1 : start+end]
+			params, rest := cutOutsideQuotes(v[start+end+1:], ',')
+			v = rest
 			if hasRelNext(params) {
 				return target
 			}
@@ -120,17 +126,37 @@ func nextLink(h http.Header) string {
 	return ""
 }
 
+// hasRelNext reports whether the link parameters carry rel=next.
 func hasRelNext(params string) bool {
-	for p := range strings.SplitSeq(params, ";") {
+	for params != "" {
+		var p string
+		p, params = cutOutsideQuotes(params, ';')
 		k, val, ok := strings.Cut(strings.TrimSpace(p), "=")
-		if !ok || !strings.EqualFold(k, "rel") {
+		if !ok || !strings.EqualFold(strings.TrimSpace(k), "rel") {
 			continue
 		}
-		for rel := range strings.FieldsSeq(strings.Trim(val, `"`)) {
+		for rel := range strings.FieldsSeq(strings.Trim(strings.TrimSpace(val), `"`)) {
 			if strings.EqualFold(rel, "next") {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// cutOutsideQuotes splits s at the first sep that is not inside a quoted string.
+// A backslash escapes the next byte inside quotes.
+func cutOutsideQuotes(s string, sep byte) (before, after string) {
+	quoted := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case quoted && c == '\\':
+			i++
+		case c == '"':
+			quoted = !quoted
+		case !quoted && c == sep:
+			return s[:i], s[i+1:]
+		}
+	}
+	return s, ""
 }
