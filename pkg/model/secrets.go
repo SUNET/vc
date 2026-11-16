@@ -143,6 +143,12 @@ type OIDCOPSecrets struct {
 	// Only clients listed here will have their secrets applied; clients not
 	// present in this map keep whatever value the main config provides (which
 	// will be empty after ApplySecrets clears them).
+	//
+	// A client whose entry sets client_secret_env is filled from the
+	// environment AFTER this map is applied, so the environment wins. The
+	// key is a client_id, which means a client whose client_id_env names
+	// the environment too is matched on the resolved value - the loader
+	// resolves identities before calling ApplySecrets.
 	StaticClients map[string]string `yaml:"static_clients,omitempty" doc_example:"<client_id>: \"<client_secret>\""`
 }
 
