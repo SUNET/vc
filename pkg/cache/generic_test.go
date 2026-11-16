@@ -273,26 +273,17 @@ func readUntilGone(c *MemoryCache[string], key string, step, total time.Duration
 	return ok
 }
 
-func TestMemoryCache_ReadsExtendLifetimeByDefault(t *testing.T) {
+func TestMemoryCache_ReadsDoNotExtendLifetime(t *testing.T) {
 	c := NewMemoryCache[string](200 * time.Millisecond)
 	defer c.Stop()
 	c.Set(context.Background(), "k", "v")
 
-	assert.True(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond),
-		"default behaviour is a sliding lifetime")
-}
-
-func TestMemoryCache_WithAbsoluteExpiry_ReadsDoNotExtendLifetime(t *testing.T) {
-	c := NewMemoryCache[string](200*time.Millisecond, WithAbsoluteExpiry())
-	defer c.Stop()
-	c.Set(context.Background(), "k", "v")
-
 	assert.False(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond),
-		"entry must expire a fixed time after Set however often it is read")
+		"entry must expire a fixed time after Set however often it is read, as in MongoCache")
 }
 
-func TestMemoryCache_WithAbsoluteExpiry_SetWithTTL(t *testing.T) {
-	c := NewMemoryCache[string](time.Hour, WithAbsoluteExpiry())
+func TestMemoryCache_SetWithTTL_ReadsDoNotExtendLifetime(t *testing.T) {
+	c := NewMemoryCache[string](time.Hour)
 	defer c.Stop()
 	c.SetWithTTL(context.Background(), "k", "v", 200*time.Millisecond)
 
@@ -338,21 +329,9 @@ func TestMemoryCache_SetNXWithTTL_ZeroTTL_UsesDefault(t *testing.T) {
 	assert.False(t, found, "zero TTL should fall back to default TTL, not infinite")
 }
 
-func TestMemoryCache_ReadsExtendLifeByDefault(t *testing.T) {
+func TestMemoryCache_GetAndGetErrDoNotExtendLife(t *testing.T) {
 	ctx := context.Background()
-	c := NewMemoryCache[string](200 * time.Millisecond)
-	c.Set(ctx, "k", "v")
-
-	for range 4 {
-		time.Sleep(100 * time.Millisecond)
-		_, ok := c.Get(ctx, "k")
-		require.True(t, ok, "touch-on-hit keeps a polled entry alive")
-	}
-}
-
-func TestFixedLifetimeMemoryCache_ReadsDoNotExtendLife(t *testing.T) {
-	ctx := context.Background()
-	c := NewFixedLifetimeMemoryCache[string](300 * time.Millisecond)
+	c := NewMemoryCache[string](300 * time.Millisecond)
 	c.Set(ctx, "k", "v")
 
 	for range 2 {
@@ -367,9 +346,9 @@ func TestFixedLifetimeMemoryCache_ReadsDoNotExtendLife(t *testing.T) {
 	assert.False(t, ok, "polling must not extend the lifetime")
 }
 
-func TestFixedLifetimeMemoryCache_UpdateKeepsRemainingLife(t *testing.T) {
+func TestMemoryCache_UpdateKeepsRemainingLife(t *testing.T) {
 	ctx := context.Background()
-	c := NewFixedLifetimeMemoryCache[string](300 * time.Millisecond)
+	c := NewMemoryCache[string](300 * time.Millisecond)
 	c.Set(ctx, "k", "v1")
 
 	time.Sleep(150 * time.Millisecond)
@@ -382,9 +361,9 @@ func TestFixedLifetimeMemoryCache_UpdateKeepsRemainingLife(t *testing.T) {
 	assert.False(t, ok, "an update must not restart the lifetime")
 }
 
-func TestFixedLifetimeMemoryCache_UpdateDoesNotRecreateExpiredEntry(t *testing.T) {
+func TestMemoryCache_UpdateDoesNotRecreateExpiredEntry(t *testing.T) {
 	ctx := context.Background()
-	c := NewFixedLifetimeMemoryCache[string](100 * time.Millisecond)
+	c := NewMemoryCache[string](100 * time.Millisecond)
 	c.Set(ctx, "k", "v1")
 
 	wrote, err := c.Update(ctx, "k", func(string) (string, time.Duration, bool) {

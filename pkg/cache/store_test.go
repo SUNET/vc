@@ -38,6 +38,61 @@ func TestMemoryStoreSaveAnchorsCreatedAt(t *testing.T) {
 	assert.Equal(t, anchor, second.CreatedAt, "a re-save must keep the original anchor")
 }
 
+// runAuthContextStoreRetentionTests is the rule both backends must meet: a
+// context is kept until CreatedAt + the store's ttl, and neither reading nor
+// writing it moves that. MongoStore gets it from a TTL index on created_at;
+// MemoryStore has to be built to the same rule or the two deployments answer
+// "is this still here?" differently. ttl is the retention the store was built with.
+func runAuthContextStoreRetentionTests(t *testing.T, store AuthContextStore, ttl time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("a context created in the past expires at CreatedAt plus ttl", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "retention-past",
+			CreatedAt: time.Now().Add(-(ttl - 2*time.Second)),
+		}))
+		_, err := store.GetByID(ctx, "retention-past")
+		require.NoError(t, err, "still within its retention")
+
+		require.Eventually(t, func() bool {
+			_, err := store.GetByID(ctx, "retention-past")
+			return err != nil
+		}, 15*time.Second, 250*time.Millisecond, "kept past CreatedAt + ttl")
+	})
+
+	t.Run("reads do not extend it", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "retention-read",
+			CreatedAt: time.Now().Add(-(ttl - 3*time.Second)),
+		}))
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := store.GetByID(ctx, "retention-read"); err != nil {
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		t.Fatal("polling kept the context alive past CreatedAt + ttl")
+	})
+
+	t.Run("a write does not restart the countdown", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "retention-write",
+			CreatedAt: time.Now().Add(-(ttl - 3*time.Second)),
+		}))
+		doc, err := store.GetByID(ctx, "retention-write")
+		require.NoError(t, err)
+		doc.Consent = true
+		require.NoError(t, store.Update(ctx, doc))
+
+		require.Eventually(t, func() bool {
+			_, err := store.GetByID(ctx, "retention-write")
+			return err != nil
+		}, 15*time.Second, 250*time.Millisecond, "an Update restarted the lifetime")
+	})
+}
+
 // TestInterfaceContract_Memory runs the shared contract tests against the MemoryStore.
 func TestInterfaceContract_Memory(t *testing.T) {
 	store := NewMemoryStore(5 * time.Minute)
@@ -852,4 +907,9 @@ func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
 	assert.True(t, after.Forfeited,
 		"a consumed code must not be resurrected by a caller that read before it was consumed")
 	assert.Equal(t, "some-provider", after.AuthProvider, "and the caller's own change must still land")
+}
+
+func TestMemoryStore_RetentionFollowsCreatedAt(t *testing.T) {
+	const ttl = 5 * time.Second
+	runAuthContextStoreRetentionTests(t, NewMemoryStore(ttl), ttl)
 }

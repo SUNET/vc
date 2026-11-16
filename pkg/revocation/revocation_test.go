@@ -438,7 +438,7 @@ func TestStatusListChecker_CacheDoesNotSlide(t *testing.T) {
 	defer server.Close()
 
 	const life = 400 * time.Millisecond
-	statusCache := cache.NewMemoryCache[[]uint8](life, cache.WithAbsoluteExpiry())
+	statusCache := cache.NewMemoryCache[[]uint8](life)
 	defer statusCache.Stop()
 	checker, err := NewStatusListChecker(
 		WithCache(statusCache),

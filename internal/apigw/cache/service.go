@@ -37,11 +37,6 @@ func NewTestMemoryCache[V any](ttl time.Duration) *pkgcache.MemoryCache[V] {
 	return pkgcache.NewMemoryCache[V](ttl)
 }
 
-// NewTestFixedLifetimeMemoryCache returns an in-memory fixed-lifetime Cache for use in tests only.
-func NewTestFixedLifetimeMemoryCache[V any](ttl time.Duration) *pkgcache.MemoryCache[V] {
-	return pkgcache.NewFixedLifetimeMemoryCache[V](ttl)
-}
-
 // Service holds all caches used by the apigw service.
 type Service struct {
 	cfg    *model.Cfg
@@ -157,11 +152,11 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: vci_nonce: %w", err)
 	}
 
-	if s.IssuanceStatus, err = pkgcache.NewFixedLifetimeCache[*IssuanceStatusRecord](cs, ctx, "apigw_issuance_status", IssuanceStatusTTL); err != nil {
+	if s.IssuanceStatus, err = pkgcache.NewGenericCache[*IssuanceStatusRecord](cs, ctx, "apigw_issuance_status", IssuanceStatusTTL); err != nil {
 		return nil, fmt.Errorf("cache: issuance_status: %w", err)
 	}
 
-	if s.NotificationBinding, err = pkgcache.NewFixedLifetimeCache[string](cs, ctx, "apigw_notification_ids", IssuanceStatusTTL); err != nil {
+	if s.NotificationBinding, err = pkgcache.NewGenericCache[string](cs, ctx, "apigw_notification_ids", IssuanceStatusTTL); err != nil {
 		return nil, fmt.Errorf("cache: notification_ids: %w", err)
 	}
 

@@ -29,8 +29,8 @@ func newStatusTestClient(t *testing.T) *Client {
 	return &Client{
 		log: log,
 		cacheService: &cache.Service{
-			IssuanceStatus:      cache.NewTestFixedLifetimeMemoryCache[*cache.IssuanceStatusRecord](time.Hour),
-			NotificationBinding: cache.NewTestFixedLifetimeMemoryCache[string](time.Hour),
+			IssuanceStatus:      cache.NewTestMemoryCache[*cache.IssuanceStatusRecord](time.Hour),
+			NotificationBinding: cache.NewTestMemoryCache[string](time.Hour),
 		},
 	}
 }

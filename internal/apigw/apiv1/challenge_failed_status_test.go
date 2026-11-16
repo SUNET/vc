@@ -14,7 +14,7 @@ import (
 // returns the ids a test needs to continue and to poll.
 func openPreparedExchange(t *testing.T, client *Client) (issuanceID, authSession string) {
 	t.Helper()
-	client.cacheService.IssuanceStatus = apigwcache.NewTestFixedLifetimeMemoryCache[*apigwcache.IssuanceStatusRecord](time.Hour)
+	client.cacheService.IssuanceStatus = apigwcache.NewTestMemoryCache[*apigwcache.IssuanceStatusRecord](time.Hour)
 
 	prepared, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
 		Scope:         challengeScope,

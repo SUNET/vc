@@ -68,8 +68,9 @@ func WithHTTPClient(client *http.Client) StatusListCheckerOption {
 
 // WithCache sets an external cache implementation.
 // The cache's TTL (set at creation time) controls how long status lists are cached.
-// The cache must not extend an entry's lifetime on read (see cache.WithAbsoluteExpiry),
-// or a frequently read list outlives its token's exp and ttl.
+// The cache must not extend an entry's lifetime on read, or a frequently read
+// list outlives its token's exp and ttl. cache.NewMemoryCache and the MongoDB cache
+// both meet that.
 func WithCache(ch cache.Cache[[]uint8]) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.cache = ch
