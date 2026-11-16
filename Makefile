@@ -401,6 +401,8 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 		cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/$$h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/" || exit 1; \
 	done
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
+	@# Go 1.27.4 rejects archives that carry LLVM LTO sections.
+	objcopy --remove-section .llvmbc --remove-section .llvmcmd "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a"
 	@# The nym_auth vectors ship with the crate (the circuit artifact, a
 	@# real proof and the request values that produced it), and
 	@# pkg/nymauth/verifier's zknative test verifies that proof rather
@@ -495,6 +497,8 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi/zk_cred_vega_nymauth_go.h" "$(ZK_CRED_VEGA_STAGE)/include/"
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi"/libzk_cred_vega.* "$(ZK_CRED_VEGA_STAGE)/lib/"
+	@# Go 1.27.4 rejects archives that carry LLVM LTO sections.
+	objcopy --remove-section .llvmbc --remove-section .llvmcmd "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a"
 	@# The crate's own nym_auth vectors - the published mdoc circuit's
 	@# shapes, a reference proof made against them, and the statement
 	@# that produced it. Staged beside the library, the same way the
