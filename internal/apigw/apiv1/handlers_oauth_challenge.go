@@ -467,6 +467,11 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 // existed or has expired.
 const errDescIssuerStateInvalid = "issuer_state is invalid or has expired"
 
+// errDescChallengeFailed is the event_description of an issuance whose
+// exchange failed after its handle was claimed. Fixed text: the status
+// endpoint returns it, and the real cause can name identity-match details.
+const errDescChallengeFailed = "interactive authorization failed"
+
 // authorizationChallengeIntermediate handles every request after the first:
 // it finds the exchange the auth_session names, consumes whatever the
 // interaction produced, and - when that leaves the Holder established -
@@ -554,6 +559,19 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	}
 	authCtx = claimed
 
+	response, err := c.finishClaimedChallenge(ctx, ia, req, authCtx)
+	if err != nil {
+		// The handle is spent and cannot be reopened, so this issuance cannot resume.
+		c.recordIssuanceStatus(ctx, authCtx.IssuanceID, IssuanceStatusFailed, errDescChallengeFailed, 0)
+		return nil, err
+	}
+	return response, nil
+}
+
+// finishClaimedChallenge is everything that happens to a claimed exchange:
+// decoding the wallet's answer, verifying the presentation and handing out
+// the authorization code. Any error from here is terminal for the issuance.
+func (c *Client) finishClaimedChallenge(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest, authCtx *cache.AuthorizationContext) (*AuthorizationChallengeResponse, error) {
 	vpResponse, privateEphemeralJWK, err := c.decodeInteractiveAuthorizationResponse(ctx, authCtx, req.OpenID4VPResponse)
 	if err != nil {
 		return nil, err
