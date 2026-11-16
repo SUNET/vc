@@ -417,6 +417,58 @@ func TestMemoryCache_UpdateIsAtomic(t *testing.T) {
 	assert.Equal(t, workers, got)
 }
 
+// Update is atomic against every mutation, not only against another Update:
+// a write or delete issued while the callback runs waits for it, so the
+// callback's result is never built on a value that has since changed.
+func TestMemoryCache_UpdateIsAtomicAgainstOtherMutations(t *testing.T) {
+	mutators := map[string]func(ctx context.Context, c *MemoryCache[string]){
+		"Set":        func(ctx context.Context, c *MemoryCache[string]) { c.Set(ctx, "k", "interloper") },
+		"SetWithTTL": func(ctx context.Context, c *MemoryCache[string]) { c.SetWithTTL(ctx, "k", "interloper", time.Minute) },
+		"Delete":     func(ctx context.Context, c *MemoryCache[string]) { c.Delete(ctx, "k") },
+		"GetAndDelete": func(ctx context.Context, c *MemoryCache[string]) {
+			c.GetAndDelete(ctx, "k")
+		},
+	}
+
+	for name, mutate := range mutators {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			c := NewMemoryCache[string](time.Minute)
+			c.Set(ctx, "k", "original")
+
+			inCallback := make(chan struct{})
+			release := make(chan struct{})
+			updated := make(chan struct{})
+			go func() {
+				defer close(updated)
+				_, err := c.Update(ctx, "k", func(string) (string, time.Duration, bool) {
+					close(inCallback)
+					<-release
+					return "updated", 0, true
+				})
+				assert.NoError(t, err)
+			}()
+
+			<-inCallback
+			mutated := make(chan struct{})
+			go func() {
+				defer close(mutated)
+				mutate(ctx, c)
+			}()
+
+			select {
+			case <-mutated:
+				t.Fatal("a mutation ran while Update's callback was still running")
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			close(release)
+			<-updated
+			<-mutated
+		})
+	}
+}
+
 func TestMemoryCache_Stop(t *testing.T) {
 	c := NewMemoryCache[string](5 * time.Minute)
 	c.Stop() // should not panic

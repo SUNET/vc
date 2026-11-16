@@ -14,8 +14,9 @@ type MemoryCache[V any] struct {
 	cache *ttlcache.Cache[string, V]
 	ttl   time.Duration
 
-	// updateMu serialises Update calls with each other.
-	updateMu sync.Mutex
+	// mu serialises every mutation, so Update's read-modify-write cannot
+	// interleave with a plain write or a delete.
+	mu sync.Mutex
 }
 
 // MemoryCacheOption configures a MemoryCache.
@@ -96,12 +97,18 @@ func (m *MemoryCache[V]) GetErr(_ context.Context, key string) (V, error) {
 
 // Set stores a value with the default TTL.
 func (m *MemoryCache[V]) Set(_ context.Context, key string, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cache.Set(key, value, ttlcache.DefaultTTL)
 }
 
 // SetNX stores a value only if the key does not already exist.
 // Returns true if the value was set, false if the key already existed.
 func (m *MemoryCache[V]) SetNX(_ context.Context, key string, value V) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	_, found := m.cache.GetOrSet(key, value)
 	return !found, nil
 }
@@ -113,20 +120,26 @@ func (m *MemoryCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, 
 	if ttl <= 0 {
 		return m.SetNX(ctx, key, value)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	_, found := m.cache.GetOrSet(key, value, ttlcache.WithTTL[string, V](ttl))
 	return !found, nil
 }
 
 // SetWithTTL stores a value with a custom TTL.
 func (m *MemoryCache[V]) SetWithTTL(_ context.Context, key string, value V, ttl time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cache.Set(key, value, ttl)
 }
 
 // Update atomically read-modify-writes a value; see Cache.Update.
-// It is atomic against other Update calls, not against plain Set.
+// It holds the cache lock while fn runs, so fn must not call back into this cache.
 func (m *MemoryCache[V]) Update(_ context.Context, key string, fn func(V) (V, time.Duration, bool)) (bool, error) {
-	m.updateMu.Lock()
-	defer m.updateMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	item := m.cache.Get(key, ttlcache.WithDisableTouchOnHit[string, V]())
 	if item == nil {
@@ -153,11 +166,17 @@ func (m *MemoryCache[V]) Update(_ context.Context, key string, fn func(V) (V, ti
 
 // Delete removes a value by key.
 func (m *MemoryCache[V]) Delete(_ context.Context, key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cache.Delete(key)
 }
 
 // GetAndDelete atomically retrieves and removes a value by key.
 func (m *MemoryCache[V]) GetAndDelete(_ context.Context, key string) (V, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	item, ok := m.cache.GetAndDelete(key)
 	if !ok || item == nil {
 		var zero V
