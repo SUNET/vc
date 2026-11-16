@@ -183,22 +183,29 @@ func (c *Client) fetchToken(ctx context.Context) (string, error) {
 // Get performs an authenticated GET to baseURL+path and returns the body,
 // which is limited to 10 MB.
 func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
-	body, _, err := c.GetWithHeaders(ctx, path, query)
-	return body, err
+	resp, err := c.GetResponse(ctx, path, query)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
 }
 
-// URL returns the absolute URL that Get and GetWithHeaders request for path and query.
-func (c *Client) URL(path string, query url.Values) string {
+// Response is a successful GET response.
+type Response struct {
+	Body   []byte
+	Header http.Header
+	// URL is where the body came from, after any redirects. Relative Link targets
+	// resolve against it.
+	URL string
+}
+
+// GetResponse is Get that also returns the response headers and final URL.
+func (c *Client) GetResponse(ctx context.Context, path string, query url.Values) (*Response, error) {
 	u := c.baseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
-	return u
-}
-
-// GetWithHeaders is Get that also returns the response headers.
-func (c *Client) GetWithHeaders(ctx context.Context, path string, query url.Values) ([]byte, http.Header, error) {
-	return c.do(ctx, c.URL(path, query), path)
+	return c.do(ctx, u, path)
 }
 
 // Resolve resolves ref against from, the URL of the response that carried it
@@ -226,44 +233,45 @@ func (c *Client) Resolve(from, ref string) (string, error) {
 
 // GetURL performs an authenticated GET to rawURL, which may be relative to the
 // base URL or absolute. It is refused when it leaves the base URL's origin.
-func (c *Client) GetURL(ctx context.Context, rawURL string) ([]byte, http.Header, error) {
+func (c *Client) GetURL(ctx context.Context, rawURL string) (*Response, error) {
 	target, err := c.Resolve(c.baseURL, rawURL)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	u, err := url.Parse(target)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: parse URL %q: %w", c.name, target, err)
+		return nil, fmt.Errorf("%s: parse URL %q: %w", c.name, target, err)
 	}
 	return c.do(ctx, target, u.Path)
 }
 
 // do performs the authenticated GET to u; errPath is used in error messages.
-func (c *Client) do(ctx context.Context, u, errPath string) ([]byte, http.Header, error) {
+func (c *Client) do(ctx context.Context, u, errPath string) (*Response, error) {
 	token, err := c.ensureToken(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: create request: %w", c.name, err)
+		return nil, fmt.Errorf("%s: create request: %w", c.name, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", c.accept)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: request failed: %w", c.name, err)
+		return nil, fmt.Errorf("%s: request failed: %w", c.name, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: read response: %w", c.name, err)
+		return nil, fmt.Errorf("%s: read response: %w", c.name, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("%s: GET %s returned %d: %s", c.name, errPath, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("%s: GET %s returned %d: %s", c.name, errPath, resp.StatusCode, string(body))
 	}
-	return body, resp.Header, nil
+	// resp.Request is the last request in the redirect chain.
+	return &Response{Body: body, Header: resp.Header, URL: resp.Request.URL.String()}, nil
 }

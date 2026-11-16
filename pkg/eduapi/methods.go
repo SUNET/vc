@@ -42,8 +42,7 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 	}
 
 	q := url.Values{"filter": {"person='" + personID + "'"}}
-	pageURL := c.http.URL("/enrollments", q)
-	data, header, err := c.http.GetWithHeaders(ctx, "/enrollments", q)
+	resp, err := c.http.GetResponse(ctx, "/enrollments", q)
 
 	var active []Enrollment
 	for page := 1; ; page++ {
@@ -51,7 +50,7 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 			return nil, err
 		}
 		var enrollments []Enrollment
-		if err := json.Unmarshal(data, &enrollments); err != nil {
+		if err := json.Unmarshal(resp.Body, &enrollments); err != nil {
 			return nil, fmt.Errorf("eduapi: decode enrollments: %w", err)
 		}
 		for _, e := range enrollments {
@@ -60,19 +59,19 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 			}
 		}
 
-		next := nextLink(header)
+		next := nextLink(resp.Header)
 		if next == "" {
 			return active, nil
 		}
 		if page >= maxEnrollmentPages {
 			return nil, fmt.Errorf("eduapi: enrollments exceed %d pages", maxEnrollmentPages)
 		}
-		// A relative link is relative to the page that carried it, not to the base URL.
-		pageURL, err = c.http.Resolve(pageURL, next)
-		if err != nil {
-			return nil, err
+		// A relative link is relative to the page that carried it, after any redirect.
+		nextURL, resolveErr := c.http.Resolve(resp.URL, next)
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
-		data, header, err = c.http.GetURL(ctx, pageURL)
+		resp, err = c.http.GetURL(ctx, nextURL)
 	}
 }
 

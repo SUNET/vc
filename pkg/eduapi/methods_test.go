@@ -273,3 +273,29 @@ func TestRequestsCarryBasePathAndToken(t *testing.T) {
 	assert.Equal(t, "Bearer test-token", gotAuth)
 	assert.Equal(t, basePath+"/persons/p-1", gotPath)
 }
+
+func TestListActiveEnrollmentsResolvesNextAgainstFinalURL(t *testing.T) {
+	var paths []string
+	mux := http.NewServeMux()
+	// /enrollments moves to /canonical/enrollments, so <page2> must resolve to /canonical/page2.
+	mux.HandleFunc("/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		http.Redirect(w, r, basePath+"/canonical/enrollments?"+r.URL.RawQuery, http.StatusFound)
+	})
+	mux.HandleFunc("/canonical/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Link", `<page2>; rel="next"`)
+		writeJSON(w, []Enrollment{{SourcedID: "e1", IsActive: true}})
+	})
+	mux.HandleFunc("/canonical/page2", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		writeJSON(w, []Enrollment{{SourcedID: "e2", IsActive: true}})
+	})
+	_, client := newTestClient(t, mux)
+
+	got, err := client.ListActiveEnrollments(context.Background(), "p-lisa")
+	require.NoError(t, err)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{"/enrollments", "/canonical/enrollments", "/canonical/page2"}, paths)
+}

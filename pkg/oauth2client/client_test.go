@@ -112,12 +112,15 @@ func TestGetWithHeaders(t *testing.T) {
 	srv := newTokenAndResourceServer()
 	defer srv.Close()
 
-	_, h, err := newTestClient(t, srv).GetWithHeaders(context.Background(), "/resource", nil)
+	resp, err := newTestClient(t, srv).GetResponse(context.Background(), "/resource", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := h.Get("X-Total-Count"); got != "7" {
+	if got := resp.Header.Get("X-Total-Count"); got != "7" {
 		t.Errorf("X-Total-Count = %q, want 7", got)
+	}
+	if want := srv.URL + "/base/resource"; resp.URL != want {
+		t.Errorf("URL = %q, want %q", resp.URL, want)
 	}
 }
 
@@ -127,13 +130,13 @@ func TestGetURL(t *testing.T) {
 	c := newTestClient(t, srv)
 
 	for _, u := range []string{srv.URL + "/base/resource", "/base/resource"} {
-		if _, _, err := c.GetURL(context.Background(), u); err != nil {
+		if _, err := c.GetURL(context.Background(), u); err != nil {
 			t.Errorf("GetURL(%q): %v", u, err)
 		}
 	}
 
 	for _, u := range []string{"https://evil.example.org/base/resource", "http://127.0.0.1:1/base/resource"} {
-		if _, _, err := c.GetURL(context.Background(), u); err == nil {
+		if _, err := c.GetURL(context.Background(), u); err == nil {
 			t.Errorf("GetURL(%q): expected cross-origin error", u)
 		}
 	}

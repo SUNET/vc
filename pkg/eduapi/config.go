@@ -3,7 +3,7 @@ package eduapi
 import "time"
 
 // DefaultScope is the Edu-API read-only scope requested when a remote sets none.
-const DefaultScope = "http://purl.1edtech.org/spec/eduapi/v1p0/scope/core.readonly"
+const DefaultScope = "http://purl.1edtech.org/spec/eduapi/v1p0/scope/core.readonly" // NOSONAR — scope identifier from the Edu-API spec, not an endpoint
 
 // Config holds the full Edu-API (1EdTech) data source configuration for credential issuance.
 type Config struct {
