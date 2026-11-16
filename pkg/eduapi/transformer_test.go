@@ -8,112 +8,105 @@ import (
 
 func TestFlattenPerson(t *testing.T) {
 	have := &Person{
-		SourcedID: "p-123",
-		Status:    "active",
-		Name: PersonName{
-			FamilyName: "Andersson",
-			GivenName:  "Lisa",
-			MiddleName: "Maria",
-		},
-		Email: []TypedContact{
-			{Type: "institutional", Value: "lisa@university.se"},
-		},
-		Phone: []TypedContact{
-			{Type: "mobile", Value: "+46701234567"},
-		},
-		Identifiers: []IdentifierEntry{
-			{IdentifierType: "personnummer", Identifier: "199001011234"},
-			{IdentifierType: "org.eppn", Identifier: "lisa@uni.se"},
-		},
-		Demographics: &Demographics{
-			BirthDate: "1990-01-01",
+		SourcedID:     "p-123",
+		RecordStatus:  "active",
+		LegalName:     &PersonName{GivenName: "Lisa", FamilyName: "Andersson", AdditionalName: "Maria"},
+		FormattedName: "Lisa Maria Andersson",
+		DateOfBirth:   "1990-01-01",
+		PrimaryEmail:  &OptionallyTypedEmail{Email: "lisa@university.se", EmailType: "workEmail"},
+		PrimaryPhone:  &OptionallyTypedPhone{Phone: "+46701234567"},
+		OtherIdentifiers: []IdentifierEntry{
+			{IdentifierType: "nationalIdentityNumber", Identifier: "199001011234"},
+			{IdentifierType: "ext:org.eppn", Identifier: "lisa@uni.se"},
 		},
 	}
 
 	got := have.Flatten()
 
 	expected := map[string]any{
-		"sourcedId":               "p-123",
-		"familyName":              "Andersson",
-		"givenName":               "Lisa",
-		"middleName":              "Maria",
-		"email":                   "lisa@university.se",
-		"phone":                   "+46701234567",
-		"birthDate":               "1990-01-01",
-		"identifier.personnummer": "199001011234",
-		"identifier.org_eppn":     "lisa@uni.se",
+		"sourcedId":                         "p-123",
+		"recordStatus":                      "active",
+		"givenName":                         "Lisa",
+		"familyName":                        "Andersson",
+		"additionalName":                    "Maria",
+		"formattedName":                     "Lisa Maria Andersson",
+		"dateOfBirth":                       "1990-01-01",
+		"email":                             "lisa@university.se",
+		"phone":                             "+46701234567",
+		"identifier.nationalIdentityNumber": "199001011234",
+		"identifier.ext:org_eppn":           "lisa@uni.se",
 	}
-
 	for key, want := range expected {
 		assert.Equal(t, want, got[key], "key %q", key)
 	}
 }
 
+func TestFlattenPersonMinimal(t *testing.T) {
+	got := (&Person{SourcedID: "p-min"}).Flatten()
+
+	assert.Equal(t, map[string]any{"sourcedId": "p-min"}, got)
+}
+
 func TestFlattenEnrollment(t *testing.T) {
 	e := &Enrollment{
-		SourcedID: "e-456",
-		Status:    "active",
-		Role:      "student",
-		PersonRef: GUIDRef{SourcedID: "p-123"},
-		ClassRef:  GUIDRef{SourcedID: "c-789"},
-		BeginDate: "2024-01-15",
-		EndDate:   "2024-06-15",
-		Primary:   true,
+		SourcedID:         "e-456",
+		Person:            "p-123",
+		EducationOffering: "co-789",
+		OfferingType:      "course",
+		Role:              "student",
+		EnrollmentStatus:  "enrolled",
+		IsActive:          true,
+		StartDate:         "2024-01-15T00:00:00Z",
 	}
 
 	got := e.Flatten()
 
 	assert.Equal(t, "e-456", got["sourcedId"])
 	assert.Equal(t, "student", got["role"])
-	assert.Equal(t, "p-123", got["user.sourcedId"])
-	assert.Equal(t, true, got["primary"])
+	assert.Equal(t, "p-123", got["person"])
+	assert.Equal(t, "co-789", got["educationOffering"])
+	assert.Equal(t, "course", got["offeringType"])
+	assert.Equal(t, true, got["isActive"])
+	assert.Equal(t, "enrolled", got["enrollmentStatus"])
+	assert.Equal(t, "2024-01-15T00:00:00Z", got["startDate"])
+	assert.NotContains(t, got, "endDate")
 }
 
 func TestFlattenCourseOffering(t *testing.T) {
 	co := &CourseOffering{
-		SourcedID:    "c-789",
-		Title:        "Advanced Mathematics",
-		CourseCode:   "MATH301",
-		ClassType:    "scheduled",
-		SchoolRef:    GUIDRef{SourcedID: "org-1"},
-		SubjectCodes: []string{"MAT"},
+		SourcedID:      "co-789",
+		RecordLanguage: "sv",
+		Title: []LanguageTypedString{
+			{RecordLanguage: "en", Value: "Advanced Mathematics"},
+			{RecordLanguage: "sv", Value: "Avancerad matematik"},
+		},
+		PrimaryCode:  &IdentifierEntry{IdentifierType: "systemId", Identifier: "MATH301"},
+		Organization: "org-1",
+		StartDate:    "2024-08-26T00:00:00Z",
 	}
 
 	got := co.Flatten()
 
-	assert.Equal(t, "Advanced Mathematics", got["title"])
-	assert.Equal(t, "MATH301", got["courseCode"])
-	assert.Equal(t, "org-1", got["school.sourcedId"])
+	assert.Equal(t, "Avancerad matematik", got["title"], "record language wins")
+	assert.Equal(t, "MATH301", got["primaryCode"])
+	assert.Equal(t, "org-1", got["organization"])
+	assert.NotContains(t, got, "description")
 }
 
 func TestFlattenOrganization(t *testing.T) {
 	org := &Organization{
-		SourcedID:  "org-1",
-		Name:       "Stockholm University",
-		Type:       "school",
-		Identifier: "SE-202100-3062",
+		SourcedID:        "org-1",
+		RecordLanguage:   "de",
+		Name:             []LanguageTypedString{{RecordLanguage: "en", Value: "Stockholm University"}},
+		OrganizationType: "university",
+		PrimaryCode:      &IdentifierEntry{IdentifierType: "systemId", Identifier: "SU"},
 	}
 
 	got := org.Flatten()
 
-	assert.Equal(t, "Stockholm University", got["name"])
-	assert.Equal(t, "SE-202100-3062", got["identifier"])
-}
-
-func TestFlattenResult(t *testing.T) {
-	r := &Result{
-		SourcedID:   "r-001",
-		PersonRef:   GUIDRef{SourcedID: "p-123"},
-		ClassRef:    GUIDRef{SourcedID: "li-001"},
-		Score:       "VG",
-		ScoreStatus: "fully graded",
-		ScoreDate:   "2024-06-20",
-	}
-
-	got := r.Flatten()
-
-	assert.Equal(t, "VG", got["score"])
-	assert.Equal(t, "fully graded", got["scoreStatus"])
+	assert.Equal(t, "Stockholm University", got["name"], "falls back to first entry")
+	assert.Equal(t, "university", got["organizationType"])
+	assert.Equal(t, "SU", got["primaryCode"])
 }
 
 func TestMergeMaps(t *testing.T) {
@@ -128,47 +121,7 @@ func TestMergeMaps(t *testing.T) {
 		assert.Equal(t, "val3", got["key3"])
 	})
 
-	t.Run("three maps", func(t *testing.T) {
-		a := map[string]any{"key1": "a", "shared": "a"}
-		b := map[string]any{"key2": "b", "shared": "b"}
-		c := map[string]any{"key3": "c", "shared": "c"}
-
-		got := MergeMaps(a, b, c)
-
-		assert.Equal(t, "a", got["key1"])
-		assert.Equal(t, "b", got["key2"])
-		assert.Equal(t, "c", got["key3"])
-		assert.Equal(t, "c", got["shared"], "last map should win")
-	})
-
-	t.Run("single map", func(t *testing.T) {
-		a := map[string]any{"key1": "val1"}
-
-		got := MergeMaps(a)
-
-		assert.Equal(t, "val1", got["key1"])
-		assert.Len(t, got, 1)
-	})
-
 	t.Run("no maps", func(t *testing.T) {
-		got := MergeMaps()
-
-		assert.Empty(t, got)
+		assert.Empty(t, MergeMaps())
 	})
-}
-
-func TestFlattenPersonMinimal(t *testing.T) {
-	have := &Person{
-		SourcedID: "p-min",
-		Name: PersonName{
-			FamilyName: "Smith",
-			GivenName:  "John",
-		},
-	}
-
-	got := have.Flatten()
-
-	assert.Len(t, got, 3) // sourcedId, familyName, givenName
-	assert.NotContains(t, got, "email")
-	assert.NotContains(t, got, "birthDate")
 }

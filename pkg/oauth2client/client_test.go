@@ -74,3 +74,66 @@ func TestNewRequiresTokenCache(t *testing.T) {
 		t.Fatal("expected error when TokenCache is nil")
 	}
 }
+
+func newTestClient(t *testing.T, srv *httptest.Server) *Client {
+	t.Helper()
+	log, err := logger.New("test", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := New(Config{
+		BaseURL:      srv.URL + "/base",
+		TokenURL:     srv.URL + "/oauth2/token",
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+		Name:         "test",
+		TokenCache:   cache.NewMemoryCache[string](1 * time.Hour),
+	}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func newTokenAndResourceServer() *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "test-token", "expires_in": 3600})
+	})
+	mux.HandleFunc("/base/resource", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "7")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+	return httptest.NewServer(mux)
+}
+
+func TestGetWithHeaders(t *testing.T) {
+	srv := newTokenAndResourceServer()
+	defer srv.Close()
+
+	_, h, err := newTestClient(t, srv).GetWithHeaders(context.Background(), "/resource", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.Get("X-Total-Count"); got != "7" {
+		t.Errorf("X-Total-Count = %q, want 7", got)
+	}
+}
+
+func TestGetURL(t *testing.T) {
+	srv := newTokenAndResourceServer()
+	defer srv.Close()
+	c := newTestClient(t, srv)
+
+	for _, u := range []string{srv.URL + "/base/resource", "/base/resource"} {
+		if _, _, err := c.GetURL(context.Background(), u); err != nil {
+			t.Errorf("GetURL(%q): %v", u, err)
+		}
+	}
+
+	for _, u := range []string{"https://evil.example.org/base/resource", "http://127.0.0.1:1/base/resource"} {
+		if _, _, err := c.GetURL(context.Background(), u); err == nil {
+			t.Errorf("GetURL(%q): expected cross-origin error", u)
+		}
+	}
+}

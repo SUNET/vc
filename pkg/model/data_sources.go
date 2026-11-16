@@ -408,7 +408,7 @@ type Remote struct {
 	Type RemoteType `yaml:"type" validate:"required,oneof=eduapi ooapi oeapi"`
 
 	// BaseURL is the base URL of the API endpoint
-	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://api.ladok.se/eduapi\""`
+	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://api.ladok.se/1edtech/eduapi/base/v1p0\""`
 
 	// TokenURL is the OAuth 2.0 token endpoint for Client Credentials Grant
 	TokenURL string `yaml:"token_url" validate:"required,url" doc_example:"\"https://api.ladok.se/oauth2/token\""`

@@ -168,35 +168,64 @@ func (c *Client) fetchToken(ctx context.Context) (string, error) {
 // Get performs an authenticated GET to baseURL+path and returns the body,
 // which is limited to 10 MB.
 func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
-	token, err := c.ensureToken(ctx)
-	if err != nil {
-		return nil, err
-	}
+	body, _, err := c.GetWithHeaders(ctx, path, query)
+	return body, err
+}
 
+// GetWithHeaders is Get that also returns the response headers.
+func (c *Client) GetWithHeaders(ctx context.Context, path string, query url.Values) ([]byte, http.Header, error) {
 	u := c.baseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
+	return c.do(ctx, u, path)
+}
+
+// GetURL performs an authenticated GET to rawURL, which may be relative to the
+// base URL's host or absolute. An absolute URL must share scheme and host with
+// the base URL so the bearer token is never sent to another origin.
+func (c *Client) GetURL(ctx context.Context, rawURL string) ([]byte, http.Header, error) {
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: parse base URL: %w", c.name, err)
+	}
+	ref, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: parse URL %q: %w", c.name, rawURL, err)
+	}
+	target := base.ResolveReference(ref)
+	if target.Scheme != base.Scheme || target.Host != base.Host {
+		return nil, nil, fmt.Errorf("%s: refusing URL %q: different origin than base URL", c.name, rawURL)
+	}
+	return c.do(ctx, target.String(), target.Path)
+}
+
+// do performs the authenticated GET to u; errPath is used in error messages.
+func (c *Client) do(ctx context.Context, u, errPath string) ([]byte, http.Header, error) {
+	token, err := c.ensureToken(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%s: create request: %w", c.name, err)
+		return nil, nil, fmt.Errorf("%s: create request: %w", c.name, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", c.accept)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: request failed: %w", c.name, err)
+		return nil, nil, fmt.Errorf("%s: request failed: %w", c.name, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB
 	if err != nil {
-		return nil, fmt.Errorf("%s: read response: %w", c.name, err)
+		return nil, nil, fmt.Errorf("%s: read response: %w", c.name, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: GET %s returned %d: %s", c.name, path, resp.StatusCode, string(body))
+		return nil, nil, fmt.Errorf("%s: GET %s returned %d: %s", c.name, errPath, resp.StatusCode, string(body))
 	}
-	return body, nil
+	return body, resp.Header, nil
 }
