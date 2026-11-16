@@ -455,7 +455,11 @@ bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issu
 	$(MAKE) -C "$(ZK_CRED_BBS_CHECKOUT)" go-cabi
 	@mkdir -p "$(ZK_CRED_BBS_STAGE)/include" "$(ZK_CRED_BBS_STAGE)/lib" "$(ZK_CRED_BBS_STAGE)/test-vectors"
 	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi/zk_cred_bbs_go.h" "$(ZK_CRED_BBS_STAGE)/include/"
-	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi"/libzk_cred_bbs.* "$(ZK_CRED_BBS_STAGE)/lib/"
+	@# Static archive only: Go 1.27.4 rejects `-l:libzk_cred_bbs.a` and any archive
+	@# with LLVM LTO sections, so strip them (plain -l then links statically).
+	rm -f "$(ZK_CRED_BBS_STAGE)"/lib/libzk_cred_bbs.*
+	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi/libzk_cred_bbs.a" "$(ZK_CRED_BBS_STAGE)/lib/"
+	objcopy --remove-section .llvmbc --remove-section .llvmcmd "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a"
 	@# The crate's own reference vectors, so pkg/bbs's tests check against
 	@# the same ground truth the Rust and TypeScript sides do rather than a
 	@# second copy that can drift.
