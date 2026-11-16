@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
+	dsig "github.com/russellhaering/goxmldsig"
 
 	"github.com/crewjam/saml"
+	"github.com/crewjam/saml/internal/signerutil"
 )
 
 const (
@@ -22,8 +24,25 @@ type JWTSessionCodec struct {
 	SigningMethod jwt.SigningMethod
 	Audience      string
 	Issuer        string
-	MaxAge        time.Duration
-	Key           crypto.Signer
+
+	// MaxAge is how long an issued session token is valid. It should match
+	// the MaxAge of the CookieSessionProvider that stores the token.
+	MaxAge time.Duration
+	Key    crypto.Signer
+
+	// KeyAttributesByName, if true, keys the session's Attributes by each
+	// SAML attribute's Name. By default they are keyed by FriendlyName, or
+	// Name when FriendlyName is empty. saml-core §2.7.3.1 says FriendlyName
+	// "MUST NOT be used as a basis for formally identifying SAML
+	// attributes": two attributes with different Names but the same
+	// FriendlyName are merged under one key, and a FriendlyName can equal
+	// another attribute's Name, so an attribute can stand in for another.
+	// Set this when attribute values are used for authorization.
+	KeyAttributesByName bool
+
+	// Clock, if non-nil, is the time source for the times of the sessions it issues and for checking their expiry. If nil, the real
+	// clock is used (through the deprecated saml.TimeNow).
+	Clock *dsig.Clock
 }
 
 var _ SessionCodec = JWTSessionCodec{}
@@ -32,18 +51,28 @@ var _ SessionCodec = JWTSessionCodec{}
 //
 // The returned Session is a JWTSessionClaims.
 func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
-	now := saml.TimeNow()
+	now := clockNow(c.Clock)
+	expiresAt := now.Add(c.MaxAge)
+	if end, ok := sessionEnd(assertion); ok {
+		if !now.Before(end) {
+			return nil, fmt.Errorf("%w: the IdP session ended at %s (SessionNotOnOrAfter)", ErrSessionEnded, end)
+		}
+		if end.Before(expiresAt) {
+			expiresAt = end
+		}
+	}
 	claims := JWTSessionClaims{}
 	claims.SAMLSession = true
-	claims.Audience = c.Audience
+	claims.Audience = jwt.ClaimStrings{c.Audience}
 	claims.Issuer = c.Issuer
-	claims.IssuedAt = now.Unix()
-	claims.ExpiresAt = now.Add(c.MaxAge).Unix()
-	claims.NotBefore = now.Unix()
+	claims.IssuedAt = jwt.NewNumericDate(now)
+	claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
+	claims.NotBefore = jwt.NewNumericDate(now)
 
 	if sub := assertion.Subject; sub != nil {
 		if nameID := sub.NameID; nameID != nil {
 			claims.Subject = nameID.Value
+			setNameIDClaims(&claims, nameID)
 		}
 	}
 
@@ -52,11 +81,11 @@ func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
 	for _, attributeStatement := range assertion.AttributeStatements {
 		for _, attr := range attributeStatement.Attributes {
 			claimName := attr.FriendlyName
-			if claimName == "" {
+			if claimName == "" || c.KeyAttributesByName {
 				claimName = attr.Name
 			}
 			for _, value := range attr.Values {
-				claims.Attributes[claimName] = append(claims.Attributes[claimName], value.Value)
+				claims.Attributes[claimName] = append(claims.Attributes[claimName], attributeValueString(value))
 			}
 		}
 	}
@@ -70,6 +99,59 @@ func (c JWTSessionCodec) New(assertion *saml.Assertion) (Session, error) {
 	return claims, nil
 }
 
+// ErrSessionEnded is returned when a session would be created from an
+// assertion whose AuthnStatement SessionNotOnOrAfter has already passed.
+var ErrSessionEnded = errors.New("samlsp: the IdP session has already ended")
+
+// sessionEnd returns the moment the security context established by
+// assertion must end: the earliest SessionNotOnOrAfter of its
+// AuthnStatements, allowing for saml.MaxClockSkew. saml-profiles §4.1.4.3:
+// "If an <AuthnStatement> used to establish a security context for the
+// principal contains a SessionNotOnOrAfter attribute, the security context
+// SHOULD be discarded once this time is reached". It reports false if no
+// AuthnStatement has one.
+func sessionEnd(assertion *saml.Assertion) (time.Time, bool) {
+	var end time.Time
+	for _, statement := range assertion.AuthnStatements {
+		if statement.SessionNotOnOrAfter == nil {
+			continue
+		}
+		if t := statement.SessionNotOnOrAfter.Add(saml.MaxClockSkew); end.IsZero() || t.Before(end) {
+			end = t
+		}
+	}
+	return end, !end.IsZero()
+}
+
+// setNameIDClaims records the Format, NameQualifier and SPNameQualifier of
+// nameID in claims, so that GetSAMLNameID can rebuild it. An omitted Format
+// is recorded as the unspecified format, which it means (saml-core §8.3.1),
+// so that a recorded Format marks a session made with these claims.
+func setNameIDClaims(claims *JWTSessionClaims, nameID *saml.NameID) {
+	if nameID.Value == "" {
+		return
+	}
+	claims.NameIDFormat = nameID.Format
+	if claims.NameIDFormat == "" {
+		claims.NameIDFormat = string(saml.UnspecifiedNameIDFormat)
+	}
+	claims.NameIDNameQualifier = nameID.NameQualifier
+	claims.NameIDSPNameQualifier = nameID.SPNameQualifier
+}
+
+// attributeValueString returns the string form of a SAML AttributeValue.
+//
+// Some attributes, such as eduPersonTargetedID, carry a <saml:NameID> element
+// instead of text content. For those the NameID's value is returned; the
+// AttributeValue's own character data is then only (possibly empty)
+// whitespace around the child element.
+func attributeValueString(value saml.AttributeValue) string {
+	if value.NameID != nil {
+		return value.NameID.Value
+	}
+	return value.Value
+}
+
 // Encode returns a serialized version of the Session.
 //
 // The provided session must be a JWTSessionClaims, otherwise this
@@ -78,20 +160,21 @@ func (c JWTSessionCodec) Encode(s Session) (string, error) {
 	claims := s.(JWTSessionClaims) // this will panic if you pass the wrong kind of session
 
 	token := jwt.NewWithClaims(c.SigningMethod, claims)
-	signedString, err := token.SignedString(c.Key)
-	if err != nil {
-		return "", err
-	}
-
-	return signedString, nil
+	return signToken(token, c.Key)
 }
 
 // Decode parses the serialized session that may have been returned by Encode
 // and returns a Session.
 func (c JWTSessionCodec) Decode(signed string) (Session, error) {
-	parser := jwt.Parser{
-		ValidMethods: []string{c.SigningMethod.Alg()},
+	if signerutil.IsNil(c.Key) {
+		return nil, fmt.Errorf("decoding key is nil")
 	}
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{c.SigningMethod.Alg()}),
+		jwt.WithTimeFunc(func() time.Time { return clockNow(c.Clock) }),
+		jwt.WithAudience(c.Audience),
+		jwt.WithIssuer(c.Issuer),
+	)
 	claims := JWTSessionClaims{}
 	_, err := parser.ParseWithClaims(signed, &claims, func(*jwt.Token) (interface{}, error) {
 		return c.Key.Public(), nil
@@ -99,12 +182,6 @@ func (c JWTSessionCodec) Decode(signed string) (Session, error) {
 	// TODO(ross): check for errors due to bad time and return ErrNoSession
 	if err != nil {
 		return nil, err
-	}
-	if !claims.VerifyAudience(c.Audience, true) {
-		return nil, fmt.Errorf("expected audience %q, got %q", c.Audience, claims.Audience)
-	}
-	if !claims.VerifyIssuer(c.Issuer, true) {
-		return nil, fmt.Errorf("expected issuer %q, got %q", c.Issuer, claims.Issuer)
 	}
 	if !claims.SAMLSession {
 		return nil, errors.New("expected saml-session")
@@ -114,12 +191,42 @@ func (c JWTSessionCodec) Decode(signed string) (Session, error) {
 
 // JWTSessionClaims represents the JWT claims in the encoded session
 type JWTSessionClaims struct {
-	jwt.StandardClaims
+	jwt.RegisteredClaims
 	Attributes  Attributes `json:"attr"`
 	SAMLSession bool       `json:"saml-session"`
+
+	// NameIDFormat, NameIDNameQualifier and NameIDSPNameQualifier are the
+	// Format, NameQualifier and SPNameQualifier of the NameID of the
+	// assertion the session was made from; its value is the JWT subject.
+	// Together they let GetSAMLNameID rebuild that NameID, for example to
+	// query the IdP's attribute authority (see Middleware.QueryAttributes).
+	// Empty ones are omitted from the JWT. Sessions issued before these
+	// claims existed have none of them.
+	NameIDFormat          string `json:"saml-nameid-format,omitempty"`
+	NameIDNameQualifier   string `json:"saml-nameid-nq,omitempty"`
+	NameIDSPNameQualifier string `json:"saml-nameid-spnq,omitempty"`
 }
 
 var _ Session = JWTSessionClaims{}
+
+// GetSAMLNameID implements SessionWithSAMLNameID. It returns the NameID of
+// the assertion the session was made from, with its Format and qualifiers.
+// It returns false if the session does not record the NameID's Format,
+// because it was issued before JWTSessionCodec recorded it, or has no
+// subject.
+func (c JWTSessionClaims) GetSAMLNameID() (saml.NameID, bool) {
+	if c.Subject == "" || c.NameIDFormat == "" {
+		return saml.NameID{}, false
+	}
+	return saml.NameID{
+		Format:          c.NameIDFormat,
+		NameQualifier:   c.NameIDNameQualifier,
+		SPNameQualifier: c.NameIDSPNameQualifier,
+		Value:           c.Subject,
+	}, true
+}
+
+var _ SessionWithSAMLNameID = JWTSessionClaims{}
 
 // GetAttributes implements SessionWithAttributes. It returns the SAMl attributes.
 func (c JWTSessionClaims) GetAttributes() Attributes {

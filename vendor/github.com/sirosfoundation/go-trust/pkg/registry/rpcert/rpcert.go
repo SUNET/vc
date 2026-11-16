@@ -8,6 +8,7 @@ package rpcert
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -71,6 +72,14 @@ type RPEntitlements struct {
 	// DCQL `credentials[].claims[].path[0]` entries in the WRPRC payload.
 	// Used for over-request detection. Distinct from EntitlementURIs.
 	AllowedAttributes []string `json:"allowed_attributes,omitempty"`
+
+	// AllowedClaimPaths holds the registrar's credential query claim paths
+	// at their NATIVE granularity, each under its credential format. The
+	// flat AllowedAttributes (path[0] of each) remains for display, but
+	// authorization decisions must compare these exact paths: flattening
+	// [namespace, age_over_18] to namespace would let a grant for one
+	// element authorize every element of the namespace.
+	AllowedClaimPaths []ClaimPathGrant `json:"allowed_claim_paths,omitempty"`
 
 	// Purpose contains the multi-language purpose descriptions from the
 	// `purpose` claim (Table 9). Preserves all language variants.
@@ -320,4 +329,88 @@ func (r *ValidatorRegistry) Formats() []string {
 		formats = append(formats, f)
 	}
 	return formats
+}
+
+// ClaimPathGrant is one registrar-granted claim path under its credential
+// format — the grant at its native granularity.
+type ClaimPathGrant struct {
+	// Format is the credential format the grant's query names (e.g.
+	// "dc+sd-jwt", "mso_mdoc"). Empty for a format-less representation such
+	// as a flat requested_attributes entry.
+	Format string `json:"format,omitempty"`
+
+	// Path is the full claim path (e.g. ["given_name"] or
+	// ["org.iso.18013.5.1", "age_over_18"]).
+	Path []string `json:"path"`
+}
+
+// claimPathGrants extracts the grant paths from the WRPRC's credential
+// queries, each under its query's format.
+func claimPathGrants(creds []wrprcCredential) []ClaimPathGrant {
+	var grants []ClaimPathGrant
+	for _, cred := range creds {
+		for _, claim := range cred.entries() {
+			if len(claim.Path) > 0 {
+				grants = append(grants, ClaimPathGrant{Format: cred.Format, Path: claim.Path})
+			}
+		}
+	}
+	return grants
+}
+
+// EqualClaimPath reports whether two claim paths are element-wise equal.
+func EqualClaimPath(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// DetectOverRequestPaths compares the requested claims against the
+// registrar's granted claim paths at their native granularity. A requested
+// claim is allowed only when a grant carries the exact same path — with the
+// credential format matched whenever both sides name one; a format-less
+// representation matches by path alone. Every unmatched requested claim is
+// an over-request. An empty grant set is an authoritative empty grant: every
+// requested claim is an over-request.
+func DetectOverRequestPaths(entitlements *RPEntitlements, requested []ClaimPathGrant) *OverRequestResult {
+	if entitlements == nil {
+		return &OverRequestResult{Requested: claimPathNames(requested)}
+	}
+	var allowed, over []string
+	for _, req := range requested {
+		granted := false
+		for _, grant := range entitlements.AllowedClaimPaths {
+			if (grant.Format == "" || req.Format == "" || grant.Format == req.Format) &&
+				EqualClaimPath(grant.Path, req.Path) {
+				granted = true
+				break
+			}
+		}
+		if granted {
+			allowed = append(allowed, strings.Join(req.Path, "."))
+		} else {
+			over = append(over, strings.Join(req.Path, "."))
+		}
+	}
+	return &OverRequestResult{
+		Requested:     claimPathNames(requested),
+		Allowed:       allowed,
+		OverRequested: over,
+		IsOverRequest: len(over) > 0,
+	}
+}
+
+// claimPathNames renders the paths as dotted display names.
+func claimPathNames(grants []ClaimPathGrant) []string {
+	names := make([]string, 0, len(grants))
+	for _, g := range grants {
+		names = append(names, strings.Join(g.Path, "."))
+	}
+	return names
 }
