@@ -151,14 +151,29 @@ func (c *Client) extendIssuanceDeadline(ctx context.Context, issuanceID string, 
 	}
 }
 
-// preAuthDeadline caps a token's expiry at the life of the document the offer
-// cached, after which the credential request cannot succeed. The document is
-// written with the pre-authorized context, which is why its start is CreatedAt.
-func preAuthDeadline(authCtx *cache.AuthorizationContext, tokenExpiresAt int64) int64 {
+// statusDeadline caps a token's expiry at how long the records issuance needs
+// are kept, because the credential request cannot succeed after that. A
+// pre-authorized offer writes its document with the context, so the document's
+// shorter life applies; every other flow is bound by the context's retention.
+func statusDeadline(authCtx *cache.AuthorizationContext, tokenExpiresAt int64) int64 {
 	if authCtx.CreatedAt.IsZero() {
 		return tokenExpiresAt
 	}
-	return min(tokenExpiresAt, authCtx.CreatedAt.Add(cache.DocumentTTL).Unix())
+	retention := cache.AuthContextTTL
+	if authCtx.PreAuthorized || authCtx.SourceSessionID != "" {
+		retention = cache.DocumentTTL
+	}
+	return min(tokenExpiresAt, authCtx.CreatedAt.Add(retention).Unix())
+}
+
+// extendDeadlineAfterRefresh carries a rotated token's lifetime to the status
+// record. A pre-auth child session is skipped: its CreatedAt is not the offer's,
+// and it is the offer's document that ends the issuance.
+func (c *Client) extendDeadlineAfterRefresh(ctx context.Context, rotated *cache.AuthorizationContext) {
+	if rotated.SourceSessionID != "" {
+		return
+	}
+	c.extendIssuanceDeadline(ctx, rotated.IssuanceID, statusDeadline(rotated, rotated.Token.ExpiresAt))
 }
 
 func truncateEventDescription(s string) string {

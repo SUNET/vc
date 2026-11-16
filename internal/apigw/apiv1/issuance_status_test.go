@@ -340,15 +340,30 @@ func TestIssuanceStatus_RefreshTokenGrantExtendsDeadline(t *testing.T) {
 		"still token_issued after the original token's expiry")
 }
 
-func TestPreAuthDeadline(t *testing.T) {
+func TestStatusDeadline(t *testing.T) {
 	created := time.Now()
-	docLife := created.Add(cache.DocumentTTL).Unix()
-	ctx := &cache.AuthorizationContext{CreatedAt: created}
-
-	assert.Equal(t, docLife, preAuthDeadline(ctx, created.Add(time.Hour).Unix()), "capped at the document's life")
+	hour := created.Add(time.Hour).Unix()
 	soon := created.Add(time.Minute).Unix()
-	assert.Equal(t, soon, preAuthDeadline(ctx, soon), "an earlier token expiry wins")
-	assert.Equal(t, soon, preAuthDeadline(&cache.AuthorizationContext{}, soon), "no creation time, no cap")
+
+	t.Run("pre-authorized is capped at the document's life", func(t *testing.T) {
+		ctx := &cache.AuthorizationContext{CreatedAt: created, PreAuthorized: true}
+		assert.Equal(t, created.Add(cache.DocumentTTL).Unix(), statusDeadline(ctx, hour))
+	})
+	t.Run("a pre-auth child session is capped the same way", func(t *testing.T) {
+		ctx := &cache.AuthorizationContext{CreatedAt: created, SourceSessionID: "offer"}
+		assert.Equal(t, created.Add(cache.DocumentTTL).Unix(), statusDeadline(ctx, hour))
+	})
+	t.Run("other flows are capped at the context's retention", func(t *testing.T) {
+		ctx := &cache.AuthorizationContext{CreatedAt: created}
+		assert.Equal(t, created.Add(cache.AuthContextTTL).Unix(), statusDeadline(ctx, hour))
+	})
+	t.Run("an earlier token expiry wins", func(t *testing.T) {
+		ctx := &cache.AuthorizationContext{CreatedAt: created}
+		assert.Equal(t, soon, statusDeadline(ctx, soon))
+	})
+	t.Run("no creation time, no cap", func(t *testing.T) {
+		assert.Equal(t, hour, statusDeadline(&cache.AuthorizationContext{}, hour))
+	})
 }
 
 func newPreAuthStatusClient(t *testing.T, sessionID string) (*Client, *cache.AuthorizationContext) {
@@ -422,4 +437,71 @@ func TestIssuanceStatus_PreAuthRefreshDoesNotOutliveTheDocument(t *testing.T) {
 	after, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
 	require.NoError(t, err)
 	assert.Equal(t, before.Deadline, after.Deadline, "a new token does not bring the document back")
+}
+
+func TestIssuanceStatus_SecondPreAuthRedeemerKeepsTheOfferDeadline(t *testing.T) {
+	ctx := t.Context()
+	firstKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	secondKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	c, offer := newPreAuthStatusClient(t, "pre-auth-code")
+	for _, key := range []*ecdsa.PrivateKey{firstKey, secondKey} {
+		_, err := c.OAuthToken(ctx, &openid4vci.TokenRequest{
+			GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+			PreAuthorizedCode: offer.Code,
+			DPOP:              tokenDPoPProof(t, key),
+		})
+		require.NoError(t, err)
+	}
+
+	record, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+	assert.Equal(t, offer.CreatedAt.Add(cache.DocumentTTL).Unix(), record.Deadline,
+		"every redeemer is bound by the same cached document, so the deadline is the same")
+	assert.Equal(t, IssuanceStatusTokenIssued, effectiveStatus(record, offer.CreatedAt.Add(time.Minute)))
+}
+
+func TestIssuanceStatus_RefreshDeadlineStopsWhenTheAuthContextDoes(t *testing.T) {
+	ctx := t.Context()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	c := newStatusTestClient(t)
+	store := cache.NewTestMemoryStore(10 * time.Minute)
+	c.cfg = &model.Cfg{APIGW: &model.APIGW{Delivery: model.APIGWDelivery{OpenID4VCI: model.OAuthServer{
+		TokenEndpoint:        iaTokenEndpoint,
+		GrantTypes:           []string{"refresh_token"},
+		RefreshTokenDuration: 3600,
+	}}}}
+	c.cacheService.AuthContext = store
+	c.cacheService.DPopJTI = cache.NewTestMemoryCache[bool](time.Minute)
+
+	created := time.Now()
+	originalExpiry := created.Add(time.Minute).Unix()
+	require.NoError(t, c.createIssuanceStatus(ctx, "id-1", "pid", "SUNET", originalExpiry))
+	c.recordIssuanceStatus(ctx, "id-1", IssuanceStatusAuthorizationStarted, "", originalExpiry)
+	c.recordIssuanceStatus(ctx, "id-1", IssuanceStatusTokenIssued, "", originalExpiry)
+	require.NoError(t, store.Save(ctx, &cache.AuthorizationContext{
+		SessionID:             "session-1",
+		IssuanceID:            "id-1",
+		CreatedAt:             created,
+		Scopes:                []string{"pid"},
+		RefreshToken:          "refresh-1",
+		RefreshTokenExpiresAt: created.Add(time.Hour).Unix(),
+		Token:                 &cache.Token{AccessToken: "access-1", ExpiresAt: originalExpiry, DPoPThumbprint: thumbprintOf(t, key)},
+	}))
+
+	_, err = c.OAuthToken(ctx, &openid4vci.TokenRequest{
+		GrantType:    "refresh_token",
+		RefreshToken: "refresh-1",
+		DPOP:         tokenDPoPProof(t, key),
+	})
+	require.NoError(t, err)
+
+	record, err := c.cacheService.IssuanceStatus.GetErr(ctx, "id-1")
+	require.NoError(t, err)
+	assert.Equal(t, created.Add(cache.AuthContextTTL).Unix(), record.Deadline,
+		"a one-hour token cannot outlive the context that holds it")
 }

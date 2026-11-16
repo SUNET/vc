@@ -858,11 +858,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 	}
 
-	statusDeadline := tokenDoc.ExpiresAt
-	if isPreAuthFlow {
-		statusDeadline = preAuthDeadline(authorizationContext, statusDeadline)
-	}
-	c.recordIssuanceStatus(ctx, authorizationContext.IssuanceID, IssuanceStatusTokenIssued, "", statusDeadline)
+	c.recordIssuanceStatus(ctx, authorizationContext.IssuanceID, IssuanceStatusTokenIssued, "",
+		statusDeadline(authorizationContext, tokenDoc.ExpiresAt))
 
 	c.log.Debug("OAuthToken complete")
 
@@ -1196,10 +1193,7 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 
 	// This grant returns before the token-issued hook in OAuthToken, so the
 	// renewed access token's lifetime has to reach the status record here.
-	// A pre-auth child session is skipped: its document, not the token, ends the issuance.
-	if rotated.SourceSessionID == "" {
-		c.extendIssuanceDeadline(ctx, rotated.IssuanceID, rotated.Token.ExpiresAt)
-	}
+	c.extendDeadlineAfterRefresh(ctx, &rotated)
 
 	reply := &openid4vci.TokenResponse{
 		AccessToken:           newAccessToken,
