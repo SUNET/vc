@@ -11,9 +11,31 @@ import (
 // that an operator reading one can go straight to the block it is about.
 const staticClientsPath = "verifier.outbound.oidc_provider.static_clients"
 
-// staticClients returns the configured static OIDC clients, or nil when this
-// service has no verifier-OP configured at all.
-func staticClients(cfg *model.Cfg) []model.StaticOIDCClient {
+// servicesServingTheVerifierOP lists the services that actually read
+// verifier.outbound.oidc_provider.static_clients.
+//
+// Only the verifier serves the OP, and only it looks a static client up
+// (internal/verifier/apiv1/client.go). Its siblings share one config.yaml -
+// see docker-compose.yaml - and already tolerate a verifier block they will
+// never use: a static client with no client_secret at all loads cleanly for
+// the issuer and the registry today, because validation is scoped and that
+// block is not theirs to complete.
+//
+// Resolution has to be scoped the same way, or a deployment that injects a
+// client's credentials into the verifier's pod alone - which is exactly the
+// deployment this feature is for - stops the issuer, the registry and the
+// apigw on a variable none of them has any reason to hold.
+var servicesServingTheVerifierOP = map[string]bool{
+	"verifier": true,
+}
+
+// staticClients returns the static OIDC clients this service is responsible
+// for: none unless it serves the verifier-OP, and none when no verifier-OP
+// is configured at all.
+func staticClients(cfg *model.Cfg, serviceName string) []model.StaticOIDCClient {
+	if !servicesServingTheVerifierOP[serviceName] {
+		return nil
+	}
 	if cfg == nil || cfg.Verifier == nil || cfg.Verifier.Outbound.OIDCProvider == nil {
 		return nil
 	}
@@ -35,8 +57,8 @@ func staticClients(cfg *model.Cfg) []model.StaticOIDCClient {
 // ApplySecrets CLEARS every static client's secret on its way in: afterwards
 // a secret written in config.yaml is indistinguishable from one never
 // written, and the operator who wrote both down would never be told.
-func resolveStaticClientIdentities(cfg *model.Cfg) error {
-	clients := staticClients(cfg)
+func resolveStaticClientIdentities(cfg *model.Cfg, serviceName string) error {
+	clients := staticClients(cfg, serviceName)
 
 	for i := range clients {
 		c := &clients[i]
@@ -89,8 +111,8 @@ func resolveStaticClientIdentities(cfg *model.Cfg) error {
 // what a platform injected for one particular client. The conflict between
 // client_secret and client_secret_env is caught earlier - see
 // resolveStaticClientIdentities for why it cannot be caught here.
-func resolveStaticClientSecrets(cfg *model.Cfg) error {
-	clients := staticClients(cfg)
+func resolveStaticClientSecrets(cfg *model.Cfg, serviceName string) error {
+	clients := staticClients(cfg, serviceName)
 
 	for i := range clients {
 		c := &clients[i]

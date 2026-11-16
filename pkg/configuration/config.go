@@ -170,7 +170,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	// process its credentials that way. The two halves resolve on either
 	// side of the secrets file, and the order is load-bearing - see
 	// resolveStaticClientIdentities.
-	if err := resolveStaticClientIdentities(cfg); err != nil {
+	if err := resolveStaticClientIdentities(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
@@ -185,7 +185,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
-	if err := resolveStaticClientSecrets(cfg); err != nil {
+	if err := resolveStaticClientSecrets(cfg, serviceName); err != nil {
 		return nil, err
 	}
 

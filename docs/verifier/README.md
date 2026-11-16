@@ -250,6 +250,11 @@ Four things are refused at startup rather than resolved silently:
 Each message names the entry's position, the client it belongs to, and the
 variable involved.
 
+Only the verifier reads these clients, so only the verifier resolves them.
+The issuer, registry and apigw share the same `config.yaml` and ignore the
+block, exactly as they ignore a static client with no secret today — the
+variables need only be set in the verifier's own container.
+
 An environment variable's value is captured when the container starts, so
 rotating the underlying secret does not reach a running pod - rotation means
 rolling the pods. The secrets file is read once at startup too, so today that

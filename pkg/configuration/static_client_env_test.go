@@ -34,8 +34,8 @@ func TestStaticClientIDAndSecretComeFromTheEnvironment(t *testing.T) {
 		ClientSecretEnv: "VC_RP_SECRET",
 	})
 
-	require.NoError(t, resolveStaticClientIdentities(cfg))
-	require.NoError(t, resolveStaticClientSecrets(cfg))
+	require.NoError(t, resolveStaticClientIdentities(cfg, "verifier"))
+	require.NoError(t, resolveStaticClientSecrets(cfg, "verifier"))
 
 	client := cfg.Verifier.Outbound.OIDCProvider.StaticClients[0]
 	assert.Equal(t, "https://rp.example.org", client.ClientID)
@@ -49,8 +49,8 @@ func TestStaticClientWithoutEnvReferencesIsUntouched(t *testing.T) {
 		ClientSecret: "from-config",
 	})
 
-	require.NoError(t, resolveStaticClientIdentities(cfg))
-	require.NoError(t, resolveStaticClientSecrets(cfg))
+	require.NoError(t, resolveStaticClientIdentities(cfg, "verifier"))
+	require.NoError(t, resolveStaticClientSecrets(cfg, "verifier"))
 
 	client := cfg.Verifier.Outbound.OIDCProvider.StaticClients[0]
 	assert.Equal(t, "https://rp.example.org", client.ClientID)
@@ -68,7 +68,7 @@ func TestStaticClientRefusesTwoSourcesForOneValue(t *testing.T) {
 			ClientIDEnv: "VC_RP_ID",
 		})
 
-		err := resolveStaticClientIdentities(cfg)
+		err := resolveStaticClientIdentities(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "client_id and client_id_env are both set")
 		assert.Contains(t, err.Error(), staticClientsPath+"[0]")
@@ -82,7 +82,7 @@ func TestStaticClientRefusesTwoSourcesForOneValue(t *testing.T) {
 			ClientSecretEnv: "VC_RP_SECRET",
 		})
 
-		err := resolveStaticClientIdentities(cfg)
+		err := resolveStaticClientIdentities(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "client_secret and client_secret_env are both set")
 		assert.Contains(t, err.Error(), `client_id "https://rp.example.org"`)
@@ -96,7 +96,7 @@ func TestStaticClientRefusesAnUnresolvableEnvReference(t *testing.T) {
 	t.Run("client_id is not set", func(t *testing.T) {
 		cfg := cfgWithStaticClients(model.StaticOIDCClient{ClientIDEnv: "VC_RP_ID_ABSENT"})
 
-		err := resolveStaticClientIdentities(cfg)
+		err := resolveStaticClientIdentities(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `client_id_env names "VC_RP_ID_ABSENT", which is not set`)
 	})
@@ -105,7 +105,7 @@ func TestStaticClientRefusesAnUnresolvableEnvReference(t *testing.T) {
 		t.Setenv("VC_RP_ID", "")
 		cfg := cfgWithStaticClients(model.StaticOIDCClient{ClientIDEnv: "VC_RP_ID"})
 
-		err := resolveStaticClientIdentities(cfg)
+		err := resolveStaticClientIdentities(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `client_id_env names "VC_RP_ID", which is set but empty`)
 	})
@@ -116,7 +116,7 @@ func TestStaticClientRefusesAnUnresolvableEnvReference(t *testing.T) {
 			ClientSecretEnv: "VC_RP_SECRET_ABSENT",
 		})
 
-		err := resolveStaticClientSecrets(cfg)
+		err := resolveStaticClientSecrets(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `client_secret_env names "VC_RP_SECRET_ABSENT", which is not set`)
 		assert.Contains(t, err.Error(), `client_id "https://rp.example.org"`,
@@ -130,7 +130,7 @@ func TestStaticClientRefusesAnUnresolvableEnvReference(t *testing.T) {
 			ClientSecretEnv: "VC_RP_SECRET",
 		})
 
-		err := resolveStaticClientSecrets(cfg)
+		err := resolveStaticClientSecrets(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `client_secret_env names "VC_RP_SECRET", which is set but empty`)
 	})
@@ -149,7 +149,7 @@ func TestStaticClientRefusesADuplicateClientID(t *testing.T) {
 			model.StaticOIDCClient{ClientIDEnv: "VC_RP_B"},
 		)
 
-		err := resolveStaticClientIdentities(cfg)
+		err := resolveStaticClientIdentities(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `entries [0] and [1] both have client_id "https://rp.example.org"`)
 	})
@@ -162,7 +162,7 @@ func TestStaticClientRefusesADuplicateClientID(t *testing.T) {
 			model.StaticOIDCClient{ClientID: "https://rp.example.org"},
 		)
 
-		err := resolveStaticClientIdentities(cfg)
+		err := resolveStaticClientIdentities(cfg, "verifier")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `entries [0] and [1] both have client_id`)
 	})
@@ -174,7 +174,44 @@ func TestStaticClientRefusesADuplicateClientID(t *testing.T) {
 func TestStaticClientWithNoIDAtAllIsNotADuplicate(t *testing.T) {
 	cfg := cfgWithStaticClients(model.StaticOIDCClient{}, model.StaticOIDCClient{})
 
-	assert.NoError(t, resolveStaticClientIdentities(cfg))
+	assert.NoError(t, resolveStaticClientIdentities(cfg, "verifier"))
+}
+
+// Only the verifier reads these clients, and only the verifier resolves
+// them. Its siblings share one config.yaml, so a variable injected into the
+// verifier's pod alone must not stop the issuer, the registry or the apigw -
+// which is the whole deployment this feature exists for.
+//
+// They already tolerate a verifier block they will never use: a static
+// client with no client_secret at all loads cleanly for the issuer and the
+// registry today, because validation is scoped and that block is not theirs
+// to complete. Resolution is scoped the same way.
+func TestStaticClientResolutionIsOnlyForTheServiceThatServesTheOP(t *testing.T) {
+	for _, service := range []string{"issuer", "registry", "apigw"} {
+		t.Run(service, func(t *testing.T) {
+			cfg := cfgWithStaticClients(model.StaticOIDCClient{
+				ClientIDEnv:     "VC_RP_ID_ABSENT",
+				ClientSecretEnv: "VC_RP_SECRET_ABSENT",
+			})
+
+			require.NoError(t, resolveStaticClientIdentities(cfg, service))
+			require.NoError(t, resolveStaticClientSecrets(cfg, service))
+
+			client := cfg.Verifier.Outbound.OIDCProvider.StaticClients[0]
+			assert.Empty(t, client.ClientID, "a sibling service must not resolve what it will never read")
+			assert.Empty(t, client.ClientSecret)
+		})
+	}
+
+	// The control: the same config, loaded by the service that does serve
+	// the OP, is still held to every rule above.
+	t.Run("verifier", func(t *testing.T) {
+		cfg := cfgWithStaticClients(model.StaticOIDCClient{ClientIDEnv: "VC_RP_ID_ABSENT"})
+
+		err := resolveStaticClientIdentities(cfg, "verifier")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `client_id_env names "VC_RP_ID_ABSENT"`)
+	})
 }
 
 // A service with no verifier-OP configured resolves nothing and does not
@@ -186,8 +223,8 @@ func TestStaticClientResolutionIgnoresAConfigWithoutAVerifierOP(t *testing.T) {
 		"no oidc_provider": {Verifier: &model.Verifier{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.NoError(t, resolveStaticClientIdentities(cfg))
-			assert.NoError(t, resolveStaticClientSecrets(cfg))
+			assert.NoError(t, resolveStaticClientIdentities(cfg, "verifier"))
+			assert.NoError(t, resolveStaticClientSecrets(cfg, "verifier"))
 		})
 	}
 }
@@ -318,4 +355,27 @@ func TestNewRefusesAnUnresolvableStaticClientSecret(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `client_secret_env names "VC_RP_SECRET_ABSENT", which is not set`,
 		"an unresolved reference must be named, not left to a generic required_unless failure")
+}
+
+// The same config, the same absent variable, loaded by a service that does
+// not serve the OP: it starts.
+//
+// Through New rather than the resolvers, because the gate's position is the
+// point - these services share one config.yaml and already load a verifier
+// block they will never complete. Dropping the service check passes every
+// resolver test and fails here.
+func TestNewLetsASiblingServiceStartWithoutTheVerifiersVariables(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VC_CONFIG_YAML", writeStaticClientConfig(t, dir, "sibling",
+		`        - client_id_env: "VC_RP_ID_ABSENT"
+          client_secret_env: "VC_RP_SECRET_ABSENT"
+          redirect_uris: ["https://rp.example.org/callback"]`, ""))
+
+	for _, service := range []string{"issuer", "registry"} {
+		t.Run(service, func(t *testing.T) {
+			_, err := New(t.Context(), service)
+			assert.NoError(t, err,
+				"a variable injected into the verifier's pod alone must not stop its siblings")
+		})
+	}
 }
