@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -12,34 +13,20 @@ import (
 type MemoryCache[V any] struct {
 	cache *ttlcache.Cache[string, V]
 	ttl   time.Duration
-}
 
-// MemoryCacheOption configures a MemoryCache.
-type MemoryCacheOption func(*memoryCacheConfig)
-
-type memoryCacheConfig struct {
-	absoluteExpiry bool
-}
-
-// WithAbsoluteExpiry stops a Get from extending an entry's lifetime, so an
-// entry expires a fixed time after it was set however often it is read.
-func WithAbsoluteExpiry() MemoryCacheOption {
-	return func(c *memoryCacheConfig) { c.absoluteExpiry = true }
+	// mu serialises every mutation, so Update's read-modify-write cannot
+	// interleave with a plain write or a delete.
+	mu sync.Mutex
 }
 
 // NewMemoryCache creates a new in-memory generic cache with the given default TTL.
-// By default a Get extends the entry's lifetime; see WithAbsoluteExpiry.
-func NewMemoryCache[V any](ttl time.Duration, opts ...MemoryCacheOption) *MemoryCache[V] {
-	var cfg memoryCacheConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
-	ttlOpts := []ttlcache.Option[string, V]{ttlcache.WithTTL[string, V](ttl)}
-	if cfg.absoluteExpiry {
-		ttlOpts = append(ttlOpts, ttlcache.WithDisableTouchOnHit[string, V]())
-	}
-	c := ttlcache.New(ttlOpts...)
+// An entry expires ttl after it was written, however often it is read: the same
+// rule MongoCache's TTL index on created_at applies.
+func NewMemoryCache[V any](ttl time.Duration) *MemoryCache[V] {
+	c := ttlcache.New(
+		ttlcache.WithTTL[string, V](ttl),
+		ttlcache.WithDisableTouchOnHit[string, V](),
+	)
 
 	go c.Start()
 
@@ -79,12 +66,18 @@ func (m *MemoryCache[V]) GetErr(_ context.Context, key string) (V, error) {
 
 // Set stores a value with the default TTL.
 func (m *MemoryCache[V]) Set(_ context.Context, key string, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cache.Set(key, value, ttlcache.DefaultTTL)
 }
 
 // SetNX stores a value only if the key does not already exist.
 // Returns true if the value was set, false if the key already existed.
 func (m *MemoryCache[V]) SetNX(_ context.Context, key string, value V) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	_, found := m.cache.GetOrSet(key, value)
 	return !found, nil
 }
@@ -96,22 +89,63 @@ func (m *MemoryCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, 
 	if ttl <= 0 {
 		return m.SetNX(ctx, key, value)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	_, found := m.cache.GetOrSet(key, value, ttlcache.WithTTL[string, V](ttl))
 	return !found, nil
 }
 
 // SetWithTTL stores a value with a custom TTL.
 func (m *MemoryCache[V]) SetWithTTL(_ context.Context, key string, value V, ttl time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cache.Set(key, value, ttl)
+}
+
+// Update atomically read-modify-writes a value; see Cache.Update.
+// It holds the cache lock while fn runs, so fn must not call back into this cache.
+func (m *MemoryCache[V]) Update(_ context.Context, key string, fn func(V) (V, time.Duration, bool)) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	item := m.cache.Get(key, ttlcache.WithDisableTouchOnHit[string, V]())
+	if item == nil {
+		return false, ErrNoDocuments
+	}
+	expiresAt := item.ExpiresAt()
+	next, ttl, write := fn(item.Value())
+	if !write {
+		return false, nil
+	}
+	if ttl <= 0 {
+		ttl = ttlcache.PreviousOrDefaultTTL
+		if !expiresAt.IsZero() {
+			// An explicit remaining lifetime: if the entry was evicted while fn ran,
+			// Set would otherwise recreate it with the full default TTL.
+			if ttl = time.Until(expiresAt); ttl <= 0 {
+				return false, ErrNoDocuments
+			}
+		}
+	}
+	m.cache.Set(key, next, ttl)
+	return true, nil
 }
 
 // Delete removes a value by key.
 func (m *MemoryCache[V]) Delete(_ context.Context, key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cache.Delete(key)
 }
 
 // GetAndDelete atomically retrieves and removes a value by key.
 func (m *MemoryCache[V]) GetAndDelete(_ context.Context, key string) (V, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	item, ok := m.cache.GetAndDelete(key)
 	if !ok || item == nil {
 		var zero V

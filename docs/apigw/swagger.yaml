@@ -145,6 +145,9 @@ definitions:
         $ref: '#/definitions/openid4vci.CredentialOfferResult'
       credential_offer_url:
         type: string
+      issuance_id:
+        description: IssuanceID is what the caller polls at GET /api/v1/issuance/status.
+        type: string
       tx_code:
         description: |-
           TXCode is the transaction code (PIN) the wallet must present at the
@@ -288,6 +291,27 @@ definitions:
     - authentic_source
     - authentic_source_person_id
     type: object
+  apiv1.IssuanceStatusReply:
+    properties:
+      authentic_source:
+        type: string
+      created_at:
+        description: CreatedAt and UpdatedAt are Unix timestamps.
+        type: integer
+      event_description:
+        type: string
+      issuance_id:
+        type: string
+      scope:
+        type: string
+      status:
+        description: |-
+          Status is one of offer_created, authorization_started, token_issued,
+          credential_issued, accepted, rejected, failed or expired.
+        type: string
+      updated_at:
+        type: integer
+    type: object
   apiv1.JWKSResponse:
     properties:
       keys:
@@ -409,6 +433,45 @@ definitions:
         type: array
       meta:
         $ref: '#/definitions/model.MetaData'
+      opening_claims:
+        additionalProperties: {}
+        description: |-
+          OpeningClaims holds the claims an assertion scope's hash_commitment
+          openings read, as the identity provider asserted them. The callback
+          derives and filters DocumentData, which drops or rewrites them. Tagged
+          for JSON like PresentedClaims, which is what the cache serialises.
+        type: object
+      presented_claims:
+        description: |-
+          PresentedClaims names the top-level claims of DocumentData whose
+          value came from a VERIFIED presentation rather than from the
+          datastore, so issuance can keep them authoritative through the
+          derivations it runs.
+
+          It travels INSIDE the document because it describes that document.
+          Carried beside it - on the authorization context - it was a second
+          write that could interleave with this one: two direct-post requests
+          matching different auth scopes could leave one request's document
+          paired with the other's provenance, and a verified claim unpinned.
+          One write cannot disagree with itself.
+
+          Tagged for JSON, which is what the cache actually uses. The
+          Mongo-backed cache serialises through MongoCache.marshalEntry, and
+          that calls json.Marshal - so a bson tag does nothing for it and
+          json:"-" dropped this field entirely under HA, leaving issuance
+          with no pinned claims and a derivation free to replace a verified
+          birth date. That is the THIRD time this provenance was lost on the
+          HA path alone; it is tagged for the encoder in use, not the one
+          the collection name suggests.
+
+          omitempty, and set only on the cached copy a verification
+          produces: a document read from the datastore never carries it, and
+          the handlers that return a CompleteDocument return stored ones.
+          The user lookup reads DocumentData and never returns the document
+          itself. So it survives the cache without appearing in a response.
+        items:
+          type: string
+        type: array
     required:
     - document_data
     - identity_mapping_ids
@@ -496,6 +559,15 @@ definitions:
     type: object
   oauth2.AuthorizationServerMetadata:
     properties:
+      authorization_challenge_endpoint:
+        description: |-
+          AuthorizationChallengeEndpoint OPTIONAL. The endpoint at which a
+          wallet begins Interactive Authorization
+          (draft-ietf-oauth-first-party-apps §8, profiled by OpenID4VCI 1.1).
+
+          Its PRESENCE is the whole signal: a wallet needs nothing else to
+          know the mechanism is available.
+        type: string
       authorization_endpoint:
         description: AuthorizationEndpoint URL of the authorization server's authorization
           endpoint [RFC6749].  This is REQUIRED unless no grant types are supported
@@ -617,6 +689,21 @@ definitions:
         description: RegistrationEndpoint OPTIONAL.  URL of the authorization server's
           OAuth 2.0 Dynamic Client Registration endpoint [RFC7591].
         type: string
+      require_interactive_authorization:
+        description: |-
+          RequireInteractiveAuthorization OPTIONAL. Whether this server accepts
+          ONLY Interactive Authorization for credential issuance (OpenID4VCI
+          1.1). Default false.
+
+          MUST NOT appear without AuthorizationChallengeEndpoint - the
+          specification says so, and a server advertising a requirement for a
+          mechanism it does not expose is unusable rather than merely wrong.
+
+          Enforced on the STRUCT rather than only where it is built, because
+          this type is also unmarshalled straight from a configured document
+          and then signed: a guard in GenerateMetadata does nothing for that
+          path, and a signed forbidden document is worse than an unsigned one.
+        type: boolean
       require_pushed_authorization_requests:
         description: require_pushed_authorization_requests from GUNET issuer
         type: boolean
@@ -1035,6 +1122,19 @@ definitions:
         - S256
         - plain
         type: string
+      dynamic_params:
+        additionalProperties:
+          type: string
+        description: |-
+          DynamicParams holds key-value parameters bound directly from the PAR
+          caller's request body. Despite the name, these are NOT verified to
+          originate from any authentic source business system -- nothing here
+          authenticates the caller's claim about where the values came from.
+          They are used only for template substitution in the outgoing OIDC
+          request parameters (resolveOIDCRequestParams); issuance policy
+          evaluation is deliberately gated on OP-asserted claims instead (see
+          handlers_oidcrp.go), precisely because these values are unverified.
+        type: object
       issuing_state:
         type: string
       prompt:
@@ -1181,7 +1281,17 @@ definitions:
           ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).
           When using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's "sub" claim.
           OPTIONAL for pre-authorized_code grant.
-        maxLength: 128
+
+          The 512-character bound is deliberate: RFC 6749 puts no length limit on
+          client_id, and wallets increasingly identify themselves with a DID. A
+          did:key is short, but a did:jwk over a P-256 key is around 175
+          characters - past the 128 this used to allow. Kept in step with
+          cache.AuthorizationContext.WalletClientID, which is where PAR stores
+          the wallet's own client_id (that type's ClientID holds this
+          deployment's identifier instead), and with oauth2.MaxClientIDLength,
+          which bounds the same value when private_key_jwt conveys it in the
+          assertion's sub claim rather than in this parameter.
+        maxLength: 512
         type: string
       code:
         description: Code REQUIRED for authorization_code grant. The authorization
@@ -1741,6 +1851,41 @@ paths:
           schema:
             $ref: '#/definitions/apiv1.IdentityMappingSearchReply'
       summary: IdentityMappingSearch
+      tags:
+      - vc-platform
+  /api/v1/issuance/status:
+    get:
+      description: Get the state of a credential issuance by issuance_id
+      operationId: issuance-status
+      parameters:
+      - description: issuance_id from the offer reply
+        in: query
+        name: issuance_id
+        required: true
+        type: string
+      - description: authentic_source the offer was created for
+        in: query
+        name: authentic_source
+        required: true
+        type: string
+      - description: scope the offer was created for
+        in: query
+        name: scope
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.IssuanceStatusReply'
+        "404":
+          description: Unknown, expired or not owned by the given authentic_source
+            and scope
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: IssuanceStatus
       tags:
       - vc-platform
   /authorization/consent:

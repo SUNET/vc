@@ -71,6 +71,9 @@ type PrepareIssuanceReply struct {
 	// ExpiresAt is when the prepared issuance stops being redeemable,
 	// as a Unix timestamp.
 	ExpiresAt int64 `json:"expires_at"`
+
+	// IssuanceID is what the caller polls at GET /api/v1/issuance/status.
+	IssuanceID string `json:"issuance_id"`
 }
 
 // defaultPreparedIssuanceTTL is how long a prepared issuance lasts when
@@ -108,83 +111,9 @@ const maxPreparedIssuanceTTLSeconds = model.MaxAuthSessionTTLSeconds
 // to present a credential, and is issued to only if that credential
 // satisfies the rule the caller supplied here.
 func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceRequest) (*PrepareIssuanceReply, error) {
-	ia := &c.cfg.APIGW.Delivery.InteractiveAuthorization
-
-	// Nothing prepared here is redeemable while Interactive Authorization
-	// is off: the Challenge Endpoint is the only place an issuer_state can
-	// be spent, and it answers 404 when the mechanism is not enabled. A
-	// preparation that succeeds anyway hands the caller a valid-looking
-	// offer to print and distribute, and the failure surfaces to whoever
-	// scans it.
-	if !ia.Enabled() {
-		return nil, helpers.NewErrorDetailsWithStatus("interactive_authorization_disabled",
-			"interactive authorization is not enabled on this server, so a prepared issuance could not be redeemed", 400)
-	}
-
-	if err := req.IdentityMatch.Validate(); err != nil {
-		return nil, helpers.NewErrorDetailsWithStatus("invalid_identity_match", err.Error(), 400)
-	}
-
-	// The scope has to be one a presentation can authenticate, or there is
-	// no point at which the rule could be evaluated. Asked through the
-	// same Selector the Challenge Endpoint and /authorize use, so a scope
-	// prepared here is one this deployment will actually answer with a
-	// presentation rather than a browser.
-	required, source, err := c.interactionTypeForScope(ia, req.Scope)
+	source, ttl, err := c.validatePrepareRequest(req)
 	if err != nil {
 		return nil, err
-	}
-	if required != ia.InteractionType(model.InteractionOpenID4VPPresentation) {
-		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentation_authenticated",
-			fmt.Sprintf("scope %q is authenticated by %q, and an identity match can only be evaluated against a presentation",
-				req.Scope, required), 400)
-	}
-
-	// The offer names req.Scope as its credential_configuration_id, and
-	// issuance resolves it through matchScope only after the exchange is spent.
-	if c.cfg.GetCredentialMetadata(req.Scope) == nil {
-		return nil, helpers.NewErrorDetailsWithStatus("unknown_credential_configuration",
-			fmt.Sprintf("scope %q has no credential metadata, so the offer would name a credential this issuer does not advertise", req.Scope), 400)
-	}
-
-	// The source the caller named, if it named one, has to be the source
-	// this scope resolves to.
-	//
-	// The authorization middleware reads authentic_source from this body
-	// and authorizes the (source, scope) pair it finds. Nothing else
-	// compared that pair to the one preparation would actually use, so a
-	// caller permitted source A could name A, send a scope the Selector
-	// resolves to B, and have the issuance prepared against B having been
-	// authorized for nothing of the sort. Refusing the mismatch keeps the
-	// pair that was checked and the pair that is used the same pair.
-	if req.AuthenticSource != "" && req.AuthenticSource != source.AuthenticSource {
-		c.log.Error(nil, "PREPARE: authentic_source does not match the source the scope resolves to",
-			"scope", req.Scope, "named", req.AuthenticSource, "resolved", source.AuthenticSource)
-		return nil, helpers.NewErrorDetailsWithStatus("authentic_source_mismatch",
-			fmt.Sprintf("scope %q is served by authentic source %q, not %q",
-				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
-	}
-
-	// A rule naming a claim the request will not ask for can never pass.
-	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
-		return nil, err
-	}
-
-	// And the request itself has to be buildable, which matching claim
-	// NAMES does not establish.
-	//
-	// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
-	// query and one whose credential metadata is missing, and it is not
-	// reached until a wallet resumes the offer - by which point the
-	// failure belongs to a Holder standing in front of a QR code, for a
-	// configuration problem the caller could have been told about at the
-	// moment it prepared the issuance. Built here and thrown away: it is
-	// rebuilt when the exchange opens, from configuration that may have
-	// changed, so storing this one would only make the two disagree.
-	if _, err := c.issuanceAuthDCQL(req.Scope); err != nil {
-		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.Scope)
-		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
-			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.Scope, err), 400)
 	}
 
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
@@ -192,23 +121,19 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 	}
 
-	ttl := req.TTLSeconds
-	if ttl == 0 {
-		ttl = defaultPreparedIssuanceTTLSeconds
-	}
-	if ttl > maxPreparedIssuanceTTLSeconds {
-		return nil, helpers.NewErrorDetailsWithStatus("ttl_too_long",
-			fmt.Sprintf("ttl_seconds must be at most %d; a prepared issuance is stored in a cache that does not keep it longer",
-				maxPreparedIssuanceTTLSeconds), 400)
-	}
-
 	issuerState, err := crypto.GenerateSecureToken(32, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate issuer_state: %w", err)
 	}
 
+	issuanceID, err := newIssuanceID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate issuance_id: %w", err)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:       uuid.NewString(),
+		IssuanceID:      issuanceID,
 		Code:            uuid.NewString(),
 		IssuerState:     issuerState,
 		IdentityMatch:   req.IdentityMatch,
@@ -234,6 +159,9 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, err
 	}
+	if err := c.createIssuanceStatus(ctx, issuanceID, req.Scope, source.AuthenticSource, authCtx.ExpiresAt); err != nil {
+		return nil, err
+	}
 
 	offer, err := openid4vci.NewCredentialOffer(
 		c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, req.Scope, openid4vci.GrantTypeAuthorizationCode)
@@ -254,7 +182,104 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		CredentialOffer: offer,
 		IssuerState:     issuerState,
 		ExpiresAt:       authCtx.ExpiresAt,
+		IssuanceID:      issuanceID,
 	}, nil
+}
+
+// validatePrepareRequest refuses a request that could not produce a redeemable
+// issuance, and returns the credential source the scope resolves to and the
+// lifetime to give the issuance.
+func (c *Client) validatePrepareRequest(req *PrepareIssuanceRequest) (model.CredentialSource, int, error) {
+	ia := &c.cfg.APIGW.Delivery.InteractiveAuthorization
+
+	// Nothing prepared here is redeemable while Interactive Authorization
+	// is off: the Challenge Endpoint is the only place an issuer_state can
+	// be spent, and it answers 404 when the mechanism is not enabled. A
+	// preparation that succeeds anyway hands the caller a valid-looking
+	// offer to print and distribute, and the failure surfaces to whoever
+	// scans it.
+	if !ia.Enabled() {
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("interactive_authorization_disabled",
+			"interactive authorization is not enabled on this server, so a prepared issuance could not be redeemed", 400)
+	}
+
+	if err := req.IdentityMatch.Validate(); err != nil {
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("invalid_identity_match", err.Error(), 400)
+	}
+
+	// The scope has to be one a presentation can authenticate, or there is
+	// no point at which the rule could be evaluated. Asked through the
+	// same Selector the Challenge Endpoint and /authorize use, so a scope
+	// prepared here is one this deployment will actually answer with a
+	// presentation rather than a browser.
+	required, source, err := c.interactionTypeForScope(ia, req.Scope)
+	if err != nil {
+		return model.CredentialSource{}, 0, err
+	}
+	if required != ia.InteractionType(model.InteractionOpenID4VPPresentation) {
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("scope_not_presentation_authenticated",
+			fmt.Sprintf("scope %q is authenticated by %q, and an identity match can only be evaluated against a presentation",
+				req.Scope, required), 400)
+	}
+
+	// The offer names req.Scope as its credential_configuration_id, and
+	// issuance resolves it through matchScope only after the exchange is spent.
+	if c.cfg.GetCredentialMetadata(req.Scope) == nil {
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("unknown_credential_configuration",
+			fmt.Sprintf("scope %q has no credential metadata, so the offer would name a credential this issuer does not advertise", req.Scope), 400)
+	}
+
+	// The source the caller named, if it named one, has to be the source
+	// this scope resolves to.
+	//
+	// The authorization middleware reads authentic_source from this body
+	// and authorizes the (source, scope) pair it finds. Nothing else
+	// compared that pair to the one preparation would actually use, so a
+	// caller permitted source A could name A, send a scope the Selector
+	// resolves to B, and have the issuance prepared against B having been
+	// authorized for nothing of the sort. Refusing the mismatch keeps the
+	// pair that was checked and the pair that is used the same pair.
+	if req.AuthenticSource != "" && req.AuthenticSource != source.AuthenticSource {
+		c.log.Error(nil, "PREPARE: authentic_source does not match the source the scope resolves to",
+			"scope", req.Scope, "named", req.AuthenticSource, "resolved", source.AuthenticSource)
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("authentic_source_mismatch",
+			fmt.Sprintf("scope %q is served by authentic source %q, not %q",
+				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
+	}
+
+	// A rule naming a claim the request will not ask for can never pass.
+	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
+		return model.CredentialSource{}, 0, err
+	}
+
+	// And the request itself has to be buildable, which matching claim
+	// NAMES does not establish.
+	//
+	// buildIssuanceAuthDCQL refuses an auth scope whose format it cannot
+	// query and one whose credential metadata is missing, and it is not
+	// reached until a wallet resumes the offer - by which point the
+	// failure belongs to a Holder standing in front of a QR code, for a
+	// configuration problem the caller could have been told about at the
+	// moment it prepared the issuance. Built here and thrown away: it is
+	// rebuilt when the exchange opens, from configuration that may have
+	// changed, so storing this one would only make the two disagree.
+	if _, err := c.issuanceAuthDCQL(req.Scope); err != nil {
+		c.log.Error(err, "PREPARE: scope cannot be turned into a presentation request", "scope", req.Scope)
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("scope_not_presentable",
+			fmt.Sprintf("scope %q cannot be turned into a presentation request: %v", req.Scope, err), 400)
+	}
+
+	ttl := req.TTLSeconds
+	if ttl == 0 {
+		ttl = defaultPreparedIssuanceTTLSeconds
+	}
+	if ttl > maxPreparedIssuanceTTLSeconds {
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("ttl_too_long",
+			fmt.Sprintf("ttl_seconds must be at most %d; a prepared issuance is stored in a cache that does not keep it longer",
+				maxPreparedIssuanceTTLSeconds), 400)
+	}
+
+	return source, ttl, nil
 }
 
 // validateIdentityMatchIsAskable refuses a rule that names a claim the

@@ -63,6 +63,11 @@ type AuthorizationContext struct {
 	// session's credential documents.
 	SourceSessionID string `json:"source_session_id,omitempty" bson:"source_session_id,omitempty" validate:"omitempty,max=128,printascii"`
 
+	// IssuanceID is the opaque handle a customer service polls to follow this
+	// issuance. Distinct from IssuerState and the pre-authorized code, which are
+	// bearer secrets and must not be handed to the caller's status checks.
+	IssuanceID string `json:"issuance_id,omitempty" bson:"issuance_id,omitempty" validate:"omitempty,max=128,printascii"`
+
 	// Client and authorization fields
 	// ClientID is this deployment's own identifier for the flow - the
 	// issuance path stores "x509_san_dns:<host>", and the verifier stores an

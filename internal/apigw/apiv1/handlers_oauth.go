@@ -819,6 +819,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		childSession := &cache.AuthorizationContext{
 			SessionID:            childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
+			IssuanceID:           authorizationContext.IssuanceID,
 			Status:               cache.SessionStatusTokenIssued,
 			CreatedAt:            time.Now(),
 			ExpiresAt:            tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
@@ -856,6 +857,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, err
 		}
 	}
+
+	c.recordIssuanceStatus(ctx, authorizationContext.IssuanceID, IssuanceStatusTokenIssued, "",
+		statusDeadline(authorizationContext, tokenDoc.ExpiresAt))
 
 	c.log.Debug("OAuthToken complete")
 
@@ -1186,6 +1190,10 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
 			"internal error during token rotation", 500, err)
 	}
+
+	// This grant returns before the token-issued hook in OAuthToken, so the
+	// renewed access token's lifetime has to reach the status record here.
+	c.extendDeadlineAfterRefresh(ctx, &rotated)
 
 	reply := &openid4vci.TokenResponse{
 		AccessToken:           newAccessToken,

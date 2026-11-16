@@ -45,8 +45,10 @@ func NewMemoryStore(ttl time.Duration) *MemoryStore {
 		ttl:     ttl,
 	}
 
+	// No touch-on-hit, as in NewMemoryCache: MongoStore's TTL index counts from created_at.
 	c := ttlcache.New(
 		ttlcache.WithTTL[string, *AuthorizationContext](ttl),
+		ttlcache.WithDisableTouchOnHit[string, *AuthorizationContext](),
 	)
 
 	// Clean up secondary indices when entries are automatically evicted.
@@ -61,6 +63,27 @@ func NewMemoryStore(ttl time.Duration) *MemoryStore {
 
 	s.cache = c
 	return s
+}
+
+// put stores doc so that it expires at doc.CreatedAt + ttl, the instant
+// MongoStore's TTL index on created_at deletes it. A write therefore never
+// restarts the countdown, and re-anchoring means changing CreatedAt, which
+// is what MongoStore does too.
+func (c *MemoryStore) put(sessionID string, doc *AuthorizationContext) {
+	c.cache.Set(sessionID, doc, c.remainingTTL(doc))
+}
+
+// remainingTTL is how long doc has left. A document without CreatedAt keeps
+// whatever life its entry already has.
+func (c *MemoryStore) remainingTTL(doc *AuthorizationContext) time.Duration {
+	if doc.CreatedAt.IsZero() {
+		return ttlcache.PreviousOrDefaultTTL
+	}
+	if left := time.Until(doc.CreatedAt.Add(c.ttl)); left > 0 {
+		return left
+	}
+	// Already past its retention: ttlcache reads a TTL of 0 or less as "default" or "never".
+	return time.Nanosecond
 }
 
 // Save stores an authorization context in the cache with sessionID as primary key
@@ -90,7 +113,7 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	}
 
 	// Store by primary key (sessionID)
-	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
+	c.put(doc.SessionID, doc)
 
 	// Create secondary indices for lookups by other fields
 	if doc.RequestURI != "" {
@@ -256,7 +279,7 @@ func (c *MemoryStore) ForfeitAuthorizationCode(ctx context.Context, query *Autho
 	doc.Forfeited = true
 
 	// Update the primary cache entry
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.put(sessionID, doc)
 
 	// Update indices if needed
 	c.updateIndices(doc)
@@ -316,7 +339,7 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 	// Use PreviousOrDefaultTTL to preserve the original TTL — repeated redemptions
 	// by different clients must not extend the code's lifetime.
 	doc.RedeemedBy = append(doc.RedeemedBy, dpopThumbprint)
-	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+	c.put(sessionID, doc)
 
 	return doc, nil
 }
@@ -352,12 +375,12 @@ func (c *MemoryStore) ConsumeTXCodeAttempt(ctx context.Context, code string) (*A
 
 	if doc.TXCodeAttempts >= MaxTXCodeAttempts {
 		doc.Forfeited = true
-		c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+		c.put(sessionID, doc)
 		return nil, ErrTXCodeAttemptsExceeded
 	}
 
 	doc.TXCodeAttempts++
-	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+	c.put(sessionID, doc)
 
 	return doc, nil
 }
@@ -386,7 +409,7 @@ func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) 
 	doc.Consent = true
 
 	// Update the primary cache entry
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.put(sessionID, doc)
 
 	// Update indices if needed
 	c.updateIndices(doc)
@@ -432,7 +455,7 @@ func (c *MemoryStore) ExtendExpiry(ctx context.Context, query *AuthorizationCont
 	updated := *stored
 	updated.ExpiresAt = expiresAt
 
-	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.put(sessionID, &updated)
 	c.updateIndices(&updated)
 
 	return nil
@@ -462,7 +485,7 @@ func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) e
 	doc.Token = token
 
 	// Update the primary cache entry
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.put(sessionID, doc)
 
 	// Update indices with new access token
 	c.updateIndices(doc)
@@ -532,7 +555,7 @@ func (c *MemoryStore) RotateRefreshToken(ctx context.Context, oldToken string, u
 	c.deleteIndices(doc)
 
 	// Persist the updated document and rebuild indices under the resolved sessionID.
-	c.cache.Set(sessionID, updated, ttlcache.DefaultTTL)
+	c.put(sessionID, updated)
 	c.updateIndices(updated)
 
 	return nil
@@ -560,7 +583,7 @@ func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *Authorizati
 	doc.AuthenticSource = authenticSource
 
 	// Update the primary cache entry
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.put(sessionID, doc)
 
 	return nil
 }
@@ -589,7 +612,7 @@ func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationCon
 	doc.Identifier = identifier
 
 	// Update the primary cache entry
-	c.cache.Set(query.SessionID, doc, ttlcache.DefaultTTL)
+	c.put(query.SessionID, doc)
 
 	return nil
 }
@@ -722,7 +745,7 @@ func (c *MemoryStore) Update(ctx context.Context, doc *AuthorizationContext) err
 	c.deleteIndices(item.Value())
 
 	// Update in cache
-	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
+	c.put(doc.SessionID, doc)
 
 	// Rebuild secondary indices from the new document
 	c.updateIndices(doc)
@@ -811,7 +834,7 @@ func (c *MemoryStore) MarkCodeAsForfeited(ctx context.Context, id string) error 
 	doc.Forfeited = true
 
 	// Update the primary cache entry
-	c.cache.Set(id, doc, ttlcache.DefaultTTL)
+	c.put(id, doc)
 
 	return nil
 }
@@ -905,7 +928,7 @@ func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, 
 	c.deleteIndices(item.Value())
 
 	delete(c.indices, indexKey)
-	c.cache.Set(sessionID, &stored, ttlcache.DefaultTTL)
+	c.put(sessionID, &stored)
 	c.updateIndices(&stored)
 
 	claimed := stored
@@ -952,7 +975,7 @@ func (c *MemoryStore) ResumeIssuerState(ctx context.Context, issuerState string,
 	c.deleteIndices(stored)
 	stored.IssuerState = ""
 	resume.applyTo(stored)
-	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+	c.put(sessionID, stored)
 	c.updateIndices(stored)
 
 	resumed := *stored
@@ -1018,7 +1041,7 @@ func (c *MemoryStore) claimIndexedHandle(indexPrefix, handle string, read func(*
 	clear(&replacement)
 	delete(c.indices, indexKey)
 	// Claiming must not extend the code's lifetime; the Mongo $unset does not either.
-	c.cache.Set(sessionID, &replacement, ttlcache.PreviousOrDefaultTTL)
+	c.put(sessionID, &replacement)
 
 	return &claimed, nil
 }
@@ -1083,7 +1106,7 @@ func (c *MemoryStore) SetAuthProvider(ctx context.Context, sessionID string, fie
 	updated.RemoteName = fields.RemoteName
 	updated.AuthenticSource = fields.AuthenticSource
 
-	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.put(sessionID, &updated)
 	c.updateIndices(&updated)
 
 	return nil
