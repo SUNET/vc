@@ -430,6 +430,20 @@ func (c *Client) backgroundRetry() retryConfig {
 	}
 }
 
+// redactURL renders a URL with any credentials in it replaced by "xxxxx",
+// for the error and log messages that name one.
+//
+// url.URL.Redacted does this, but only for a URL that parses; a string that
+// does not is returned as the literal "<unparseable url>" rather than
+// printed, since the reason it did not parse may be the secret in it.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable url>"
+	}
+	return u.Redacted()
+}
+
 // refuseRedirect stops the HTTP client following a redirect, because every
 // URL this client calls is a configured API endpoint and a redirect away
 // from one is either a misconfiguration or an attack.

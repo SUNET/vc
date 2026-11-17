@@ -710,3 +710,38 @@ func TestNewRejectsCredentialsInABaseURL(t *testing.T) {
 		}
 	}
 }
+
+// A list URL carrying credentials is refused, because that URL is
+// PUBLISHED: it becomes the credential's status.status_list.uri, which
+// every holder keeps and every verifier fetches.
+func TestListIDFromURL_RefusesCredentialsInAPublishedURL(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"user and password", "https://user:pw@status.example.org/lists/abc"},
+		{"user only", "https://token@status.example.org/lists/abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id, err := ListIDFromURL(tc.url)
+			if err == nil {
+				t.Fatalf("%q must be rejected, got list ID %q", tc.url, id)
+			}
+			// Refusing it must not be the thing that logs the secret.
+			if strings.Contains(err.Error(), "pw") || strings.Contains(err.Error(), "token@") {
+				t.Fatalf("the refusal must not echo the credentials: %v", err)
+			}
+		})
+	}
+}
+
+// redactURL keeps a credential out of a message while still saying which
+// endpoint is meant, and never prints a URL it could not parse.
+func TestRedactURL(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"https://user:pw@status.example.org/lists/abc", "https://user:xxxxx@status.example.org/lists/abc"},
+		{"https://status.example.org/lists/abc", "https://status.example.org/lists/abc"},
+		{"https://status.example.org/a%zz", "<unparseable url>"},
+	} {
+		if got := redactURL(tc.in); got != tc.want {
+			t.Fatalf("redactURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
