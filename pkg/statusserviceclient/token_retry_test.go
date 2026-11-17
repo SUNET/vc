@@ -595,3 +595,45 @@ func TestNewRejectsABaseURLWithADotSegment(t *testing.T) {
 		}
 	}
 }
+
+// An ESCAPED dot segment is a dot segment.
+//
+// u.Path is percent-decoded and u.EscapedPath is not, so "/v1/.." appears
+// only in the first and "/v1/%2e%2e" only in the second. Checking one form
+// is how the escaped spelling walked past this check when it was added;
+// ListIDFromURL has always checked the decoded path, and the two now agree.
+func TestNewRejectsAnEscapedDotSegmentInTheBaseURL(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Each spelling is caught by a different half of the check, which is
+	// why both halves exist:
+	//
+	//   %2e%2e  - the escaped segment unescapes to "..", so unescaping
+	//             each segment is what catches it.
+	//   %2F..   - the escaped path splits as one segment "a%2F..", which
+	//             unescapes to "a/.." and is not a dot segment; only the
+	//             DECODED path splits it into "a" and "..".
+	for _, bad := range []string{
+		"https://status.example.org/v1/%2e%2e",
+		"https://status.example.org/v1/%2E%2E",
+		"https://status.example.org/v1/%2e",
+		"https://status.example.org/%2e%2e/admin",
+		"https://status.example.org/a%2F..",
+		"https://status.example.org/a%2f%2e%2e",
+	} {
+		c, err := New(Config{
+			IngestionURL: bad, ASURL: "https://as.example.org",
+			IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+		}, nil)
+		if err == nil {
+			c.Close()
+			t.Fatalf("%q must be refused", bad)
+		}
+		if !strings.Contains(err.Error(), "dot segment") {
+			t.Fatalf("%q must be refused FOR its dot segment, got: %v", bad, err)
+		}
+	}
+}

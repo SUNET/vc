@@ -106,3 +106,66 @@ func TestRetryStopsOnContextCancellation(t *testing.T) {
 		t.Fatal("fn should have been attempted at least once before cancellation")
 	}
 }
+
+// A cancelled caller is told it cancelled, not that the service failed.
+//
+// The loop used to return the last attempt's error, so errors.Is(err,
+// context.Canceled) answered false and an issuer deciding what to do about
+// an unreachable status service could not tell "the service is down" from
+// "I cancelled my own request". Both facts are kept now.
+func TestRetryReportsCancellationAsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	serviceErr := errors.New("status service returned 503: down")
+	attempts := 0
+	err := retry(ctx, retryConfig{initialBackoff: time.Hour, maxBackoff: time.Hour}, func(context.Context) error {
+		attempts++
+		cancel() // the caller gives up while a retry is pending
+		return serviceErr
+	})
+
+	if err == nil {
+		t.Fatal("a cancelled retry must fail")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the caller cancelled; errors.Is(err, context.Canceled) must answer: %v", err)
+	}
+	if !errors.Is(err, serviceErr) {
+		t.Fatalf("the last attempt's failure is the diagnosis and must survive: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("a cancelled context must stop the loop, ran %d attempts", attempts)
+	}
+}
+
+// Giving up after maxElapsed is a deadline, and says so.
+func TestRetryReportsItsOwnDeadlineAsADeadline(t *testing.T) {
+	serviceErr := errors.New("status service returned 503: down")
+	err := retry(context.Background(), retryConfig{
+		initialBackoff: time.Millisecond, maxBackoff: time.Millisecond,
+		maxElapsed: 20 * time.Millisecond,
+	}, func(context.Context) error { return serviceErr })
+
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, serviceErr) {
+		t.Fatalf("want a deadline or the service error, got %v", err)
+	}
+	if !errors.Is(err, serviceErr) {
+		t.Fatalf("the service failure must survive the give-up: %v", err)
+	}
+}
+
+// And an uncancelled failure is still just the failure: no context error
+// invented where none happened.
+func TestRetryDoesNotInventACancellation(t *testing.T) {
+	serviceErr := errors.New("status service returned 503: down")
+	err := retry(context.Background(), retryConfig{
+		initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, maxAttempts: 2,
+	}, func(context.Context) error { return serviceErr })
+
+	if !errors.Is(err, serviceErr) {
+		t.Fatalf("want the service error, got %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("nothing was cancelled: %v", err)
+	}
+}

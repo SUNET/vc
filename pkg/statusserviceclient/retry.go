@@ -3,6 +3,7 @@ package statusserviceclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -76,11 +77,8 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 	start := time.Now()
 	var lastErr error
 	for attempt := 1; ; attempt++ {
-		if err := ctx.Err(); err != nil {
-			if lastErr != nil {
-				return lastErr
-			}
-			return err
+		if ctx.Err() != nil {
+			return contextFailure(ctx, lastErr)
 		}
 
 		err := fn(ctx)
@@ -105,7 +103,7 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 		}
 		select {
 		case <-ctx.Done():
-			return lastErr
+			return contextFailure(ctx, lastErr)
 		case <-time.After(sleep):
 		}
 
@@ -113,5 +111,32 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 		if backoff > maxBackoff {
 			backoff = maxBackoff
 		}
+	}
+}
+
+// contextFailure reports a retry loop that stopped because its context
+// ended, keeping BOTH facts.
+//
+// Returning only the last attempt's error - which is what this did - tells
+// a caller who cancelled that the status service failed. errors.Is(err,
+// context.Canceled) answered false, so an issuer deciding what to do about
+// an unreachable service could not tell "the service is down" from "I
+// cancelled my own request", and a cancelled issuance would be reported as
+// a status-service outage.
+//
+// Returning only the context error would lose the diagnosis instead, so
+// both are wrapped: errors.Is answers for context.Canceled and
+// context.DeadlineExceeded AND for whatever the last attempt failed with.
+// The deadline case includes the one this loop sets from maxElapsed, which
+// is a real give-up after TakeFallbackTimeout.
+func contextFailure(ctx context.Context, lastErr error) error {
+	cause := ctx.Err()
+	switch {
+	case cause == nil:
+		return lastErr
+	case lastErr == nil:
+		return cause
+	default:
+		return fmt.Errorf("%w: last attempt failed: %w", cause, lastErr)
 	}
 }
