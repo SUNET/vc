@@ -732,13 +732,60 @@ func TestListIDFromURL_RefusesCredentialsInAPublishedURL(t *testing.T) {
 	}
 }
 
-// redactURL keeps a credential out of a message while still saying which
-// endpoint is meant, and never prints a URL it could not parse.
-func TestRedactURL(t *testing.T) {
+// No diagnostic prints a credential, whatever the URL is wrong about.
+//
+// The userinfo check cannot be the only guard: the scheme, host, query,
+// fragment and dot-segment checks each refuse a URL too, and each ran
+// before or instead of it. A URL that is wrong in two ways at once -
+// credentials AND a bad scheme - was refused for the scheme, printing the
+// password while doing it.
+func TestNoURLDiagnosticEchoesACredential(t *testing.T) {
+	const secret = "sup3rsecret"
+
+	for _, tc := range []struct{ name, url string }{
+		{"bad scheme", "ftp://user:" + secret + "@status.example.org"},
+		{"no host", "https://user:" + secret + "@"},
+		{"query", "https://user:" + secret + "@status.example.org?a=b"},
+		{"fragment", "https://user:" + secret + "@status.example.org#f"},
+		{"dot segment", "https://user:" + secret + "@status.example.org/v1/.."},
+		{"credentials alone", "https://user:" + secret + "@status.example.org"},
+		{"unparseable", "https://user:" + secret + "@status.example.org/%zz"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := requireHTTPEndpoint("IngestionURL", tc.url)
+			if err == nil {
+				t.Fatalf("%q must be refused", tc.url)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("the refusal printed the credential: %v", err)
+			}
+		})
+	}
+
+	// The same for a list URL, whose own checks run before its userinfo
+	// check for the same reason.
+	for _, bad := range []string{
+		"lists/abc",
+		"https://user:" + secret + "@status.example.org/lists/abc#f",
+		"https://user:" + secret + "@status.example.org/lists/abc",
+	} {
+		if _, err := ListIDFromURL(bad); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		} else if strings.Contains(err.Error(), secret) {
+			t.Fatalf("the refusal printed the credential: %v", err)
+		}
+	}
+}
+
+// A token in the USERNAME position is redacted too, which url.URL.Redacted
+// does not do.
+func TestRedactURLBlanksTheWholeUserinfo(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
-		{"https://user:pw@status.example.org/lists/abc", "https://user:xxxxx@status.example.org/lists/abc"},
-		{"https://status.example.org/lists/abc", "https://status.example.org/lists/abc"},
-		{"https://status.example.org/a%zz", "<unparseable url>"},
+		{"https://sometoken@status.example.org/x", "https://xxxxx@status.example.org/x"},
+		{"https://user:pw@status.example.org/x", "https://xxxxx@status.example.org/x"},
+		{"https://status.example.org/x", "https://status.example.org/x"},
+		// Never printed: the reason it would not parse may be the secret.
+		{"https://user:pw@status.example.org/a%zz", "<unparseable url>"},
 	} {
 		if got := redactURL(tc.in); got != tc.want {
 			t.Fatalf("redactURL(%q) = %q, want %q", tc.in, got, tc.want)
