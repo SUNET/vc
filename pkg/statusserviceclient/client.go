@@ -474,7 +474,16 @@ func requireHTTPEndpoint(name, raw string) error {
 	// resolves it to "/allocate". The same rule a list ID is held to, for
 	// the same reason - an endpoint that names one resource and resolves
 	// to another.
-	for _, segment := range strings.Split(u.EscapedPath(), "/") {
+	// u.Path, the PERCENT-DECODED form, which is the only one that catches
+	// every spelling: "%2e%2e" arrives here as "..", and "a%2F.." has
+	// already split into "a" and "..". The first version of this check
+	// split EscapedPath instead, where "%2e%2e" is not "..", and the
+	// escaped spelling walked straight past it.
+	//
+	// The decoded path is what ListIDFromURL has always checked. Checking
+	// the same form here is what makes a configured endpoint and a derived
+	// list ID held to one rule rather than two.
+	for _, segment := range strings.Split(u.Path, "/") {
 		if segment == "." || segment == ".." {
 			return fmt.Errorf("statusserviceclient: %s %q contains the dot segment %q, so the endpoint it names is not the one that would be called", name, raw, segment)
 		}
