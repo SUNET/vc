@@ -177,6 +177,14 @@ type Config struct {
 
 	// HTTPClient, when set, replaces the default *http.Client (used by
 	// tests to point at an httptest.Server with a short timeout).
+	//
+	// Redirects: the client this package builds refuses to follow them,
+	// because following one leaks the access token or the client
+	// assertion to wherever the redirect names (see refuseRedirect). A
+	// client supplied here inherits that policy only when it has none of
+	// its own - an explicit CheckRedirect is left exactly as the caller
+	// set it, including a permissive one, and the caller then owns that
+	// decision. Nothing is mutated: the policy is applied to a copy.
 	HTTPClient *http.Client
 
 	// The following bound retry/backoff behaviour. All default to sensible
@@ -189,8 +197,14 @@ type Config struct {
 	RetryInitialBackoff time.Duration
 	// RetryMaxBackoff caps how large the backoff is allowed to grow.
 	RetryMaxBackoff time.Duration
-	// TakeFallbackTimeout bounds Take's synchronous allocation attempt
-	// when the pool is empty.
+	// TakeFallbackTimeout bounds every FOREGROUND call - Take's
+	// synchronous allocation attempt when the pool is empty, and
+	// SetStatus - as the total elapsed time across retries. Named for
+	// Take because that is the one whose bound keeps credential issuance
+	// from hanging, but SetStatus is held to it too.
+	//
+	// The pool's own background refill is not bounded by this: nothing
+	// waits on any single refill attempt, so it retries until Close.
 	TakeFallbackTimeout time.Duration
 	// RefillInterval is the periodic-check period for the background
 	// refill loop, independent of low-water-mark wakeups.

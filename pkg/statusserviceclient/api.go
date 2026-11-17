@@ -472,12 +472,46 @@ func (c *Client) setStatusOnce(ctx context.Context, listID string, idx uint64, s
 }
 
 // SetStatus updates the status of a previously allocated index, retrying
-// transient failures (network errors, 5xx) with backoff bounded by
-// TakeFallbackTimeout. A permanent failure (the status service's answer to
-// "no", such as 403 not-owner, 404 not-found, or 410 archived) is returned
-// immediately, unretried.
+// transient failures (network errors, 5xx, 408, 429) with backoff bounded
+// by TakeFallbackTimeout. A permanent failure (the status service's answer
+// to "no", such as 403 not-owner, 404 not-found, or 410 archived) is
+// returned immediately, unretried.
+//
+// listID is checked before it is put in a path: this is a public entry
+// point, and the caller's value usually comes back out of the caller's own
+// storage rather than from the Entry this package handed it.
 func (c *Client) SetStatus(ctx context.Context, listID string, idx uint64, status Status) error {
+	if err := requireUsableListID(listID); err != nil {
+		return permanent(err)
+	}
 	return retry(ctx, c.foregroundRetry(), func(ctx context.Context) error {
 		return c.setStatusOnce(ctx, listID, idx, status)
 	})
+}
+
+// requireUsableListID refuses a list ID that would not stay one segment of
+// the PATCH path.
+//
+// url.PathEscape does NOT escape a dot, because a dot is unreserved - so
+// ".." passes through intact and the request-URI becomes "/status/../5".
+// Go does not remove dot segments from a request URI; whatever sits in
+// front of the ingestion service does, and the write lands on "/5". That is
+// the same traversal ListIDFromURL refuses when DERIVING an ID, and it has
+// to be refused here too, because SetStatus is reached with an ID the
+// caller stored rather than one this package just produced.
+//
+// A slash is refused as well. Every ID this package produces comes out of
+// path.Base and cannot contain one, so a caller passing "lists/abc" has
+// passed a path by mistake; escaped to "lists%2Fabc" it would silently
+// address a list nobody has.
+func requireUsableListID(listID string) error {
+	switch {
+	case listID == "":
+		return errors.New("statusserviceclient: a list ID is required")
+	case listID == "." || listID == "..":
+		return fmt.Errorf("statusserviceclient: list ID %q is a dot segment, which resolves to a different resource than it names", listID)
+	case strings.Contains(listID, "/"):
+		return fmt.Errorf("statusserviceclient: list ID %q contains a slash, so it is a path rather than a list ID", listID)
+	}
+	return nil
 }

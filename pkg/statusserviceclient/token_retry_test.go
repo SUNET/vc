@@ -482,3 +482,49 @@ func TestRateLimitingIsRetriedRatherThanTreatedAsARefusal(t *testing.T) {
 		})
 	}
 }
+
+// SetStatus is a public entry point, and its list ID has to survive being
+// put in a path.
+//
+// url.PathEscape leaves a dot alone - it is unreserved - so ".." reaches
+// the wire intact and the request-URI becomes "/status/../5". Go does not
+// remove dot segments from a request URI; whatever sits in front of the
+// ingestion service does, and the write lands on "/5". ListIDFromURL
+// already refuses this when DERIVING an ID, but a caller reaches SetStatus
+// with an ID out of its own storage.
+func TestSetStatusRefusesAListIDThatWouldNotStayOneSegment(t *testing.T) {
+	fake, c, entry := clientHoldingOneEntry(t)
+	before := fake.statusCallCount.Load()
+
+	for _, tc := range []struct{ name, listID string }{
+		{"empty", ""},
+		{"dot", "."},
+		{"dot dot", ".."},
+		{"a path", "lists/abc"},
+		{"a traversal", "../admin"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := c.SetStatus(context.Background(), tc.listID, entry.Index, StatusInvalid)
+			if err == nil {
+				t.Fatalf("list ID %q must be refused", tc.listID)
+			}
+			if !isPermanent(err) {
+				t.Fatalf("list ID %q is not going to become valid; refusal must be permanent, got %v", tc.listID, err)
+			}
+		})
+	}
+
+	if got := fake.statusCallCount.Load(); got != before {
+		t.Fatalf("a refused list ID must never reach the network; %d request(s) went out", got-before)
+	}
+}
+
+// And an ordinary list ID still works, or the test above would pass with
+// SetStatus refusing everything.
+func TestSetStatusAcceptsTheListIDItWasHandedByAllocate(t *testing.T) {
+	_, c, entry := clientHoldingOneEntry(t)
+
+	if err := c.SetStatus(context.Background(), entry.ListID, entry.Index, StatusInvalid); err != nil {
+		t.Fatalf("the ID allocate handed back must be usable: %v", err)
+	}
+}
