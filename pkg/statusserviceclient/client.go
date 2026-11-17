@@ -487,8 +487,11 @@ func urlParseReason(err error) string {
 // that are worth stealing, so neither is allowed to travel somewhere the
 // configuration did not name.
 func refuseRedirect(req *http.Request, via []*http.Request) error {
+	// redactURL, not URL.Redacted: that keeps the username, and the
+	// redirect TARGET comes from a Location header - whoever wrote it
+	// chooses what credentials to put in it.
 	return fmt.Errorf("statusserviceclient: %s %s redirected to %s, and this client does not follow redirects away from a configured endpoint",
-		via[len(via)-1].Method, via[len(via)-1].URL.Redacted(), req.URL.Redacted())
+		via[len(via)-1].Method, redactURL(via[len(via)-1].URL.String()), redactURL(req.URL.String()))
 }
 
 // requireHTTPEndpoint rejects a missing endpoint, or one this client cannot
