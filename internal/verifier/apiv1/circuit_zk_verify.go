@@ -108,16 +108,28 @@ func (c *Client) circuitZkTolerance() (skew, maxAge time.Duration) {
 }
 
 // circuitZkRequestFor builds the response-side request from the
-// verifier's own DCQL query and its own offered formats.
+// verifier's own DCQL query and the system ids this session offered.
 //
-// The offered circuit ids and proof systems come from
-// verifier.preferred_vp_formats.circuit_zk - the verifier's
-// configuration - and not from anything in the response. A request
-// that offered neither list offered nothing, and
+// The offered circuit ids and proof systems come from the verifier's
+// own side of the exchange and never from anything in the response. A
+// session that offered neither list offered nothing, and
 // ValidateCircuitZkResponse then refuses every response, which is the
 // intended reading: a circuit this verifier never named is not one it
 // can decide it trusts after seeing a proof from it.
-func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.ZkpReqRequest {
+//
+// From the SESSION where it recorded what it offered, and from
+// verifier.preferred_vp_formats.zkp_req only when it did not. The
+// configuration is what the node holds NOW; a presentation answers
+// what the request object said THEN. On a rolling deployment those
+// differ, and reading the live config would refuse a wallet that
+// proved with exactly the circuit it was offered - reported as a
+// wallet problem, by the node that changed its mind.
+//
+// The fallback is not a safety valve but a migration: a session opened
+// before the field existed has nothing recorded, and the behaviour it
+// had is the behaviour it keeps. See
+// AuthorizationContext.OfferedZkpReqSystemIDs.
+func (c *Client) circuitZkRequestFor(authCtx *cache.AuthorizationContext, query openid4vp.CredentialQuery) openid4vp.ZkpReqRequest {
 	request := openid4vp.ZkpReqRequest{
 		QueryID:  query.ID,
 		Items:    query.Req,
@@ -127,10 +139,28 @@ func (c *Client) circuitZkRequestFor(query openid4vp.CredentialQuery) openid4vp.
 		// MSO validity period.
 		SourceFormat: query.Meta.SourceFormat,
 	}
-	if formats := c.cfg.Verifier.PreferredVPFormats; formats != nil && formats.ZkpReq != nil {
-		request.OfferedSystemIDs = formats.ZkpReq.SystemIDValues
+	if authCtx != nil && authCtx.OfferedZkpReqSystemIDs != nil {
+		request.OfferedSystemIDs = authCtx.OfferedZkpReqSystemIDs
+		return request
 	}
+	request.OfferedSystemIDs = c.offeredZkpReqSystemIDs()
 	return request
+}
+
+// offeredZkpReqSystemIDs is the zkp_req system id list this node's
+// configuration offers, recorded on a session when its request object is
+// built so that verification can read it back unchanged.
+//
+// nil when nothing is configured, which is what an offer of nothing has to
+// look like: an empty non-nil slice would be indistinguishable from it here
+// but would record "this session offered nothing" on a context, and the two
+// have to stay apart for the fallback above to mean what it says.
+func (c *Client) offeredZkpReqSystemIDs() []string {
+	formats := c.cfg.Verifier.PreferredVPFormats
+	if formats == nil || formats.ZkpReq == nil {
+		return nil
+	}
+	return formats.ZkpReq.SystemIDValues
 }
 
 // circuitZkRawToken returns the whole vp_token ENVELOPE, as it

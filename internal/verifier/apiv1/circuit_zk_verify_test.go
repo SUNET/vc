@@ -47,7 +47,7 @@ func TestCircuitZkRequestTakesTheOfferFromConfiguration(t *testing.T) {
 		Req:      []openid4vp.ReqItem{{FnID: "age_check", Return: "age-1"}},
 	}
 
-	request := client.circuitZkRequestFor(query)
+	request := client.circuitZkRequestFor(nil, query)
 	assert.Equal(t, "nym_attestation", request.QueryID)
 	assert.True(t, request.Multiple)
 	assert.Equal(t, []string{"urn:circuits:longfellow:nym_auth:v1"}, request.OfferedSystemIDs)
@@ -59,10 +59,75 @@ func TestCircuitZkRequestTakesTheOfferFromConfiguration(t *testing.T) {
 func TestCircuitZkRequestWithNoOfferIsEmpty(t *testing.T) {
 	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{}}}
 
-	request := client.circuitZkRequestFor(openid4vp.CredentialQuery{ID: "q"})
+	request := client.circuitZkRequestFor(nil, openid4vp.CredentialQuery{ID: "q"})
 	assert.Empty(t, request.OfferedSystemIDs)
 	assert.Empty(t, request.OfferedSystemIDs)
 	assert.False(t, request.Multiple, "DCQL multiple defaults to false")
+}
+
+// A presentation is checked against what its own session offered, not
+// against what this node is configured with now.
+//
+// The failure without it is a rolling deployment: node A offers a
+// circuit, the wallet proves with it, node B - already carrying a
+// narrowed verifier.preferred_vp_formats - reads the response and
+// refuses a wallet that did exactly as it was told, reporting it as the
+// wallet's fault.
+func TestCircuitZkRequestPrefersWhatTheSessionOffered(t *testing.T) {
+	// The node's CURRENT configuration, narrowed since the session began.
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
+		PreferredVPFormats: &openid4vp.VPFormatsSupported{ZkpReq: &openid4vp.ZkpReqFormat{
+			SystemIDValues: []string{"urn:circuits:vega:nym_auth:v1"},
+		}},
+	}}}
+
+	authCtx := &cache.AuthorizationContext{
+		OfferedZkpReqSystemIDs: []string{"urn:circuits:longfellow:nym_auth:v1"},
+	}
+
+	request := client.circuitZkRequestFor(authCtx, openid4vp.CredentialQuery{ID: "q"})
+	assert.Equal(t, []string{"urn:circuits:longfellow:nym_auth:v1"}, request.OfferedSystemIDs,
+		"the session's own offer decides, not the configuration this node holds now")
+}
+
+// A session opened before the field existed has nothing recorded, and
+// keeps the behaviour it had: the configuration decides.
+//
+// This is what makes the change safe to roll out in both directions - a
+// session opened by an old replica is still verifiable by a new one.
+func TestCircuitZkRequestFallsBackToConfigForASessionThatRecordedNoOffer(t *testing.T) {
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
+		PreferredVPFormats: &openid4vp.VPFormatsSupported{ZkpReq: &openid4vp.ZkpReqFormat{
+			SystemIDValues: []string{"urn:circuits:longfellow:nym_auth:v1"},
+		}},
+	}}}
+
+	for name, authCtx := range map[string]*cache.AuthorizationContext{
+		"no session at all":   nil,
+		"a session with none": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := client.circuitZkRequestFor(authCtx, openid4vp.CredentialQuery{ID: "q"})
+			assert.Equal(t, []string{"urn:circuits:longfellow:nym_auth:v1"}, request.OfferedSystemIDs)
+		})
+	}
+}
+
+// A session that recorded offering NOTHING is not a session that
+// recorded nothing: an empty offer refuses every response, and must not
+// fall through to a configuration that would accept one.
+func TestCircuitZkRequestKeepsAnEmptyOfferEmpty(t *testing.T) {
+	client := &Client{cfg: &model.Cfg{Verifier: &model.Verifier{
+		PreferredVPFormats: &openid4vp.VPFormatsSupported{ZkpReq: &openid4vp.ZkpReqFormat{
+			SystemIDValues: []string{"urn:circuits:longfellow:nym_auth:v1"},
+		}},
+	}}}
+
+	authCtx := &cache.AuthorizationContext{OfferedZkpReqSystemIDs: []string{}}
+
+	request := client.circuitZkRequestFor(authCtx, openid4vp.CredentialQuery{ID: "q"})
+	assert.Empty(t, request.OfferedSystemIDs,
+		"a recorded offer of nothing stands; it is not an absent recording")
 }
 
 // The channel decides the SessionTranscript, and a channel with no
