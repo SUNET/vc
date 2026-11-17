@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -356,6 +357,12 @@ func TestNewRejectsABaseURLThatWouldSwallowThePath(t *testing.T) {
 					c.Close()
 					t.Fatalf("%s = %q must be refused", field, tc.bad)
 				}
+				// The MESSAGE, not just an error: New has several other
+				// ways to fail, and any of them would satisfy a bare
+				// err != nil while this guard was gone.
+				if !strings.Contains(err.Error(), "query string") && !strings.Contains(err.Error(), "fragment") {
+					t.Fatalf("%s = %q must be refused FOR its query or fragment, got: %v", field, tc.bad, err)
+				}
 			}
 		})
 	}
@@ -383,5 +390,95 @@ func TestNewAcceptsAnOrdinaryBaseURL(t *testing.T) {
 			t.Fatalf("%q must be accepted: %v", base, err)
 		}
 		c.Close()
+	}
+}
+
+// A redirect away from a configured endpoint is refused, and nothing
+// reaches the target.
+//
+// Measured rather than trusted to net/http. Go strips the Authorization
+// header only when the redirect crosses to a different HOST, and even then
+// it REPLAYS THE BODY on 307/308 - and the token request's body carries the
+// RFC 7523 client assertion. A different PORT on the same host is not a
+// different host to Go, so without a policy both the bearer token and the
+// assertion travel to wherever the redirect names.
+func TestAClientDoesNotFollowARedirect(t *testing.T) {
+	var reached atomic.Int32
+	var sawAuth, sawBody atomic.Value
+	sawAuth.Store("")
+	sawBody.Store("")
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		sawAuth.Store(r.Header.Get("Authorization"))
+		b, _ := io.ReadAll(r.Body)
+		sawBody.Store(string(b))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	// 308: method and body are preserved across it, which is the case that
+	// carries the client assertion.
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusPermanentRedirect)
+	}))
+	defer redirector.Close()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := New(Config{
+		IngestionURL: redirector.URL, ASURL: redirector.URL,
+		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+		PoolSize: 0, RefillInterval: time.Hour,
+		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
+		TakeFallbackTimeout: 200 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	if _, err := c.Take(context.Background()); err == nil {
+		t.Fatal("a redirected endpoint must not yield an entry")
+	}
+
+	if n := reached.Load(); n != 0 {
+		t.Fatalf("the redirect target was reached %d times; it must never be", n)
+	}
+	if got := sawAuth.Load().(string); got != "" {
+		t.Fatalf("an access token reached the redirect target: %q", got)
+	}
+	if got := sawBody.Load().(string); strings.Contains(got, "client_assertion") {
+		t.Fatalf("the client assertion reached the redirect target: %q", got)
+	}
+}
+
+// A 429 is the service asking to be asked again, not refusing.
+//
+// Classified permanent, a rate-limited service fails the allocation
+// outright - and an issuer on the default degraded mode then mints a
+// credential with no status claim, unrevokable, because the service asked
+// it to slow down. 408 is the same shape.
+func TestRateLimitingIsRetriedRatherThanTreatedAsARefusal(t *testing.T) {
+	for _, code := range []int{http.StatusTooManyRequests, http.StatusRequestTimeout} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			if err := classifyStatus(code, []byte("slow down")); err == nil {
+				t.Fatalf("%d is still an error", code)
+			} else if isPermanent(err) {
+				t.Fatalf("%d must be retryable, not a refusal", code)
+			}
+		})
+	}
+
+	// The control: an ordinary 4xx is still a refusal, or this test would
+	// pass just as well with every 4xx made retryable.
+	for _, code := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusGone} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			if err := classifyStatus(code, []byte("no")); !isPermanent(err) {
+				t.Fatalf("%d must stay a refusal", code)
+			}
+		})
 	}
 }

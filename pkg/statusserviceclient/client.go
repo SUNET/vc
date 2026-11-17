@@ -318,7 +318,13 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
+		httpClient = &http.Client{Timeout: defaultHTTPTimeout, CheckRedirect: refuseRedirect}
+	} else if httpClient.CheckRedirect == nil {
+		// A copy, so a caller's client is never mutated under it, and
+		// only when the caller expressed no policy of their own.
+		withPolicy := *httpClient
+		withPolicy.CheckRedirect = refuseRedirect
+		httpClient = &withPolicy
 	}
 
 	c := &Client{
@@ -391,6 +397,28 @@ func (c *Client) backgroundRetry() retryConfig {
 		initialBackoff: c.cfg.RetryInitialBackoff,
 		maxBackoff:     c.cfg.RetryMaxBackoff,
 	}
+}
+
+// refuseRedirect stops the HTTP client following a redirect, because every
+// URL this client calls is a configured API endpoint and a redirect away
+// from one is either a misconfiguration or an attack.
+//
+// Following one discloses credentials, which is measured rather than
+// assumed - see TestAClientDoesNotFollowARedirect. Go strips the
+// Authorization header when the redirect crosses to a different HOST, but:
+//
+//   - it REPLAYS THE REQUEST BODY on 307 and 308 even then, and the token
+//     request's body carries the RFC 7523 client assertion - this issuer's
+//     signed identity, handed to whoever the redirect names; and
+//   - a different PORT on the same host is not a different host to Go, so
+//     a redirect to one carries both the bearer token and the body intact.
+//
+// The access token and the assertion are the two things this package holds
+// that are worth stealing, so neither is allowed to travel somewhere the
+// configuration did not name.
+func refuseRedirect(req *http.Request, via []*http.Request) error {
+	return fmt.Errorf("statusserviceclient: %s %s redirected to %s, and this client does not follow redirects away from a configured endpoint",
+		via[len(via)-1].Method, via[len(via)-1].URL.Redacted(), req.URL.Redacted())
 }
 
 // requireHTTPEndpoint rejects a missing endpoint, or one this client cannot

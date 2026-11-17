@@ -95,14 +95,30 @@ func allocateDispatchIsRetryable(err error) bool {
 }
 
 // classifyStatus turns an HTTP status code into either nil (2xx), a
-// permanent error (4xx - retrying cannot help: bad request, unauthorized,
-// forbidden, not found, gone), or a plain (retryable) error (5xx, or
-// anything else unexpected).
+// permanent error (most 4xx - retrying cannot help: bad request,
+// unauthorized, forbidden, not found, gone), or a plain (retryable) error
+// (5xx, 408, 429, or anything else unexpected).
+//
+// 408 and 429 are 4xx that explicitly mean "ask again". Treating 429 as a
+// refusal is the costly one: a rate-limited status service would fail the
+// allocation outright, and an issuer running the default degraded mode
+// then mints a credential with no status claim - unrevokable - because
+// the service asked it to slow down.
+//
+// The backoff already in retry() governs when the next attempt goes out.
+// Retry-After is deliberately not read: honouring a server-chosen delay
+// would let the service pin a foreground Take past its own
+// TakeFallbackTimeout, which is the bound that keeps issuance from
+// hanging.
 func classifyStatus(statusCode int, body []byte) error {
 	if statusCode >= 200 && statusCode < 300 {
 		return nil
 	}
 	msg := fmt.Sprintf("status service returned %d: %s", statusCode, strings.TrimSpace(string(body)))
+	switch statusCode {
+	case http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return fmt.Errorf("%s", msg)
+	}
 	if statusCode >= 400 && statusCode < 500 {
 		return permanent(fmt.Errorf("%s", msg))
 	}
