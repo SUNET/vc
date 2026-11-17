@@ -93,8 +93,14 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 		if cfg.maxAttempts > 0 && attempt >= cfg.maxAttempts {
 			return lastErr
 		}
+		// Through contextFailure like the other two give-up sites: when
+		// maxElapsed is set this loop runs under a context carrying that
+		// same deadline, so reaching here means the deadline has passed
+		// and the caller is owed that fact. Returning lastErr bare - which
+		// is what this did - reports a give-up after TakeFallbackTimeout
+		// as nothing but the last service error.
 		if cfg.maxElapsed > 0 && time.Since(start) >= cfg.maxElapsed {
-			return lastErr
+			return contextFailure(ctx, lastErr)
 		}
 
 		sleep := time.Duration(0)

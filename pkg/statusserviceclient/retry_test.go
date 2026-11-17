@@ -146,8 +146,11 @@ func TestRetryReportsItsOwnDeadlineAsADeadline(t *testing.T) {
 		maxElapsed: 20 * time.Millisecond,
 	}, func(context.Context) error { return serviceErr })
 
-	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, serviceErr) {
-		t.Fatalf("want a deadline or the service error, got %v", err)
+	// Independently, not as one arm of an OR: serviceErr is always wrapped,
+	// so an OR with it passes whether or not the deadline survived, and the
+	// give-up path could drop context.DeadlineExceeded undetected.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("giving up after maxElapsed is a deadline and must say so: %v", err)
 	}
 	if !errors.Is(err, serviceErr) {
 		t.Fatalf("the service failure must survive the give-up: %v", err)
@@ -167,5 +170,38 @@ func TestRetryDoesNotInventACancellation(t *testing.T) {
 	}
 	if errors.Is(err, context.Canceled) {
 		t.Fatalf("nothing was cancelled: %v", err)
+	}
+}
+
+// The give-up after maxElapsed says so from EVERY path that reaches it.
+//
+// There are three ways this loop can stop on a context: the check at the
+// top, the select during backoff, and the elapsed check between attempts.
+// The first two were fixed together and this one was missed, which an
+// assertion written as "deadline OR service error" could never have caught
+// - serviceErr is always wrapped, so the OR was satisfied either way.
+//
+// fn outruns maxElapsed here, so the elapsed check fires immediately after
+// it returns, before any select on ctx.Done().
+func TestRetryReportsTheDeadlineFromTheElapsedPathToo(t *testing.T) {
+	serviceErr := errors.New("status service returned 503: down")
+
+	start := time.Now()
+	err := retry(context.Background(), retryConfig{
+		initialBackoff: time.Hour, maxBackoff: time.Hour,
+		maxElapsed: 20 * time.Millisecond,
+	}, func(context.Context) error {
+		time.Sleep(50 * time.Millisecond)
+		return serviceErr
+	})
+
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("the loop slept the backoff instead of giving up: %v", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("giving up on the elapsed check is still a deadline: %v", err)
+	}
+	if !errors.Is(err, serviceErr) {
+		t.Fatalf("the service failure must survive it: %v", err)
 	}
 }
