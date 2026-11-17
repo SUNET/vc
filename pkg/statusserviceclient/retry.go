@@ -93,14 +93,17 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 		if cfg.maxAttempts > 0 && attempt >= cfg.maxAttempts {
 			return lastErr
 		}
-		// Through contextFailure like the other two give-up sites: when
-		// maxElapsed is set this loop runs under a context carrying that
-		// same deadline, so reaching here means the deadline has passed
-		// and the caller is owed that fact. Returning lastErr bare - which
-		// is what this did - reports a give-up after TakeFallbackTimeout
-		// as nothing but the last service error.
+		// context.DeadlineExceeded by construction, NOT ctx.Err().
+		//
+		// This loop runs under a context carrying the same deadline, so
+		// reaching here means it has passed - but the context's err is set
+		// by its own timer goroutine, which may not have run yet.
+		// time.Since(start) can therefore be true while ctx.Err() is still
+		// nil, and reading it here reported the give-up as nothing but the
+		// last service error: the very bug this site had, reintroduced as
+		// a race that reproduced about one run in four.
 		if cfg.maxElapsed > 0 && time.Since(start) >= cfg.maxElapsed {
-			return contextFailure(ctx, lastErr)
+			return wrapGiveUp(context.DeadlineExceeded, lastErr)
 		}
 
 		sleep := time.Duration(0)
@@ -136,7 +139,14 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 // The deadline case includes the one this loop sets from maxElapsed, which
 // is a real give-up after TakeFallbackTimeout.
 func contextFailure(ctx context.Context, lastErr error) error {
-	cause := ctx.Err()
+	return wrapGiveUp(ctx.Err(), lastErr)
+}
+
+// wrapGiveUp keeps both facts about a retry loop that stopped: WHY it
+// stopped, and what the last attempt failed with. Either alone misleads -
+// the cause alone loses the diagnosis, the last error alone says the
+// service failed when the caller cancelled.
+func wrapGiveUp(cause, lastErr error) error {
 	switch {
 	case cause == nil:
 		return lastErr
