@@ -21,6 +21,8 @@
 
   On a Galera cluster the lock holds only on the node running the migration, so stop writers on every other node first. A write from another node stalls replication on the migrating node and throttles writes across the cluster, other databases included. `KILL` leaves the stall in place. Restarting the node clears it, and the run has then failed partway: restore the backup.
 
+  Start one service and let the migration finish before starting the other. APIGW and the verifier both run migrations at startup, and golang-migrate's MariaDB driver waits only 10 seconds for its advisory lock before giving up, a timeout its source fixes rather than reads from configuration. A rebuild that outlasts those 10 seconds therefore panics the second service, which then restarts until the first one is done. Measured on MariaDB 11.8: a database of 200,000 documents, 600,000 identity mapping rows, 183,000 identities and 200,000 credential subjects, 66 MB of table and index data, took 11 seconds up and 7 seconds down, and a reader running against it throughout was blocked for all but 70 ms of the run. The lock window is the whole migration, and it grows with the table sizes.
+
   A document now reaches an identity only when its `identity_mapping_ids` entry spells the identity's `authentic_source_person_id` exactly. The migration leaves links that relied on folding as they are, because a variant can be another person. Before upgrading, this query lists them. It spans authentic sources, as the lookup by identity does:
 
   ```sql
