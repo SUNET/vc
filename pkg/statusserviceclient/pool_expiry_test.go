@@ -31,6 +31,56 @@ func newExpiryTestPool(t *testing.T, entries ...Entry) *pool {
 // An entry that expires while it sits in the pool must never be handed out:
 // it would go into an issued credential's status_list reference, and the
 // verifier resolving it is the one who would discover the problem.
+// statusOnlyServer is a fake ingestion service that answers /token and
+// /allocate with the bare minimum and hands every /status/ request to
+// onStatus.
+//
+// The split is the point. New starts a background refill goroutine that
+// talks to this same server, so a test that counted every request would
+// pass or fail on that loop's timing rather than on what it means to
+// measure.
+func statusOnlyServer(t *testing.T, onStatus http.HandlerFunc) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
+		case !strings.HasPrefix(r.URL.Path, "/status/"):
+			_, _ = w.Write([]byte(`{"list_url":"` + r.Host + `/lists/x","index":1}`))
+		default:
+			onStatus(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fastPoolClient builds a client against server with a fresh software key,
+// backoffs short enough not to slow a test down, and RefillInterval an hour
+// so the pool is driven by the test rather than by the refill loop.
+func fastPoolClient(t *testing.T, serverURL string, poolSize int, takeFallback time.Duration) *Client {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	c, err := New(Config{
+		IngestionURL: serverURL, ASURL: serverURL,
+		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+		PoolSize: poolSize, RefillInterval: time.Hour,
+		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
+		TakeFallbackTimeout: takeFallback,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(c.Close)
+	return c
+}
+
 func TestPoolTake_SkipsExpiredEntries(t *testing.T) {
 	fresh := Entry{ListURL: "https://s.example/l/fresh", ListID: "fresh", Index: 1, Exp: time.Now().Add(time.Hour)}
 	stale := Entry{ListURL: "https://s.example/l/stale", ListID: "stale", Index: 2, Exp: time.Now().Add(-time.Minute)}
@@ -120,21 +170,7 @@ func TestTake_FallbackRejectsAnEntryInsideTheSkewWindow(t *testing.T) {
 	}))
 	defer server.Close()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	c, err := New(Config{
-		IngestionURL: server.URL, ASURL: server.URL,
-		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
-		PoolSize: 0, RefillInterval: time.Hour,
-		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
-		TakeFallbackTimeout: 150 * time.Millisecond,
-	}, nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer c.Close()
+	c := fastPoolClient(t, server.URL, 0, 150*time.Millisecond)
 
 	if _, err := c.Take(context.Background()); err == nil {
 		t.Fatal("Take must not return an entry that is already inside the expiry skew window")
@@ -169,23 +205,9 @@ func TestTake_ReleasesAndStopsWhenEveryAllocationIsBornExpired(t *testing.T) {
 	}))
 	defer server.Close()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	c, err := New(Config{
-		IngestionURL: server.URL, ASURL: server.URL,
-		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
-		// PoolSize 1, not 0: zero is defaulted to 50, and the background
-		// refill would then be allocating alongside the path under test.
-		PoolSize: 1, RefillInterval: time.Hour,
-		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
-		TakeFallbackTimeout: time.Second,
-	}, nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer c.Close()
+	// PoolSize 1, not 0: zero is defaulted to 50, and the background refill
+	// would then be allocating alongside the path under test.
+	c := fastPoolClient(t, server.URL, 1, time.Second)
 
 	if _, err := c.Take(context.Background()); err == nil {
 		t.Fatal("Take must not return an entry inside the expiry skew window")
@@ -271,42 +293,15 @@ func TestPoolReclaim_MarksQueuedEntriesInvalid(t *testing.T) {
 	var mu sync.Mutex
 	var patches []patch
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/token") {
-			_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
-			return
-		}
-		// Only the status updates: the background refill goroutine New
-		// starts is also talking to this server, and counting its
-		// /allocate calls as reclaims would make this test pass or fail on
-		// the loop's timing.
-		if !strings.HasPrefix(r.URL.Path, "/status/") {
-			_, _ = w.Write([]byte(`{"list_url":"` + r.Host + `/lists/x","index":1}`))
-			return
-		}
+	server := statusOnlyServer(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		patches = append(patches, patch{path: r.URL.Path, body: string(body)})
 		mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	})
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := New(Config{
-		IngestionURL: server.URL, ASURL: server.URL,
-		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
-		PoolSize: 0, RefillInterval: time.Hour,
-		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
+	c := fastPoolClient(t, server.URL, 0, 0)
 
 	c.pool.mu.Lock()
 	c.pool.stale = []Entry{
@@ -350,39 +345,16 @@ func TestPoolReclaim_DoesNotHoldTheLockDuringTheCall(t *testing.T) {
 	inFlight := make(chan struct{})
 	var once sync.Once
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/token") {
-			_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
-			return
-		}
-		if !strings.HasPrefix(r.URL.Path, "/status/") {
-			_, _ = w.Write([]byte(`{"list_url":"` + r.Host + `/lists/x","index":1}`))
-			return
-		}
+	server := statusOnlyServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		// The test only means anything while the call is actually in
 		// flight: without this it could check the lock before reclaim ever
 		// took it, and pass against a version that holds it throughout.
 		once.Do(func() { close(inFlight) })
 		<-release // the update hangs until the test lets it finish
 		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	})
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := New(Config{
-		IngestionURL: server.URL, ASURL: server.URL,
-		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
-		PoolSize: 0, RefillInterval: time.Hour,
-		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
+	c := fastPoolClient(t, server.URL, 0, 0)
 
 	c.pool.mu.Lock()
 	c.pool.stale = []Entry{{ListURL: server.URL + "/lists/aaa", ListID: "aaa", Index: 1}}
