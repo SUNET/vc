@@ -409,5 +409,21 @@ func requireHTTPEndpoint(name, raw string) error {
 	if u.Host == "" {
 		return fmt.Errorf("statusserviceclient: %s %q has no host", name, raw)
 	}
+	// This is a BASE url, and every call appends to it by string
+	// concatenation: /token, /allocate, /status/{listID}/{idx}. A query or
+	// a fragment swallows whatever follows it, so
+	// "https://as.example/token?tenant=1" becomes
+	// ".../token?tenant=1/token" - a request to the wrong path, with the
+	// suffix buried in a parameter value, answered by something.
+	//
+	// Refused rather than stripped: an operator who wrote a query there
+	// meant it to be sent, and quietly dropping it would be a different
+	// wrong request. Nothing this client calls takes a base-url query.
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("statusserviceclient: %s %q carries a query string, but it is a base URL this client appends paths to, so the query would swallow them", name, raw)
+	}
+	if u.Fragment != "" || u.RawFragment != "" {
+		return fmt.Errorf("statusserviceclient: %s %q carries a fragment, but it is a base URL this client appends paths to, so the fragment would swallow them", name, raw)
+	}
 	return nil
 }
