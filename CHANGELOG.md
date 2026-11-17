@@ -88,6 +88,12 @@
 
 ### Fixed
 
+- **`Replace` keeps a document's `created_at`**: the store assigns `created_at`
+  at first save and it never changes afterwards, on MongoDB, Postgres and
+  MariaDB. `PUT /api/v1/datastore` ignores `created_at` in the request and
+  keeps the stored value. Documents already stored with a zero `created_at`
+  keep it. A MongoDB document stored without one reads as zero and stores zero
+  at its next `Replace`.
 - **SPOCP resource rules hold for the selector a handler receives**: the
   authorization middleware and `Binding.Request` could read different
   `authentic_source` or `scope` values from one `/api/v1` request. Every
