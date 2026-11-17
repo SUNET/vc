@@ -165,8 +165,13 @@
   private keys 0600, and the script wrote the nym_auth seed 0600, so the
   containers (uid 65532) could not read the keys they mount. On Linux the
   script now grants uid 65532 read access through an ACL entry, and stops
-  when `setfacl` is missing or fails. Keys generated earlier keep their
-  modes; `make pki-clean pki` regenerates them.
+  when `setfacl` is missing or fails. A key generated earlier keeps its
+  mode, and `make pki` repairs its ACL in place - the script re-grants
+  container read access to every key it finds before deciding whether to
+  generate one. Do NOT reach for `make pki-clean pki` to fix access: that
+  deletes the whole PKI directory and rotates the CA, the credential
+  encryption key and the nym_auth seed with it, which invalidates every
+  credential and every ssc already issued against them.
 - **mdoc integers at the top of their range are refused**: an mdoc element the
   MDDL declares as `int` with the value 2^63 overflowed into a signed credential.
   On amd64 it was issued as -2^63, and a `uint` of 2^64 or more as 2^63. Issuance

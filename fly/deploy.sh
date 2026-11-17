@@ -633,8 +633,14 @@ provision_apigw_saml_sp_keypair() {
             >/dev/null 2>&1; then
         saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
         saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
+        # BOTH halves, exactly as the guard above: a run that set only the
+        # key leaves apigw unable to load the keypair, and treating that
+        # key as evidence of another run would discard the pair generated
+        # here and leave the certificate missing on every later deploy.
+        # Only a COMPLETE pair from another run is worth keeping.
         read_app_secrets "$apigw_app" secrets_json
-        if grep -q '"SAML_SP_KEY"' <<<"$secrets_json"; then
+        if grep -q '"SAML_SP_CERT"' <<<"$secrets_json" \
+            && grep -q '"SAML_SP_KEY"' <<<"$secrets_json"; then
             echo "    (SAML SP keypair was set by another run while this one was generating; keeping theirs)"
         elif set_app_secrets "$apigw_app" \
             SAML_SP_CERT="$saml_cert_b64" \
