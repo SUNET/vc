@@ -285,6 +285,22 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 	if cfg.IssuerID == "" {
 		return nil, fmt.Errorf("statusserviceclient: IssuerID is required")
 	}
+	// An AllocateExpiry at or below the skew can never produce a usable
+	// entry: the service answers with now+AllocateExpiry, and expired()
+	// discards anything inside entryExpirySkew of now, so EVERY entry is
+	// born unusable.
+	//
+	// That is not a slow failure. Each refill allocates one, finds it
+	// unusable, marks it invalid to release it, and gives up until the
+	// next cycle - burning one remote index per cycle, for as long as the
+	// process runs, while the pool never fills and every issuance goes to
+	// degraded mode. The cause is a constant in the configuration, so it
+	// is decidable here, once, instead of being discovered one wasted
+	// allocation at a time.
+	if cfg.AllocateExpiry > 0 && cfg.AllocateExpiry <= entryExpirySkew {
+		return nil, fmt.Errorf("statusserviceclient: AllocateExpiry %s is at or below the %s expiry skew, so every allocated entry would be discarded as already expiring; set it well above the skew, or leave it zero to take the service's own maximum",
+			cfg.AllocateExpiry, entryExpirySkew)
+	}
 	if cfg.Signer == nil {
 		return nil, fmt.Errorf("statusserviceclient: Signer is required")
 	}
@@ -451,6 +467,16 @@ func requireHTTPEndpoint(name, raw string) error {
 	}
 	if u.Host == "" {
 		return fmt.Errorf("statusserviceclient: %s %q has no host", name, raw)
+	}
+	// Credentials in the URL are never what authenticates this client -
+	// the token endpoint takes an RFC 7523 client assertion and every
+	// other call a bearer token - so userinfo here is at best inert and
+	// at worst a password copied into every log line that prints the
+	// endpoint. Go would also send it as basic auth on each request,
+	// alongside the Authorization header this client sets, which is not
+	// what any operator writing it meant.
+	if u.User != nil {
+		return fmt.Errorf("statusserviceclient: %s carries credentials in the URL, which this client never uses and would leak wherever the endpoint is logged", name)
 	}
 	// This is a BASE url, and every call appends to it by string
 	// concatenation: /token, /allocate, /status/{listID}/{idx}. A query or

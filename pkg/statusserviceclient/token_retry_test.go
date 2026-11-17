@@ -637,3 +637,76 @@ func TestNewRejectsAnEscapedDotSegmentInTheBaseURL(t *testing.T) {
 		}
 	}
 }
+
+// An AllocateExpiry at or below the expiry skew is refused at startup.
+//
+// The service answers with now+AllocateExpiry and expired() discards
+// anything inside entryExpirySkew of now, so every entry would be born
+// unusable - and each refill cycle would allocate one, mark it invalid to
+// release it, and give up until the next cycle. One remote index burned per
+// cycle for the life of the process, the pool never filling, every issuance
+// in degraded mode. The cause is a constant, so it is decidable once here.
+func TestNewRejectsAnAllocateExpiryInsideTheSkew(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := func(exp time.Duration) Config {
+		return Config{
+			IngestionURL: "https://status.example.org", ASURL: "https://as.example.org",
+			IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+			PoolSize: 0, RefillInterval: time.Hour, AllocateExpiry: exp,
+		}
+	}
+
+	for _, bad := range []time.Duration{time.Second, 30 * time.Second, entryExpirySkew} {
+		c, err := New(base(bad), nil)
+		if err == nil {
+			c.Close()
+			t.Fatalf("AllocateExpiry %s must be refused", bad)
+		}
+		if !strings.Contains(err.Error(), "expiry skew") {
+			t.Fatalf("AllocateExpiry %s must be refused FOR the skew, got: %v", bad, err)
+		}
+	}
+
+	// Zero means "take the service's own maximum", and a value above the
+	// skew is the ordinary case: neither is refused.
+	for _, ok := range []time.Duration{0, entryExpirySkew + time.Second, 24 * time.Hour} {
+		c, err := New(base(ok), nil)
+		if err != nil {
+			t.Fatalf("AllocateExpiry %s must be accepted: %v", ok, err)
+		}
+		c.Close()
+	}
+}
+
+// Credentials in a base URL are refused: this client authenticates with a
+// client assertion and a bearer token, so userinfo is inert here, would be
+// sent as basic auth alongside the Authorization header, and would appear
+// wherever the endpoint is logged.
+func TestNewRejectsCredentialsInABaseURL(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{
+		"https://user:pw@status.example.org",
+		"https://user@status.example.org",
+	} {
+		c, err := New(Config{
+			IngestionURL: bad, ASURL: "https://as.example.org",
+			IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+		}, nil)
+		if err == nil {
+			c.Close()
+			t.Fatalf("%q must be refused", bad)
+		}
+		// The message must not echo the URL, or refusing it would be the
+		// thing that copies the password into the log.
+		if strings.Contains(err.Error(), "pw") {
+			t.Fatalf("the refusal must not print the credentials: %v", err)
+		}
+	}
+}
