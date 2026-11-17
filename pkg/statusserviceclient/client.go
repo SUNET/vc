@@ -36,8 +36,8 @@
 // `iss`/`sub` in the RFC 7523 client assertion, i.e. Config.IssuerID) at
 // PATCH /status time, not by which process or pool instance originally
 // allocated it. Every replica of a given issuer deployment shares the same
-// IssuerID and signing key (Config.Key, defaulting to the credential-signing
-// key), so any replica holding a valid access token can revoke any index
+// IssuerID and signing key (Config.Signer, which this package requires and
+// does not default), so any replica holding a valid access token can revoke any index
 // this issuer identity has ever been given - regardless of which replica's
 // pool drew it out originally. SetStatus therefore takes a list ID and index
 // directly (as recorded against the issued credential) and needs no pool
@@ -114,6 +114,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,7 +133,7 @@ const (
 	StatusSuspended Status = "SUSPENDED"
 )
 
-// Config configures a Client. IngestionURL, ASURL, IssuerID and Key are
+// Config configures a Client. IngestionURL, ASURL, IssuerID and Signer are
 // required; everything else has a workable default.
 type Config struct {
 	// IngestionURL is the base URL of the status service's ingestion API
@@ -466,6 +467,17 @@ func requireHTTPEndpoint(name, raw string) error {
 	}
 	if u.Fragment != "" || u.RawFragment != "" {
 		return fmt.Errorf("statusserviceclient: %s %q carries a fragment, but it is a base URL this client appends paths to, so the fragment would swallow them", name, raw)
+	}
+	// A dot segment in the BASE makes the configured endpoint and the
+	// called one different: ".../v1/.." + "/allocate" is sent as
+	// "/v1/../allocate", and whatever sits in front of the service
+	// resolves it to "/allocate". The same rule a list ID is held to, for
+	// the same reason - an endpoint that names one resource and resolves
+	// to another.
+	for _, segment := range strings.Split(u.EscapedPath(), "/") {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("statusserviceclient: %s %q contains the dot segment %q, so the endpoint it names is not the one that would be called", name, raw, segment)
+		}
 	}
 	return nil
 }

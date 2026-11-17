@@ -409,9 +409,39 @@ func ListIDFromURL(listURL string) (string, error) {
 		}
 	}
 
-	id := path.Base(u.Path)
-	if id == "" || id == "." || id == "/" {
+	// The ESCAPED path, not u.Path. u.Path is already percent-decoded, so
+	// "/lists/a%2Fb" reads as "/lists/a/b" and path.Base hands back "b" -
+	// the last segment of a list ID, not the list ID. The credential would
+	// then carry a status_list.uri a verifier resolves to the list "a/b"
+	// while every PATCH went to a list called "b": status updates landing
+	// on the wrong list, silently, for the life of the credential.
+	escaped := path.Base(u.EscapedPath())
+	id, err := url.PathUnescape(escaped)
+	if err != nil {
+		return "", fmt.Errorf("list URL path %q has an unusable last segment: %w", u.EscapedPath(), err)
+	}
+
+	// And the segment has to be one this client can reproduce. Every PATCH
+	// is built with url.PathEscape(id), so an id whose escaping differs
+	// from what the service sent addresses something else: "%41%42" decodes
+	// to "AB" and re-escapes to "AB", a different request-URI than the one
+	// the allocate response named.
+	//
+	// Refused rather than passed through verbatim, for the same reason the
+	// rest of this function refuses: a list ID that cannot be round-tripped
+	// is one this client cannot reliably address, and guessing is how a
+	// credential ends up pointing somewhere nobody intended.
+	if url.PathEscape(id) != escaped {
+		return "", fmt.Errorf("list URL's last segment %q is encoded in a form this client cannot reproduce (it re-escapes to %q)", escaped, url.PathEscape(id))
+	}
+
+	if id == "" || id == "/" {
 		return "", fmt.Errorf("could not determine list ID from path %q", u.Path)
+	}
+	// The same rule SetStatus applies to a caller-supplied ID, so an ID
+	// derived here cannot be one SetStatus would then refuse.
+	if err := requireUsableListID(id); err != nil {
+		return "", fmt.Errorf("list URL %q names no usable list: %w", listURL, err)
 	}
 	return id, nil
 }
@@ -512,6 +542,14 @@ func requireUsableListID(listID string) error {
 		return fmt.Errorf("statusserviceclient: list ID %q is a dot segment, which resolves to a different resource than it names", listID)
 	case strings.Contains(listID, "/"):
 		return fmt.Errorf("statusserviceclient: list ID %q contains a slash, so it is a path rather than a list ID", listID)
+	}
+	// A control character - a NUL most of all - is never part of a real
+	// list ID, and "/lists/abc%00" decodes to one. url.PathEscape encodes
+	// it rather than refusing, so without this it would travel.
+	for _, r := range listID {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("statusserviceclient: list ID %q contains a control character", listID)
+		}
 	}
 	return nil
 }

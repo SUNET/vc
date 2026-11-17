@@ -528,3 +528,70 @@ func TestSetStatusAcceptsTheListIDItWasHandedByAllocate(t *testing.T) {
 		t.Fatalf("the ID allocate handed back must be usable: %v", err)
 	}
 }
+
+// A list ID is derived from the ESCAPED path, and must be one this client
+// can reproduce.
+//
+// url.URL.Path is already percent-decoded, so ".../lists/a%2Fb" reads as
+// "/lists/a/b" and path.Base returns "b" - the tail of a list ID rather
+// than the list ID. The credential would carry a status_list.uri a verifier
+// resolves to the list "a/b" while every PATCH went to a list called "b":
+// status updates landing on the wrong list, silently, for the life of the
+// credential.
+func TestListIDFromURL_RefusesASegmentItCannotReproduce(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"an escaped slash", "https://status.example.org/lists/a%2Fb"},
+		{"a redundantly escaped letter", "https://status.example.org/lists/%41%42"},
+		{"an embedded NUL", "https://status.example.org/lists/abc%00"},
+	} {
+		assertListIDRejected(t, tc.name, tc.url)
+	}
+}
+
+// The control: an ordinary ID still comes back, including one carrying the
+// characters a list ID is allowed to carry.
+func TestListIDFromURL_StillAcceptsAnOrdinaryID(t *testing.T) {
+	for _, tc := range []struct{ url, want string }{
+		{"https://status.example.org/lists/abc123", "abc123"},
+		{"https://status.example.org/lists/a-b_c.d", "a-b_c.d"},
+		{"https://status.example.org:8443/lists/abc", "abc"},
+	} {
+		got, err := ListIDFromURL(tc.url)
+		if err != nil {
+			t.Fatalf("%q must be accepted: %v", tc.url, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%q -> %q, want %q", tc.url, got, tc.want)
+		}
+	}
+}
+
+// A dot segment in a configured BASE url makes the endpoint named and the
+// endpoint called two different things: ".../v1/.." + "/allocate" goes out
+// as "/v1/../allocate", which anything in front of the service resolves to
+// "/allocate".
+func TestNewRejectsABaseURLWithADotSegment(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{
+		"https://status.example.org/v1/..",
+		"https://status.example.org/..",
+		"https://status.example.org/./v1",
+		"https://status.example.org/a/../b",
+	} {
+		c, err := New(Config{
+			IngestionURL: bad, ASURL: "https://as.example.org",
+			IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+		}, nil)
+		if err == nil {
+			c.Close()
+			t.Fatalf("%q must be refused", bad)
+		}
+		if !strings.Contains(err.Error(), "dot segment") {
+			t.Fatalf("%q must be refused FOR its dot segment, got: %v", bad, err)
+		}
+	}
+}
