@@ -98,6 +98,33 @@ read_app_secrets() {
     printf -v "$_secrets_var" '%s' '[]'
 }
 
+# Sets the secrets $2.. on Fly app $1, but only while $2's name is still
+# absent from the app. Returns 1 when another run has set it meanwhile.
+#
+# The provisioning below is check-then-set: read the secret list, see nothing,
+# generate, set. Two deploys of one environment at the same time - two
+# operators, or a launch racing a deploy - both read "absent" and both set,
+# and the second WINS. For NYM_AUTH_SEED that silently invalidates every ssc
+# already derived from the first seed, and for CREDENTIAL_ENCRYPTION_KEY it
+# leaves every credential encrypted under the first key undecryptable. Both
+# are unrecoverable: Fly secrets are write-only, so the overwritten value
+# cannot be read back.
+#
+# Re-reading immediately before the write narrows that window to the round
+# trip rather than to however long generation takes. It does NOT close it -
+# Fly has no conditional set - so the remaining race is stated rather than
+# papered over, and the caller is told to re-run rather than left believing
+# it provisioned what another run actually owns.
+set_app_secret_if_absent() {
+    local _app="$1" _name="$2" _value="$3" _secrets_json
+    read_app_secrets "$_app" _secrets_json
+    if grep -q "\"$_name\"" <<<"$_secrets_json"; then
+        echo "    ($_name was set by another run while this one was generating; keeping theirs)"
+        return 1
+    fi
+    set_app_secrets "$_app" "$_name=$_value"
+}
+
 # Sets the secrets $2.. on Fly app $1. Returns 1 after an "app missing" note
 # when the app is absent.
 set_app_secrets() {
@@ -604,7 +631,10 @@ provision_apigw_saml_sp_keypair() {
             >/dev/null 2>&1; then
         saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
         saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
-        if set_app_secrets "$apigw_app" \
+        read_app_secrets "$apigw_app" secrets_json
+        if grep -q '"SAML_SP_KEY"' <<<"$secrets_json"; then
+            echo "    (SAML SP keypair was set by another run while this one was generating; keeping theirs)"
+        elif set_app_secrets "$apigw_app" \
             SAML_SP_CERT="$saml_cert_b64" \
             SAML_SP_KEY="$saml_key_b64"; then
             echo "    SAML SP keypair set"
@@ -628,7 +658,7 @@ provision_apigw_nym_auth_secrets() {
         echo "==> Provisioning CREDENTIAL_ENCRYPTION_KEY for $apigw_app"
         value="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')"
         require_generated CREDENTIAL_ENCRYPTION_KEY "$value"
-        if set_app_secrets "$apigw_app" CREDENTIAL_ENCRYPTION_KEY="$value"; then
+        if set_app_secret_if_absent "$apigw_app" CREDENTIAL_ENCRYPTION_KEY "$value"; then
             echo "    CREDENTIAL_ENCRYPTION_KEY set"
         fi
     fi
@@ -638,7 +668,7 @@ provision_apigw_nym_auth_secrets() {
         echo "==> Provisioning NYM_AUTH_SEED for $apigw_app"
         value="$(openssl rand 32 | basenc --base64url | tr -d '=' | base64 | tr -d '\n')"
         require_generated NYM_AUTH_SEED "$value"
-        if set_app_secrets "$apigw_app" NYM_AUTH_SEED="$value"; then
+        if set_app_secret_if_absent "$apigw_app" NYM_AUTH_SEED "$value"; then
             echo "    NYM_AUTH_SEED set"
         fi
     fi
