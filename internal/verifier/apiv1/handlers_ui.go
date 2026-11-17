@@ -680,12 +680,15 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// What the request objects below are issued with, kept so the
 		// response is checked against it and not against a later config.
 		TransactionDataResponseModes: transactionDataModes,
-		Code:                         "",
-		RequestURI:                   "",
-		WalletURI:                    "",
-		Forfeited:                    false,
-		State:                        state,
-		ClientID:                     uiClientID,
+		// The same rule for the zkp_req offer those objects carry in
+		// client_metadata.vp_formats_supported - see circuitZkRequestFor.
+		OfferedZkpReqSystemIDs: c.offeredZkpReqSystemIDs(),
+		Code:                   "",
+		RequestURI:             "",
+		WalletURI:              "",
+		Forfeited:              false,
+		State:                  state,
+		ClientID:               uiClientID,
 		// How long the user has to complete the presentation.
 		//
 		// This was 0, and isSessionActive reads 0 as "never expires" - so

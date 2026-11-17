@@ -175,6 +175,10 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		// VerificationDirectPost needs this to find a scope's response. Empty
 		// for a query built from credential_metadata, where the two agree.
 		ScopeQueryIDs: c.ScopeQueryIDs(ctx, dcqlQuery, requestedScopes),
+		// What this session's request object will offer, pinned at the
+		// start so the response is checked against it and not against a
+		// later config - see circuitZkRequestFor.
+		OfferedZkpReqSystemIDs: c.offeredZkpReqSystemIDs(),
 	}
 
 	// Save session

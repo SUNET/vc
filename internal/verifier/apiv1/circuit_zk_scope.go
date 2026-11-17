@@ -78,7 +78,7 @@ func (c *Client) verifyCircuitZkScope(
 
 	// Shape, and binding to what THIS request offered. Nothing here
 	// is a verified fact yet; a pseudonym is the holder's claim.
-	presentations, err := openid4vp.ValidateZkpReqResponse(raw, c.circuitZkRequestFor(query))
+	presentations, err := openid4vp.ValidateZkpReqResponse(raw, c.circuitZkRequestFor(authCtx, query))
 	if err != nil {
 		return nil, c.zkpReqError(scope, "zkp_req presentation refused", err, "query_id", query.ID)
 	}
