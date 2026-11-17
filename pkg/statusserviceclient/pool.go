@@ -149,7 +149,7 @@ func (p *pool) queueStaleLocked(e Entry) {
 		dropped := p.stale[0]
 		p.stale = p.stale[1:]
 		p.c.log.Error(nil, "the status-entry reclaim backlog is full; dropping the oldest entry, whose slot stays reserved on the service",
-			"list_url", dropped.ListURL, "index", dropped.Index, "backlog", maxStaleBacklog)
+			"list_url", redactURL(dropped.ListURL), "index", dropped.Index, "backlog", maxStaleBacklog)
 	}
 	p.stale = append(p.stale, e)
 }
@@ -375,7 +375,7 @@ func (e *poolExhaustedError) Unwrap() []error { return []error{ErrPoolExhausted,
 func (c *Client) releaseUnusable(ctx context.Context, e Entry) {
 	listID, err := ListIDFromURL(e.ListURL)
 	if err != nil {
-		c.log.Error(err, "cannot determine the list ID to release an unusable status entry", "list_url", e.ListURL)
+		c.log.Error(err, "cannot determine the list ID to release an unusable status entry", "list_url", redactURL(e.ListURL))
 		return
 	}
 	if err := c.setStatusOnce(ctx, listID, e.Index, StatusInvalid); err != nil {

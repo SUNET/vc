@@ -24,9 +24,12 @@ import (
 // permanent (as a bare classifyStatus does) stops the retry loop dead and
 // turns a routine token expiry into a failed allocation.
 //
-// Token-endpoint responses keep using classifyStatus: a 4xx there really is
-// a refusal, and retrying it would hammer the AS with credentials it has
-// already rejected.
+// Token-endpoint responses keep using classifyStatus, where a 4xx is a
+// refusal and is not retried - retrying would re-present credentials the AS
+// has already rejected. The exceptions classifyStatus makes for 408 and 429
+// apply there too, and are not that: a rate-limited or timed-out AS has not
+// rejected anything, and the backoff governs when the next attempt goes
+// out, so it is asking again rather than hammering.
 func classifyResourceStatus(statusCode int, body []byte) error {
 	if statusCode == http.StatusUnauthorized {
 		return fmt.Errorf("status service returned 401 for a cached token: %s",
@@ -326,7 +329,7 @@ func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
 
 	listID, err := ListIDFromURL(ar.ListURL)
 	if err != nil {
-		return Entry{}, permanent(fmt.Errorf("allocate response list_url %q: %w", ar.ListURL, err))
+		return Entry{}, permanent(fmt.Errorf("allocate response list_url %q: %w", redactURL(ar.ListURL), err))
 	}
 
 	return Entry{ListURL: ar.ListURL, ListID: listID, Index: ar.Index, Exp: ar.Exp}, nil
@@ -373,6 +376,20 @@ func ListIDFromURL(listURL string) (string, error) {
 	// so it is refused rather than stripped.
 	if u.Fragment != "" || strings.Contains(listURL, "#") {
 		return "", fmt.Errorf("list URL %q carries a fragment, which is never sent in the request that fetches it", listURL)
+	}
+
+	// This URL is PUBLISHED. It becomes the credential's
+	// status.status_list.uri, which every holder keeps and every verifier
+	// fetches, so credentials in it would be handed to everyone the
+	// credential reaches - and the section 8.3 subject check would be
+	// comparing against a string containing a password. A verifier fetches
+	// it with no credentials at all, so userinfo cannot be doing any work
+	// here either.
+	//
+	// The message does not echo the URL: refusing it must not be the thing
+	// that copies the secret into the log.
+	if u.User != nil {
+		return "", fmt.Errorf("list URL for host %q carries credentials, and this URL is published in every credential issued against the list", u.Host)
 	}
 
 	// A trailing slash has to be rejected rather than trimmed: path.Base
