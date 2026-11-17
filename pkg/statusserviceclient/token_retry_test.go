@@ -138,6 +138,21 @@ func TestGetToken_WaiterHonoursItsOwnDeadline(t *testing.T) {
 	}
 }
 
+// assertListIDRejected requires ListIDFromURL to refuse url, naming the ID it
+// handed back instead when it does not.
+//
+// Deriving a good-looking ID from an unusable URL is the bad outcome in every
+// case below, which is why they share one assertion.
+func assertListIDRejected(t *testing.T, name, url string) {
+	t.Helper()
+
+	t.Run(name, func(t *testing.T) {
+		if id, err := ListIDFromURL(url); err == nil {
+			t.Fatalf("%q must be rejected, got list ID %q", url, id)
+		}
+	})
+}
+
 // The list_url goes into a credential's status.status_list.uri as well as
 // giving up the ID for PATCH, so anything a verifier could not resolve has
 // to be refused. Deriving a good-looking ID from an unusable URL is the bad
@@ -159,11 +174,7 @@ func TestListIDFromURL_RejectsUnusableURLs(t *testing.T) {
 		{"file", "file:///etc/passwd"},
 		{"data", "data:application/json,{}"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if id, err := ListIDFromURL(tc.url); err == nil {
-				t.Fatalf("%q must be rejected, got list ID %q", tc.url, id)
-			}
-		})
+		assertListIDRejected(t, tc.name, tc.url)
 	}
 }
 
@@ -185,11 +196,7 @@ func TestListIDFromURL_RejectsDotSegments(t *testing.T) {
 		{"single dot earlier in the path", "https://status.example.org/lists/./abc"},
 		{"escaped, earlier in the path", "https://status.example.org/lists/%2e%2e/admin/abc"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if id, err := ListIDFromURL(tc.url); err == nil {
-				t.Fatalf("%q must be rejected, got list ID %q", tc.url, id)
-			}
-		})
+		assertListIDRejected(t, tc.name, tc.url)
 	}
 }
 

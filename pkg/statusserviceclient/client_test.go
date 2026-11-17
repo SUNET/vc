@@ -32,6 +32,34 @@ func fastConfig(fake *fakeStatusService, key *ecdsa.PrivateKey) Config {
 	return fastConfigAs(fake, "https://issuer.example.org", key)
 }
 
+// clientHoldingOneEntry builds a client against a fresh fake service and
+// returns it with one entry already taken from its pool.
+//
+// Every test of a per-entry operation needs exactly this and nothing else
+// from the setup, and waiting for the pool to fill is the part that has to
+// be got right: the first refill is asynchronous, so taking immediately
+// after New races it.
+func clientHoldingOneEntry(t *testing.T) (*fakeStatusService, *Client, Entry) {
+	t.Helper()
+
+	fake := newFakeStatusService(t)
+	c, err := New(fastConfig(fake, testKey(t)), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(c.Close)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for c.PoolLen() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	entry, err := c.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	return fake, c, entry
+}
+
 func fastConfigAs(fake *fakeStatusService, issuerID string, key *ecdsa.PrivateKey) Config {
 	return Config{
 		IngestionURL:        fake.ingestionURL,
@@ -232,21 +260,7 @@ func TestTakeFailsFastOnPermanentFailure(t *testing.T) {
 // TestSetStatusRetriesTransientFailures mirrors the allocate case for
 // PATCH /status.
 func TestSetStatusRetriesTransientFailures(t *testing.T) {
-	fake := newFakeStatusService(t)
-	c, err := New(fastConfig(fake, testKey(t)), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer c.Close()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for c.PoolLen() < 1 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	entry, err := c.Take(context.Background())
-	if err != nil {
-		t.Fatalf("Take: %v", err)
-	}
+	fake, c, entry := clientHoldingOneEntry(t)
 
 	fake.statusFailures.Store(2)
 	fake.statusFailureStatus = http.StatusInternalServerError
@@ -262,25 +276,11 @@ func TestSetStatusRetriesTransientFailures(t *testing.T) {
 // TestSetStatusDoesNotRetryPermanentFailure checks a 403 (not owner) is
 // returned immediately, without retrying.
 func TestSetStatusDoesNotRetryPermanentFailure(t *testing.T) {
-	fake := newFakeStatusService(t)
-	c, err := New(fastConfig(fake, testKey(t)), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer c.Close()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for c.PoolLen() < 1 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	entry, err := c.Take(context.Background())
-	if err != nil {
-		t.Fatalf("Take: %v", err)
-	}
+	fake, c, entry := clientHoldingOneEntry(t)
 
 	// Simulate a permanent rejection by asking to update an index nobody
 	// owns (a synthetic, never-allocated index under this list).
-	err = c.SetStatus(context.Background(), entry.ListID, entry.Index+1000, StatusInvalid)
+	err := c.SetStatus(context.Background(), entry.ListID, entry.Index+1000, StatusInvalid)
 	if err == nil {
 		t.Fatal("want an error for an unknown index")
 	}
