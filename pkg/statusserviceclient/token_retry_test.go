@@ -317,3 +317,71 @@ func TestNew_AcceptsHTTPEndpoints(t *testing.T) {
 	}
 	c.Close()
 }
+
+// A base URL carrying a query or a fragment is refused at construction.
+//
+// Every call appends to these by string concatenation - /token, /allocate,
+// /status/{listID}/{idx} - and a query or fragment swallows the suffix:
+// "https://as.example/token?tenant=1" becomes ".../token?tenant=1/token",
+// which is a request to the wrong path with the suffix buried in a
+// parameter value. Nothing downstream can notice; the server answers
+// whatever that resolves to.
+func TestNewRejectsABaseURLThatWouldSwallowThePath(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, bad string }{
+		{"a query string", "https://as.example/token?tenant=1"},
+		{"a bare question mark", "https://as.example?"},
+		{"a fragment", "https://as.example#frag"},
+		{"both", "https://as.example/v1?a=b#c"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Once as the AS URL, once as the ingestion URL: both are
+			// bases this client appends to, so both have to be held to it.
+			for field, cfg := range map[string]Config{
+				"ASURL": {
+					IngestionURL: "https://status.example.org", ASURL: tc.bad,
+					IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+				},
+				"IngestionURL": {
+					IngestionURL: tc.bad, ASURL: "https://as.example.org",
+					IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+				},
+			} {
+				c, err := New(cfg, nil)
+				if err == nil {
+					c.Close()
+					t.Fatalf("%s = %q must be refused", field, tc.bad)
+				}
+			}
+		})
+	}
+}
+
+// And an ordinary base URL still builds, with or without a trailing slash.
+func TestNewAcceptsAnOrdinaryBaseURL(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, base := range []string{
+		"https://status.example.org",
+		"https://status.example.org/",
+		"https://status.example.org/v1",
+		"http://127.0.0.1:8080",
+	} {
+		c, err := New(Config{
+			IngestionURL: base, ASURL: base,
+			IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+			PoolSize: 0, RefillInterval: time.Hour,
+		}, nil)
+		if err != nil {
+			t.Fatalf("%q must be accepted: %v", base, err)
+		}
+		c.Close()
+	}
+}
