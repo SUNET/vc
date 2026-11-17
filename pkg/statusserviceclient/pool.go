@@ -18,6 +18,19 @@ type Entry struct {
 	// the allocate response does not return it separately. It is what
 	// PATCH /status/{listID}/{idx} needs, and is otherwise not meaningful
 	// on its own.
+	//
+	// This is a CONTRACT with the status service that the client cannot
+	// verify: it assumes a list URL ends in the list's own id, so that the
+	// resource a verifier fetches at ListURL and the resource a PATCH
+	// updates at {IngestionURL}/status/{ListID} are the same list. A
+	// service whose ids are themselves multi-segment - ".../lists/t-a/abc"
+	// meaning the list "t-a/abc" - would have its id truncated here, and
+	// updates would land on a list no verifier reads. Nothing in the
+	// allocate response distinguishes that case from an ordinary path
+	// prefix, so it cannot be detected client-side; it is written down
+	// here instead. The spellings that CAN be detected - an escaped
+	// slash, a dot segment, an id that does not re-escape to what was
+	// sent - are refused by ListIDFromURL.
 	ListID string
 	// Index is this credential's position within the list - the
 	// `status.status_list.idx` claim value.

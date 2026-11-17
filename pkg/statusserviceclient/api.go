@@ -364,7 +364,7 @@ func ListIDFromURL(listURL string) (string, error) {
 		return "", fmt.Errorf("list URL %q is not absolute: a verifier-facing scheme and host are required", redactURL(listURL))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("list URL %q uses scheme %q: a status list must be fetchable over http or https", listURL, u.Scheme)
+		return "", fmt.Errorf("list URL %q uses scheme %q: a status list must be fetchable over http or https", redactURL(listURL), u.Scheme)
 	}
 
 	// A fragment is never sent in an HTTP request, so a list_url carrying

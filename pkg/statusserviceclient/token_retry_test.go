@@ -768,6 +768,10 @@ func TestNoURLDiagnosticEchoesACredential(t *testing.T) {
 		"lists/abc",
 		"https://user:" + secret + "@status.example.org/lists/abc#f",
 		"https://user:" + secret + "@status.example.org/lists/abc",
+		// The scheme check runs before the userinfo one, exactly as it
+		// did in requireHTTPEndpoint.
+		"ftp://user:" + secret + "@status.example.org/lists/abc",
+		"https://" + secret + "@status.example.org/lists/abc/",
 	} {
 		if _, err := ListIDFromURL(bad); err == nil {
 			t.Fatalf("%q must be refused", bad)
