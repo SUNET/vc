@@ -310,7 +310,19 @@ type AuthorizationContext struct {
 	// falls back to the configuration, which is the behaviour it had.
 	// That keeps a rolling upgrade working in both directions: a session
 	// opened by an old replica is still verifiable by a new one.
-	OfferedZkpReqSystemIDs []string `json:"offered_zkp_req_system_ids,omitempty" bson:"offered_zkp_req_system_ids,omitempty"`
+	//
+	// NO omitempty, on either tag, and that is the whole correctness of
+	// the field. Absent and empty mean opposite things here - fall back
+	// to the configuration, versus offer nothing and refuse everything -
+	// and omitempty cannot tell them apart: it drops a zero-length slice,
+	// so an empty offer is written as no field at all and reads back nil.
+	// A session that deliberately offered nothing would come out of Mongo
+	// looking like a session from before this existed, and accept a
+	// system it never offered. Written plainly, an empty offer stores as
+	// [] and a nil one as null, and the two survive the round trip.
+	// Measured, not assumed - see
+	// TestAuthorizationContextKeepsAnEmptyOfferDistinctFromNoneThroughBSON.
+	OfferedZkpReqSystemIDs []string `json:"offered_zkp_req_system_ids" bson:"offered_zkp_req_system_ids"`
 
 	// DCQLQueryExact carries the same query as JSON text, which is the
 	// only representation that keeps its numbers.
