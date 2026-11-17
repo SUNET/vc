@@ -92,6 +92,22 @@ generate_container_key() {
     require_key_written "$container_key"
 }
 
+# Re-applies container read access to key file $1 when it already exists.
+#
+# Every key block is guarded by `[ ! -f key ]`, so a key from an earlier run is
+# skipped whole - and so was its ACL. A key created before this script granted
+# the container uid, or on a run where the ACL did not take, therefore stayed
+# unreadable to the container no matter how many times the script was re-run,
+# while the script reported success and the service failed to start.
+#
+# Called for every container-read key on every run, before the guard, so a
+# re-run repairs what it cannot regenerate.
+repair_container_read() {
+    [ "$grant_acl" -eq 1 ] || return 0
+    [ -f "$1" ] || return 0
+    grant_container_read "$1"
+}
+
 # Ends the block of the key generated last, which a later run may skip.
 key_block_complete() {
     generating_key=
@@ -154,7 +170,8 @@ fi
 create_leaf_cert() {
         service_name=${1}
 
-if [ ! -f "${PKI_DIR}/tls_${service_name}.key" ]; then
+repair_container_read "${PKI_DIR}/tls_${service_name}.key"
+    if [ ! -f "${PKI_DIR}/tls_${service_name}.key" ]; then
     echo Creating leaf certificate for ${service_name}
 
     # Generate config files for openssl
@@ -264,6 +281,7 @@ EOF
     fi
 
     # EC signing key pair (ES256 - P-256 curve) with certificate
+    repair_container_read "${PKI_DIR}/signing_ec_private.pem"
     if [ ! -f "${PKI_DIR}/signing_ec_private.pem" ]; then
         echo "Generating EC signing key pair (P-256) with certificate..."
         
@@ -312,6 +330,7 @@ EOF
     fi
 
     # EC key-agreement key (P-256) for Credential Request and Response encryption
+    repair_container_read "${PKI_DIR}/credential_encryption.pem"
     if [ ! -f "${PKI_DIR}/credential_encryption.pem" ]; then
         echo "Generating credential encryption key (P-256)..."
         generate_container_key "${PKI_DIR}/credential_encryption.pem" write_p256_pkcs8 "${PKI_DIR}/credential_encryption.pem"
@@ -319,6 +338,7 @@ EOF
     fi
 
     # Secret of the nym_auth ssc hkdf opening
+    repair_container_read "${PKI_DIR}/nym_auth_seed.key"
     if [ ! -f "${PKI_DIR}/nym_auth_seed.key" ]; then
         echo "Generating the nym_auth ssc opening secret..."
         seed=$(openssl rand 32 | basenc --base64url | tr -d '=')
