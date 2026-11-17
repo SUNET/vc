@@ -111,6 +111,7 @@ package statusserviceclient
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -430,18 +431,42 @@ func (c *Client) backgroundRetry() retryConfig {
 	}
 }
 
-// redactURL renders a URL with any credentials in it replaced by "xxxxx",
-// for the error and log messages that name one.
+// redactURL renders a URL with any credentials in it replaced, for the
+// error and log messages that name one.
 //
-// url.URL.Redacted does this, but only for a URL that parses; a string that
-// does not is returned as the literal "<unparseable url>" rather than
-// printed, since the reason it did not parse may be the secret in it.
+// NOT url.URL.Redacted, which blanks the password and leaves the USERNAME:
+// "https://sometoken@host/x" comes back from it unchanged, and a token used
+// as the username is exactly the shape a status service hands out. The
+// whole userinfo goes, and "xxxxx@" is kept so a reader can still see that
+// credentials were there.
+//
+// A string that does not parse is returned as the literal "<unparseable
+// url>" rather than printed, since the reason it did not parse may be the
+// secret in it.
 func redactURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "<unparseable url>"
 	}
-	return u.Redacted()
+	if u.User != nil {
+		u.User = url.User("xxxxx")
+	}
+	return u.String()
+}
+
+// urlParseReason is a url.Parse failure with the URL it was parsing taken
+// out of it.
+//
+// url.Error.Error() renders as `parse "<the whole url>": <reason>`, so
+// reporting a parse failure by wrapping it prints the very string the
+// caller must not have logged - a URL too malformed to redact is still a
+// URL that may carry a password.
+func urlParseReason(err error) string {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err.Error()
+	}
+	return err.Error()
 }
 
 // refuseRedirect stops the HTTP client following a redirect, because every
@@ -474,13 +499,13 @@ func requireHTTPEndpoint(name, raw string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("statusserviceclient: %s %q is not a URL: %w", name, raw, err)
+		return fmt.Errorf("statusserviceclient: %s is not a URL: %s", name, urlParseReason(err))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("statusserviceclient: %s %q uses scheme %q, but this client speaks only http and https", name, raw, u.Scheme)
+		return fmt.Errorf("statusserviceclient: %s %q uses scheme %q, but this client speaks only http and https", name, redactURL(raw), u.Scheme)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("statusserviceclient: %s %q has no host", name, raw)
+		return fmt.Errorf("statusserviceclient: %s %q has no host", name, redactURL(raw))
 	}
 	// Credentials in the URL are never what authenticates this client -
 	// the token endpoint takes an RFC 7523 client assertion and every
@@ -503,10 +528,10 @@ func requireHTTPEndpoint(name, raw string) error {
 	// meant it to be sent, and quietly dropping it would be a different
 	// wrong request. Nothing this client calls takes a base-url query.
 	if u.RawQuery != "" || u.ForceQuery {
-		return fmt.Errorf("statusserviceclient: %s %q carries a query string, but it is a base URL this client appends paths to, so the query would swallow them", name, raw)
+		return fmt.Errorf("statusserviceclient: %s %q carries a query string, but it is a base URL this client appends paths to, so the query would swallow them", name, redactURL(raw))
 	}
 	if u.Fragment != "" || u.RawFragment != "" {
-		return fmt.Errorf("statusserviceclient: %s %q carries a fragment, but it is a base URL this client appends paths to, so the fragment would swallow them", name, raw)
+		return fmt.Errorf("statusserviceclient: %s %q carries a fragment, but it is a base URL this client appends paths to, so the fragment would swallow them", name, redactURL(raw))
 	}
 	// A dot segment in the BASE makes the configured endpoint and the
 	// called one different: ".../v1/.." + "/allocate" is sent as
@@ -525,7 +550,7 @@ func requireHTTPEndpoint(name, raw string) error {
 	// list ID held to one rule rather than two.
 	for _, segment := range strings.Split(u.Path, "/") {
 		if segment == "." || segment == ".." {
-			return fmt.Errorf("statusserviceclient: %s %q contains the dot segment %q, so the endpoint it names is not the one that would be called", name, raw, segment)
+			return fmt.Errorf("statusserviceclient: %s %q contains the dot segment %q, so the endpoint it names is not the one that would be called", name, redactURL(raw), segment)
 		}
 	}
 	return nil

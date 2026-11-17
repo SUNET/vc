@@ -361,7 +361,7 @@ func ListIDFromURL(listURL string) (string, error) {
 	// http and https to limit SSRF surface. Accepting one here would mint
 	// credentials whose status reference that checker will not follow.
 	if u.Host == "" {
-		return "", fmt.Errorf("list URL %q is not absolute: a verifier-facing scheme and host are required", listURL)
+		return "", fmt.Errorf("list URL %q is not absolute: a verifier-facing scheme and host are required", redactURL(listURL))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("list URL %q uses scheme %q: a status list must be fetchable over http or https", listURL, u.Scheme)
@@ -375,7 +375,7 @@ func ListIDFromURL(listURL string) (string, error) {
 	// is no reading under which a fragment belongs in a status list URL,
 	// so it is refused rather than stripped.
 	if u.Fragment != "" || strings.Contains(listURL, "#") {
-		return "", fmt.Errorf("list URL %q carries a fragment, which is never sent in the request that fetches it", listURL)
+		return "", fmt.Errorf("list URL %q carries a fragment, which is never sent in the request that fetches it", redactURL(listURL))
 	}
 
 	// This URL is PUBLISHED. It becomes the credential's
@@ -458,7 +458,7 @@ func ListIDFromURL(listURL string) (string, error) {
 	// The same rule SetStatus applies to a caller-supplied ID, so an ID
 	// derived here cannot be one SetStatus would then refuse.
 	if err := requireUsableListID(id); err != nil {
-		return "", fmt.Errorf("list URL %q names no usable list: %w", listURL, err)
+		return "", fmt.Errorf("list URL %q names no usable list: %w", redactURL(listURL), err)
 	}
 	return id, nil
 }
