@@ -271,6 +271,7 @@ func (c *CompositeRegistry) applyLogic(results []compositeResult) *authzen.Evalu
 	// through when the composite as a whole allows (AND: all children, OR,
 	// MAJORITY and QUORUM: the agreeing ones).
 	mergeVerifierIDs(resp, positive)
+	mergeDisplayName(resp, positive)
 	return resp
 }
 

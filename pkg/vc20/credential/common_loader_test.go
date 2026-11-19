@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/piprate/json-gold/ld"
@@ -73,23 +74,41 @@ func TestCachingDocumentLoaderLoadDocument(t *testing.T) {
 	}
 }
 
+// A second load is served from the cache rather than fetched.
+//
+// This used to assert pointer identity, which is the one thing the loader
+// must NOT do: json-gold writes into the document it is handed - merging
+// an importing context's members, "@import" included, into the imported
+// map - so a shared pointer let one expansion corrupt the cached document
+// for every later one. LoadDocument returns a deep copy, and the cache hit
+// is asserted the way it actually matters: the document comes back, with
+// the same content, from a URL that could not possibly be fetched.
 func TestCachingDocumentLoaderCacheHit(t *testing.T) {
-	loader := GetGlobalLoader()
+	loader := NewCachingDocumentLoader()
 
-	// First load
-	doc1, err := loader.LoadDocument("https://www.w3.org/ns/credentials/v2")
+	// .invalid never resolves, so anything that comes back came from the
+	// cache. A reachable URL would pass this test even with no cache.
+	const url = "https://ctx.invalid/cache-hit.jsonld"
+	loader.AddContext(url, `{"@context":{"Test":"https://example.org/Test"}}`)
+
+	doc1, err := loader.LoadDocument(url)
 	if err != nil {
 		t.Fatalf("Failed to load document: %v", err)
 	}
 
-	// Second load should hit cache
-	doc2, err := loader.LoadDocument("https://www.w3.org/ns/credentials/v2")
+	doc2, err := loader.LoadDocument(url)
 	if err != nil {
 		t.Fatalf("Failed to load document on second call: %v", err)
 	}
 
-	if doc1 != doc2 {
-		t.Error("Expected same document from cache")
+	if !reflect.DeepEqual(doc1.Document, doc2.Document) {
+		t.Error("Expected the same content from cache")
+	}
+	if doc1.DocumentURL != url || doc2.DocumentURL != url {
+		t.Errorf("Expected both documents to carry %q", url)
+	}
+	if doc1 == doc2 {
+		t.Error("Expected distinct documents: a shared pointer lets one caller's mutation reach the cache")
 	}
 }
 

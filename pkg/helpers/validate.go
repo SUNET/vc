@@ -356,7 +356,6 @@ func NewValidator() (*validator.Validate, error) {
 		d := sl.Current()
 		count := 0
 		for _, f := range d.Fields() {
-			f := f
 			if f.Kind() == reflect.Pointer && !f.IsNil() {
 				count++
 			}
@@ -683,6 +682,28 @@ func NewValidator() (*validator.Validate, error) {
 				}
 			}
 		}
+		for scope, cred := range ds.ExternalAPI.Scopes {
+			if cred.AuthProvider != model.AuthProviderOpenID4VP {
+				if len(cred.AuthScopes) > 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_only_for_openid4vp", scope)
+				}
+				continue
+			}
+			if len(cred.AuthScopes) == 0 {
+				sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
+			}
+			if _, selfRef := cred.AuthScopes[scope]; selfRef {
+				sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
+			}
+			for name, entry := range cred.AuthScopes {
+				if len(entry.AuthClaims) == 0 {
+					sl.ReportError(entry.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_auth_scope", name)
+				}
+				if len(entry.IdentityAttributes) > 0 || len(entry.DocumentClaims) > 0 {
+					sl.ReportError(entry, "AuthScopes", "AuthScopes", "external_api_auth_scope_takes_only_auth_claims", name)
+				}
+			}
+		}
 		// Validate AssertionScope.ExpiryDuration at config load. `omitempty`
 		// on the field only lets an empty string through; a malformed or
 		// non-positive value would otherwise only surface on the first
@@ -868,6 +889,9 @@ func validateScopeProviderUniqueness(sl validator.StructLevel, ds model.DataSour
 	}
 	for scope, cred := range ds.ExternalAPI.Scopes {
 		record(scope, cred.AuthProvider, "external_api")
+	}
+	for scope, cred := range ds.Presentation.Scopes {
+		record(scope, cred.AuthProvider, "presentation")
 	}
 
 	// Sorted so the reported order does not depend on map iteration.

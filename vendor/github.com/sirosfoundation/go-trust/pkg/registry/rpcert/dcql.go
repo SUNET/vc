@@ -118,12 +118,20 @@ func ParseDCQLQuery(raw interface{}) *DCQLQuery {
 				if id, ok := claimMap["id"].(string); ok {
 					claim.ID = id
 				}
-				if pathRaw, ok := claimMap["path"].([]interface{}); ok {
+				// The path arrives as []interface{} from JSON
+				// deserialization, but an in-process caller building the
+				// request from its own structs naturally passes a typed
+				// []string — refusing it would silently drop the claim from
+				// the requested set.
+				switch pathRaw := claimMap["path"].(type) {
+				case []interface{}:
 					for _, p := range pathRaw {
 						if s, ok := p.(string); ok {
 							claim.Path = append(claim.Path, s)
 						}
 					}
+				case []string:
+					claim.Path = append(claim.Path, pathRaw...)
 				}
 				claim.Values = claimMap["values"]
 				cq.Claims = append(cq.Claims, claim)
@@ -134,4 +142,20 @@ func ParseDCQLQuery(raw interface{}) *DCQLQuery {
 	}
 
 	return query
+}
+
+// RequestsWholeCredential reports whether the query contains a credential
+// query WITHOUT claims — a request for the entire credential, a scope no
+// attribute-level grant can represent. A query constrained by claim sets is
+// not a whole-credential request.
+func (q *DCQLQuery) RequestsWholeCredential() bool {
+	if q == nil {
+		return false
+	}
+	for _, cred := range q.Credentials {
+		if len(cred.Claims) == 0 && len(cred.ClaimSets) == 0 {
+			return true
+		}
+	}
+	return false
 }

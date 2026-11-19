@@ -24,13 +24,11 @@ import (
 
 	"github.com/gin-contrib/sessions"
 
-	// Swagger
-	_ "github.com/SUNET/vc/docs/apigw"
+	apigwdocs "github.com/SUNET/vc/docs/apigw"
+	"github.com/SUNET/vc/pkg/swaggerui"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // Service is the service object for httpserver
@@ -196,7 +194,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, fmt.Errorf("spocp engine: %w", err)
 	}
 
-	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
+	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, spocpService, s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
 	if err != nil {
 		return nil, fmt.Errorf("api_auth middleware: %w", err)
 	}
@@ -324,7 +322,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	}
 
 	rgDocs := rgRoot.Group("/swagger")
-	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	rgDocs.GET("/*any", swaggerui.Handler(apigwdocs.Spec))
 
 	rgAPIv1 := rgRoot.Group("api/v1")
 
@@ -334,7 +332,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	rgAPIv1.Use(s.httpHelpers.Middleware.CSRFProtection(adminSessionKey))
 	// Unified auth: session users go through the same SPOCP method+path+subject
 	// check as API clients. Both paths use the shared SPOCP engine.
-	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, "apigw"))
+	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, spocpService))
 
 	// Identity mapping endpoints
 	rgIdentity := rgAPIv1.Group("/identity")
@@ -349,6 +347,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// already authenticated the user prepares an issuance and says who
 	// may complete it.
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodGet, "/issuance/status", http.StatusOK, s.endpointIssuanceStatus)
 
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")

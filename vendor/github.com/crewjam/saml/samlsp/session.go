@@ -18,6 +18,18 @@ type SessionWithAttributes interface {
 	GetAttributes() Attributes
 }
 
+// SessionWithSAMLNameID is a session that knows the full SAML NameID of the
+// user it belongs to, with its Format and qualifiers, as the IdP issued it.
+// Middleware.QueryAttributes needs it to name the user in an attribute
+// query.
+type SessionWithSAMLNameID interface {
+	Session
+
+	// GetSAMLNameID returns the NameID, or false if the session does not
+	// record it.
+	GetSAMLNameID() (saml.NameID, bool)
+}
+
 // ErrNoSession is the error returned when the remote user does not have a session
 var ErrNoSession = errors.New("saml: session not present")
 
@@ -34,7 +46,8 @@ type SessionProvider interface {
 	DeleteSession(w http.ResponseWriter, r *http.Request) error
 
 	// GetSession returns the current Session associated with the request, or
-	// ErrNoSession if there is no valid session.
+	// an error matching ErrNoSession (as determined by errors.Is) if there is
+	// no valid session. Such an error may wrap the underlying cause.
 	GetSession(r *http.Request) (Session, error)
 }
 

@@ -35,9 +35,10 @@ type DatastoreConfig struct {
 	Scopes map[string]DatastoreScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 
 	// Import configures automatic data import from JSON files at startup.
-	// When configured, APIGW reads JSON files on every startup and imports
-	// each document whose natural key is not already present, so newly added
-	// fixtures (or a whole new scope) are imported on restart.
+	// When configured, APIGW reads JSON files on every startup and inserts
+	// each document whose natural key is absent, so newly added fixtures (or a
+	// whole new scope) are imported on restart. A document already present is
+	// left untouched, or overwritten when replace_existing is true.
 	Import *DatastoreImport `yaml:"import,omitempty"`
 }
 
@@ -45,8 +46,9 @@ type DatastoreConfig struct {
 type DatastoreImport struct {
 	// FilePaths lists JSON files to import into the datastore.
 	// Each JSON file should contain a map of person IDs to CompleteDocument objects.
-	// On every startup each document is imported only if one with the same
-	// natural key is not already present; existing documents are left untouched.
+	// On every startup each document whose natural key is absent is inserted.
+	// A document already present is left untouched, or overwritten when
+	// replace_existing is true.
 	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/pid.json\", \"./bootstrapping/ehic.json\"]"`
 
 	// Users limits which person IDs to import. If empty, all persons are imported.
@@ -300,8 +302,16 @@ type ExternalAPIScope struct {
 	// Remote is the name of a remote defined in Remotes
 	Remote string `yaml:"remote" validate:"required"`
 
-	// AuthProvider is the auth provider to identify the user (saml or oidc)
-	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
+	// AuthProvider is the auth provider to identify the user (saml, oidc or openid4vp)
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc openid4vp"`
+
+	// AuthScopes lists the credentials the wallet may present to authenticate
+	// when auth_provider is openid4vp, keyed by credential scope. Presenting any
+	// one of them is enough. The auth_claims are what the wallet is asked to
+	// disclose, and what the identity_match of a prepared issuance can compare;
+	// the person fetched from the remote is the authentic_source_person_id of that prepared
+	// issuance, not a presented claim. Rejected for other providers.
+	AuthScopes map[string]AuthScopeEntry `yaml:"auth_scopes,omitempty"`
 
 	// AttributeMapping defines how to map API response data to credential claims
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`
@@ -406,7 +416,7 @@ type Remote struct {
 	Type RemoteType `yaml:"type" validate:"required,oneof=eduapi ooapi oeapi"`
 
 	// BaseURL is the base URL of the API endpoint
-	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://api.ladok.se/eduapi\""`
+	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://api.ladok.se/1edtech/eduapi/base/v1p0\""`
 
 	// TokenURL is the OAuth 2.0 token endpoint for Client Credentials Grant
 	TokenURL string `yaml:"token_url" validate:"required,url" doc_example:"\"https://api.ladok.se/oauth2/token\""`

@@ -387,9 +387,9 @@ func TestForfeitAuthorizationCode_AlreadyUsed(t *testing.T) {
 
 	// Second forfeit attempt - trying to reuse an already-used authorization code
 	// This should fail as it's a security violation (code replay attack)
-	result2, err := cache.ForfeitAuthorizationCode(ctx, query)
+	replayResult, err := cache.ForfeitAuthorizationCode(ctx, query)
 	assert.Error(t, err, "Attempting to forfeit an already-forfeited code should fail")
-	assert.Nil(t, result2)
+	assert.Nil(t, replayResult)
 	assert.Contains(t, err.Error(), "already forfeited", "Error should indicate the code was already forfeited")
 
 	// Verify the context remains marked as forfeited
@@ -417,11 +417,11 @@ func TestRedeemPreAuthorizedCode_MultipleClients(t *testing.T) {
 	assert.Contains(t, result.RedeemedBy, "thumbprint-client-1")
 
 	// Second client also redeems successfully
-	result2, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-2")
+	secondClientResult, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-2")
 	require.NoError(t, err)
-	assert.Equal(t, "preauth-session", result2.SessionID)
-	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-1")
-	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-2")
+	assert.Equal(t, "preauth-session", secondClientResult.SessionID)
+	assert.Contains(t, secondClientResult.RedeemedBy, "thumbprint-client-1")
+	assert.Contains(t, secondClientResult.RedeemedBy, "thumbprint-client-2")
 
 	// Same client trying again is rejected
 	result3, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-1")
@@ -640,7 +640,7 @@ func TestSetAuthenticSource_NotFound(t *testing.T) {
 	assert.Equal(t, ErrNoDocuments, err)
 }
 
-func TestSetIdentifier_BySessionID(t *testing.T) {
+func TestSetAuthenticSourcePersonID_BySessionID(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -651,16 +651,16 @@ func TestSetIdentifier_BySessionID(t *testing.T) {
 
 	query := &AuthorizationContext{SessionID: "session-add-identity"}
 
-	err := cache.SetIdentifier(ctx, query, "john-doe-id")
+	err := cache.SetAuthenticSourcePersonID(ctx, query, "john-doe-id")
 	require.NoError(t, err)
 
 	// Verify the identifier was set
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-add-identity"})
 	require.NoError(t, err)
-	assert.Equal(t, "john-doe-id", retrieved.Identifier)
+	assert.Equal(t, "john-doe-id", retrieved.AuthenticSourcePersonID)
 }
 
-func TestSetIdentifier_BySessionID_WithRequestURI(t *testing.T) {
+func TestSetAuthenticSourcePersonID_BySessionID_WithRequestURI(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -672,52 +672,52 @@ func TestSetIdentifier_BySessionID_WithRequestURI(t *testing.T) {
 
 	query := &AuthorizationContext{SessionID: "session-identity-uri"}
 
-	err := cache.SetIdentifier(ctx, query, "jane-id")
+	err := cache.SetAuthenticSourcePersonID(ctx, query, "jane-id")
 	require.NoError(t, err)
 
 	// Verify the identifier was set
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-uri"})
 	require.NoError(t, err)
-	assert.Equal(t, "jane-id", retrieved.Identifier)
+	assert.Equal(t, "jane-id", retrieved.AuthenticSourcePersonID)
 }
 
-func TestSetIdentifier_NilQuery(t *testing.T) {
+func TestSetAuthenticSourcePersonID_NilQuery(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
-	err := cache.SetIdentifier(ctx, nil, "test-id")
+	err := cache.SetAuthenticSourcePersonID(ctx, nil, "test-id")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "query cannot be nil")
 }
 
-func TestSetIdentifier_EmptyIdentifier(t *testing.T) {
+func TestSetAuthenticSourcePersonID_Empty(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
-	err := cache.SetIdentifier(ctx, query, "")
+	err := cache.SetAuthenticSourcePersonID(ctx, query, "")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "identifier cannot be empty")
+	assert.Contains(t, err.Error(), "authentic_source_person_id cannot be empty")
 }
 
-func TestSetIdentifier_NoSessionID(t *testing.T) {
+func TestSetAuthenticSourcePersonID_NoSessionID(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{}
 
-	err := cache.SetIdentifier(ctx, query, "test-id")
+	err := cache.SetAuthenticSourcePersonID(ctx, query, "test-id")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "session_id cannot be empty")
 }
 
-func TestSetIdentifier_NotFound(t *testing.T) {
+func TestSetAuthenticSourcePersonID_NotFound(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "non-existent"}
 
-	err := cache.SetIdentifier(ctx, query, "test-id")
+	err := cache.SetAuthenticSourcePersonID(ctx, query, "test-id")
 	assert.Error(t, err)
 	assert.Equal(t, ErrNoDocuments, err)
 }

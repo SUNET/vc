@@ -86,7 +86,6 @@ func (s *Service) endpointCredentialDisplay(ctx context.Context, c *gin.Context)
 		"ShowClaims":        response.ShowClaims,
 		"PrimaryColor":      response.PrimaryColor,
 		"SecondaryColor":    response.SecondaryColor,
-		"CustomCSS":         response.CustomCSS,
 	})
 
 	return nil, nil

@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/resourcereach"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ type DatastoreUploadReply struct {
 //	@Success		200	{object}	DatastoreUploadReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [post]
 func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*DatastoreUploadReply, error) {
 	if req.Meta.DocumentID == "" {
@@ -163,6 +165,7 @@ type DatastoreAddIdentityRequest struct {
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
 //	@Param			req	body		DatastoreAddIdentityRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/identity [put]
 func (c *Client) DatastoreAddIdentity(ctx context.Context, req *DatastoreAddIdentityRequest) error {
 	err := c.datastoreStore.AddIdentity(ctx, &db.AddIdentityQuery{
@@ -208,6 +211,7 @@ type DatastoreDeleteIdentityRequest struct {
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/identity [delete]
 func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
 	err := c.datastoreStore.DeleteIdentity(ctx, &db.DeleteIdentityQuery{
@@ -308,6 +312,9 @@ type DatastoreListRequest struct {
 	Scope             string `json:"scope"`
 	ValidFrom         int64  `json:"valid_from"`
 	ValidTo           int64  `json:"valid_to"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreListReply is the reply for a list of documents
@@ -326,6 +333,7 @@ type DatastoreListReply struct {
 //	@Success		200	{object}	DatastoreListReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreListRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/list [post]
 func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
 	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
@@ -334,6 +342,7 @@ func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (
 		Scope:             req.Scope,
 		ValidFrom:         req.ValidFrom,
 		ValidTo:           req.ValidTo,
+		Reach:             req.Reach,
 	})
 	if err != nil {
 		return nil, err
@@ -371,6 +380,7 @@ type DatastoreGetByKeyReply struct {
 //	@Param			authentic_source	query		string					true	"Authentic source"
 //	@Param			scope				query		string					true	"Scope"
 //	@Param			document_id			query		string					true	"Document ID"
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [get]
 func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
@@ -410,6 +420,7 @@ type DatastoreResolveReply struct {
 //	@Success		200	{object}	DatastoreResolveReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreResolveRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/resolve [post]
 func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequest) (*DatastoreResolveReply, error) {
 	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
@@ -424,6 +435,8 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		AuthenticSource:   req.AuthenticSource,
 		Scope:             req.Scope,
 		IdentityMappingID: personID,
+		// The SPOCP guard answered the selectors this request names.
+		Reach: resourcereach.Everything(),
 	})
 	if err != nil {
 		return nil, err
@@ -454,6 +467,7 @@ type DatastoreDeleteByKeyRequest struct {
 //	@Success		204	"No Content"
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
 //	@Param			req	body		DatastoreDeleteByKeyRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [delete]
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
 	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
@@ -470,6 +484,7 @@ func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteB
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [put]
 func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error {
 	upload := &model.CompleteDocument{
@@ -493,12 +508,13 @@ func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadReque
 
 // DatastoreSearchRequest is the request for searching documents
 type DatastoreSearchRequest struct {
-	Search                  string   `json:"search" form:"search"`
-	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
-	Scope                   string   `json:"scope" form:"scope"`
-	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-"`
-	AllowedScopes           []string `json:"-" form:"-"`
+	Search          string `json:"search" form:"search"`
+	AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	Scope           string `json:"scope" form:"scope"`
+	Limit           int64  `json:"limit" form:"limit"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // DatastoreSearchReply is the reply for searching documents
@@ -519,6 +535,7 @@ type DatastoreSearchReply struct {
 //	@Param			authentic_source	query		string					false	"Filter by authentic source"
 //	@Param			scope				query		string					false	"Filter by scope"
 //	@Param			limit				query		int						false	"Max results (default 50, max 200)"
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/search [get]
 func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchRequest) (*DatastoreSearchReply, error) {
 	limit := req.Limit
@@ -526,12 +543,11 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 		limit = 50
 	}
 	docs, err := c.datastoreStore.Search(ctx, &db.SearchDocumentsQuery{
-		Search:                  req.Search,
-		AuthenticSource:         req.AuthenticSource,
-		Scope:                   req.Scope,
-		Limit:                   limit,
-		AllowedAuthenticSources: req.AllowedAuthenticSources,
-		AllowedScopes:           req.AllowedScopes,
+		Search:          req.Search,
+		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
+		Limit:           limit,
+		Reach:           req.Reach,
 	})
 	if err != nil {
 		return nil, err
@@ -549,20 +565,17 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 // DatastorePreAuthOfferRequest is the request for generating a pre-authorized credential offer
 // for a specific document in the datastore.
 type DatastorePreAuthOfferRequest struct {
-	// header:"-" on every field: gin binds headers by field name when there is no
-	// header tag, and the SPOCP middleware never reads headers (see PrepareIssuanceRequest).
-
 	// required: true
 	// example: SUNET
-	AuthenticSource string `json:"authentic_source" header:"-" validate:"required,max=128,printascii"`
+	AuthenticSource string `json:"authentic_source" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: pid
-	Scope string `json:"scope" header:"-" validate:"required,max=128,printascii"`
+	Scope string `json:"scope" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
-	DocumentID string `json:"document_id" header:"-" validate:"required,max=128,printascii"`
+	DocumentID string `json:"document_id" validate:"required,max=128,printascii"`
 }
 
 // DatastorePreAuthOfferReply is the reply containing a credential offer
@@ -573,6 +586,9 @@ type DatastorePreAuthOfferReply struct {
 	// token endpoint. Only set when apigw.auth_providers.preauth.enable_pin
 	// is true; must be delivered to the end user out-of-band.
 	TXCode string `json:"tx_code,omitempty"`
+
+	// IssuanceID is what the caller polls at GET /api/v1/issuance/status.
+	IssuanceID string `json:"issuance_id"`
 }
 
 // DatastorePreAuthOffer generates a pre-authorized credential offer for a specific
@@ -589,6 +605,7 @@ type DatastorePreAuthOfferReply struct {
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Failure		404	{object}	helpers.ErrorResponse			"Document not found"
 //	@Param			req	body		DatastorePreAuthOfferRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/preauth_offer [post]
 func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAuthOfferRequest) (*DatastorePreAuthOfferReply, error) {
 	// Only scopes explicitly marked auth_provider: preauth can be minted
@@ -649,8 +666,14 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	// which per OID4VCI spec forces the wallet to use credential_identifier
 	// (not credential_configuration_id) in the credential request. Most wallets
 	// use credential_configuration_id for pre-auth flows, so we keep it simple.
+	issuanceID, err := newIssuanceID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate issuance_id: %w", err)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:     preAuthCode,
+		IssuanceID:    issuanceID,
 		Code:          preAuthCode,
 		Status:        "code_issued",
 		CreatedAt:     time.Now(),
@@ -664,6 +687,9 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	}
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
+	}
+	if err := c.createIssuanceStatus(ctx, issuanceID, req.Scope, req.AuthenticSource, authCtx.ExpiresAt); err != nil {
+		return nil, err
 	}
 
 	// Store the document data so the credential endpoint can issue the
@@ -684,6 +710,7 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		CredentialOffer:    credentialOffer,
 		CredentialOfferURL: credentialOfferURL,
 		TXCode:             pin,
+		IssuanceID:         issuanceID,
 	}
 
 	c.log.Info("Pre-authorized credential offer created for datastore document",

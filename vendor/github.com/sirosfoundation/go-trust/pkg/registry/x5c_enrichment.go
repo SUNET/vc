@@ -1,7 +1,10 @@
 package registry
 
 import (
+	"context"
 	"crypto/x509"
+	"strconv"
+	"strings"
 
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
@@ -54,6 +57,18 @@ type X5CEnrichmentResult struct {
 	// organisation-level binding check.
 	WRPACServiceID string
 
+	// WRPRCEntitlements holds the parsed and validated entitlements of the
+	// FRONTED relying party's WRPRC (ETSI TS 119 475), when the request
+	// carried one — request.Context["wrprc"], the content of the ETSI TS
+	// 119 472-2 §6.3.2.2 `registration_cert` member. Nil when the request
+	// carried no WRPRC (the pre-EAAP shape). When non-nil the registrar's
+	// chain anchored in the verifier's roots, the JWT signature verified
+	// under the anchored chain's leaf key, the validity period held at
+	// evaluation time, and the presenting WRPAC bound to the WRPRC per the
+	// presentation actually being made (direct RPRC_16, or the Table 10
+	// `act` intermediary binding).
+	WRPRCEntitlements *rpcert.RPEntitlements
+
 	// VerifierIDs are the verifier identifiers derived from the verified leaf
 	// certificate, for the types the policy enabled (return_verifier_ids). It is
 	// empty unless Decision is true and ProfileValidationError is empty: nothing
@@ -73,14 +88,24 @@ type X5CEnrichmentResult struct {
 // the caller should return a deny response with result.FailureReason merged
 // into the reason map.
 func EnrichX5CResponse(req *authzen.EvaluationRequest, leaf *x509.Certificate) *X5CEnrichmentResult {
-	return EnrichX5CResponseWithProfiles(req, leaf, nil)
+	return EnrichX5CResponseWithProfiles(req, leaf, nil, nil)
 }
 
 // EnrichX5CResponseWithProfiles is like EnrichX5CResponse but additionally
 // matches the leaf certificate against registered RP profiles. When a profile
 // matches, it is used for identity extraction and profile-specific validation.
 // Pass nil for profiles to get the same behaviour as EnrichX5CResponse.
-func EnrichX5CResponseWithProfiles(req *authzen.EvaluationRequest, leaf *x509.Certificate, profiles *rpcert.ProfileRegistry) *X5CEnrichmentResult {
+//
+// wrprcValidator evaluates the fronted relying party's WRPRC when the
+// request carries one (request.Context["wrprc"], the TS 119 472-2
+// registration_cert member's content): the registrar chain is anchored in
+// the verifier's roots, the JWT signature is verified under the anchored
+// chain's leaf key, the claims are parsed, the validity period is checked,
+// and the presenting WRPAC is bound to the WRPRC. A presented WRPRC with a
+// nil verifier fails closed — a registry that cannot evaluate a
+// registration certificate must not wave it through. See WRPRCVerifier and
+// NewAnchoredWRPRCVerifier.
+func EnrichX5CResponseWithProfiles(req *authzen.EvaluationRequest, leaf *x509.Certificate, profiles *rpcert.ProfileRegistry, wrprcValidator WRPRCVerifier) *X5CEnrichmentResult {
 	result := &X5CEnrichmentResult{Decision: true}
 
 	// Validate certificate policy OIDs if required
@@ -156,54 +181,213 @@ func EnrichX5CResponseWithProfiles(req *authzen.EvaluationRequest, leaf *x509.Ce
 		}
 	}
 
-	// Over-request detection: compare requested attributes against entitlements
-	requestedAttrs := extractRequestedAttributes(req)
-	allowedAttrs := extractAllowedAttributes(req)
-	if len(requestedAttrs) > 0 && len(allowedAttrs) > 0 {
-		entitlements := &rpcert.RPEntitlements{
-			AllowedAttributes: allowedAttrs,
-		}
-		result.OverRequest = rpcert.DetectOverRequest(entitlements, requestedAttrs)
-
-		if result.OverRequest.IsOverRequest && isStrictEntitlementCheck(req) {
+	// The EAAP presentation model (ETSI TS 119 475 + 119 411-8): when the
+	// request carries the fronted relying party's registration certificate —
+	// request.Context["wrprc"], the content of the ETSI TS 119 472-2
+	// §6.3.2.2 `registration_cert` member — evaluate it against the
+	// registrar's anchors and bind it to the presenting WRPAC. This path is
+	// AUTHORITATIVE: the registrar-issued entitlements supersede the
+	// policy-configured allowed_attributes, and the verified binding
+	// supersedes the unvalidated intermediary_x5c metadata.
+	//
+	// A PRESENT but malformed member never falls back to the legacy path:
+	// wrprc: {} or null or "" is a request that names a registration
+	// certificate and fails to carry one — denied, not reinterpreted.
+	wrprcToken, wrprcValid, wrprcPresent := extractWRPRC(req)
+	if wrprcPresent {
+		if !wrprcValid {
 			result.Decision = false
 			result.FailureReason = map[string]interface{}{
-				"error":          "RP is requesting attributes beyond their entitlements",
-				"over_requested": result.OverRequest.OverRequested,
-				"allowed":        result.OverRequest.Allowed,
-				"requested":      result.OverRequest.Requested,
+				"error": "the wrprc member is malformed: expected a non-empty registration certificate string",
 			}
 			return result
 		}
-	}
-
-	// Intermediary verification: check if this is a proxied/brokered request
-	intermediaryX5C := extractIntermediaryX5C(req)
-	if len(intermediaryX5C) > 0 {
-		result.IsIntermediaryRequest = true
-		if !isIntermediariesAllowed(req) {
+		if wrprcValidator == nil {
 			result.Decision = false
 			result.FailureReason = map[string]interface{}{
-				"error": "intermediary/broker presentation requests are not allowed by policy",
+				"error": "a WRPRC was presented but this registry has no registrar trust anchors configured",
 			}
 			return result
 		}
-		// Extract intermediary identity from the first cert in the chain.
-		// NOTE: The intermediary certificate chain is NOT validated against any
-		// trust store. This metadata is informational only. Full intermediary
-		// chain validation will be implemented when the intermediary certificate
-		// profile is finalized.
-		result.IntermediaryIdentity = map[string]interface{}{
-			"intermediary_x5c_leaf": intermediaryX5C[0],
-			"rp_subject":            leaf.Subject.CommonName,
-			"verified":              false,
+		ent, err := wrprcValidator.VerifyWRPRC(context.Background(), []byte(wrprcToken))
+		if err != nil {
+			result.Decision = false
+			result.FailureReason = map[string]interface{}{
+				"error": "the presented WRPRC failed validation",
+				"wrprc": err.Error(),
+			}
+			return result
+		}
+		result.WRPRCEntitlements = ent
+
+		if ent.ActingIntermediary != "" {
+			// An intermediated presentation (Table 10 `act`, GEN-5.2.4-09):
+			// the presenting WRPAC is the INTERMEDIARY's access certificate,
+			// and the policy must admit intermediaries at all.
+			result.IsIntermediaryRequest = true
+			if !isIntermediariesAllowed(req) {
+				result.Decision = false
+				result.FailureReason = map[string]interface{}{
+					"error": "intermediary presentations are not allowed by policy (the WRPRC names an acting intermediary)",
+				}
+				return result
+			}
+		}
+		// The binding is the security property of this path, so its
+		// identifiers are REQUIRED here — the optional-skip semantics of the
+		// underlying helpers (empty means "not present, do not enforce") are
+		// for WRPRC-only flows. The binding identifier is the SUBJECT's
+		// semantic identifier: for a legal person the
+		// organizationIdentifier, for a natural person the personal
+		// identifier from serialNumber (ETSI TS 119 475 §5.1.5) — never an
+		// affiliated organization's identifier, which would bind a person's
+		// certificate to the organization's WRPRC.
+		bindingID, hasBindingID := rpcert.SemanticIdentifier(leaf)
+		if !hasBindingID || bindingID == "" {
+			result.Decision = false
+			result.FailureReason = map[string]interface{}{
+				"error": "the presenting certificate carries no usable binding identifier; the WRPRC binding cannot be established",
+			}
+			return result
+		}
+		if ent.ActingIntermediary == "" && ent.Subject.ID == "" {
+			result.Decision = false
+			result.FailureReason = map[string]interface{}{
+				"error": "the WRPRC names no identifier to bind the presentation to",
+			}
+			return result
+		}
+		if err := rpcert.CheckWRPACWRPRCPresentationBinding(bindingID, ent); err != nil {
+			result.Decision = false
+			result.FailureReason = map[string]interface{}{
+				"error": "the presenting WRPAC does not bind to the WRPRC",
+				"wrprc": err.Error(),
+			}
+			return result
+		}
+		// The service-identifier binding (the Santesson convention,
+		// OIDWRPACServiceIdentifier): when both sides carry one they must
+		// match, or a certificate for service A reuses a WRPRC issued for
+		// service B within the same organization. DIRECT presentations
+		// only: the helper distinguishes services of ONE organization, and
+		// an intermediated presentation legitimately carries the
+		// INTERMEDIARY's service identifier beside the FRONTED RP's.
+		if ent.ActingIntermediary == "" {
+			if err := rpcert.CheckWRPACWRPRCServiceBinding(result.WRPACServiceID, ent); err != nil {
+				result.Decision = false
+				result.FailureReason = map[string]interface{}{
+					"error": "the presenting WRPAC's service identifier does not bind to the WRPRC",
+					"wrprc": err.Error(),
+				}
+				return result
+			}
+		}
+
+		// A whole-credential request — a DCQL credential query without
+		// `claims` — is checked FIRST and unconditionally: a MIXED query
+		// (one claims-less credential beside one with claims) must not slip
+		// the unrepresentable scope past the attribute-level comparison
+		// below, which would otherwise see only the explicit claims.
+		// In strict mode the unrepresentable scope denies; otherwise it is
+		// surfaced as a warning and the attribute comparison still runs.
+		if requestsWholeCredential(req) {
+			result.OverRequest = &rpcert.OverRequestResult{
+				OverRequested: []string{"<the entire credential>"},
+				IsOverRequest: true,
+			}
+			if isStrictEntitlementCheck(req) {
+				result.Decision = false
+				result.FailureReason = map[string]interface{}{
+					"error": "the request asks for a whole credential, which the WRPRC's attribute-level grants cannot represent",
+				}
+				return result
+			}
+		}
+
+		// Over-request detection against the AUTHORITATIVE entitlements at
+		// their native granularity: the registrar's granted claim paths,
+		// exact-path and format-scoped — flattening [namespace, element] to
+		// namespace would let a grant for one element authorize the whole
+		// namespace. The requested set is the union of EVERY representation
+		// the request carries — the flat requested_attributes list and the
+		// DCQL queries' claim paths — so one representation cannot hide a
+		// beyond-grant request inside another. A WRPRC granting NO queries
+		// is an authoritative empty grant: every requested claim is an
+		// over-request.
+		if requested := requestedClaimGrants(req); len(requested) > 0 {
+			overReq := rpcert.DetectOverRequestPaths(ent, requested)
+			// A clean attribute comparison must not erase the
+			// whole-credential warning recorded above.
+			if overReq.IsOverRequest || result.OverRequest == nil {
+				result.OverRequest = overReq
+			}
+			if result.OverRequest.IsOverRequest && isStrictEntitlementCheck(req) {
+				denyOverRequest(result)
+				return result
+			}
+		}
+
+		// Verified intermediary metadata for the intermediated shape: the
+		// registrar chain anchored and the binding was checked, unlike the
+		// unverified intermediary_x5c shape below.
+		if ent.ActingIntermediary != "" {
+			result.IntermediaryIdentity = map[string]interface{}{
+				"acting_intermediary":   ent.ActingIntermediary,
+				"fronted_rp_id":         ent.Subject.ID,
+				"fronted_rp_legal_name": ent.Subject.LegalName,
+				"verified":              true,
+			}
+		}
+	} else {
+		// The legacy path: the request carried no wrprc member at all (the
+		// pre-EAAP shape) — a present-but-malformed one was denied above.
+		// Over-request detection: compare requested attributes against entitlements
+		requestedAttrs := extractRequestedAttributes(req)
+		allowedAttrs := extractAllowedAttributes(req)
+		if len(requestedAttrs) > 0 && len(allowedAttrs) > 0 {
+			entitlements := &rpcert.RPEntitlements{
+				AllowedAttributes: allowedAttrs,
+			}
+			result.OverRequest = rpcert.DetectOverRequest(entitlements, requestedAttrs)
+
+			if result.OverRequest.IsOverRequest && isStrictEntitlementCheck(req) {
+				denyOverRequest(result)
+				return result
+			}
+		}
+
+		// Intermediary verification: check if this is a proxied/brokered request
+		intermediaryX5C := extractIntermediaryX5C(req)
+		if len(intermediaryX5C) > 0 {
+			result.IsIntermediaryRequest = true
+			if !isIntermediariesAllowed(req) {
+				result.Decision = false
+				result.FailureReason = map[string]interface{}{
+					"error": "intermediary/broker presentation requests are not allowed by policy",
+				}
+				return result
+			}
+			// Extract intermediary identity from the first cert in the chain.
+			// NOTE: The intermediary certificate chain is NOT validated against any
+			// trust store. This metadata is informational only. Requests carrying
+			// a WRPRC take the verified EAAP path above instead.
+			result.IntermediaryIdentity = map[string]interface{}{
+				"intermediary_x5c_leaf": intermediaryX5C[0],
+				"rp_subject":            leaf.Subject.CommonName,
+				"verified":              false,
+			}
 		}
 	}
 
 	// Verifier identifiers: only from a certificate that passed every check
 	// above, including the matched profile's validation. A profile failure is
 	// otherwise only a warning, so it has to be tested for explicitly here.
-	if result.Decision && result.ProfileValidationError == "" {
+	// A VERIFIED intermediated WRPRC is exempt: the leaf is the
+	// INTERMEDIARY's certificate, and emitting its semantic identifier as
+	// the end RP's verifier ID would attribute the fronted RP's
+	// presentations to the intermediary.
+	intermediatedWRPRC := result.WRPRCEntitlements != nil && result.WRPRCEntitlements.ActingIntermediary != ""
+	if result.Decision && result.ProfileValidationError == "" && !intermediatedWRPRC {
 		result.VerifierIDs = deriveX5CVerifierIDs(req, leaf, result.IsIntermediaryRequest)
 	}
 
@@ -249,6 +433,32 @@ func ApplyEnrichmentToResponse(resp *authzen.EvaluationResponse, enrichment *X5C
 			trustMetadata = make(map[string]interface{})
 		}
 		trustMetadata["rp_profile"] = enrichment.MatchedProfile
+	}
+
+	// The fronted relying party's WRPRC evaluation, when the request carried
+	// one: the registrar-anchored entitlements the wallet renders and its EDP
+	// layer enforces, plus the acting intermediary for intermediated
+	// presentations.
+	if enrichment.WRPRCEntitlements != nil {
+		if trustMetadata == nil {
+			trustMetadata = make(map[string]interface{})
+		}
+		ent := enrichment.WRPRCEntitlements
+		trustMetadata["wrprc"] = map[string]interface{}{
+			"fronted_rp_id":         ent.Subject.ID,
+			"fronted_rp_legal_name": ent.Subject.LegalName,
+			"acting_intermediary":   ent.ActingIntermediary,
+			"trade_name":            ent.TradeName,
+			"country":               ent.Country,
+			"entitlements":          ent.EntitlementURIs,
+			// The display-oriented flat names AND the exact grants: an
+			// mdoc grant for [namespace, age_over_18] flattens to the
+			// namespace alone, and a consumer cannot distinguish it from a
+			// grant for [namespace, portrait] without the full paths.
+			"allowed_attributes":  ent.AllowedAttributes,
+			"allowed_claim_paths": claimPathGrantsMetadata(ent.AllowedClaimPaths),
+			"privacy_policy_uri":  ent.PrivacyPolicyURI,
+		}
 	}
 
 	if trustMetadata != nil {
@@ -373,7 +583,8 @@ func ExtractRPIdentity(cert *x509.Certificate) map[string]interface{} {
 // extractRequestedAttributes extracts the list of attributes the RP is requesting.
 // It checks (in order of priority):
 //  1. request.Context["requested_attributes"] — explicit flat list
-//  2. action.Parameters["query"] — DCQL query, from which claim names are extracted
+//  2. the DCQL query — from action.Parameters OR request.Context (the
+//     manager accepts it in both places), from which claim names are extracted
 func extractRequestedAttributes(req *authzen.EvaluationRequest) []string {
 	// Check for explicit requested_attributes first
 	if req.Context != nil {
@@ -382,7 +593,8 @@ func extractRequestedAttributes(req *authzen.EvaluationRequest) []string {
 		}
 	}
 
-	// Fall back to extracting claim names from DCQL query in action parameters
+	// The DCQL query: action parameters first, then the request context —
+	// the manager's allowlist admits "query" in both.
 	if req.Action != nil && req.Action.Parameters != nil {
 		if queryRaw, ok := req.Action.Parameters["query"]; ok {
 			if dcql := rpcert.ParseDCQLQuery(queryRaw); dcql != nil {
@@ -390,8 +602,164 @@ func extractRequestedAttributes(req *authzen.EvaluationRequest) []string {
 			}
 		}
 	}
+	if req.Context != nil {
+		if queryRaw, ok := req.Context["query"]; ok {
+			if dcql := rpcert.ParseDCQLQuery(queryRaw); dcql != nil {
+				return dcql.ExtractRequestedClaimNames()
+			}
+		}
+	}
 
 	return nil
+}
+
+// requestsWholeCredential reports whether the request's DCQL carries a
+// credential query WITHOUT claims — a request for the entire credential,
+// which no attribute-level grant can represent.
+func requestsWholeCredential(req *authzen.EvaluationRequest) bool {
+	var queryRaw interface{}
+	if req.Action != nil && req.Action.Parameters != nil {
+		queryRaw = req.Action.Parameters["query"]
+	}
+	if queryRaw == nil && req.Context != nil {
+		queryRaw = req.Context["query"]
+	}
+	if queryRaw == nil {
+		return false
+	}
+	dcql := rpcert.ParseDCQLQuery(queryRaw)
+	if dcql == nil {
+		return false
+	}
+	return dcql.RequestsWholeCredential()
+}
+
+// claimPathGrantsMetadata renders the registrar's exact claim-path grants
+// for response consumers: each entry the credential format and the full
+// claim path at its native granularity.
+func claimPathGrantsMetadata(grants []rpcert.ClaimPathGrant) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(grants))
+	for _, grant := range grants {
+		out = append(out, map[string]interface{}{
+			"format": grant.Format,
+			"path":   append([]string(nil), grant.Path...),
+		})
+	}
+	return out
+}
+
+// denyOverRequest marks the enrichment result as a strict-mode over-request
+// denial — the shared shape of the WRPRC (authoritative) and legacy
+// (policy-configured) over-request paths.
+func denyOverRequest(result *X5CEnrichmentResult) {
+	result.Decision = false
+	result.FailureReason = map[string]interface{}{
+		"error":          "RP is requesting attributes beyond their entitlements",
+		"over_requested": result.OverRequest.OverRequested,
+		"allowed":        result.OverRequest.Allowed,
+		"requested":      result.OverRequest.Requested,
+	}
+}
+
+// extractWRPRC extracts the serialized fronted relying party's WRPRC
+// (the TS 119 472-2 §6.3.2.2 `registration_cert` member's content) from
+// request.Context["wrprc"], distinguishing ABSENT from PRESENT-but-invalid:
+// absent is the pre-EAAP request shape (the legacy path); a present member
+// that is not a non-empty string is malformed and must not be reinterpreted
+// as an absence.
+func extractWRPRC(req *authzen.EvaluationRequest) (token string, valid bool, present bool) {
+	if req.Context == nil {
+		return "", false, false
+	}
+	v, ok := req.Context["wrprc"]
+	if !ok {
+		return "", false, false
+	}
+	s, ok := v.(string)
+	if !ok || s == "" {
+		return "", false, true
+	}
+	return s, true, true
+}
+
+// requestedClaimGrants builds the requested claim set from EVERY
+// representation the request carries — the flat requested_attributes list
+// and the DCQL queries' claim paths (action parameters or request context,
+// both allowlisted) — so one representation cannot hide a beyond-grant
+// request inside another. The flat entries carry no credential format; the
+// DCQL entries carry their query's.
+func requestedClaimGrants(req *authzen.EvaluationRequest) []rpcert.ClaimPathGrant {
+	var requested []rpcert.ClaimPathGrant
+	seen := map[string]bool{}
+	add := func(format string, path []string) {
+		if len(path) == 0 {
+			return
+		}
+		// Deduplicate through a key that is injective BY CONSTRUCTION —
+		// every field length-prefixed — so ["address", "street"] and
+		// ["address.street"] never merge, and the cost stays LINEAR in the
+		// requested-claim count: a quadratic scan would let a hostile
+		// 20,000-claim request force ~200 million comparisons before the
+		// request can be denied.
+		key := claimPathKey(format, path)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		requested = append(requested, rpcert.ClaimPathGrant{Format: format, Path: path})
+	}
+	if req.Context != nil {
+		for _, name := range extractStringSliceFromContext(req.Context, "requested_attributes") {
+			if name != "" {
+				add("", []string{name})
+			}
+		}
+	}
+	for _, raw := range dcqlQueries(req) {
+		if dcql := rpcert.ParseDCQLQuery(raw); dcql != nil {
+			for _, cred := range dcql.Credentials {
+				for _, claim := range cred.Claims {
+					add(cred.Format, claim.Path)
+				}
+			}
+		}
+	}
+	return requested
+}
+
+// claimPathKey builds an injective string key for a (format, path) claim
+// grant: every field length-prefixed as <len>:<content>, so no two distinct
+// pairs produce the same key — the parse is deterministic at every step —
+// and deduplication stays linear in the requested-claim count.
+func claimPathKey(format string, path []string) string {
+	var b strings.Builder
+	writeField := func(field string) {
+		b.WriteString(strconv.Itoa(len(field)))
+		b.WriteByte(':')
+		b.WriteString(field)
+	}
+	writeField(format)
+	for _, segment := range path {
+		writeField(segment)
+	}
+	return b.String()
+}
+
+// dcqlQueries yields the raw DCQL query values the request carries, from
+// action parameters and from the request context.
+func dcqlQueries(req *authzen.EvaluationRequest) []interface{} {
+	var out []interface{}
+	if req.Action != nil && req.Action.Parameters != nil {
+		if q, ok := req.Action.Parameters["query"]; ok {
+			out = append(out, q)
+		}
+	}
+	if req.Context != nil {
+		if q, ok := req.Context["query"]; ok {
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // extractAllowedAttributes extracts the RP's entitled attributes

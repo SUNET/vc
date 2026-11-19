@@ -306,6 +306,7 @@ func (m *RegistryManager) dispatch(ctx context.Context, req *authzen.EvaluationR
 		return resp, err
 	}
 	markEvaluationFailures(resp)
+	applyDisplayName(req, resp)
 	return attachTrustData(resp, freshnessBefore, trustDataSnapshot(applicable)), nil
 }
 
@@ -500,6 +501,13 @@ var clientSuppliableContextKeys = map[string]bool{
 	// intermediary_x5c is read only when the policy has set allow_intermediaries.
 	"doc_type":         true, // mdoc doctype, filters VICAL entries
 	"intermediary_x5c": true, // the intermediary's own certificate chain
+	// The fronted RP's registration certificate (ETSI TS 119 475), the
+	// content of the ETSI TS 119 472-2 §6.3.2.2 registration_cert member.
+	// Data, not policy: it is evaluated against the registry's own registrar
+	// anchors and can only NARROW a decision — a WRPRC that fails validation,
+	// names an intermediary the policy forbids, or grants nothing the request
+	// needs denies; a client cannot loosen anything by supplying one.
+	"wrprc": true,
 
 	// OpenID Federation request data, consumed by OIDFedRegistry. All four
 	// are data or hints, not policy: none of them decides what the server

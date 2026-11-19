@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -157,6 +158,40 @@ func runGenericCacheContractTests[V comparable](t *testing.T, c Cache[V], val1, 
 		require.True(t, found)
 		assert.Equal(t, val1, got)
 	})
+
+	t.Run("Update_Missing", func(t *testing.T) {
+		wrote, err := c.Update(ctx, "upd-missing", func(V) (V, time.Duration, bool) {
+			t.Fatal("fn must not run for a missing key")
+			return val1, 0, true
+		})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.False(t, wrote)
+	})
+
+	t.Run("Update_Writes", func(t *testing.T) {
+		c.Set(ctx, "upd-write", val1)
+		wrote, err := c.Update(ctx, "upd-write", func(cur V) (V, time.Duration, bool) {
+			assert.Equal(t, val1, cur)
+			return val2, 0, true
+		})
+		require.NoError(t, err)
+		assert.True(t, wrote)
+		got, found := c.Get(ctx, "upd-write")
+		require.True(t, found)
+		assert.Equal(t, val2, got)
+	})
+
+	t.Run("Update_DeclinedWriteLeavesValue", func(t *testing.T) {
+		c.Set(ctx, "upd-skip", val1)
+		wrote, err := c.Update(ctx, "upd-skip", func(V) (V, time.Duration, bool) {
+			return val2, 0, false
+		})
+		require.NoError(t, err)
+		assert.False(t, wrote)
+		got, found := c.Get(ctx, "upd-skip")
+		require.True(t, found)
+		assert.Equal(t, val1, got)
+	})
 }
 
 // --- MemoryCache type-specific tests ---
@@ -225,6 +260,36 @@ func TestMemoryCache_TTLExpiration(t *testing.T) {
 	assert.False(t, ok, "expected item to expire")
 }
 
+// readUntilGone reads key every step and reports whether it was still present
+// after total has elapsed, so reads that extend an entry's life keep it alive.
+func readUntilGone(c *MemoryCache[string], key string, step, total time.Duration) bool {
+	ctx := context.Background()
+	start := time.Now()
+	for time.Since(start) < total {
+		c.Get(ctx, key)
+		time.Sleep(step)
+	}
+	_, ok := c.Get(ctx, key)
+	return ok
+}
+
+func TestMemoryCache_ReadsDoNotExtendLifetime(t *testing.T) {
+	c := NewMemoryCache[string](200 * time.Millisecond)
+	defer c.Stop()
+	c.Set(context.Background(), "k", "v")
+
+	assert.False(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond),
+		"entry must expire a fixed time after Set however often it is read, as in MongoCache")
+}
+
+func TestMemoryCache_SetWithTTL_ReadsDoNotExtendLifetime(t *testing.T) {
+	c := NewMemoryCache[string](time.Hour)
+	defer c.Stop()
+	c.SetWithTTL(context.Background(), "k", "v", 200*time.Millisecond)
+
+	assert.False(t, readUntilGone(c, "k", 40*time.Millisecond, 500*time.Millisecond))
+}
+
 func TestMemoryCache_SetNXWithTTL_Expiration(t *testing.T) {
 	ctx := context.Background()
 	c := NewMemoryCache[string](5 * time.Minute)
@@ -262,6 +327,125 @@ func TestMemoryCache_SetNXWithTTL_ZeroTTL_UsesDefault(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	_, found = c.Get(ctx, "nx-zero-ttl")
 	assert.False(t, found, "zero TTL should fall back to default TTL, not infinite")
+}
+
+func TestMemoryCache_GetAndGetErrDoNotExtendLife(t *testing.T) {
+	ctx := context.Background()
+	c := NewMemoryCache[string](300 * time.Millisecond)
+	c.Set(ctx, "k", "v")
+
+	for range 2 {
+		time.Sleep(100 * time.Millisecond)
+		_, ok := c.Get(ctx, "k")
+		require.True(t, ok)
+		_, err := c.GetErr(ctx, "k")
+		require.NoError(t, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	_, ok := c.Get(ctx, "k")
+	assert.False(t, ok, "polling must not extend the lifetime")
+}
+
+func TestMemoryCache_UpdateKeepsRemainingLife(t *testing.T) {
+	ctx := context.Background()
+	c := NewMemoryCache[string](300 * time.Millisecond)
+	c.Set(ctx, "k", "v1")
+
+	time.Sleep(150 * time.Millisecond)
+	wrote, err := c.Update(ctx, "k", func(string) (string, time.Duration, bool) { return "v2", 0, true })
+	require.NoError(t, err)
+	require.True(t, wrote)
+
+	time.Sleep(250 * time.Millisecond)
+	_, ok := c.Get(ctx, "k")
+	assert.False(t, ok, "an update must not restart the lifetime")
+}
+
+func TestMemoryCache_UpdateDoesNotRecreateExpiredEntry(t *testing.T) {
+	ctx := context.Background()
+	c := NewMemoryCache[string](100 * time.Millisecond)
+	c.Set(ctx, "k", "v1")
+
+	wrote, err := c.Update(ctx, "k", func(string) (string, time.Duration, bool) {
+		time.Sleep(300 * time.Millisecond) // the entry expires while fn runs
+		return "v2", 0, true
+	})
+	assert.ErrorIs(t, err, ErrNoDocuments)
+	assert.False(t, wrote)
+
+	_, ok := c.Get(ctx, "k")
+	assert.False(t, ok, "an update must not give an expired entry a new lifetime")
+}
+
+func TestMemoryCache_UpdateIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	c := NewMemoryCache[int](time.Minute)
+	c.Set(ctx, "n", 0)
+
+	const workers = 50
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			_, err := c.Update(ctx, "n", func(cur int) (int, time.Duration, bool) { return cur + 1, 0, true })
+			assert.NoError(t, err)
+		})
+	}
+	wg.Wait()
+
+	got, _ := c.Get(ctx, "n")
+	assert.Equal(t, workers, got)
+}
+
+// Update is atomic against every mutation, not only against another Update:
+// a write or delete issued while the callback runs waits for it, so the
+// callback's result is never built on a value that has since changed.
+func TestMemoryCache_UpdateIsAtomicAgainstOtherMutations(t *testing.T) {
+	mutators := map[string]func(ctx context.Context, c *MemoryCache[string]){
+		"Set":        func(ctx context.Context, c *MemoryCache[string]) { c.Set(ctx, "k", "interloper") },
+		"SetWithTTL": func(ctx context.Context, c *MemoryCache[string]) { c.SetWithTTL(ctx, "k", "interloper", time.Minute) },
+		"Delete":     func(ctx context.Context, c *MemoryCache[string]) { c.Delete(ctx, "k") },
+		"GetAndDelete": func(ctx context.Context, c *MemoryCache[string]) {
+			c.GetAndDelete(ctx, "k")
+		},
+	}
+
+	for name, mutate := range mutators {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			c := NewMemoryCache[string](time.Minute)
+			c.Set(ctx, "k", "original")
+
+			inCallback := make(chan struct{})
+			release := make(chan struct{})
+			updated := make(chan struct{})
+			go func() {
+				defer close(updated)
+				_, err := c.Update(ctx, "k", func(string) (string, time.Duration, bool) {
+					close(inCallback)
+					<-release
+					return "updated", 0, true
+				})
+				assert.NoError(t, err)
+			}()
+
+			<-inCallback
+			mutated := make(chan struct{})
+			go func() {
+				defer close(mutated)
+				mutate(ctx, c)
+			}()
+
+			select {
+			case <-mutated:
+				t.Fatal("a mutation ran while Update's callback was still running")
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			close(release)
+			<-updated
+			<-mutated
+		})
+	}
 }
 
 func TestMemoryCache_Stop(t *testing.T) {
@@ -446,6 +630,36 @@ func TestMongoCache_SetWithTTL_SameAsDefault(t *testing.T) {
 	// No shift; created_at should be ~now.
 	assert.InDelta(t, 0, age, float64(5*time.Second),
 		"created_at should be approximately now when TTL equals default")
+}
+
+func TestMongoCache_Update_RetriesOnConcurrentTTLChange(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_update_ttl_cas", 10*time.Minute, nil)
+	require.NoError(t, err)
+	c.Set(ctx, "k", "same")
+
+	calls := 0
+	wrote, err := c.Update(ctx, "k", func(cur string) (string, time.Duration, bool) {
+		calls++
+		if calls == 1 {
+			// Another writer changes only the lifetime; the value stays "same".
+			c.SetWithTTL(ctx, "k", "same", 2*time.Minute)
+		}
+		return "updated", 0, true
+	})
+	require.NoError(t, err)
+	require.True(t, wrote)
+	assert.Equal(t, 2, calls, "a TTL-only change must force a re-read")
+
+	var doc bson.M
+	require.NoError(t, client.Database("test_generic").Collection("cache_update_ttl_cas").
+		FindOne(ctx, bson.M{"_id": "k"}).Decode(&doc))
+	age := time.Since(doc["created_at"].(bson.DateTime).Time())
+	assert.InDelta(t, 8*time.Minute, age, float64(5*time.Second),
+		"the other writer's shortened lifetime must survive the update")
 }
 
 func TestMongoCache_SetNXWithTTL_CreatedAtShift(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -811,9 +812,7 @@ func challengeDPoPProofClaiming(t *testing.T, key *ecdsa.PrivateKey, jti string,
 		"htm": "POST",
 		"htu": challengeIssuerURL + "/authorize-challenge",
 	}
-	for name, value := range extra {
-		claims[name] = value
-	}
+	maps.Copy(claims, extra)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "dpop+jwt"

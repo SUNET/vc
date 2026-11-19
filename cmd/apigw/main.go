@@ -106,19 +106,20 @@ func main() {
 		panic(err)
 	}
 
-	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, authProvidersSvc.Selector(), tracer, meter, cfg, log)
+	// Initialize data sources (Edu-API, etc.) before apiv1: presentation-based
+	// issuance auth fetches external_api documents itself.
+	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cfg.APIGW.DataSources.ExternalAPI, cacheService.Document, mainLog)
+	if err != nil {
+		panic(err)
+	}
+
+	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, authProvidersSvc.Selector(), dataSourcesSvc, tracer, meter, cfg, log)
 	if err != nil {
 		panic(err)
 	}
 
 	// Start background refresher for signed metadata (issuer-signed, cached with 1h TTL)
 	apiv1Client.StartSignedMetadataRefresher(ctx)
-
-	// Initialize data sources (Edu-API, etc.)
-	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cfg.APIGW.DataSources.ExternalAPI, cacheService.Document, mainLog)
-	if err != nil {
-		panic(err)
-	}
 
 	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, eventPublisher, authProvidersSvc, dataSourcesSvc, cacheService, meter.HTTPHandler(), log)
 	services["httpService"] = httpService

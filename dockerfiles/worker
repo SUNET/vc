@@ -6,12 +6,15 @@
 # toolchains — the tool-install steps below no-op when they detect the
 # tools are already present.
 # Keep the golang tag aligned with dockerfiles/gobuild's FROM.
-ARG GOBUILD_IMAGE=golang:1.27.3-bookworm
+ARG GOBUILD_IMAGE=golang:1.27.4-bookworm
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
 
-RUN command -v protoc >/dev/null 2>&1 && command -v swag >/dev/null 2>&1 \
+# A swag v1 baked into an older GOBUILD_IMAGE cannot emit OpenAPI 3.1.
+RUN command -v protoc >/dev/null 2>&1 \
+    && command -v swag >/dev/null 2>&1 \
+    && swag --version | grep -q 'version v2' \
     || make install-tools
 RUN command -v cmake >/dev/null 2>&1 \
     || ( apt-get update && apt-get install -y --no-install-recommends \

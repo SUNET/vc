@@ -62,8 +62,18 @@ type Config struct {
 	// role.
 	RoleSchemeTypes map[string][]string
 
-	// RequireRole denies x5c requests that reach the CA-anchored path (subject
-	// not itself listed) without a role that resolves through RoleSchemeTypes.
+	// WRPRCSchemeTypes lists the LoTE types whose listed entities may issue
+	// WRPRCs (the national registrars). The WRPRC evaluation's trust anchors
+	// are exactly the certificates of entities listed under these types —
+	// never the global pool, which also holds Access CAs and every other
+	// role: an ordinary access-certificate holder must not be able to
+	// self-sign registration claims. Empty means no registrar anchors are
+	// configured, and a presented WRPRC fails closed.
+	WRPRCSchemeTypes []string
+
+	// RequireRole denies any request whose action does not resolve to LoTE
+	// types through RoleSchemeTypes (or name a LoTE type itself), whether the
+	// subject is listed directly or reached through a listed CA.
 	RequireRole bool
 
 	// AllowStale accepts lists whose NextUpdate has passed. By default a
@@ -159,6 +169,21 @@ type indexedEntity struct {
 	// certPool contains X.509 certificates from this entity's digital identities,
 	// used as trust anchors for PKIX path validation of x5c requests.
 	certPool *x509.CertPool
+	// certs are the parsed certificates this entity lists, for exact-match
+	// identity comparison on the direct-key path: a submitted leaf whose key
+	// matches a listed key must BE a listed certificate — the key alone does
+	// not authenticate the certificate's identity fields.
+	certs []*x509.Certificate
+	// namesByKeyHash records, per indexed digital identity, the human-facing
+	// name of the entity that contributed it. buildIndex pools entities that
+	// share an identifier into one entry, so `entity`'s own name is the name
+	// of whichever entity was indexed first — not of whoever holds the key
+	// that matched. The decision names the holder, so it names them from here.
+	namesByKeyHash map[string]etsi119602.NameSet
+	// pooled is true when more than one listed entity merged into this entry,
+	// which leaves `entity`'s name ambiguous for any decision that does not
+	// rest on a specific digital identity.
+	pooled bool
 }
 
 // Pub-EAA service status URIs per ETSI TS 119 602 Annex H.
@@ -313,6 +338,13 @@ func (r *Registry) Evaluate(ctx context.Context, req *authzen.EvaluationRequest)
 	// Look up the entity by subject ID, limited to the LoTE types the
 	// requested role allows.
 	roleTypes := r.roleTypes(req)
+	if roleTypes == nil && r.config.RequireRole {
+		reason := map[string]interface{}{
+			"admin": "the request names no role this registry can scope by (RequireRole)",
+		}
+		addCredentialTypesToReason(reason, credentialTypes)
+		return &authzen.EvaluationResponse{Decision: false, Context: &authzen.EvaluationResponseContext{Reason: reason}}, nil
+	}
 	variants := r.index.variants[subjectID]
 	var candidates []*indexedEntity
 	for _, v := range variants {
@@ -416,11 +448,16 @@ func (r *Registry) evaluateEntity(req *authzen.EvaluationRequest, ent *indexedEn
 
 	// Resolution-only: no key check needed.
 	if req.IsResolutionOnlyRequest() {
+		context := &authzen.EvaluationResponseContext{
+			TrustMetadata: ent.entity,
+		}
+		// No key is checked here, so there is no digital identity to name a
+		// pooled entry by: displayNameOf withholds the name rather than
+		// guessing between the entities sharing this identifier.
+		setDisplayName(context, ent, "")
 		return &authzen.EvaluationResponse{
 			Decision: true,
-			Context: &authzen.EvaluationResponseContext{
-				TrustMetadata: ent.entity,
-			},
+			Context:  context,
 		}
 	}
 
@@ -441,7 +478,55 @@ func (r *Registry) evaluateEntity(req *authzen.EvaluationRequest, ent *indexedEn
 	}
 
 	if ent.keyHashes[keyHash] {
-		return r.buildSuccessResponse(subjectID, ent.territory, "key matches entity", credentialTypes)
+		if req.Resource.Type != "x5c" {
+			return r.buildSuccessResponseFor(ent, keyHash, subjectID, ent.territory, "key matches entity", credentialTypes)
+		}
+		// A malformed chain DENIES — never skips the gate on a parse
+		// failure, or [listed_leaf, "garbage"] would bypass the WRPRC
+		// evaluation entirely.
+		certs, err := parseX5CCerts(req, r.config.CryptoExt)
+		if err != nil || len(certs) == 0 {
+			reason := map[string]interface{}{
+				"admin": fmt.Sprintf("key matches entity %q but the x5c chain is malformed", subjectID),
+			}
+			if err != nil {
+				reason["parse_error"] = err.Error()
+			}
+			addCredentialTypesToReason(reason, credentialTypes)
+			return &authzen.EvaluationResponse{
+				Decision: false,
+				Context:  &authzen.EvaluationResponseContext{Reason: reason},
+			}
+		}
+		// The key match alone is not authentication of the certificate's
+		// IDENTITY: a listed key holder can submit a self-signed
+		// certificate with the same key but another organization's
+		// identifier, and the enrichment would bind to that organization's
+		// genuine WRPRC. The submitted leaf must BE a listed certificate —
+		// byte-exact — or chain to the entity's listed anchors, which the
+		// chain path below validates with the same enrichment gate.
+		if !containsExactCertificate(ent.certs, certs[0]) {
+			if resp := r.validateX5CChain(req, ent, credentialTypes); resp != nil {
+				return resp
+			}
+			reason := map[string]interface{}{
+				"admin": fmt.Sprintf("key matches entity %q but the submitted certificate is neither the listed certificate nor anchored by it", subjectID),
+			}
+			addCredentialTypesToReason(reason, credentialTypes)
+			return &authzen.EvaluationResponse{
+				Decision: false,
+				Context:  &authzen.EvaluationResponseContext{Reason: reason},
+			}
+		}
+		// The listed certificate itself: run the enrichment gate — a
+		// directly listed key is not a licence to skip the WRPRC evaluation.
+		enrichment := registry.EnrichX5CResponseWithProfiles(req, certs[0], r.profiles, r.wrprcVerifier())
+		if !enrichment.Decision {
+			return enrichmentDenial(fmt.Sprintf("key matches entity %q but enrichment check failed", subjectID), enrichment, credentialTypes)
+		}
+		resp := r.buildSuccessResponseFor(ent, keyHash, subjectID, ent.territory, "key matches entity", credentialTypes)
+		registry.ApplyEnrichmentToResponse(resp, enrichment)
+		return resp
 	}
 
 	// For x5c: attempt PKIX path validation if the entity has X.509 trust anchors.
@@ -531,20 +616,99 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	return r.refresh()
 }
 
-// buildSuccessResponse creates a successful EvaluationResponse with credential_types
-// from the request context included for audit purposes.
-func (r *Registry) buildSuccessResponse(subjectID, territory, detail string, credentialTypes []string) *authzen.EvaluationResponse {
+// buildSuccessResponseFor builds a successful response with credential_types
+// from the request context included for audit purposes, naming the entity the
+// decision is about: when a name is established for it (#249), the response's
+// context carries it as display_name — the wallet consent UI's verifier label,
+// presentation only, never a trust input. keyHash is the digital identity the
+// decision rests on, empty when it rests on none. Nil ent, or a name that
+// cannot be attributed, leaves the response unnamed.
+func (r *Registry) buildSuccessResponseFor(ent *indexedEntity, keyHash, subjectID, territory, detail string, credentialTypes []string) *authzen.EvaluationResponse {
 	reason := map[string]interface{}{
 		"admin": fmt.Sprintf("%s %q in LoTE (territory: %s)", detail, subjectID, territory),
 	}
 	addCredentialTypesToReason(reason, credentialTypes)
 
+	context := &authzen.EvaluationResponseContext{
+		Reason: reason,
+	}
+	setDisplayName(context, ent, keyHash)
 	return &authzen.EvaluationResponse{
 		Decision: true,
-		Context: &authzen.EvaluationResponseContext{
-			Reason: reason,
-		},
+		Context:  context,
 	}
+}
+
+// displayNameOf picks the human-facing name of the entity a decision is about
+// (#249). keyHash is the digital identity the decision rests on: the name of
+// the entity that contributed it is the only name the response may carry,
+// because entities sharing an identifier are pooled into one entry and the
+// entry's own name is the first-indexed entity's. With no such identity, a
+// pooled entry is ambiguous and stays unnamed — absence is a supported
+// outcome, and naming a different organisation than the one the user is
+// transacting with would be worse than none, since display_name overrides
+// the verifier's own label downstream.
+func displayNameOf(ent *indexedEntity, keyHash string) etsi119602.NameSet {
+	if ent == nil {
+		return nil
+	}
+	if keyHash != "" {
+		if names, ok := ent.namesByKeyHash[keyHash]; ok {
+			return names
+		}
+	}
+	if ent.pooled {
+		return nil
+	}
+	return entityNames(ent.entity)
+}
+
+// setDisplayName names the response after the attributable entity: display_name
+// is its preferred (English, else first) entry and display_name_l10n the whole
+// language-tagged set it came from, so the two always describe the same entity.
+func setDisplayName(context *authzen.EvaluationResponseContext, ent *indexedEntity, keyHash string) {
+	names := displayNameOf(ent, keyHash)
+	name := registry.SanitizeDisplayName(names.Get("en", ""))
+	if name == "" {
+		return
+	}
+	context.DisplayName = name
+	l10n := make(map[string]string, len(names))
+	for _, n := range names {
+		if lang := strings.ToLower(strings.TrimSpace(n.Lang)); lang != "" {
+			if _, dup := l10n[lang]; !dup {
+				l10n[lang] = n.Value
+			}
+		}
+	}
+	context.DisplayNameL10n = registry.SanitizeDisplayNameL10n(l10n)
+}
+
+// entityNames is one entity's human-facing name set (#249): the TEName, else
+// the TETradeName. Nil when it carries neither - the common case.
+func entityNames(ent etsi119602.TrustedEntity) etsi119602.NameSet {
+	if names := ent.TrustedEntityInformation.TEName; names.Get("en", "") != "" {
+		return names
+	}
+	if names := ent.TrustedEntityInformation.TETradeName; names.Get("en", "") != "" {
+		return names
+	}
+	return nil
+}
+
+// anchorKeyHash is the indexed hash of the trust anchor a validated chain
+// terminates at, so a chain anchored by a pooled entry is named by the entity
+// that actually listed the anchor (#249). Empty when the root cannot be hashed.
+func anchorKeyHash(chains [][]*x509.Certificate) string {
+	if len(chains) == 0 || len(chains[0]) == 0 {
+		return ""
+	}
+	root := chains[0][len(chains[0])-1]
+	pubDER, err := x509.MarshalPKIXPublicKey(root.PublicKey)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(pubDER))
 }
 
 // extractCredentialTypes extracts credential_types from the request context.
@@ -606,25 +770,18 @@ func (r *Registry) validateX5CChain(req *authzen.EvaluationRequest, ent *indexed
 		opts.Intermediates = intermediates
 	}
 
-	if _, err := certs[0].Verify(opts); err == nil {
+	if chains, err := certs[0].Verify(opts); err == nil {
 		// Post-chain-validation enrichment: cert policy OID check + RP identity extraction
-		enrichment := registry.EnrichX5CResponseWithProfiles(req, certs[0], r.profiles)
+		enrichment := registry.EnrichX5CResponseWithProfiles(
+			req, certs[0], r.profiles,
+			r.wrprcVerifier(),
+		)
 		if !enrichment.Decision {
-			reason := map[string]interface{}{
-				"admin": fmt.Sprintf("x5c chain valid for entity %q but enrichment check failed", ent.entityID),
-			}
-			for k, v := range enrichment.FailureReason {
-				reason[k] = v
-			}
-			addCredentialTypesToReason(reason, credentialTypes)
-			return &authzen.EvaluationResponse{
-				Decision: false,
-				Context: &authzen.EvaluationResponseContext{
-					Reason: reason,
-				},
-			}
+
+			return enrichmentDenial(fmt.Sprintf("x5c chain valid for entity %q but enrichment check failed", ent.entityID), enrichment, credentialTypes)
+
 		}
-		resp := r.buildSuccessResponse(ent.entityID, ent.territory, "x5c chain validates against trust anchor for entity", credentialTypes)
+		resp := r.buildSuccessResponseFor(ent, anchorKeyHash(chains), ent.entityID, ent.territory, "x5c chain validates against trust anchor for entity", credentialTypes)
 		registry.ApplyEnrichmentToResponse(resp, enrichment)
 		return resp
 	}
@@ -652,9 +809,59 @@ func leafBindingFailure(req *authzen.EvaluationRequest, leaf *x509.Certificate, 
 	}
 }
 
+// enrichmentDenial builds the denial response for a failed enrichment check:
+// the admin message naming what anchored, the enrichment's own failure
+// reason, and the request's credential types.
+func enrichmentDenial(adminMsg string, enrichment *registry.X5CEnrichmentResult, credentialTypes []string) *authzen.EvaluationResponse {
+	reason := map[string]interface{}{"admin": adminMsg}
+	for k, v := range enrichment.FailureReason {
+		reason[k] = v
+	}
+	addCredentialTypesToReason(reason, credentialTypes)
+	return &authzen.EvaluationResponse{
+		Decision: false,
+		Context:  &authzen.EvaluationResponseContext{Reason: reason},
+	}
+}
+
+// containsExactCertificate reports whether candidate is byte-exact one of
+// the listed certificates (x509.Certificate.Equal compares the raw DER).
+func containsExactCertificate(listed []*x509.Certificate, candidate *x509.Certificate) bool {
+	for _, cert := range listed {
+		if cert.Equal(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// wrprcVerifier returns the WRPRC verifier over the REGISTRAR-authorized
+// anchors: the certificates of entities listed under the configured
+// WRPRCSchemeTypes. Never the global pool — that also holds Access CAs and
+// every other role, and an ordinary access-certificate holder must not be
+// able to self-sign registration claims that anchor through its own CA. An
+// empty configuration returns nil, and the enrichment fails a presented
+// WRPRC closed.
+//
+// Callers hold r.mu (read or write) — the index is immutable between
+// refreshes.
+func (r *Registry) wrprcVerifier() registry.WRPRCVerifier {
+	if len(r.config.WRPRCSchemeTypes) == 0 {
+		return nil
+	}
+	pool := x509.NewCertPool()
+	for _, t := range r.config.WRPRCSchemeTypes {
+		for _, cert := range r.index.certsByType[t] {
+			pool.AddCert(cert)
+		}
+	}
+	return registry.NewAnchoredWRPRCVerifier(pool)
+}
+
 // scopedRoots returns the CA pool an x5c chain may anchor to: the certificates
 // of the role's LoTE types, or every listed certificate when the request names
-// no role. It reports false when the request names no role and RequireRole is set.
+// no role. It reports false when the request names no role and RequireRole is
+// set (Evaluate already denies that case; kept so the CA path fails closed on its own).
 func (r *Registry) scopedRoots(roleTypes []string) (*x509.CertPool, bool) {
 	if roleTypes == nil {
 		return r.index.globalCertPool, !r.config.RequireRole
@@ -749,22 +956,21 @@ func (r *Registry) validateX5CChainCA(req *authzen.EvaluationRequest, credential
 	}
 
 	// Post-chain-validation enrichment (profile / WRPRC checks).
-	enrichment := registry.EnrichX5CResponseWithProfiles(req, certs[0], r.profiles)
+	enrichment := registry.EnrichX5CResponseWithProfiles(
+		req, certs[0], r.profiles,
+		r.wrprcVerifier(),
+	)
 	if !enrichment.Decision {
-		reason := map[string]interface{}{
-			"admin": fmt.Sprintf("x5c chain validates against CA %q in LoTE but enrichment check failed", matchedID),
-		}
-		for k, v := range enrichment.FailureReason {
-			reason[k] = v
-		}
-		addCredentialTypesToReason(reason, credentialTypes)
-		return &authzen.EvaluationResponse{
-			Decision: false,
-			Context:  &authzen.EvaluationResponseContext{Reason: reason},
-		}
+
+		return enrichmentDenial(fmt.Sprintf("x5c chain validates against CA %q in LoTE but enrichment check failed", matchedID), enrichment, credentialTypes)
+
 	}
 
-	resp := r.buildSuccessResponse(req.Subject.ID, territory,
+	// matchedEnt is the CA whose pool the chain validates against, not the
+	// subject — which this path exists precisely because it is not listed.
+	// The CA's name is not the subject's, so the response carries none; the
+	// CA identity stays in the reason metadata above.
+	resp := r.buildSuccessResponseFor(nil, "", req.Subject.ID, territory,
 		fmt.Sprintf("x5c chain validates against CA-anchored entity %q for subject", matchedID),
 		credentialTypes)
 	registry.ApplyEnrichmentToResponse(resp, enrichment)
@@ -938,11 +1144,12 @@ func buildIndex(lotes []*etsi119602.ListOfTrustedEntities, ext *cryptoutil.Exten
 			}
 			if ie == nil {
 				ie = &indexedEntity{
-					entity:     ent,
-					entityID:   id,
-					territory:  territory,
-					schemeType: schemeType,
-					keyHashes:  make(map[string]bool),
+					entity:         ent,
+					entityID:       id,
+					territory:      territory,
+					schemeType:     schemeType,
+					keyHashes:      make(map[string]bool),
+					namesByKeyHash: make(map[string]etsi119602.NameSet),
 				}
 				idx.variants[id] = append(idx.variants[id], ie)
 				idx.all = append(idx.all, ie)
@@ -955,6 +1162,9 @@ func buildIndex(lotes []*etsi119602.ListOfTrustedEntities, ext *cryptoutil.Exten
 					append([]etsi119602.TrustedEntityService(nil), ie.entity.TrustedEntityServices...),
 					ent.TrustedEntityServices...)
 				ie.entity = merged
+				// The merge keeps the first entry's TrustedEntityInformation,
+				// so the entry's own name no longer identifies one entity.
+				ie.pooled = true
 			}
 
 			// Index service digital identities.
@@ -977,8 +1187,16 @@ func buildIndex(lotes []*etsi119602.ListOfTrustedEntities, ext *cryptoutil.Exten
 				}
 				sdi := svc.ServiceInformation.ServiceDigitalIdentity
 				hashes := hashServiceDigitalIdentity(sdi, ext)
+				name := entityNames(ent)
 				for _, h := range hashes {
 					ie.keyHashes[h] = true
+					// Attribute the identity to the entity that listed it, so
+					// a match names that entity and not the pooled entry's.
+					if name != nil {
+						if _, seen := ie.namesByKeyHash[h]; !seen {
+							ie.namesByKeyHash[h] = name
+						}
+					}
 					if idx.byKeyHash[h] == nil {
 						idx.byKeyHash[h] = make(map[string]bool)
 					}
@@ -995,6 +1213,7 @@ func buildIndex(lotes []*etsi119602.ListOfTrustedEntities, ext *cryptoutil.Exten
 								ie.certPool = x509.NewCertPool()
 							}
 							ie.certPool.AddCert(cert)
+							ie.certs = append(ie.certs, cert)
 							// Also add to the global pool for CA-anchored chain
 							// validation (issue #90).
 							if idx.globalCertPool == nil {

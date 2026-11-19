@@ -11,11 +11,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// isDockerAvailable checks if Docker is accessible
-func isDockerAvailable() bool {
-	return testsupport.IsDockerAvailable()
-}
-
 // startMongoContainer spins up a throwaway MongoDB via testcontainers and
 // returns a connected *mongo.Client plus a cleanup function.
 func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
@@ -161,8 +156,8 @@ func TestMongoStore_SetAuthenticSourceNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoDocuments)
 }
 
-// TestMongoStore_SetIdentifier runs the full SetIdentifier flow.
-func TestMongoStore_SetIdentifier(t *testing.T) {
+// TestMongoStore_SetAuthenticSourcePersonID runs the full SetAuthenticSourcePersonID flow.
+func TestMongoStore_SetAuthenticSourcePersonID(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
@@ -172,22 +167,22 @@ func TestMongoStore_SetIdentifier(t *testing.T) {
 	doc := &AuthorizationContext{SessionID: "id-1", RequestURI: "https://example.com/r"}
 	require.NoError(t, store.Save(ctx, doc))
 
-	require.NoError(t, store.SetIdentifier(ctx, &AuthorizationContext{SessionID: "id-1"}, "alice-id"))
+	require.NoError(t, store.SetAuthenticSourcePersonID(ctx, &AuthorizationContext{SessionID: "id-1"}, "alice-id"))
 
 	result, err := store.GetByID(ctx, "id-1")
 	require.NoError(t, err)
-	assert.Equal(t, "alice-id", result.Identifier)
+	assert.Equal(t, "alice-id", result.AuthenticSourcePersonID)
 }
 
-// TestMongoStore_SetIdentifierNotFound verifies SetIdentifier on missing doc.
-func TestMongoStore_SetIdentifierNotFound(t *testing.T) {
+// TestMongoStore_SetAuthenticSourcePersonIDNotFound verifies SetAuthenticSourcePersonID on missing doc.
+func TestMongoStore_SetAuthenticSourcePersonIDNotFound(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
 	store := newMongoTestStore(t, client, "identity_nf")
 	ctx := t.Context()
 
-	err := store.SetIdentifier(ctx, &AuthorizationContext{SessionID: "nope"}, "ghost-id")
+	err := store.SetAuthenticSourcePersonID(ctx, &AuthorizationContext{SessionID: "nope"}, "ghost-id")
 	assert.ErrorIs(t, err, ErrNoDocuments)
 }
 

@@ -1,10 +1,18 @@
 {
-    "swagger": "2.0",
+    "components": {},
     "info": {
         "title": "Issuer API",
-        "contact": {},
         "version": "0.1.0"
     },
-    "basePath": "/issuer/api/v1",
-    "paths": {}
+    "externalDocs": {
+        "description": "",
+        "url": ""
+    },
+    "paths": {},
+    "openapi": "3.1.0",
+    "servers": [
+        {
+            "url": "/issuer/api/v1"
+        }
+    ]
 }

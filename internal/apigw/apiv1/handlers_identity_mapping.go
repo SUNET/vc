@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/resourcereach"
 
 	"github.com/google/uuid"
 )
@@ -33,6 +34,7 @@ type IdentityMappingCreateReply struct {
 //	@Success		200	{object}	IdentityMappingCreateReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		IdentityMappingCreateRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/identity/mapping [post]
 func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMappingCreateRequest) (*IdentityMappingCreateReply, error) {
 	identifier := req.AuthenticSourcePersonID
@@ -121,6 +123,7 @@ type IdentityMappingResolveReply struct {
 //	@Success		200	{object}	IdentityMappingResolveReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		IdentityMappingResolveRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/identity/mapping/resolve [post]
 func (c *Client) IdentityMappingResolve(ctx context.Context, req *IdentityMappingResolveRequest) (*IdentityMappingResolveReply, error) {
 	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
@@ -156,6 +159,7 @@ type IdentityMappingUpdateRequest struct {
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		IdentityMappingUpdateRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/identity/mapping [put]
 func (c *Client) IdentityMappingUpdate(ctx context.Context, req *IdentityMappingUpdateRequest) error {
 	mapping := &model.IdentityMapping{
@@ -184,6 +188,7 @@ type IdentityMappingDeleteRequest struct {
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		IdentityMappingDeleteRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/identity/mapping [delete]
 func (c *Client) IdentityMappingDelete(ctx context.Context, req *IdentityMappingDeleteRequest) error {
 	return c.identityMappingStore.DeleteMapping(ctx, &db.DeleteMappingQuery{
@@ -194,10 +199,12 @@ func (c *Client) IdentityMappingDelete(ctx context.Context, req *IdentityMapping
 
 // IdentityMappingSearchRequest is the request for searching identity mappings
 type IdentityMappingSearchRequest struct {
-	Search                  string   `json:"search" form:"search"`
-	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
-	Limit                   int64    `json:"limit" form:"limit"`
-	AllowedAuthenticSources []string `json:"-" form:"-"`
+	Search          string `json:"search" form:"search"`
+	AuthenticSource string `json:"authentic_source" form:"authentic_source"`
+	Limit           int64  `json:"limit" form:"limit"`
+
+	// Reach comes from the authorization middleware. Every binder ignores it.
+	Reach resourcereach.Reach `json:"-" form:"-" header:"-" uri:"-"`
 }
 
 // IdentityMappingSearchReply is the reply for searching identity mappings
@@ -217,6 +224,7 @@ type IdentityMappingSearchReply struct {
 //	@Param			search				query		string						false	"Search term"
 //	@Param			authentic_source	query		string						false	"Filter by authentic source"
 //	@Param			limit				query		int							false	"Max results (default 50, max 200)"
+//	@Security		BearerAuth
 //	@Router			/api/v1/identity/mapping/search [get]
 func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMappingSearchRequest) (*IdentityMappingSearchReply, error) {
 	limit := req.Limit
@@ -224,10 +232,10 @@ func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMapping
 		limit = 50
 	}
 	mappings, err := c.identityMappingStore.SearchMappings(ctx, &db.SearchMappingsQuery{
-		Search:                  req.Search,
-		AuthenticSource:         req.AuthenticSource,
-		Limit:                   limit,
-		AllowedAuthenticSources: req.AllowedAuthenticSources,
+		Search:          req.Search,
+		AuthenticSource: req.AuthenticSource,
+		Limit:           limit,
+		Reach:           req.Reach,
 	})
 	if err != nil {
 		return nil, err

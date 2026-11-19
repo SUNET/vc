@@ -145,7 +145,7 @@ func (q CredentialQuery) MarshalYAML() (any, error) {
 	if err := decodeExact(encoded, &m); err != nil {
 		return nil, err
 	}
-	return mergeExtraYAML(m, q.Extra, declaredJSONKeys(reflect.TypeOf(CredentialQuery{})), "credential query")
+	return mergeExtraYAML(m, q.Extra, declaredJSONKeys(reflect.TypeFor[CredentialQuery]()), "credential query")
 }
 
 // UnmarshalYAML captures every member other than the modelled ones.
@@ -1107,7 +1107,7 @@ func (v VPFormatsSupported) MarshalYAML() (any, error) {
 	if err := decodeExact(encoded, &m); err != nil {
 		return nil, err
 	}
-	return mergeExtraYAML(m, v.Extra, declaredJSONKeys(reflect.TypeOf(VPFormatsSupported{})), "vp_formats_supported")
+	return mergeExtraYAML(m, v.Extra, declaredJSONKeys(reflect.TypeFor[VPFormatsSupported]()), "vp_formats_supported")
 }
 
 // UnmarshalYAML captures format entries this build does not model.

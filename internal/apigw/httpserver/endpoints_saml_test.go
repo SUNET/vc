@@ -355,6 +355,14 @@ func signSAMLResponseForACS(t *testing.T, idpEntityID, spEntityID, acsURL, inRes
 				{Audience: samltypes.Audience{Value: spEntityID}},
 			},
 		},
+		AuthnStatements: []samltypes.AuthnStatement{
+			{
+				AuthnInstant: now,
+				AuthnContext: samltypes.AuthnContext{
+					AuthnContextClassRef: &samltypes.AuthnContextClassRef{Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"},
+				},
+			},
+		},
 		AttributeStatements: []samltypes.AttributeStatement{
 			{
 				Attributes: []samltypes.Attribute{

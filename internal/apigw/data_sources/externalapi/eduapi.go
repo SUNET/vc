@@ -24,6 +24,9 @@ type EduAPI struct {
 // and the external_api scopes that reference it. Each scope's AttributeMapping
 // is wired into a per-credential-type mapper.
 func NewEduAPI(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*EduAPI, error) {
+	if len(remote.Scopes) == 0 {
+		remote.Scopes = []string{eduapi.DefaultScope}
+	}
 	base, err := newService(remote, scopes, "application/json", "eduapi", docCache, tokenCache, log)
 	if err != nil {
 		return nil, err
@@ -71,7 +74,7 @@ func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTy
 	}()
 	go func() {
 		defer wg.Done()
-		enrollments, enrollErr = s.client.GetEnrollmentsForPerson(fetchCtx, personID)
+		enrollments, enrollErr = s.client.ListActiveEnrollments(fetchCtx, personID)
 	}()
 	wg.Wait()
 
@@ -103,41 +106,38 @@ func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTy
 	return nil
 }
 
-// mergeEnrollmentClaims flattens the first active enrollment and, best-effort,
+// mergeEnrollmentClaims flattens the first course enrollment and, best-effort,
 // its course offering and the offering's organisation into claims. Missing
 // references and failed lookups are logged and skipped, not treated as errors.
 func (s *EduAPI) mergeEnrollmentClaims(ctx context.Context, claims map[string]any, enrollments []eduapi.Enrollment) {
-	e := firstActiveEnrollment(enrollments)
+	e := firstCourseEnrollment(enrollments)
 	if e == nil {
 		return
 	}
 	mergeClaims(claims, "enrollment.", e.Flatten())
 
-	if e.ClassRef.SourcedID == "" {
-		return
-	}
-	course, err := s.client.GetCourseOffering(ctx, e.ClassRef.SourcedID)
+	course, err := s.client.GetCourseOffering(ctx, e.EducationOffering)
 	if err != nil {
-		s.log.Info("Could not fetch course offering", "class_id", e.ClassRef.SourcedID, "error", err)
+		s.log.Info("Could not fetch course offering", "offering_id", e.EducationOffering, "error", err)
 		return
 	}
 	mergeClaims(claims, "course.", course.Flatten())
 
-	if course.SchoolRef.SourcedID == "" {
+	if course.Organization == "" {
 		return
 	}
-	org, err := s.client.GetOrganization(ctx, course.SchoolRef.SourcedID)
+	org, err := s.client.GetOrganization(ctx, course.Organization)
 	if err != nil {
-		s.log.Info("Could not fetch organization", "org_id", course.SchoolRef.SourcedID, "error", err)
+		s.log.Info("Could not fetch organization", "org_id", course.Organization, "error", err)
 		return
 	}
 	mergeClaims(claims, "organization.", org.Flatten())
 }
 
-// firstActiveEnrollment returns the first enrollment with status "active", or nil.
-func firstActiveEnrollment(enrollments []eduapi.Enrollment) *eduapi.Enrollment {
+// firstCourseEnrollment returns the first enrollment in a course offering, or nil.
+func firstCourseEnrollment(enrollments []eduapi.Enrollment) *eduapi.Enrollment {
 	for i := range enrollments {
-		if enrollments[i].Status == "active" {
+		if enrollments[i].OfferingType == "course" {
 			return &enrollments[i]
 		}
 	}

@@ -213,6 +213,72 @@ func (r *RedisCache[V]) setNXWithTTL(ctx context.Context, key string, value V, t
 	return ok, nil
 }
 
+// Update atomically read-modify-writes a value; see Cache.Update.
+// WATCH aborts the transaction when another client changes the key, and the
+// loop then starts over from a fresh read.
+func (r *RedisCache[V]) Update(ctx context.Context, key string, fn func(V) (V, time.Duration, bool)) (bool, error) {
+	nsKey := r.namespacedKey(key)
+	var written bool
+
+	txf := func(tx *redis.Tx) error {
+		var err error
+		written, err = r.updateInTx(ctx, tx, nsKey, key, fn)
+		return err
+	}
+
+	for range maxUpdateAttempts {
+		written = false
+		err := r.client.Watch(ctx, txf, nsKey)
+		switch {
+		case err == nil:
+			return written, nil
+		case errors.Is(err, redis.TxFailedErr):
+			continue
+		case errors.Is(err, ErrNoDocuments):
+			return false, ErrNoDocuments
+		default:
+			return false, fmt.Errorf("redis cache update (cache=%s): %w", r.collection, err)
+		}
+	}
+	return false, fmt.Errorf("redis cache update: too much contention (cache=%s)", r.collection)
+}
+
+// updateInTx is one WATCHed attempt of Update: it reads the key, runs fn and
+// writes the result in a transaction, and reports whether it wrote.
+func (r *RedisCache[V]) updateInTx(ctx context.Context, tx *redis.Tx, nsKey, key string, fn func(V) (V, time.Duration, bool)) (bool, error) {
+	data, err := tx.Get(ctx, nsKey).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return false, ErrNoDocuments
+	}
+	if err != nil {
+		return false, err
+	}
+	current, ok := r.decodeValue(data, "update", key)
+	if !ok {
+		return false, fmt.Errorf("decode failed")
+	}
+
+	next, ttl, write := fn(current)
+	if !write {
+		return false, nil
+	}
+	out, err := json.Marshal(next)
+	if err != nil {
+		return false, err
+	}
+	expiration := ttl
+	if expiration <= 0 {
+		expiration = redis.KeepTTL
+	}
+	if _, err := tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.Set(ctx, nsKey, out, expiration)
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Delete removes a value by key.
 func (r *RedisCache[V]) Delete(ctx context.Context, key string) {
 	if err := r.client.Del(ctx, r.namespacedKey(key)).Err(); err != nil {
