@@ -3,507 +3,299 @@ package eduapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/oauth2client/oauth2clienttest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// testServer creates a mock Edu-API server with realistic Ladok-style data and
-// returns the server and a pre-configured client. The caller must defer srv.Close().
-func testServer(t *testing.T) (*httptest.Server, *Client) {
+const basePath = "/1edtech/eduapi/base/v1p0"
+
+// newTestClient serves mux under the Edu-API base path and returns a client for it.
+func newTestClient(t *testing.T, mux *http.ServeMux) (*httptest.Server, *Client) {
 	t.Helper()
+	root := http.NewServeMux()
+	// The test client puts its token endpoint at <base URL>/oauth2/token.
+	oauth2clienttest.RegisterTokenHandler(root, basePath+"/oauth2/token", "test-token")
+	root.Handle(basePath+"/", http.StripPrefix(basePath, mux))
+	srv := httptest.NewServer(root)
+	t.Cleanup(srv.Close)
 
-	mux := http.NewServeMux()
+	return srv, NewClient(oauth2clienttest.NewClient(t, srv.URL+basePath, "application/json", "eduapi"))
+}
 
-	oauth2clienttest.RegisterTokenHandler(mux, "/oauth2/token", "test-token")
-
-	// GET /persons/{personId}
-	mux.HandleFunc("/ims/oneroster/rostering/v1p2/persons/p-lisa", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PersonResponse{ // #nosec G104
-			Person: Person{
-				SourcedID:   "p-lisa",
-				Status:      "active",
-				DateLastMod: "2025-09-01T10:00:00Z",
-				Name: PersonName{
-					FamilyName: "Andersson",
-					GivenName:  "Lisa",
-					MiddleName: "Maria",
-				},
-				Email: []TypedContact{
-					{Type: "institutional", Value: "lisa.andersson@student.su.se"},
-				},
-				Phone: []TypedContact{
-					{Type: "mobile", Value: "+46701234567"},
-				},
-				Identifiers: []IdentifierEntry{
-					{IdentifierType: "personnummer", Identifier: "199505151234"},
-					{IdentifierType: "ladokUID", Identifier: "abc-def-123"},
-				},
-				Demographics: &Demographics{
-					BirthDate: "1995-05-15",
-				},
-			},
-		})
-	})
-
-	// GET /students (collection)
-	mux.HandleFunc("/ims/oneroster/rostering/v1p2/students", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Honour limit query param for pagination testing
-		persons := []Person{
-			{SourcedID: "p-lisa", Name: PersonName{GivenName: "Lisa", FamilyName: "Andersson"}},
-			{SourcedID: "p-erik", Name: PersonName{GivenName: "Erik", FamilyName: "Johansson"}},
-			{SourcedID: "p-anna", Name: PersonName{GivenName: "Anna", FamilyName: "Svensson"}},
-		}
-
-		if r.URL.Query().Get("limit") == "2" {
-			persons = persons[:2]
-		}
-		if r.URL.Query().Get("filter") == "familyName='Svensson'" {
-			persons = []Person{persons[2]}
-		}
-
-		json.NewEncoder(w).Encode(PersonsResponse{Persons: persons}) // #nosec G104
-	})
-
-	// GET /persons/{personId}/enrollments
-	mux.HandleFunc("/ims/oneroster/rostering/v1p2/persons/p-lisa/enrollments", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(EnrollmentsResponse{ // #nosec G104
-			Enrollments: []Enrollment{
-				{
-					SourcedID: "e-1001",
-					Status:    "active",
-					Role:      "student",
-					PersonRef: GUIDRef{SourcedID: "p-lisa"},
-					ClassRef:  GUIDRef{SourcedID: "c-math301"},
-					BeginDate: "2025-08-26",
-					EndDate:   "2026-01-15",
-					Primary:   true,
-				},
-				{
-					SourcedID: "e-1002",
-					Status:    "active",
-					Role:      "student",
-					PersonRef: GUIDRef{SourcedID: "p-lisa"},
-					ClassRef:  GUIDRef{SourcedID: "c-cs201"},
-					BeginDate: "2025-08-26",
-					EndDate:   "2026-01-15",
-				},
-			},
-		})
-	})
-
-	// GET /classes/{classId}
-	mux.HandleFunc("/ims/oneroster/rostering/v1p2/classes/c-math301", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
-			"class": CourseOffering{
-				SourcedID:    "c-math301",
-				Status:       "active",
-				Title:        "Advanced Linear Algebra",
-				CourseCode:   "MATH301",
-				ClassType:    "scheduled",
-				SchoolRef:    GUIDRef{SourcedID: "org-su-math"},
-				SubjectCodes: []string{"MAT"},
-				TermRefs:     []GUIDRef{{SourcedID: "term-ht2025"}},
-			},
-		})
-	})
-
-	// GET /orgs/{orgId}
-	mux.HandleFunc("/ims/oneroster/rostering/v1p2/orgs/org-su-math", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
-			"org": Organization{
-				SourcedID:  "org-su-math",
-				Name:       "Department of Mathematics",
-				Type:       "department",
-				Identifier: "SE-202100-3062",
-				ParentRef:  &GUIDRef{SourcedID: "org-su"},
-			},
-		})
-	})
-
-	// GET /academicSessions/{sessionId}
-	mux.HandleFunc("/ims/oneroster/rostering/v1p2/academicSessions/term-ht2025", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
-			"academicSession": AcademicSession{
-				SourcedID:  "term-ht2025",
-				Title:      "Autumn Term 2025",
-				Type:       "term",
-				StartDate:  "2025-08-26",
-				EndDate:    "2026-01-15",
-				SchoolYear: "2025",
-			},
-		})
-	})
-
-	// GET /students/{studentId}/results
-	mux.HandleFunc("/ims/oneroster/gradebook/v1p2/students/p-lisa/results", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ResultsResponse{ // #nosec G104
-			Results: []Result{
-				{
-					SourcedID:   "r-2001",
-					PersonRef:   GUIDRef{SourcedID: "p-lisa"},
-					ClassRef:    GUIDRef{SourcedID: "li-math301-exam"},
-					Score:       "VG",
-					ScoreStatus: "fully graded",
-					ScoreDate:   "2026-01-20",
-				},
-				{
-					SourcedID:   "r-2002",
-					PersonRef:   GUIDRef{SourcedID: "p-lisa"},
-					ClassRef:    GUIDRef{SourcedID: "li-cs201-lab"},
-					Score:       "G",
-					ScoreStatus: "fully graded",
-					ScoreDate:   "2025-12-10",
-				},
-			},
-		})
-	})
-
-	srv := httptest.NewServer(mux)
-	return srv, NewClient(oauth2clienttest.NewClient(t, srv.URL, "application/json", "eduapi"))
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func TestGetPerson(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/persons/p-lisa", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, Person{
+			SourcedID:      "p-lisa",
+			RecordLanguage: "en",
+			LegalName:      &PersonName{GivenName: "Lisa", FamilyName: "Andersson"},
+			DateOfBirth:    "1995-05-15",
+			PrimaryEmail:   &OptionallyTypedEmail{Email: "lisa@student.su.se"},
+			OtherIdentifiers: []IdentifierEntry{
+				{IdentifierType: "nationalIdentityNumber", Identifier: "199505151234"},
+			},
+		})
+	})
+	_, client := newTestClient(t, mux)
 
-	person, err := client.GetPerson(context.Background(), "p-lisa")
-	if err != nil {
-		t.Fatalf("GetPerson: %v", err)
-	}
+	p, err := client.GetPerson(context.Background(), "p-lisa")
+	require.NoError(t, err)
+	assert.Equal(t, "Lisa", p.LegalName.GivenName)
+	assert.Equal(t, "1995-05-15", p.DateOfBirth)
+	assert.Equal(t, "lisa@student.su.se", p.PrimaryEmail.Email)
+	assert.Len(t, p.OtherIdentifiers, 1)
 
-	if person.SourcedID != "p-lisa" {
-		t.Errorf("SourcedID = %q, want p-lisa", person.SourcedID)
-	}
-	if person.Name.GivenName != "Lisa" {
-		t.Errorf("GivenName = %q, want Lisa", person.Name.GivenName)
-	}
-	if person.Name.FamilyName != "Andersson" {
-		t.Errorf("FamilyName = %q, want Andersson", person.Name.FamilyName)
-	}
-	if person.Name.MiddleName != "Maria" {
-		t.Errorf("MiddleName = %q, want Maria", person.Name.MiddleName)
-	}
-	if len(person.Email) != 1 || person.Email[0].Value != "lisa.andersson@student.su.se" {
-		t.Errorf("Email = %v, want [{institutional lisa.andersson@student.su.se}]", person.Email)
-	}
-	if person.Demographics == nil || person.Demographics.BirthDate != "1995-05-15" {
-		t.Errorf("BirthDate = %v, want 1995-05-15", person.Demographics)
-	}
-	if len(person.Identifiers) != 2 {
-		t.Errorf("Identifiers count = %d, want 2", len(person.Identifiers))
-	}
+	_, err = client.GetPerson(context.Background(), "nonexistent")
+	assert.Error(t, err)
 }
 
-func TestGetPersonNotFound(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	_, err := client.GetPerson(context.Background(), "nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent person, got nil")
-	}
-}
-
-func TestGetStudents(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	students, err := client.GetStudents(context.Background())
-	if err != nil {
-		t.Fatalf("GetStudents: %v", err)
-	}
-
-	if len(students) != 3 {
-		t.Fatalf("got %d students, want 3", len(students))
-	}
-	if students[0].SourcedID != "p-lisa" {
-		t.Errorf("first student SourcedID = %q, want p-lisa", students[0].SourcedID)
-	}
-	if students[2].Name.FamilyName != "Svensson" {
-		t.Errorf("third student FamilyName = %q, want Svensson", students[2].Name.FamilyName)
-	}
-}
-
-func TestGetStudentsWithLimit(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	students, err := client.GetStudents(context.Background(), WithLimit(2))
-	if err != nil {
-		t.Fatalf("GetStudents(WithLimit): %v", err)
-	}
-
-	if len(students) != 2 {
-		t.Errorf("got %d students, want 2 (limit=2)", len(students))
-	}
-}
-
-func TestGetStudentsWithFilter(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	students, err := client.GetStudents(context.Background(), WithFilter("familyName='Svensson'"))
-	if err != nil {
-		t.Fatalf("GetStudents(WithFilter): %v", err)
-	}
-
-	if len(students) != 1 {
-		t.Fatalf("got %d students, want 1 (filtered)", len(students))
-	}
-	if students[0].Name.FamilyName != "Svensson" {
-		t.Errorf("FamilyName = %q, want Svensson", students[0].Name.FamilyName)
-	}
-}
-
-func TestGetEnrollmentsForPerson(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	enrollments, err := client.GetEnrollmentsForPerson(context.Background(), "p-lisa")
-	if err != nil {
-		t.Fatalf("GetEnrollmentsForPerson: %v", err)
-	}
-
-	if len(enrollments) != 2 {
-		t.Fatalf("got %d enrollments, want 2", len(enrollments))
-	}
-
-	e := enrollments[0]
-	if e.SourcedID != "e-1001" {
-		t.Errorf("SourcedID = %q, want e-1001", e.SourcedID)
-	}
-	if e.Status != "active" {
-		t.Errorf("Status = %q, want active", e.Status)
-	}
-	if e.Role != "student" {
-		t.Errorf("Role = %q, want student", e.Role)
-	}
-	if e.PersonRef.SourcedID != "p-lisa" {
-		t.Errorf("PersonRef = %q, want p-lisa", e.PersonRef.SourcedID)
-	}
-	if e.ClassRef.SourcedID != "c-math301" {
-		t.Errorf("ClassRef = %q, want c-math301", e.ClassRef.SourcedID)
-	}
-	if !e.Primary {
-		t.Error("Primary = false, want true")
-	}
-	if e.BeginDate != "2025-08-26" {
-		t.Errorf("BeginDate = %q, want 2025-08-26", e.BeginDate)
-	}
-}
-
-func TestGetCourseOffering(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	course, err := client.GetCourseOffering(context.Background(), "c-math301")
-	if err != nil {
-		t.Fatalf("GetCourseOffering: %v", err)
-	}
-
-	if course.SourcedID != "c-math301" {
-		t.Errorf("SourcedID = %q, want c-math301", course.SourcedID)
-	}
-	if course.Title != "Advanced Linear Algebra" {
-		t.Errorf("Title = %q, want Advanced Linear Algebra", course.Title)
-	}
-	if course.CourseCode != "MATH301" {
-		t.Errorf("CourseCode = %q, want MATH301", course.CourseCode)
-	}
-	if course.ClassType != "scheduled" {
-		t.Errorf("ClassType = %q, want scheduled", course.ClassType)
-	}
-	if course.SchoolRef.SourcedID != "org-su-math" {
-		t.Errorf("SchoolRef = %q, want org-su-math", course.SchoolRef.SourcedID)
-	}
-	if len(course.SubjectCodes) != 1 || course.SubjectCodes[0] != "MAT" {
-		t.Errorf("SubjectCodes = %v, want [MAT]", course.SubjectCodes)
-	}
-}
-
-func TestGetOrganization(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	org, err := client.GetOrganization(context.Background(), "org-su-math")
-	if err != nil {
-		t.Fatalf("GetOrganization: %v", err)
-	}
-
-	if org.SourcedID != "org-su-math" {
-		t.Errorf("SourcedID = %q, want org-su-math", org.SourcedID)
-	}
-	if org.Name != "Department of Mathematics" {
-		t.Errorf("Name = %q, want Department of Mathematics", org.Name)
-	}
-	if org.Type != "department" {
-		t.Errorf("Type = %q, want department", org.Type)
-	}
-	if org.Identifier != "SE-202100-3062" {
-		t.Errorf("Identifier = %q, want SE-202100-3062", org.Identifier)
-	}
-	if org.ParentRef == nil || org.ParentRef.SourcedID != "org-su" {
-		t.Errorf("ParentRef = %v, want org-su", org.ParentRef)
-	}
-}
-
-func TestGetAcademicSession(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	session, err := client.GetAcademicSession(context.Background(), "term-ht2025")
-	if err != nil {
-		t.Fatalf("GetAcademicSession: %v", err)
-	}
-
-	if session.SourcedID != "term-ht2025" {
-		t.Errorf("SourcedID = %q, want term-ht2025", session.SourcedID)
-	}
-	if session.Title != "Autumn Term 2025" {
-		t.Errorf("Title = %q, want Autumn Term 2025", session.Title)
-	}
-	if session.Type != "term" {
-		t.Errorf("Type = %q, want term", session.Type)
-	}
-	if session.StartDate != "2025-08-26" {
-		t.Errorf("StartDate = %q, want 2025-08-26", session.StartDate)
-	}
-	if session.EndDate != "2026-01-15" {
-		t.Errorf("EndDate = %q, want 2026-01-15", session.EndDate)
-	}
-	if session.SchoolYear != "2025" {
-		t.Errorf("SchoolYear = %q, want 2025", session.SchoolYear)
-	}
-}
-
-func TestGetResultsForPerson(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	results, err := client.GetResultsForPerson(context.Background(), "p-lisa")
-	if err != nil {
-		t.Fatalf("GetResultsForPerson: %v", err)
-	}
-
-	if len(results) != 2 {
-		t.Fatalf("got %d results, want 2", len(results))
-	}
-
-	r := results[0]
-	if r.SourcedID != "r-2001" {
-		t.Errorf("SourcedID = %q, want r-2001", r.SourcedID)
-	}
-	if r.Score != "VG" {
-		t.Errorf("Score = %q, want VG", r.Score)
-	}
-	if r.ScoreStatus != "fully graded" {
-		t.Errorf("ScoreStatus = %q, want fully graded", r.ScoreStatus)
-	}
-	if r.ScoreDate != "2026-01-20" {
-		t.Errorf("ScoreDate = %q, want 2026-01-20", r.ScoreDate)
-	}
-	if r.PersonRef.SourcedID != "p-lisa" {
-		t.Errorf("PersonRef = %q, want p-lisa", r.PersonRef.SourcedID)
-	}
-}
-
-func TestGetResultsForPersonWithOptions(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
-
-	// Verify query options are accepted (mock returns same data regardless)
-	results, err := client.GetResultsForPerson(
-		context.Background(), "p-lisa",
-		WithLimit(10),
-		WithOffset(0),
-		WithSort("scoreDate"),
-		WithOrderBy("desc"),
-	)
-	if err != nil {
-		t.Fatalf("GetResultsForPerson(opts): %v", err)
-	}
-	if len(results) != 2 {
-		t.Errorf("got %d results, want 2", len(results))
-	}
-}
-
-// TestFullStudentJourney exercises a realistic usage pattern: look up a student,
-// fetch their enrollments, resolve each course and organization, get the term,
-// and finally retrieve grades.
-func TestFullStudentJourney(t *testing.T) {
-	srv, client := testServer(t)
-	defer srv.Close()
+func TestGetCourseOfferingOrganizationAcademicSession(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/courseOfferings/co-1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, CourseOffering{
+			SourcedID:       "co-1",
+			RecordLanguage:  "sv",
+			Title:           []LanguageTypedString{{RecordLanguage: "en", Value: "Linear Algebra"}, {RecordLanguage: "sv", Value: "Linjar algebra"}},
+			PrimaryCode:     &IdentifierEntry{IdentifierType: "systemId", Identifier: "MATH301"},
+			Organization:    "org-1",
+			AcademicSession: "as-1",
+		})
+	})
+	mux.HandleFunc("/organizations/org-1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, Organization{SourcedID: "org-1", Name: []LanguageTypedString{{RecordLanguage: "en", Value: "Stockholm University"}}, OrganizationType: "university"})
+	})
+	mux.HandleFunc("/academicSessions/as-1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, AcademicSession{SourcedID: "as-1", SessionType: "term", StartDate: "2025-08-26T00:00:00Z"})
+	})
+	_, client := newTestClient(t, mux)
 	ctx := context.Background()
 
-	// 1. Look up the student
-	person, err := client.GetPerson(ctx, "p-lisa")
-	if err != nil {
-		t.Fatalf("step 1 GetPerson: %v", err)
-	}
-	if person.Name.GivenName != "Lisa" {
-		t.Fatalf("unexpected person: %s", person.Name.GivenName)
-	}
+	co, err := client.GetCourseOffering(ctx, "co-1")
+	require.NoError(t, err)
+	assert.Equal(t, "org-1", co.Organization)
+	assert.Equal(t, "MATH301", co.PrimaryCode.Identifier)
 
-	// 2. Fetch her enrollments
-	enrollments, err := client.GetEnrollmentsForPerson(ctx, person.SourcedID)
-	if err != nil {
-		t.Fatalf("step 2 GetEnrollmentsForPerson: %v", err)
-	}
-	if len(enrollments) == 0 {
-		t.Fatal("step 2: no enrollments found")
-	}
+	org, err := client.GetOrganization(ctx, "org-1")
+	require.NoError(t, err)
+	assert.Equal(t, "university", org.OrganizationType)
 
-	// 3. Resolve the first enrollment's course offering
-	course, err := client.GetCourseOffering(ctx, enrollments[0].ClassRef.SourcedID)
-	if err != nil {
-		t.Fatalf("step 3 GetCourseOffering: %v", err)
-	}
-	if course.Title != "Advanced Linear Algebra" {
-		t.Errorf("step 3: course title = %q", course.Title)
-	}
+	as, err := client.GetAcademicSession(ctx, "as-1")
+	require.NoError(t, err)
+	assert.Equal(t, "term", as.SessionType)
+}
 
-	// 4. Resolve the course's school/department
-	org, err := client.GetOrganization(ctx, course.SchoolRef.SourcedID)
-	if err != nil {
-		t.Fatalf("step 4 GetOrganization: %v", err)
-	}
-	if org.Name != "Department of Mathematics" {
-		t.Errorf("step 4: org name = %q", org.Name)
-	}
+// linkStyle is how the test server writes the target of a next link.
+type linkStyle int
 
-	// 5. Resolve the term
-	if len(course.TermRefs) == 0 {
-		t.Fatal("step 5: no term refs on course")
-	}
-	term, err := client.GetAcademicSession(ctx, course.TermRefs[0].SourcedID)
-	if err != nil {
-		t.Fatalf("step 5 GetAcademicSession: %v", err)
-	}
-	if term.Title != "Autumn Term 2025" {
-		t.Errorf("step 5: term title = %q", term.Title)
-	}
+const (
+	linkRootRelative linkStyle = iota // </path?query>
+	linkAbsolute                      // <https://host/path?query>
+	linkQueryOnly                     // <?query>
+	linkSibling                       // <enrollments?query>
+)
 
-	// 6. Get the student's grades
-	results, err := client.GetResultsForPerson(ctx, person.SourcedID)
-	if err != nil {
-		t.Fatalf("step 6 GetResultsForPerson: %v", err)
+var linkStyles = map[string]linkStyle{
+	"root-relative": linkRootRelative,
+	"absolute":      linkAbsolute,
+	"query-only":    linkQueryOnly,
+	"sibling":       linkSibling,
+}
+
+// enrollmentServer pages enrollments two at a time, advertising each next page
+// with the given link style.
+func enrollmentServer(t *testing.T, all []Enrollment, style linkStyle, gotFilters *[]string) (*httptest.Server, *Client) {
+	t.Helper()
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		if gotFilters != nil {
+			*gotFilters = append(*gotFilters, r.URL.Query().Get("filter"))
+		}
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		end := min(offset+2, len(all))
+		if end < len(all) {
+			query := url.Values{"filter": {r.URL.Query().Get("filter")}, "offset": {strconv.Itoa(end)}}.Encode()
+			var target string
+			switch style {
+			case linkAbsolute:
+				target = srv.URL + basePath + "/enrollments?" + query
+			case linkQueryOnly:
+				target = "?" + query
+			case linkSibling:
+				target = "enrollments?" + query
+			default:
+				target = basePath + "/enrollments?" + query
+			}
+			// The comma inside the quoted title is not a link separator (RFC 8288).
+			w.Header().Set("Link", fmt.Sprintf(`<%s>; title="Semester, spring"; rel="next", <%s>; rel="last"`, target, target))
+		}
+		writeJSON(w, all[offset:end])
+	})
+	srv, client := newTestClient(t, mux)
+	return srv, client
+}
+
+func sampleEnrollments() []Enrollment {
+	return []Enrollment{
+		{SourcedID: "e1", Person: "p-lisa", EducationOffering: "co-1", OfferingType: "course", Role: "student", IsActive: true},
+		{SourcedID: "e2", Person: "p-lisa", EducationOffering: "co-2", OfferingType: "course", Role: "student", IsActive: false},
+		{SourcedID: "e3", Person: "p-lisa", EducationOffering: "co-3", OfferingType: "course", Role: "student", IsActive: true},
+		{SourcedID: "e4", Person: "p-lisa", EducationOffering: "col-1", OfferingType: "collection", Role: "student", IsActive: true},
+		{SourcedID: "e5", Person: "p-lisa", EducationOffering: "co-5", OfferingType: "course", Role: "student", IsActive: true},
 	}
-	if len(results) != 2 {
-		t.Errorf("step 6: got %d results, want 2", len(results))
+}
+
+func TestListActiveEnrollmentsFollowsNextAndFiltersInactive(t *testing.T) {
+	for name, style := range linkStyles {
+		t.Run(name, func(t *testing.T) {
+			var filters []string
+			_, client := enrollmentServer(t, sampleEnrollments(), style, &filters)
+
+			got, err := client.ListActiveEnrollments(context.Background(), "p-lisa")
+			require.NoError(t, err)
+
+			var ids []string
+			for _, e := range got {
+				ids = append(ids, e.SourcedID)
+			}
+			assert.Equal(t, []string{"e1", "e3", "e4", "e5"}, ids)
+			assert.Len(t, filters, 3, "three pages requested")
+			for _, f := range filters {
+				assert.Equal(t, "person='p-lisa'", f)
+			}
+		})
 	}
+}
+
+func TestListActiveEnrollmentsEmpty(t *testing.T) {
+	_, client := enrollmentServer(t, []Enrollment{}, linkRootRelative, nil)
+
+	got, err := client.ListActiveEnrollments(context.Background(), "p-none")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestListActiveEnrollmentsRejectsQuote(t *testing.T) {
+	var filters []string
+	_, client := enrollmentServer(t, sampleEnrollments(), linkRootRelative, &filters)
+
+	for _, id := range []string{"x' OR person!='y", `a\b`} {
+		_, err := client.ListActiveEnrollments(context.Background(), id)
+		assert.Error(t, err, "id %q", id)
+	}
+	assert.Empty(t, filters, "no request must be sent")
+}
+
+func TestListActiveEnrollmentsRefusesCrossOriginNext(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", `<https://evil.example.org/enrollments?offset=1>; rel="next"`)
+		writeJSON(w, []Enrollment{{SourcedID: "e1", IsActive: true}})
+	})
+	_, client := newTestClient(t, mux)
+
+	_, err := client.ListActiveEnrollments(context.Background(), "p-lisa")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "different origin")
+}
+
+func TestListActiveEnrollmentsPageCap(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", `</1edtech/eduapi/base/v1p0/enrollments?offset=1>; rel="next"`)
+		writeJSON(w, []Enrollment{})
+	})
+	_, client := newTestClient(t, mux)
+
+	_, err := client.ListActiveEnrollments(context.Background(), "p-lisa")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pages")
+}
+
+func TestNextLink(t *testing.T) {
+	tests := []struct {
+		name string
+		link []string
+		want string
+	}{
+		{"none", nil, ""},
+		{"next only", []string{`</a?o=2>; rel="next"`}, "/a?o=2"},
+		{"unquoted rel", []string{`</a?o=2>; rel=next`}, "/a?o=2"},
+		{"several relations", []string{`</f>; rel="first", </a?o=2>; rel="next", </l>; rel="last"`}, "/a?o=2"},
+		{"separate header lines", []string{`</f>; rel="first"`, `</a?o=2>; rel="next"`}, "/a?o=2"},
+		{"no next", []string{`</f>; rel="first", </l>; rel="last"`}, ""},
+		{"rel list", []string{`</a?o=2>; rel="next last"`}, "/a?o=2"},
+		{"case-insensitive", []string{`</a?o=2>; REL="Next"`}, "/a?o=2"},
+		{"malformed", []string{`not a link`}, ""},
+		{"prefix not next", []string{`</a>; rel="nextish"`}, ""},
+		{"comma in quoted param", []string{`</a?o=2>; title="Semester, spring"; rel="next"`}, "/a?o=2"},
+		{"comma in quoted param of earlier link", []string{`</f>; title="a, b"; rel="first", </a?o=2>; rel="next"`}, "/a?o=2"},
+		{"escaped quote in param", []string{`</a?o=2>; title="say \"hi, there\""; rel="next"`}, "/a?o=2"},
+		{"semicolon in quoted param", []string{`</a>; title="x; rel=next"; rel="last"`}, ""},
+		{"comma in target", []string{`</a?ids=1,2>; rel="next"`}, "/a?ids=1,2"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := http.Header{}
+			for _, l := range tc.link {
+				h.Add("Link", l)
+			}
+			assert.Equal(t, tc.want, nextLink(h))
+		})
+	}
+}
+
+func TestRequestsCarryBasePathAndToken(t *testing.T) {
+	var gotAuth, gotPath string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/persons/p-1", func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.RequestURI
+		writeJSON(w, Person{SourcedID: "p-1"})
+	})
+	_, client := newTestClient(t, mux)
+
+	_, err := client.GetPerson(context.Background(), "p-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer test-token", gotAuth)
+	assert.Equal(t, basePath+"/persons/p-1", gotPath)
+}
+
+func TestListActiveEnrollmentsResolvesNextAgainstFinalURL(t *testing.T) {
+	var paths []string
+	mux := http.NewServeMux()
+	// /enrollments moves to /canonical/enrollments, so <page2> must resolve to /canonical/page2.
+	mux.HandleFunc("/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		http.Redirect(w, r, basePath+"/canonical/enrollments?"+r.URL.RawQuery, http.StatusFound)
+	})
+	mux.HandleFunc("/canonical/enrollments", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Link", `<page2>; rel="next"`)
+		writeJSON(w, []Enrollment{{SourcedID: "e1", IsActive: true}})
+	})
+	mux.HandleFunc("/canonical/page2", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		writeJSON(w, []Enrollment{{SourcedID: "e2", IsActive: true}})
+	})
+	_, client := newTestClient(t, mux)
+
+	got, err := client.ListActiveEnrollments(context.Background(), "p-lisa")
+	require.NoError(t, err)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{"/enrollments", "/canonical/enrollments", "/canonical/page2"}, paths)
 }

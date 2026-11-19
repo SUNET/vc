@@ -93,43 +93,61 @@ grant_type=client_credentials
        http://purl.1edtech.org/spec/eduapi/v1p0/scope/core.readonly.privacy
 ```
 
-**b) Find Lisa in Ladok by personnummer:**
-```
-GET https://api.ladok.se/ims/eduapi/base/v1p0/persons?filter=nationalIdentityNumber eq "199205154321"
-Authorization: Bearer <access_token>
-```
-→ Returns Lisa's Edu-API Person record with `sourcedId: "ladok-person-7f3a2b"`.
+**b) Fetch Lisa's person record:**
 
-**c) Fetch her programme enrolments:**
+The authentication step already yields Lisa's sourcedId (`ladok-person-7f3a2b`), so the issuer reads her record directly. All paths are relative to the remote's `base_url`, which includes the spec's base path (`https://api.ladok.se/1edtech/eduapi/base/v1p0`).
 ```
-GET https://api.ladok.se/ims/eduapi/base/v1p0/students/ladok-person-7f3a2b/collectionOfferings
+GET /persons/ladok-person-7f3a2b
 Authorization: Bearer <access_token>
 ```
-→ Returns her active programme enrolments:
+
+**c) Fetch her active enrolments:**
+
+The spec has no person-scoped enrolment route, so the issuer uses the generic `filter` on `/enrollments` and follows `rel="next"` links in the `Link` header until none is left. It keeps only enrolments with `isActive: true`.
+```
+GET /enrollments?filter=person='ladok-person-7f3a2b'
+Authorization: Bearer <access_token>
+```
+→ Returns her enrolments:
 ```json
 [
   {
-    "sourcedId": "ladok-co-4e8d1a",
-    "offeringType": "program",
-    "collection": "ladok-ct-master-cs",
-    "title": [
-      {"recordLanguage": "sv", "value": "Masterprogram i datavetenskap"},
-      {"recordLanguage": "en", "value": "Master's Programme in Computer Science"}
-    ],
-    "primaryCode": {"identifier": "SU-CS-MSC-2025", "identifierType": "systemId"},
-    "organization": "ladok-org-su",
-    "academicSession": "ladok-as-ht2025",
-    "startDate": "2025-08-25T00:00:00Z",
-    "endDate": "2027-06-15T00:00:00Z",
-    "registrationStatus": "open",
+    "sourcedId": "ladok-en-91c2",
+    "person": "ladok-person-7f3a2b",
+    "educationOffering": "ladok-co-4e8d1a",
+    "offeringType": "course",
+    "role": "student",
+    "enrollmentStatus": "enrolled",
+    "isActive": true,
     "recordStatus": "active"
   }
 ]
 ```
+The issuer takes the first `offeringType: course` enrolment and fetches the offering. If Lisa has no active course enrolment, the credential is still issued from her person data alone.
+```
+GET /courseOfferings/ladok-co-4e8d1a
+```
+```json
+{
+  "sourcedId": "ladok-co-4e8d1a",
+  "offeringType": "standard",
+  "title": [
+    {"recordLanguage": "sv", "value": "Masterprogram i datavetenskap"},
+    {"recordLanguage": "en", "value": "Master's Programme in Computer Science"}
+  ],
+  "primaryCode": {"identifier": "SU-CS-MSC-2025", "identifierType": "systemId"},
+  "organization": "ladok-org-su",
+  "academicSession": "ladok-as-ht2025",
+  "startDate": "2025-08-25T00:00:00Z",
+  "endDate": "2027-06-15T00:00:00Z",
+  "registrationStatus": "open",
+  "recordStatus": "active"
+}
+```
 
 **d) Fetch Stockholm University details:**
 ```
-GET https://api.ladok.se/ims/eduapi/base/v1p0/organizations/ladok-org-su
+GET /organizations/ladok-org-su
 Authorization: Bearer <access_token>
 ```
 → Returns:
@@ -276,17 +294,15 @@ Organization
 | Endpoint | Use Case |
 |----------|----------|
 | `GET /persons/{id}` | Student identity (name, DOB, email) |
-| `GET /enrollments?personId={id}` | All enrollments for a student |
+| `GET /enrollments?filter=person='{id}'` | Enrollments for a person (no person-scoped route exists in the spec) |
 | `GET /courseOfferings/{id}` | Course details for diploma claims |
 | `GET /collectionOfferings/{id}` | Program/degree info |
 | `GET /organizations/{id}` | Issuing institution details |
 | `GET /academicSessions/{id}` | Term/semester context |
-| `GET /affiliations?personId={id}` | Organizational roles |
+| `GET /affiliations?filter=person='{id}'` | Organizational roles |
 | `GET /collectionTemplates/{id}` | Canonical program definition |
-| `GET /students/{id}/collectionOfferings` | Programs for a student |
-| `GET /students/{id}/componentOfferings` | Components for a student |
 
-All endpoints support pagination (`limit`, `offset`), sorting (`sort`, `orderBy`), and filtering (`filter`).
+List endpoints support pagination (`limit`, `offset`, with `Link` headers carrying the next page), sorting (`sort`, `orderBy`), and filtering (`filter`). Responses are bare JSON objects and arrays. The normative schema is the OpenAPI 3 file at https://purl.imsglobal.org/spec/eduapi/v1p0/schema/openapi/eduapi_v1p0_openapi3.json.
 
 ---
 
@@ -297,8 +313,8 @@ All endpoints support pagination (`limit`, `offset`), sorting (`sort`, `orderBy`
 ```
 Edu-API Source                    →  Credential Claim
 ──────────────────────────────────────────────────────
-Person.primaryName.givenName      →  given_name
-Person.primaryName.familyName     →  family_name
+Person.legalName.givenName        →  given_name
+Person.legalName.familyName       →  family_name
 Person.dateOfBirth                →  birth_date
 CollectionTemplate.title[0].value →  degree_name
 CollectionTemplate.collectionType →  degree_type (program, major...)
@@ -365,10 +381,10 @@ apigw:
       credential_mappings:
         diploma:
           attributes:
-            "primaryName.givenName":
+            "givenName":
               claim: "given_name"
               required: true
-            "primaryName.familyName":
+            "familyName":
               claim: "family_name"
               required: true
             "dateOfBirth":
@@ -380,13 +396,13 @@ apigw:
 
         eduid:
           attributes:
-            "primaryName.givenName":
+            "givenName":
               claim: "given_name"
               required: true
-            "primaryName.familyName":
+            "familyName":
               claim: "family_name"
               required: true
-            "primaryEmail.email":
+            "email":
               claim: "email"
               required: true
 ```
@@ -427,7 +443,7 @@ package eduapi
 type Person struct {
     SourcedID       string              `json:"sourcedId"`
     RecordLanguage  string              `json:"recordLanguage"`
-    PrimaryName     PersonName          `json:"primaryName"`
+    LegalName       *PersonName         `json:"legalName,omitempty"`
     OtherNames      []PersonName        `json:"otherNames,omitempty"`
     DateOfBirth     string              `json:"dateOfBirth,omitempty"`
     PlaceOfBirth    string              `json:"placeOfBirth,omitempty"`
@@ -546,15 +562,12 @@ func (c *Client) GetPerson(ctx context.Context, id string) (*Person, error)
 func (c *Client) GetAllPersons(ctx context.Context, opts ...QueryOption) ([]Person, error)
 func (c *Client) GetAllStudents(ctx context.Context, opts ...QueryOption) ([]Person, error)
 
-// Enrollment operations
-func (c *Client) GetEnrollment(ctx context.Context, id string) (*Enrollment, error)
-func (c *Client) GetAllEnrollments(ctx context.Context, opts ...QueryOption) ([]Enrollment, error)
-func (c *Client) GetEnrollmentsForCourseOffering(ctx context.Context, offeringID string, opts ...QueryOption) ([]Enrollment, error)
+// Enrollment operations: GET /enrollments?filter=person='<id>', following
+// rel="next" links and keeping only isActive enrollments
+func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]Enrollment, error)
 
 // Offering operations
 func (c *Client) GetCourseOffering(ctx context.Context, id string) (*CourseOffering, error)
-func (c *Client) GetCollectionOffering(ctx context.Context, id string) (*CollectionOffering, error)
-func (c *Client) GetStudentCollectionOfferings(ctx context.Context, studentID string, opts ...QueryOption) ([]CollectionOffering, error)
 
 // Organization operations
 func (c *Client) GetOrganization(ctx context.Context, id string) (*Organization, error)
@@ -590,10 +603,10 @@ type Transformer struct {
 
 // FlattenPerson converts a Person struct to a flat attribute map
 // Example output:
-//   "primaryName.givenName" → "Alice"
-//   "primaryName.familyName" → "Smith"
+//   "givenName" → "Alice"
+//   "familyName" → "Smith"
 //   "dateOfBirth" → "1995-03-15"
-//   "primaryEmail.email" → "alice@example.org"
+//   "email" → "alice@example.org"
 func FlattenPerson(p *Person) map[string]any
 
 // FlattenEnrollment converts an Enrollment to a flat attribute map

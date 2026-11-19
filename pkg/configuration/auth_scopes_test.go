@@ -101,4 +101,21 @@ func TestCheckAuthScopes(t *testing.T) {
 		cfg.Common = nil
 		assert.Error(t, checkAuthScopes(cfg), "a config with no credentials cannot satisfy any auth scope")
 	})
+
+	t.Run("external_api auth scope naming no credential", func(t *testing.T) {
+		cfg := cfgWith(nil)
+		cfg.APIGW.DataSources.ExternalAPI = model.ExternalAPIConfig{Scopes: map[string]model.ExternalAPIScope{
+			"sis_enrollment": {
+				Remote:       "sis",
+				AuthProvider: model.AuthProviderOpenID4VP,
+				AuthScopes:   map[string]model.AuthScopeEntry{"student_card": {AuthClaims: []string{"sis_id"}}},
+			},
+		}}
+		err := checkAuthScopes(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "external_api.sis_enrollment.auth_scopes.student_card")
+
+		cfg.Common.CredentialMetadata["student_card"] = cfg.Common.CredentialMetadata["pid"]
+		assert.NoError(t, checkAuthScopes(cfg))
+	})
 }

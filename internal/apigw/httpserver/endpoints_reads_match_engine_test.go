@@ -84,7 +84,7 @@ func newReadChain(t *testing.T, documents []*model.MetaData, rules []string, tok
 		DatastoreColl:        &readFixtureStore{documents: documents},
 		IdentityMappingsColl: &mappingFixtureStore{documents: documents},
 	}
-	client, err := apiv1.New(ctx, stores, nil, nil, tracer, &metric.Meter{Meter: noop.NewMeterProvider().Meter("test")}, cfg, log)
+	client, err := apiv1.New(ctx, stores, nil, nil, nil, tracer, &metric.Meter{Meter: noop.NewMeterProvider().Meter("test")}, cfg, log)
 	require.NoError(t, err)
 	httpHelpers, err := httphelpers.New(ctx, tracer, cfg, log)
 	require.NoError(t, err)

@@ -39,6 +39,15 @@ type PrepareIssuanceRequest struct {
 	// wants that should ask for it by name rather than by omission.
 	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match" validate:"required"`
 
+	// AuthenticSourcePersonID is the person's identifier at the authentic
+	// source the scope is served from, such as a student's sourcedId in a
+	// SIS. What it means is up to that source's data source. Required for an
+	// external_api scope and refused for any other.
+	//
+	// Kept on the server with the issuance and never put in the offer, so
+	// a holder cannot swap it for another person's.
+	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" validate:"omitempty,max=256,printascii"`
+
 	// AuthenticSource names the source this credential will be issued
 	// from, and is checked against the one the scope actually resolves to.
 	//
@@ -110,6 +119,19 @@ const maxPreparedIssuanceTTLSeconds = model.MaxAuthSessionTTLSeconds
 // takes the issuer_state to the Authorization Challenge Endpoint, is told
 // to present a credential, and is issued to only if that credential
 // satisfies the rule the caller supplied here.
+//
+//	@Summary		PrepareIssuance
+//	@ID				issuance-prepare
+//	@Description	Prepare an issuer-initiated issuance bound to an identity match and return the credential offer
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	PrepareIssuanceReply	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Failure		403	{object}	helpers.ErrorResponse	"authentic_source does not match the source the scope resolves to"
+//	@Param			req	body		PrepareIssuanceRequest	true	" "
+//	@Security		BearerAuth
+//	@Router			/api/v1/issuance/prepare [post]
 func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceRequest) (*PrepareIssuanceReply, error) {
 	source, ttl, err := c.validatePrepareRequest(req)
 	if err != nil {
@@ -132,18 +154,19 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	}
 
 	authCtx := &cache.AuthorizationContext{
-		SessionID:       uuid.NewString(),
-		IssuanceID:      issuanceID,
-		Code:            uuid.NewString(),
-		IssuerState:     issuerState,
-		IdentityMatch:   req.IdentityMatch,
-		Scopes:          []string{req.Scope},
-		ClientID:        fmt.Sprintf("x509_san_dns:%s", host),
-		AuthProvider:    source.AuthProvider,
-		DataSource:      string(source.DataSource),
-		RemoteName:      source.RemoteName,
-		AuthenticSource: source.AuthenticSource,
-		ExpiresAt:       time.Now().Add(time.Duration(ttl) * time.Second).Unix(),
+		SessionID:               uuid.NewString(),
+		IssuanceID:              issuanceID,
+		Code:                    uuid.NewString(),
+		IssuerState:             issuerState,
+		IdentityMatch:           req.IdentityMatch,
+		Scopes:                  []string{req.Scope},
+		ClientID:                fmt.Sprintf("x509_san_dns:%s", host),
+		AuthProvider:            source.AuthProvider,
+		DataSource:              string(source.DataSource),
+		RemoteName:              source.RemoteName,
+		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
+		AuthenticSource:         source.AuthenticSource,
+		ExpiresAt:               time.Now().Add(time.Duration(ttl) * time.Second).Unix(),
 	}
 
 	if authCtx.Nonce, err = crypto.GenerateSecureToken(0, 32); err != nil {
@@ -245,6 +268,18 @@ func (c *Client) validatePrepareRequest(req *PrepareIssuanceRequest) (model.Cred
 		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("authentic_source_mismatch",
 			fmt.Sprintf("scope %q is served by authentic source %q, not %q",
 				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
+	}
+
+	// An external API is queried by the person's id there, and only the
+	// preparing caller knows it. Any other source has nothing to use it for.
+	isExternalAPI := source.DataSource == model.DataSourceExternalAPI
+	switch {
+	case isExternalAPI && req.AuthenticSourcePersonID == "":
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("authentic_source_person_id_required",
+			fmt.Sprintf("scope %q is served from an external API, so authentic_source_person_id is required", req.Scope), 400)
+	case !isExternalAPI && req.AuthenticSourcePersonID != "":
+		return model.CredentialSource{}, 0, helpers.NewErrorDetailsWithStatus("authentic_source_person_id_not_allowed",
+			fmt.Sprintf("scope %q is not served from an external API, so authentic_source_person_id is not accepted", req.Scope), 400)
 	}
 
 	// A rule naming a claim the request will not ask for can never pass.

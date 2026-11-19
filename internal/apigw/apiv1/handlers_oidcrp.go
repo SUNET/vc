@@ -357,7 +357,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 
 		// Resolve the authenticated identifier for registry (applies to all flows).
-		if authCtx.Identifier == "" {
+		if authCtx.AuthenticSourcePersonID == "" {
 			var resolveErr error
 			// For assertion: pre-transform fallbacks are raw OIDC Claims["sub"] and IDToken.Subject.
 			var fallbacks []string
@@ -367,7 +367,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			if authResp.IDToken != nil && authResp.IDToken.Subject != "" {
 				fallbacks = append(fallbacks, authResp.IDToken.Subject)
 			}
-			authCtx.Identifier, resolveErr = c.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
+			authCtx.AuthenticSourcePersonID, resolveErr = c.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
 			if resolveErr != nil {
 				span.SetStatus(codes.Error, "identifier resolution failed")
 				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
@@ -378,7 +378,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
 		}
 		c.log.Info("OIDC callback: identifier resolved",
-			"vci_session_id", session.VCISessionID, "identifier", authCtx.Identifier)
+			"vci_session_id", session.VCISessionID, "identifier", authCtx.AuthenticSourcePersonID)
 
 		// Clean up OIDC session (clear err so defer doesn't double-delete)
 		err = nil
@@ -463,16 +463,16 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// which both this library's CredentialRequest.Validate and
 	// ResolveCredentialFormatWithAuthDetails already handle as the normal path.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:     preAuthCode,
-		Code:          preAuthCode,
-		Status:        "code_issued",
-		CreatedAt:     time.Now(),
-		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:        []string{session.CredentialType},
-		Nonce:         nonce,
-		AuthProvider:  model.AuthProviderOIDC,
-		Identifier:    identifier,
-		PreAuthorized: true,
+		SessionID:               preAuthCode,
+		Code:                    preAuthCode,
+		Status:                  "code_issued",
+		CreatedAt:               time.Now(),
+		ExpiresAt:               time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:                  []string{session.CredentialType},
+		Nonce:                   nonce,
+		AuthProvider:            model.AuthProviderOIDC,
+		AuthenticSourcePersonID: identifier,
+		PreAuthorized:           true,
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)

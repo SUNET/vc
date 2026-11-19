@@ -817,20 +817,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		reply.CNonce = childNonce
 
 		childSession := &cache.AuthorizationContext{
-			SessionID:            childSessionID,
-			SourceSessionID:      authorizationContext.SessionID,
-			IssuanceID:           authorizationContext.IssuanceID,
-			Status:               cache.SessionStatusTokenIssued,
-			CreatedAt:            time.Now(),
-			ExpiresAt:            tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
-			Scopes:               authorizationContext.Scopes,
-			Nonce:                childNonce,
-			AuthorizationDetails: responseDetails, // Use details with credential_identifiers from token response
-			AuthProvider:         authorizationContext.AuthProvider,
-			Identifier:           authorizationContext.Identifier,
-			DataSource:           authorizationContext.DataSource,
-			Token:                tokenDoc,
-			RefreshToken:         refreshToken,
+			SessionID:               childSessionID,
+			SourceSessionID:         authorizationContext.SessionID,
+			IssuanceID:              authorizationContext.IssuanceID,
+			Status:                  cache.SessionStatusTokenIssued,
+			CreatedAt:               time.Now(),
+			ExpiresAt:               tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
+			Scopes:                  authorizationContext.Scopes,
+			Nonce:                   childNonce,
+			AuthorizationDetails:    responseDetails, // Use details with credential_identifiers from token response
+			AuthProvider:            authorizationContext.AuthProvider,
+			AuthenticSourcePersonID: authorizationContext.AuthenticSourcePersonID,
+			DataSource:              authorizationContext.DataSource,
+			Token:                   tokenDoc,
+			RefreshToken:            refreshToken,
 		}
 		if refreshToken != "" {
 			childSession.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()

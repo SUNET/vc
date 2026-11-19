@@ -7,6 +7,7 @@ package oauth2client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,6 +40,18 @@ type Config struct {
 	TokenCache cache.Cache[string]
 }
 
+// StatusError is returned when the remote answers a GET with a non-200 status.
+type StatusError struct {
+	Name       string
+	Path       string
+	StatusCode int
+	Body       string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s: GET %s returned %d: %s", e.Name, e.Path, e.StatusCode, e.Body)
+}
+
 // Client performs CCG token management and authenticated GET requests.
 type Client struct {
 	baseURL    string
@@ -69,7 +82,7 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 		baseURL:      cfg.BaseURL,
 		accept:       accept,
 		name:         cfg.Name,
-		httpClient:   &http.Client{Timeout: cfg.Timeout},
+		httpClient:   &http.Client{Timeout: cfg.Timeout, CheckRedirect: sameOriginRedirect},
 		log:          log.New(cfg.Name),
 		tokenURL:     cfg.TokenURL,
 		clientID:     cfg.ClientID,
@@ -77,6 +90,20 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 		scopes:       cfg.Scopes,
 		tokenCache:   cfg.TokenCache,
 	}, nil
+}
+
+// sameOriginRedirect stops a redirect from carrying credentials to another origin.
+// Go's default policy keeps the Authorization header across a port or scheme change
+// on the same hostname.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	first := via[0].URL
+	if req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return fmt.Errorf("refusing redirect from %s://%s to %s://%s: different origin", first.Scheme, first.Host, req.URL.Scheme, req.URL.Host)
+	}
+	return nil
 }
 
 // tokenResponse is the OAuth 2.0 token endpoint response.
@@ -168,14 +195,73 @@ func (c *Client) fetchToken(ctx context.Context) (string, error) {
 // Get performs an authenticated GET to baseURL+path and returns the body,
 // which is limited to 10 MB.
 func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
-	token, err := c.ensureToken(ctx)
+	resp, err := c.GetResponse(ctx, path, query)
 	if err != nil {
 		return nil, err
 	}
+	return resp.Body, nil
+}
 
+// Response is a successful GET response.
+type Response struct {
+	Body   []byte
+	Header http.Header
+	// URL is where the body came from, after any redirects. Relative Link targets
+	// resolve against it.
+	URL string
+}
+
+// GetResponse is Get that also returns the response headers and final URL.
+func (c *Client) GetResponse(ctx context.Context, path string, query url.Values) (*Response, error) {
 	u := c.baseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
+	}
+	return c.do(ctx, u, path)
+}
+
+// Resolve resolves ref against from, the URL of the response that carried it
+// (RFC 8288), and refuses a result whose scheme or host differs from the base
+// URL so the bearer token is never sent to another origin.
+func (c *Client) Resolve(from, ref string) (string, error) {
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse base URL: %w", c.name, err)
+	}
+	fromURL, err := url.Parse(from)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse URL %q: %w", c.name, from, err)
+	}
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse URL %q: %w", c.name, ref, err)
+	}
+	target := fromURL.ResolveReference(refURL)
+	if target.Scheme != base.Scheme || target.Host != base.Host {
+		return "", fmt.Errorf("%s: refusing URL %q: different origin than base URL", c.name, ref)
+	}
+	return target.String(), nil
+}
+
+// GetURL performs an authenticated GET to rawURL, which may be relative to the
+// base URL or absolute. It is refused when it leaves the base URL's origin.
+func (c *Client) GetURL(ctx context.Context, rawURL string) (*Response, error) {
+	target, err := c.Resolve(c.baseURL, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return nil, fmt.Errorf("%s: parse URL %q: %w", c.name, target, err)
+	}
+	return c.do(ctx, target, u.Path)
+}
+
+// do performs the authenticated GET to u; errPath is used in error messages.
+func (c *Client) do(ctx context.Context, u, errPath string) (*Response, error) {
+	token, err := c.ensureToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -196,7 +282,8 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte
 		return nil, fmt.Errorf("%s: read response: %w", c.name, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: GET %s returned %d: %s", c.name, path, resp.StatusCode, string(body))
+		return nil, &StatusError{Name: c.name, Path: errPath, StatusCode: resp.StatusCode, Body: string(body)}
 	}
-	return body, nil
+	// resp.Request is the last request in the redirect chain.
+	return &Response{Body: body, Header: resp.Header, URL: resp.Request.URL.String()}, nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/cache"
+	datasources "github.com/SUNET/vc/internal/apigw/data_sources"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
@@ -30,9 +31,10 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
-//	@title		Datastore API
-//	@version	2.8
-//	@BasePath	/api/v1
+//	@title							Datastore API
+//	@version						dev
+//	@BasePath						/api/v1
+//	@securitydefinitions.bearerauth	BearerAuth
 
 // Client holds the public api object
 type Client struct {
@@ -94,6 +96,10 @@ type Client struct {
 	// presentation or a browser.
 	authProviderSelector AuthProviderSelector
 
+	// dataSources fetches external_api documents once a presentation has
+	// identified the person. nil in tests that never reach that branch.
+	dataSources *datasources.Service
+
 	// issuanceAuth overrides the issuance-auth pipeline the Authorization
 	// Challenge Endpoint feeds. nil everywhere but in tests, where it is
 	// the only way to reach the endpoint's own code on a presentation that
@@ -128,7 +134,7 @@ type AuthProviderSelector interface {
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authProviderSelector AuthProviderSelector, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authProviderSelector AuthProviderSelector, dataSources *datasources.Service, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
 	vciMetrics, err := metric.NewVCI(meter.Meter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VCI metrics: %w", err)
@@ -146,6 +152,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authP
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
 		cacheService:                  cacheService,
 		authProviderSelector:          authProviderSelector,
+		dataSources:                   dataSources,
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)

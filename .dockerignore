@@ -1,4 +1,5 @@
 docs/
+!docs/*/embed.go
 pki/
 gen_bootstrap
 bin/

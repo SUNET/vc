@@ -92,13 +92,14 @@ apigw:
 
   # Named remote connections (referenced by external_api credentials)
   remotes:
+    # Edu-API v1.0 Final remote. base_url includes the spec's base path.
     ladok:
       type: eduapi
-      base_url: "https://api.ladok.se/eduapi"
+      base_url: "https://api.ladok.se/1edtech/eduapi/base/v1p0"
       token_url: "https://api.ladok.se/oauth2/token"
       client_id: "vc-ladok"
       scopes:
-        - "https://purl.imsglobal.org/spec/or/v1p2/scope/roster-core.readonly"
+        - "http://purl.1edtech.org/spec/eduapi/v1p0/scope/core.readonly"
     # Open Education API (OEAPI v6.0) remote. base_url is the host root; the
     # "/v6" version path is appended automatically.
     oeapi_demo:

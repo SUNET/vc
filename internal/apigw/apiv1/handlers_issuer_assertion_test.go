@@ -140,10 +140,10 @@ func TestResolveVCIIdentifier_PreExistingIdentifier(t *testing.T) {
 	client := newTestClient(t, store)
 
 	authCtx := &cache.AuthorizationContext{
-		SessionID:       "test-session",
-		DataSource:      string(model.DataSourceAssertion),
-		AuthenticSource: "test-source",
-		Identifier:      "pre-existing-id",
+		SessionID:               "test-session",
+		DataSource:              string(model.DataSourceAssertion),
+		AuthenticSource:         "test-source",
+		AuthenticSourcePersonID: "pre-existing-id",
 	}
 
 	identifier, err := client.ResolveVCIIdentifier(t.Context(), authCtx, map[string]any{"sub": "other"})

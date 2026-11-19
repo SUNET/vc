@@ -681,7 +681,8 @@ func (h *VC20Handler) extractProof(cred map[string]any) (map[string]any, error) 
 
 // expandedContainsPresentation reports whether an expanded JSON-LD document
 // carries a VerifiablePresentation node. Expanded nodes name their types in
-// @type as absolute IRIs, not the compact "VerifiablePresentation".
+//
+//	@type	as absolute IRIs, not the compact "VerifiablePresentation".
 func expandedContainsPresentation(expanded []any) bool {
 	const vpIRI = "https://www.w3.org/2018/credentials#VerifiablePresentation"
 	for _, node := range expanded {

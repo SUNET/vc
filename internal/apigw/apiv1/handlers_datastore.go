@@ -36,6 +36,7 @@ type DatastoreUploadReply struct {
 //	@Success		200	{object}	DatastoreUploadReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [post]
 func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*DatastoreUploadReply, error) {
 	if req.Meta.DocumentID == "" {
@@ -164,6 +165,7 @@ type DatastoreAddIdentityRequest struct {
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
 //	@Param			req	body		DatastoreAddIdentityRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/identity [put]
 func (c *Client) DatastoreAddIdentity(ctx context.Context, req *DatastoreAddIdentityRequest) error {
 	err := c.datastoreStore.AddIdentity(ctx, &db.AddIdentityQuery{
@@ -209,6 +211,7 @@ type DatastoreDeleteIdentityRequest struct {
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/identity [delete]
 func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
 	err := c.datastoreStore.DeleteIdentity(ctx, &db.DeleteIdentityQuery{
@@ -330,6 +333,7 @@ type DatastoreListReply struct {
 //	@Success		200	{object}	DatastoreListReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreListRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/list [post]
 func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
 	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
@@ -376,6 +380,7 @@ type DatastoreGetByKeyReply struct {
 //	@Param			authentic_source	query		string					true	"Authentic source"
 //	@Param			scope				query		string					true	"Scope"
 //	@Param			document_id			query		string					true	"Document ID"
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [get]
 func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
@@ -415,6 +420,7 @@ type DatastoreResolveReply struct {
 //	@Success		200	{object}	DatastoreResolveReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreResolveRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/resolve [post]
 func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequest) (*DatastoreResolveReply, error) {
 	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
@@ -461,6 +467,7 @@ type DatastoreDeleteByKeyRequest struct {
 //	@Success		204	"No Content"
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
 //	@Param			req	body		DatastoreDeleteByKeyRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [delete]
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
 	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
@@ -477,6 +484,7 @@ func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteB
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore [put]
 func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error {
 	upload := &model.CompleteDocument{
@@ -527,6 +535,7 @@ type DatastoreSearchReply struct {
 //	@Param			authentic_source	query		string					false	"Filter by authentic source"
 //	@Param			scope				query		string					false	"Filter by scope"
 //	@Param			limit				query		int						false	"Max results (default 50, max 200)"
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/search [get]
 func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchRequest) (*DatastoreSearchReply, error) {
 	limit := req.Limit
@@ -596,6 +605,7 @@ type DatastorePreAuthOfferReply struct {
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Failure		404	{object}	helpers.ErrorResponse			"Document not found"
 //	@Param			req	body		DatastorePreAuthOfferRequest	true	" "
+//	@Security		BearerAuth
 //	@Router			/api/v1/datastore/preauth_offer [post]
 func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAuthOfferRequest) (*DatastorePreAuthOfferReply, error) {
 	// Only scopes explicitly marked auth_provider: preauth can be minted

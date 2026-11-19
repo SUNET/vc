@@ -1180,8 +1180,19 @@ func checkAuthScopes(cfg *model.Cfg) error {
 			}
 		}
 	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.ExternalAPI.Scopes)) {
+		credential := cfg.APIGW.DataSources.ExternalAPI.Scopes[scope]
+		if credential.AuthProvider != model.AuthProviderOpenID4VP {
+			continue
+		}
+		for _, authScope := range slices.Sorted(maps.Keys(credential.AuthScopes)) {
+			if cfg.GetCredentialMetadata(authScope) == nil {
+				problems = append(problems, fmt.Sprintf("external_api.%s.auth_scopes.%s", scope, authScope))
+			}
+		}
+	}
 	if len(problems) > 0 {
-		return fmt.Errorf("apigw.data_sources.datastore.scopes: %s name no scope in common.credential_metadata, so no credential can be requested for them", strings.Join(problems, ", "))
+		return fmt.Errorf("apigw.data_sources: %s name no scope in common.credential_metadata, so no credential can be requested for them", strings.Join(problems, ", "))
 	}
 	return nil
 }

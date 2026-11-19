@@ -594,10 +594,10 @@ func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *Authorizatio
 	return nil
 }
 
-// SetIdentifier sets the resolved identifier on an authorization context.
-func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error {
-	if identifier == "" {
-		return errors.New("identifier cannot be empty")
+// SetAuthenticSourcePersonID sets the person's id at the authentic source on an authorization context.
+func (s *MongoStore) SetAuthenticSourcePersonID(ctx context.Context, query *AuthorizationContext, authenticSourcePersonID string) error {
+	if authenticSourcePersonID == "" {
+		return errors.New("authentic_source_person_id cannot be empty")
 	}
 	if query == nil || query.SessionID == "" {
 		return errors.New("session_id cannot be empty")
@@ -606,10 +606,10 @@ func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationCont
 	result, err := s.coll.UpdateOne(
 		ctx,
 		bson.M{"session_id": query.SessionID},
-		bson.M{"$set": bson.M{"identifier": identifier}},
+		bson.M{"$set": bson.M{"authentic_source_person_id": authenticSourcePersonID}},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to set identifier: %w", err)
+		return fmt.Errorf("failed to set authentic_source_person_id: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNoDocuments
