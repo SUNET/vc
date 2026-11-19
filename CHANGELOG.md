@@ -88,6 +88,11 @@
 
 ### Fixed
 
+- **Mongo-backed documents keep their nested claims through derivations**: a
+  stored document and an authorization context's verified claims read back
+  from MongoDB with nested objects as `map[string]any` and arrays as `[]any`.
+  A derivation reading a dotted path found the value, and one writing a dotted
+  path kept the object's other fields.
 - **SPOCP resource rules hold for the selector a handler receives**: the
   authorization middleware and `Binding.Request` could read different
   `authentic_source` or `scope` values from one `/api/v1` request. Every
