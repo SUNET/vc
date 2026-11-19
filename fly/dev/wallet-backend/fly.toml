@@ -2,8 +2,7 @@ app = "sunet-vc-wallet-backend"
 primary_region = "arn"
 
 [build]
-  #image = "ghcr.io/sirosfoundation/go-wallet-backend:latest"
-  image = "docker.sunet.se/iam_vc/go-wallet-backend:latest"
+  image = "ghcr.io/sirosfoundation/go-wallet-backend:latest"
 
 # engine role adds the WebSocket v2 flow orchestrator on port 8082, which the
 # wallet-frontend needs for OID4VP presentations; auth adds /auth/* AS routes.

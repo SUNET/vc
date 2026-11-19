@@ -1,0 +1,41 @@
+server:
+  host: "0.0.0.0"
+  port: "6001"
+
+logging:
+  level: "info"
+  format: "text"
+
+registries:
+  lote:
+    enabled: true
+    name: "webuild-lote"
+    description: "WE BUILD List of Trusted Lists"
+    lotl_sources:
+      - "https://webuild-consortium.github.io/wp4-trust-group/list_of_trusted_lists.json"
+    max_dereference_depth: 2
+    fetch_timeout: "30s"
+    refresh_interval: "1h"
+    # Every list must verify against the pinned signers in this bundle (built with bin/lol).
+    verify_jws: true
+    trust_anchor_bundle: "/trust-anchors.pem"
+    # A chain is only accepted for the roles mapped here; unmapped actions are denied.
+    require_role: true
+    role_scheme_types:
+      credential-issuer: &issuer_lists
+        - "http://uri.etsi.org/19602/LoTEType/EUPubEAAProvidersList"
+        - "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList"
+        - "http://uri.etsi.org/TrstSvc/TrustedList/TSLType/EUgeneric"
+      issuer: *issuer_lists
+      status-list-signer: *issuer_lists
+      mdoc-issuer: *issuer_lists
+      mdl-issuer: *issuer_lists
+      pid-provider:
+        - "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList"
+      wallet_provider:
+        - "http://uri.etsi.org/19602/LoTEType/EUWalletProvidersList"
+      credential-verifier: &verifier_lists
+        - "http://uri.etsi.org/19602/LoTEType/EUWRPACProvidersList"
+      verifier: *verifier_lists
+      mdoc-verifier: *verifier_lists
+      mdl-verifier: *verifier_lists
