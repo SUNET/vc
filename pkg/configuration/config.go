@@ -339,6 +339,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkZkpReqPresetsAskForSomething(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -617,11 +621,35 @@ func checkNymAuthVerifier(cfg *model.Cfg) error {
 		return err
 	}
 	if !cfg.Verifier.NymAuth.Enable {
+		// The envelope check below is deliberately NOT reached here.
+		// A verifier is also the tool wallets are tested with, and the
+		// envelope form exists so an operator can send a shape this
+		// build does not model. With nym_auth off nothing comes back
+		// to be bound to the offer, so the escape hatch costs nothing.
 		return nil
+	}
+
+	if err := refuseUnbindableZkpReqOffer(cfg.Verifier.PreferredVPFormats); err != nil {
+		return err
 	}
 
 	if err := nymauth.CheckVerifierID(cfg.Verifier.NymAuth.VerifierID); err != nil {
 		return fmt.Errorf("verifier.nym_auth.verifier_id: %w", err)
+	}
+	if cfg.Verifier.Trust.PDPURL == "" {
+		// nym_auth takes the issuer key from the holder's own
+		// certificate chain, so the PDP is the only thing that says
+		// the key belongs to a real issuer. With no PDP the evaluator
+		// is AllowAllEvaluator, which answers Trusted=true to
+		// everything - and a holder can then self-sign, choose its own
+		// issuer key, and so choose its own pseudonym.
+		//
+		// Allow-all is legitimate for formats where the holder cannot
+		// supply the key it is measured against. Here it removes the
+		// only check there is, so a deployment that configures it is
+		// refused rather than started.
+		return fmt.Errorf("verifier.nym_auth is enabled but verifier.trust.pdp_url is empty, so every issuer would be trusted; " +
+			"nym_auth takes the issuer key from the holder's own certificate chain and cannot be used without a PDP")
 	}
 	if len(cfg.Verifier.NymAuth.Circuits.Allow) == 0 {
 		// Enabled with nothing allowed verifies nothing. Refused
@@ -1637,6 +1665,50 @@ func refuseLegacyZkpReqKeys(formats *openid4vp.VPFormatsSupported) error {
 		if _, legacy := formats.ZkpReq.Extra[old]; legacy {
 			return fmt.Errorf("verifier.preferred_vp_formats.zkp_req.%s is the pre-v0.4 name; rename it to %s",
 				old, replacement)
+		}
+	}
+	return nil
+}
+
+// refuseUnbindableZkpReqOffer stops a verifier whose offered circuits
+// are in a shape it cannot read back.
+//
+// The envelope form - {"fn_id": ..., "input": base64(json)} - is carried
+// through to the wallet unchanged, by design: the verifier is the tool
+// wallets are tested with, and an operator must be able to send a shape
+// this build does not model. But the response side builds its allowlist
+// from system_id_values alone, so an offer that names its circuits only
+// inside that base64 blob reaches the wallet complete and then refuses
+// every presentation it produces, as naming a system the request never
+// offered.
+//
+// Startup rather than first presentation, for the reason
+// refuseLegacyZkpReqKeys gives: refused at the response it reads as a
+// wallet problem, and the wallet is the one thing that was right.
+//
+// Parsing the envelope instead was the alternative and is deliberately
+// not done. Its contents are not modelled - the one example in the tree
+// spells its members the pre-v0.4 way - and teaching the builder to read
+// what it was built to pass through unexamined would make a serialiser
+// into a validator.
+func refuseUnbindableZkpReqOffer(formats *openid4vp.VPFormatsSupported) error {
+	if formats == nil || formats.ZkpReq == nil {
+		return nil
+	}
+	if formats.ZkpReq.SystemIDValues != nil {
+		// Present, possibly empty. An explicitly empty list is a
+		// filter that matches nothing, which is a thing an operator
+		// may legitimately mean.
+		return nil
+	}
+	for _, member := range []string{"fn_id", "input"} {
+		if _, envelope := formats.ZkpReq.Extra[member]; envelope {
+			return fmt.Errorf(
+				"verifier.preferred_vp_formats.zkp_req names its circuits only through the %q envelope member, "+
+					"and verifier.nym_auth.enable is true: the request would go to the wallet complete, and every "+
+					"presentation it returns would then be refused as naming a system the request never offered. "+
+					"List them in system_id_values, or turn verifier.nym_auth.enable off to send the envelope as a test shape",
+				member)
 		}
 	}
 	return nil

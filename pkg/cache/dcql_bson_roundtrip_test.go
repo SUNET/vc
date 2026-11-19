@@ -431,3 +431,49 @@ func vendoredVectorQuery(t *testing.T, name string) json.RawMessage {
 	require.NotEmpty(t, doc.Query, "the vector must carry a query")
 	return doc.Query
 }
+
+// An empty zkp_req offer and no offer at all mean opposite things, and the
+// HA cache has to keep them apart.
+//
+// Absent sends verification to the configuration - the behaviour a session
+// opened before the field existed keeps. Empty is a session that offered
+// nothing, which must refuse every response. omitempty on either tag
+// collapses the two: it drops a zero-length slice, so a deliberately empty
+// offer would be stored as no field, read back nil, and accept a system the
+// session never offered.
+//
+// Through the real driver on the real struct, for the same reason as the
+// test above: not "does the codec work" but "does what another replica
+// reads back still mean what was written".
+func TestAuthorizationContextKeepsAnEmptyOfferDistinctFromNoneThroughBSON(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		offered   []string
+		wantNil   bool
+		wantValue []string
+	}{
+		{"a session that offered nothing", []string{}, false, []string{}},
+		{"a session from before the field existed", nil, true, nil},
+		{"an ordinary offer", []string{"urn:circuits:longfellow:nym_auth:v1"}, false, []string{"urn:circuits:longfellow:nym_auth:v1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored, err := bson.Marshal(&AuthorizationContext{
+				SessionID:              "s",
+				OfferedZkpReqSystemIDs: tc.offered,
+			})
+			require.NoError(t, err)
+
+			var back AuthorizationContext
+			require.NoError(t, bson.Unmarshal(stored, &back))
+
+			if tc.wantNil {
+				assert.Nil(t, back.OfferedZkpReqSystemIDs,
+					"no offer must read back as no offer, so verification falls back to the configuration")
+				return
+			}
+			require.NotNil(t, back.OfferedZkpReqSystemIDs,
+				"an offer that was recorded must not read back as if it never was")
+			assert.Equal(t, tc.wantValue, back.OfferedZkpReqSystemIDs)
+		})
+	}
+}
