@@ -88,8 +88,8 @@ func requireIdentifier(identifier string, dataSource model.DataSourceType) (stri
 // (e.g., authResp.IDToken.Subject for OIDC, assertion.NameID for SAML) that
 // should be tried when the transformed claims don't contain the expected keys.
 func (c *Client) ResolveVCIIdentifier(ctx context.Context, authCtx *cache.AuthorizationContext, claims map[string]any, fallbacks ...string) (string, error) {
-	if authCtx.Identifier != "" {
-		return authCtx.Identifier, nil
+	if authCtx.AuthenticSourcePersonID != "" {
+		return authCtx.AuthenticSourcePersonID, nil
 	}
 
 	if authCtx.DataSource == string(model.DataSourceAssertion) {
@@ -518,7 +518,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	// The authenticated identifier is used for registry; for assertion-based
 	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
-	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
+	identifier, err := requireIdentifier(authContext.AuthenticSourcePersonID, model.DataSourceType(authContext.DataSource))
 	if err != nil {
 		return nil, err
 	}

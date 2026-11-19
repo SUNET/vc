@@ -1,7 +1,13 @@
 {
-    "swagger": "2.0",
+    "components": {},
     "info": {
-        "contact": {}
+        "title": "",
+        "version": ""
     },
-    "paths": {}
+    "externalDocs": {
+        "description": "",
+        "url": ""
+    },
+    "paths": {},
+    "openapi": "3.1.0"
 }

@@ -54,9 +54,9 @@ type Service struct {
 // so a Submit racing with CloseListener cannot send on a channel
 // about to be closed.
 type idGroup struct {
-	sub       pubsub.Subscription
-	done      chan struct{}
-	fanOutWg  sync.WaitGroup
+	sub      pubsub.Subscription
+	done     chan struct{}
+	fanOutWg sync.WaitGroup
 
 	mu        sync.Mutex
 	listeners []chan any

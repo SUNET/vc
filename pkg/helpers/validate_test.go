@@ -605,6 +605,78 @@ func TestAuthScopesSelfReference(t *testing.T) {
 	}
 }
 
+func TestExternalAPIOpenID4VPAuthScopes(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	card := func(entry model.AuthScopeEntry) model.DataSources {
+		return model.DataSources{ExternalAPI: model.ExternalAPIConfig{Scopes: map[string]model.ExternalAPIScope{
+			"sis_enrollment": {
+				Remote:       "sis",
+				AuthProvider: model.AuthProviderOpenID4VP,
+				AuthScopes:   map[string]model.AuthScopeEntry{"student_card": entry},
+			},
+		}}}
+	}
+
+	tests := []struct {
+		name          string
+		ds            model.DataSources
+		errorContains string
+	}{
+		{
+			name: "auth claims alone pass",
+			ds:   card(model.AuthScopeEntry{AuthClaims: []string{"given_name", "family_name", "birthdate"}}),
+		},
+		{
+			name: "identity_attributes is refused, the person comes from prepare",
+			ds: card(model.AuthScopeEntry{
+				AuthClaims:         []string{"given_name"},
+				IdentityAttributes: map[string]string{"given_name": "given_name"},
+			}),
+			errorContains: "external_api_auth_scope_takes_only_auth_claims",
+		},
+		{
+			name: "document_claims is refused",
+			ds: card(model.AuthScopeEntry{
+				AuthClaims:     []string{"given_name"},
+				DocumentClaims: map[string]string{"given_name": "given_name"},
+			}),
+			errorContains: "external_api_auth_scope_takes_only_auth_claims",
+		},
+		{
+			name: "openid4vp without auth_scopes is rejected",
+			ds: model.DataSources{ExternalAPI: model.ExternalAPIConfig{Scopes: map[string]model.ExternalAPIScope{
+				"sis_enrollment": {Remote: "sis", AuthProvider: model.AuthProviderOpenID4VP},
+			}}},
+			errorContains: "auth_scopes_required_for_openid4vp",
+		},
+		{
+			name: "auth_scopes on oidc is rejected",
+			ds: model.DataSources{ExternalAPI: model.ExternalAPIConfig{Scopes: map[string]model.ExternalAPIScope{
+				"sis_enrollment": {
+					Remote:       "sis",
+					AuthProvider: model.AuthProviderOIDC,
+					AuthScopes:   map[string]model.AuthScopeEntry{"student_card": {AuthClaims: []string{"x"}}},
+				},
+			}}},
+			errorContains: "auth_scopes_only_for_openid4vp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validate.StructPartial(tt.ds)
+			if tt.errorContains == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorContains)
+		})
+	}
+}
+
 func TestExternalAPIScope_PreAuthRejected(t *testing.T) {
 	validate, err := NewValidator()
 	require.NoError(t, err)

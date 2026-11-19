@@ -302,8 +302,16 @@ type ExternalAPIScope struct {
 	// Remote is the name of a remote defined in Remotes
 	Remote string `yaml:"remote" validate:"required"`
 
-	// AuthProvider is the auth provider to identify the user (saml or oidc)
-	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
+	// AuthProvider is the auth provider to identify the user (saml, oidc or openid4vp)
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc openid4vp"`
+
+	// AuthScopes lists the credentials the wallet may present to authenticate
+	// when auth_provider is openid4vp, keyed by credential scope. Presenting any
+	// one of them is enough. The auth_claims are what the wallet is asked to
+	// disclose, and what the identity_match of a prepared issuance can compare;
+	// the person fetched from the remote is the authentic_source_person_id of that prepared
+	// issuance, not a presented claim. Rejected for other providers.
+	AuthScopes map[string]AuthScopeEntry `yaml:"auth_scopes,omitempty"`
 
 	// AttributeMapping defines how to map API response data to credential claims
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`

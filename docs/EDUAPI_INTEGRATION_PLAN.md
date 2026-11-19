@@ -130,7 +130,7 @@ GET /courseOfferings/ladok-co-4e8d1a
 ```json
 {
   "sourcedId": "ladok-co-4e8d1a",
-  "offeringType": "course",
+  "offeringType": "standard",
   "title": [
     {"recordLanguage": "sv", "value": "Masterprogram i datavetenskap"},
     {"recordLanguage": "en", "value": "Master's Programme in Computer Science"}

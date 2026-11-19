@@ -10,12 +10,10 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
 
-	// swagger docs
-	_ "github.com/SUNET/vc/docs/issuer"
+	issuerdocs "github.com/SUNET/vc/docs/issuer"
+	"github.com/SUNET/vc/pkg/swaggerui"
 
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // Service is the service object for httpserver
@@ -54,7 +52,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", http.StatusOK, s.endpointHealth)
 
 	rgDocs := rgRoot.Group("/swagger")
-	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	rgDocs.GET("/*any", swaggerui.Handler(issuerdocs.Spec))
 
 	// Run http server
 	go func() {

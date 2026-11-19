@@ -277,9 +277,9 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	// Create mock authorization context matching the actual structure
 	mockAuthCtx := &mockAuthContextColl{
 		authContext: &cache.AuthorizationContext{
-			SessionID:  "session-123",
-			Scopes:     []string{"pid"},
-			Identifier: "test-identity-123",
+			SessionID:               "session-123",
+			Scopes:                  []string{"pid"},
+			AuthenticSourcePersonID: "test-identity-123",
 			Token: &cache.Token{
 				AccessToken: accessToken,
 				ExpiresAt:   time.Now().Add(time.Hour).Unix(),

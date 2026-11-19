@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2client"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -688,40 +690,58 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		return nil, serverFault(fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope))
 	}
 	authSourceFormat := c.cfg.GetFormatForScope(matchedAuthScope)
-	identityClaims, err := extractAuthScopeIdentity(authSourceFormat, credential, authScopeEntry)
-	if err != nil {
-		c.log.Error(err, "required identity claims missing from presented credential", "matched_auth_scope", matchedAuthScope, "scope", scope)
-		return nil, fmt.Errorf("identity extraction failed: %w", err)
-	}
 
-	// Resolve the person identifier — uses authentic_source_person_id directly
-	// when present in the extracted claims, otherwise falls back to identity
-	// mapping (given_name, family_name, birth_date → authentic_source_person_id).
-	claimsAny := make(map[string]any, len(identityClaims))
-	for k, v := range identityClaims {
-		claimsAny[k] = v
-	}
-	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
-	if err != nil {
-		if errors.Is(err, helpers.ErrNoIdentityFound) {
-			return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+	var (
+		identityClaims map[string]string
+		documents      map[string]*model.CompleteDocument
+	)
+	if authCtx.DataSource == string(model.DataSourceExternalAPI) {
+		// The person is named by the caller that prepared the issuance, and
+		// the presentation only has to match its identity_match. Without a
+		// prepared authentic_source_person_id nothing says whose data to fetch.
+		if authCtx.AuthenticSourcePersonID == "" {
+			return nil, errors.New("this credential is issued only from an issuance prepared by the issuer")
 		}
-		return nil, serverFault(fmt.Errorf("failed to resolve identity from VP claims: %w", err))
-	}
+		documents, err = c.fetchExternalAPIDocuments(ctx, authCtx, scope, authCtx.AuthenticSourcePersonID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		identityClaims, err = extractAuthScopeIdentity(authSourceFormat, credential, authScopeEntry)
+		if err != nil {
+			c.log.Error(err, "required identity claims missing from presented credential", "matched_auth_scope", matchedAuthScope, "scope", scope)
+			return nil, fmt.Errorf("identity extraction failed: %w", err)
+		}
 
-	// Persist the resolved identifier on the authorization context so that
-	// downstream credential issuance (VCICredential) can find it.
-	if err := c.cacheService.AuthContext.SetIdentifier(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, identityMappingID); err != nil {
-		c.log.Error(err, "failed to persist identifier on auth context")
-		return nil, serverFault(fmt.Errorf("failed to persist identifier: %w", err))
-	}
+		// Resolve the person identifier — uses authentic_source_person_id directly
+		// when present in the extracted claims, otherwise falls back to identity
+		// mapping (given_name, family_name, birth_date → authentic_source_person_id).
+		claimsAny := make(map[string]any, len(identityClaims))
+		for k, v := range identityClaims {
+			claimsAny[k] = v
+		}
+		identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
+		if err != nil {
+			if errors.Is(err, helpers.ErrNoIdentityFound) {
+				return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+			}
+			return nil, serverFault(fmt.Errorf("failed to resolve identity from VP claims: %w", err))
+		}
 
-	// Retrieve documents matching the identity by scope
-	c.log.Debug("Querying documents", "scope", scope, "identity_mapping_id", identityMappingID)
-	documents, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
-	if err != nil {
-		c.log.Debug("failed to get document", "error", err)
-		return nil, serverFault(err)
+		// Persist the resolved identifier on the authorization context so that
+		// downstream credential issuance (VCICredential) can find it.
+		if err := c.cacheService.AuthContext.SetAuthenticSourcePersonID(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, identityMappingID); err != nil {
+			c.log.Error(err, "failed to persist authentic_source_person_id on auth context")
+			return nil, serverFault(fmt.Errorf("failed to persist authentic_source_person_id: %w", err))
+		}
+
+		// Retrieve documents matching the identity by scope
+		c.log.Debug("Querying documents", "scope", scope, "identity_mapping_id", identityMappingID)
+		documents, err = c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
+		if err != nil {
+			c.log.Debug("failed to get document", "error", err)
+			return nil, serverFault(err)
+		}
 	}
 
 	c.log.Debug("Retrieved documents", "count", len(documents))
@@ -744,6 +764,29 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 
 	return &issuanceAuthOutcome{Scope: scope}, nil
+}
+
+// fetchExternalAPIDocuments fetches the person's documents from the external
+// API into the session cache and reads them back. A person the remote does not
+// know is the wallet's problem; anything else the remote does is ours.
+func (c *Client) fetchExternalAPIDocuments(ctx context.Context, authCtx *cache.AuthorizationContext, scope, personID string) (map[string]*model.CompleteDocument, error) {
+	if c.dataSources == nil || !c.dataSources.AnyEnabled() {
+		return nil, serverFault(fmt.Errorf("external API data source requested for %q but no remote is enabled", scope))
+	}
+	if err := c.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, personID, scope, authCtx.SessionID); err != nil {
+		var statusErr *oauth2client.StatusError
+		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound {
+			c.log.Error(err, "person not found at external API", "scope", scope, "remote", authCtx.RemoteName)
+			return nil, errors.New("no person found for the provided identity")
+		}
+		c.log.Error(err, "external API fetch failed", "scope", scope, "remote", authCtx.RemoteName)
+		return nil, serverFault(err)
+	}
+	documents, ok := c.cacheService.Document.Get(ctx, authCtx.SessionID)
+	if !ok || len(documents) == 0 {
+		return nil, serverFault(errors.New("external API fetch stored no document"))
+	}
+	return documents, nil
 }
 
 // buildIssuanceAuthDCQL builds the DCQL query the wallet must satisfy to

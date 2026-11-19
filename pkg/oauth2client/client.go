@@ -40,6 +40,18 @@ type Config struct {
 	TokenCache cache.Cache[string]
 }
 
+// StatusError is returned when the remote answers a GET with a non-200 status.
+type StatusError struct {
+	Name       string
+	Path       string
+	StatusCode int
+	Body       string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s: GET %s returned %d: %s", e.Name, e.Path, e.StatusCode, e.Body)
+}
+
 // Client performs CCG token management and authenticated GET requests.
 type Client struct {
 	baseURL    string
@@ -270,7 +282,7 @@ func (c *Client) do(ctx context.Context, u, errPath string) (*Response, error) {
 		return nil, fmt.Errorf("%s: read response: %w", c.name, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: GET %s returned %d: %s", c.name, errPath, resp.StatusCode, string(body))
+		return nil, &StatusError{Name: c.name, Path: errPath, StatusCode: resp.StatusCode, Body: string(body)}
 	}
 	// resp.Request is the last request in the redirect chain.
 	return &Response{Body: body, Header: resp.Header, URL: resp.Request.URL.String()}, nil

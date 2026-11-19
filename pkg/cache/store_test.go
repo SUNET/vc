@@ -151,23 +151,23 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		// claim mutating the stored document.
 		snapshot, err := store.GetSnapshot(ctx, query)
 		require.NoError(t, err)
-		snapshot.Identifier = "scribbled-on"
+		snapshot.AuthenticSourcePersonID = "scribbled-on"
 
 		after, err := store.GetSnapshot(ctx, query)
 		require.NoError(t, err)
-		assert.Empty(t, after.Identifier, "a snapshot must not be a handle on the store")
+		assert.Empty(t, after.AuthenticSourcePersonID, "a snapshot must not be a handle on the store")
 
 		// Get is for read-modify-Update, and must keep working that way:
 		// handing those callers a snapshot would turn their Update into a
 		// lost update against anything the store changed in between.
 		live, err := store.Get(ctx, query)
 		require.NoError(t, err)
-		live.Identifier = "written-back"
+		live.AuthenticSourcePersonID = "written-back"
 		require.NoError(t, store.Update(ctx, live))
 
 		persisted, err := store.GetSnapshot(ctx, query)
 		require.NoError(t, err)
-		assert.Equal(t, "written-back", persisted.Identifier)
+		assert.Equal(t, "written-back", persisted.AuthenticSourcePersonID)
 	})
 
 	t.Run("ResumeIssuerState", func(t *testing.T) {

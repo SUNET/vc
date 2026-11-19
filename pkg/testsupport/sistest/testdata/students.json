@@ -1,0 +1,35 @@
+{
+  "organizations": [
+    { "sourcedId": "liu", "name": "Linköping University", "type": "institution", "status": "active" },
+    { "sourcedId": "liu-ida", "name": "Department of Computer and Information Science", "type": "department", "parentId": "liu", "status": "active" }
+  ],
+  "academicSessions": [
+    { "sourcedId": "vt2026", "title": "Spring 2026", "type": "semester", "startDate": "2026-01-19", "endDate": "2026-06-07", "status": "active" }
+  ],
+  "courses": [
+    { "sourcedId": "liu:TDDE01", "code": "TDDE01", "title": "Machine Learning", "orgId": "liu-ida", "status": "active" },
+    { "sourcedId": "liu:TDDD27", "code": "TDDD27", "title": "Advanced Web Programming", "orgId": "liu-ida", "status": "active" }
+  ],
+  "offerings": [
+    { "sourcedId": "liu:TDDE01-vt2026", "title": "TDDE01 Spring 2026", "courseId": "liu:TDDE01", "academicSessionId": "vt2026", "orgId": "liu-ida", "status": "active" },
+    { "sourcedId": "liu:TDDD27-vt2026", "title": "TDDD27 Spring 2026", "courseId": "liu:TDDD27", "academicSessionId": "vt2026", "orgId": "liu-ida", "status": "active" }
+  ],
+  "persons": [
+    {
+      "sourcedId": "liu:anna.andersson", "status": "active", "givenName": "Anna", "familyName": "Andersson",
+      "roles": ["student"], "dateOfBirth": "2001-03-14",
+      "identifiers": [{ "type": "studentNumber", "value": "annan001" }, { "type": "eppn", "value": "annan001@liu.se" }],
+      "emails": [{ "type": "work", "value": "annan001@student.liu.se" }]
+    },
+    {
+      "sourcedId": "liu:erik.lindqvist", "status": "active", "givenName": "Erik", "familyName": "Lindqvist",
+      "roles": ["student"], "dateOfBirth": "2000-11-02",
+      "identifiers": [{ "type": "studentNumber", "value": "erili002" }],
+      "emails": [{ "type": "work", "value": "erili002@student.liu.se" }]
+    }
+  ],
+  "enrollments": [
+    { "sourcedId": "liu:anna.andersson:TDDE01-vt2026", "personId": "liu:anna.andersson", "offeringId": "liu:TDDE01-vt2026", "role": "student", "status": "active" },
+    { "sourcedId": "liu:anna.andersson:TDDD27-vt2026", "personId": "liu:anna.andersson", "offeringId": "liu:TDDD27-vt2026", "role": "student", "status": "inactive" }
+  ]
+}

@@ -325,6 +325,33 @@ func (s *Service) endpointSDJWTVCIssuerMetadata(ctx context.Context, c *gin.Cont
 	return reply, nil
 }
 
+// fetchExternalAPIDocuments queries the external API for a credential whose data
+// source is external_api, once the login callback has resolved the person
+// identifier. Before the login there is no identifier, so it does nothing and
+// the auth provider starts the login.
+func (s *Service) fetchExternalAPIDocuments(ctx context.Context, dataSource, scope, sessionID string) error {
+	if model.DataSourceType(dataSource) != model.DataSourceExternalAPI {
+		return nil
+	}
+	if !s.dataSources.AnyEnabled() {
+		return fmt.Errorf("external API data source requested for %q but no remote is enabled", scope)
+	}
+
+	authCtx, err := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
+	if err != nil {
+		return fmt.Errorf("failed to get auth context for session %s: %w", sessionID, err)
+	}
+	if authCtx.AuthenticSourcePersonID == "" {
+		return nil
+	}
+
+	if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, authCtx.AuthenticSourcePersonID, scope, sessionID); err != nil {
+		return err
+	}
+	s.log.Debug("External API data fetched and stored", "session_id", sessionID, "scope", scope, "remote", authCtx.RemoteName)
+	return nil
+}
+
 func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointOAuthAuthorizationConsent", "c.Request.URL", c.Request.URL.String(), "headers", c.Request.Header)
 	_, span := s.tracer.Start(ctx, "httpserver:endpointAuthorizationConsent")
@@ -391,6 +418,18 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		// Pass the wallet redirect URL via the template data attribute
 		// (cookies are no longer used for this purpose).
 		redirectURL = reply.RedirectURL
+	}
+
+	// external_api: the SAML/OIDC callback only resolves the identifier, so the
+	// fetch runs on the redirect back here. It has to come before the auth
+	// providers below, which skip the login once documents are cached.
+	if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
+		dataSource, _ := session.Get("data_source").(string)
+		scope, _ := session.Get("scope").(string)
+		if err := s.fetchExternalAPIDocuments(ctx, dataSource, scope, sessionID); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
 	}
 
 	if authProvider == model.AuthProviderSAML {
@@ -484,40 +523,6 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			redirectURL = authReq.AuthorizationURL
 		} else {
 			s.log.Debug("OIDC auth already completed, documents cached", "session_id", sessionID)
-		}
-	}
-
-	// After authentication, check if the credential's data source is external_api
-	// and fetch the data from the remote if needed.
-	if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
-		dataSource := model.DataSourceType(session.Get("data_source").(string))
-		if dataSource == model.DataSourceExternalAPI {
-			if !s.dataSources.AnyEnabled() {
-				scope, _ := session.Get("scope").(string)
-				err := fmt.Errorf("external API data source requested for %q but no remote is enabled", scope)
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			// Read person_id from auth context cache (set by SAML ACS / OIDC callback)
-			authCtx, lookupErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
-			if lookupErr != nil {
-				span.SetStatus(codes.Error, "auth context lookup failed")
-				return nil, fmt.Errorf("failed to get auth context for session %s: %w", sessionID, lookupErr)
-			}
-			if authCtx.Identifier == "" {
-				err := errors.New("identifier not found in auth context for external API flow")
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			scope, _ := session.Get("scope").(string)
-			if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, authCtx.Identifier, scope, sessionID); err != nil {
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			s.log.Debug("External API data fetched and stored", "session_id", sessionID, "scope", scope, "remote", authCtx.RemoteName)
 		}
 	}
 
