@@ -2984,6 +2984,9 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 		}
 		return &OpenID4VPCredentialAuth{AuthScopes: authScopes}
 	}
+	if cred, ok := c.APIGW.DataSources.ExternalAPI.Scopes[scope]; ok && cred.AuthProvider == AuthProviderOpenID4VP {
+		return &OpenID4VPCredentialAuth{AuthScopes: cred.AuthScopes}
+	}
 	return nil
 }
 

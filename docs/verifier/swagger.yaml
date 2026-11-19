@@ -1,4 +1,9 @@
+components: {}
+externalDocs:
+  description: ""
+  url: ""
 info:
-  contact: {}
+  title: ""
+  version: ""
+openapi: 3.1.0
 paths: {}
-swagger: "2.0"

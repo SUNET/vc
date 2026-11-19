@@ -418,6 +418,22 @@ func TestCredentialRegistry_NewClient_MultipleLogicalRegistriesAndMirrors(t *tes
 	assert.NotNil(t, client, "a config with multiple logical registries, one of which has multiple mirrors, must build successfully")
 }
 
+func TestGetOpenID4VPAuth_ExternalAPI(t *testing.T) {
+	entry := AuthScopeEntry{AuthClaims: []string{"given_name", "family_name"}}
+	cfg := &Cfg{APIGW: &APIGW{DataSources: DataSources{
+		ExternalAPI: ExternalAPIConfig{Scopes: map[string]ExternalAPIScope{
+			"sis_enrollment": {Remote: "sis", AuthProvider: AuthProviderOpenID4VP, AuthScopes: map[string]AuthScopeEntry{"student_card": entry}},
+			"sis_oidc":       {Remote: "sis", AuthProvider: AuthProviderOIDC},
+		}},
+	}}}
+
+	got := cfg.GetOpenID4VPAuth("sis_enrollment")
+	require.NotNil(t, got)
+	assert.Equal(t, entry, got.AuthScopes["student_card"])
+
+	assert.Nil(t, cfg.GetOpenID4VPAuth("sis_oidc"), "an oidc external_api scope has no presentation auth")
+}
+
 func TestLookupCredentialSources(t *testing.T) {
 	cfg := &Cfg{
 		APIGW: &APIGW{

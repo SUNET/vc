@@ -588,13 +588,13 @@ func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *Authorizati
 	return nil
 }
 
-// SetIdentifier sets the resolved identifier on an authorization context.
-func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error {
+// SetAuthenticSourcePersonID sets the person's id at the authentic source on an authorization context.
+func (c *MemoryStore) SetAuthenticSourcePersonID(ctx context.Context, query *AuthorizationContext, authenticSourcePersonID string) error {
 	if query == nil {
 		return errors.New("query cannot be nil")
 	}
-	if identifier == "" {
-		return errors.New("identifier cannot be empty")
+	if authenticSourcePersonID == "" {
+		return errors.New("authentic_source_person_id cannot be empty")
 	}
 	if query.SessionID == "" {
 		return errors.New("session_id cannot be empty")
@@ -609,7 +609,7 @@ func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationCon
 	}
 
 	doc := item.Value()
-	doc.Identifier = identifier
+	doc.AuthenticSourcePersonID = authenticSourcePersonID
 
 	// Update the primary cache entry
 	c.put(query.SessionID, doc)

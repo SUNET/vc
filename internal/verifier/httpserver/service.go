@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	verifierdocs "github.com/SUNET/vc/docs/verifier"
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/middleware"
@@ -21,12 +22,11 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/swaggerui"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/sessions"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -211,7 +211,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/resume", http.StatusOK, s.endpointUIResume)
 
 	rgDocs := rgRoot.Group("/swagger")
-	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	rgDocs.GET("/*any", swaggerui.Handler(verifierdocs.Spec))
 
 	// Run http server
 	go func() {

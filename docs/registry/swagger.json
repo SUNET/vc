@@ -1,10 +1,18 @@
 {
-    "swagger": "2.0",
+    "components": {},
     "info": {
         "title": "Registry API",
-        "contact": {},
         "version": "0.1.0"
     },
-    "basePath": "/api/v1",
-    "paths": {}
+    "externalDocs": {
+        "description": "",
+        "url": ""
+    },
+    "paths": {},
+    "openapi": "3.1.0",
+    "servers": [
+        {
+            "url": "/api/v1"
+        }
+    ]
 }

@@ -85,7 +85,9 @@ func (l *CachingDocumentLoader) loadForPin(url string, refresh bool) (*ld.Remote
 //
 // Depth alone does not bound the crawl, which the comment here used to claim.
 // A single document can list an unbounded number of distinct @context or
-// @import URLs, and every one of them sits at depth 1 - so a hostile or
+//
+//	@import	URLs, and every one of them sits at depth 1 - so a hostile or
+//
 // compromised allowlisted document could turn startup into a crawl of
 // thousands of fetches without ever nesting. The seen set stops a URL being
 // fetched twice; it does not stop there being very many of them.

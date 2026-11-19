@@ -24,13 +24,11 @@ import (
 
 	"github.com/gin-contrib/sessions"
 
-	// Swagger
-	_ "github.com/SUNET/vc/docs/apigw"
+	apigwdocs "github.com/SUNET/vc/docs/apigw"
+	"github.com/SUNET/vc/pkg/swaggerui"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // Service is the service object for httpserver
@@ -324,7 +322,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	}
 
 	rgDocs := rgRoot.Group("/swagger")
-	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	rgDocs.GET("/*any", swaggerui.Handler(apigwdocs.Spec))
 
 	rgAPIv1 := rgRoot.Group("api/v1")
 

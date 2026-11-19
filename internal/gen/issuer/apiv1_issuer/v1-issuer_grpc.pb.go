@@ -8,6 +8,7 @@ package apiv1_issuer
 
 import (
 	context "context"
+
 	apiv1_status "github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"

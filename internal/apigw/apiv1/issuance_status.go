@@ -246,6 +246,7 @@ type IssuanceStatusReply struct {
 //	@Param			issuance_id			query		string					true	"issuance_id from the offer reply"
 //	@Param			authentic_source	query		string					true	"authentic_source the offer was created for"
 //	@Param			scope				query		string					true	"scope the offer was created for"
+//	@Security		BearerAuth
 //	@Router			/api/v1/issuance/status [get]
 func (c *Client) IssuanceStatus(ctx context.Context, req *IssuanceStatusRequest) (*IssuanceStatusReply, error) {
 	if c.cacheService == nil || c.cacheService.IssuanceStatus == nil {

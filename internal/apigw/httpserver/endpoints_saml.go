@@ -290,7 +290,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 
 		// Resolve the authenticated identifier for registry (applies to all flows).
-		if authCtx.Identifier == "" {
+		if authCtx.AuthenticSourcePersonID == "" {
 			var resolveErr error
 			// For assertion: pre-transform fallbacks are raw SAML attrs and NameID.
 			var fallbacks []string
@@ -300,7 +300,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			if assertion.NameID != "" {
 				fallbacks = append(fallbacks, assertion.NameID)
 			}
-			authCtx.Identifier, resolveErr = s.apiv1.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
+			authCtx.AuthenticSourcePersonID, resolveErr = s.apiv1.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
 			if resolveErr != nil {
 				span.SetStatus(codes.Error, "identifier resolution failed")
 				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
@@ -311,7 +311,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
 		}
 		s.log.Info("SAML ACS: identifier resolved",
-			"vci_session_id", session.VCISessionID, "identifier", authCtx.Identifier)
+			"vci_session_id", session.VCISessionID, "identifier", authCtx.AuthenticSourcePersonID)
 
 		// Clean up SAML session (clear err so defer doesn't double-delete)
 		err = nil
@@ -387,16 +387,16 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// wallet fall back to credential_configuration_id, which the token
 	// endpoint and CredentialRequest.Validate already handle.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:     preAuthCode,
-		Code:          preAuthCode,
-		Status:        "code_issued",
-		CreatedAt:     time.Now(),
-		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:        []string{session.CredentialType},
-		Nonce:         nonce,
-		AuthProvider:  model.AuthProviderSAML,
-		Identifier:    identifier,
-		PreAuthorized: true,
+		SessionID:               preAuthCode,
+		Code:                    preAuthCode,
+		Status:                  "code_issued",
+		CreatedAt:               time.Now(),
+		ExpiresAt:               time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:                  []string{session.CredentialType},
+		Nonce:                   nonce,
+		AuthProvider:            model.AuthProviderSAML,
+		AuthenticSourcePersonID: identifier,
+		PreAuthorized:           true,
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)

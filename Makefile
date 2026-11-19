@@ -988,7 +988,10 @@ swagger: swagger-registry swagger-verifier swagger-apigw swagger-issuer swagger-
 swagger-fmt: ## Format Swagger annotations
 	swag fmt
 
-SWAGGER_OPTS := --packageName docs
+# swag v2 has no stable tag yet; keep this pinned. Output is OpenAPI 3.1 only
+# (json, yaml): each docs/<svc>/embed.go embeds swagger.json for the UI.
+SWAG_VERSION := v2.0.0-rc6
+SWAGGER_OPTS := --v3.1 --outputTypes json,yaml
 
 # Catch-all for services without explicit swagger targets
 swagger-%:
@@ -1212,7 +1215,7 @@ install-tools: ## Install required development tools
 		protobuf-compiler \
 		netcat-openbsd
 	$(info Installing from go)
-	go install github.com/swaggo/swag/cmd/swag@latest && \
+	go install github.com/swaggo/swag/v2/cmd/swag@$(SWAG_VERSION) && \
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
 	go install github.com/suzuki-shunsuke/pinact/v3/cmd/pinact@latest
@@ -1245,7 +1248,7 @@ vscode: test-env gh-install ## Set up VS Code development environment
 		echo "cargo already installed: $$($$HOME/.cargo/bin/cargo --version)"; \
 	fi
 	$(info Installing go packages)
-	go install github.com/swaggo/swag/cmd/swag@latest && \
+	go install github.com/swaggo/swag/v2/cmd/swag@$(SWAG_VERSION) && \
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
 	go install golang.org/x/tools/cmd/deadcode@latest && \
