@@ -890,6 +890,9 @@ func validateScopeProviderUniqueness(sl validator.StructLevel, ds model.DataSour
 	for scope, cred := range ds.ExternalAPI.Scopes {
 		record(scope, cred.AuthProvider, "external_api")
 	}
+	for scope, cred := range ds.Presentation.Scopes {
+		record(scope, cred.AuthProvider, "presentation")
+	}
 
 	// Sorted so the reported order does not depend on map iteration.
 	scopes := slices.Sorted(maps.Keys(seen))

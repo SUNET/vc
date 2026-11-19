@@ -322,6 +322,18 @@ func TestScopeProviderUniqueness(t *testing.T) {
 			wantReject: true,
 		},
 		{
+			name: "same scope and openid4vp provider in external_api and presentation",
+			ds: model.DataSources{
+				ExternalAPI: model.ExternalAPIConfig{Scopes: map[string]model.ExternalAPIScope{
+					"pid": {Remote: "ladok", AuthProvider: model.AuthProviderOpenID4VP},
+				}},
+				Presentation: model.PresentationConfig{Scopes: map[string]model.PresentationScope{
+					"pid": {AuthProvider: model.AuthProviderOpenID4VP},
+				}},
+			},
+			wantReject: true,
+		},
+		{
 			// The documented, legitimate case: one scope, two data sources,
 			// told apart by the provider the flow authenticated with.
 			name: "same scope, different providers",
