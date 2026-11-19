@@ -1496,12 +1496,28 @@ type TrustPolicyConfig struct {
 // Static clients are configured in YAML and do not require dynamic registration.
 // These clients are checked in addition to dynamically registered clients stored in the database.
 type StaticOIDCClient struct {
-	// ClientID is the unique identifier for the client
+	// ClientID is the unique identifier for the client.
+	// Mutually exclusive with client_id_env, which names an environment
+	// variable to read it from instead.
 	ClientID string `yaml:"client_id" validate:"required"`
+	// ClientIDEnv is the name of an environment variable holding this
+	// client's client_id, for a deployment whose platform hands a process
+	// its configuration that way. The variable is read once at startup,
+	// before the secrets file is applied, so a secrets file keyed by this
+	// client_id still finds it. Unset or empty is refused by name.
+	ClientIDEnv string `yaml:"client_id_env,omitempty" doc_example:"\"VC_RP_EXAMPLE_CLIENT_ID\""`
 	// ClientSecret is the client secret for authentication.
-	// Can be defined in the secrets file under verifier.oidc_op.static_clients
-	// as a map of client_id to client_secret.
+	// Can be defined in the secrets file under
+	// verifier.outbound.oidc_provider.static_clients as a map of
+	// client_id to client_secret.
+	// Mutually exclusive with client_secret_env.
 	ClientSecret string `yaml:"client_secret" validate:"required_unless=TokenEndpointAuthMethod none"`
+	// ClientSecretEnv is the name of an environment variable holding this
+	// client's client_secret. It is read after the secrets file has been
+	// applied, so the environment is the last word on a secret - the most
+	// specific source a deployment can supply is not overridden by a file.
+	// Unset or empty is refused by name.
+	ClientSecretEnv string `yaml:"client_secret_env,omitempty" doc_example:"\"VC_RP_EXAMPLE_CLIENT_SECRET\""`
 	// RedirectURIs is the list of allowed redirect URIs for this client
 	RedirectURIs []string `yaml:"redirect_uris" validate:"required,min=1,dive,redirect_uri"`
 	// AllowedScopes is the list of scopes this client is allowed to request.

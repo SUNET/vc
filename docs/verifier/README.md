@@ -199,6 +199,68 @@ registered while registration was open keep working. To keep registration but
 require a credential for it, use `dynamic_registration_auth` instead; that
 block has no effect once registration is closed.
 
+### Where a static client's credentials come from
+
+A static client's `client_id` and `client_secret` can each be written in
+`config.yaml`, or read from an environment variable named by the entry:
+
+```yaml
+verifier:
+  outbound:
+    oidc_provider:
+      static_clients:
+        - client_id_env: "VC_RP_EXAMPLE_CLIENT_ID"
+          client_secret_env: "VC_RP_EXAMPLE_CLIENT_SECRET"
+          redirect_uris: ["https://rp.example.org/callback"]
+```
+
+which a container platform fills from its own secret store:
+
+```yaml
+env:
+  - name: VC_RP_EXAMPLE_CLIENT_ID
+    valueFrom:
+      secretKeyRef: { name: verifier-clients, key: rp-example-id }
+  - name: VC_RP_EXAMPLE_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef: { name: verifier-clients, key: rp-example-secret }
+```
+
+A secret may also come from the secrets file at `common.secret_file_path`,
+which carries `verifier.outbound.oidc_provider.static_clients` as a map of
+`client_id` to `client_secret`. Three sources, and where more than one could
+apply the most specific wins: the secrets file overrides `config.yaml`, and
+`client_secret_env` overrides both. A `client_id` has two sources rather than
+three, since the secrets file is keyed by it.
+
+Four things are refused at startup rather than resolved silently:
+
+- **Both sources for one value.** `client_id` next to `client_id_env`, or
+  `client_secret` next to `client_secret_env`, means two different beliefs
+  about where that value comes from, and only one of them is true.
+- **A variable that is not set.**
+- **A variable that is set to the empty string.** A secret store will hold an
+  empty value quite happily, and an empty secret on a `client_secret_basic`
+  client is a client that cannot authenticate - better named at startup than
+  found later as a 401 loop.
+- **Two entries with the same `client_id`.** Only the first would ever be
+  matched, so the second entry's redirect URIs, scopes and secret would be
+  inert. With injection the collision need not appear anywhere in the YAML.
+
+Each message names the entry's position, the client it belongs to, and the
+variable involved.
+
+Only the verifier reads these clients, so only the verifier resolves them.
+The issuer, registry and apigw share the same `config.yaml` and ignore the
+block, exactly as they ignore a static client with no secret today — the
+variables need only be set in the verifier's own container.
+
+An environment variable's value is captured when the container starts, so
+rotating the underlying secret does not reach a running pod - rotation means
+rolling the pods. The secrets file is read once at startup too, so today that
+is a wash; a deployment that wants secrets delivered as files, for instance
+through the Secrets Store CSI driver, should keep using it.
+
 ### OpenID4VP Endpoints (for Wallets)
 
 | Endpoint | Method | Description |

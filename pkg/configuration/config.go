@@ -165,6 +165,15 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	// A static OIDC client may name the environment variables its client_id
+	// and client_secret come from, for a deployment whose platform hands a
+	// process its credentials that way. The two halves resolve on either
+	// side of the secrets file, and the order is load-bearing - see
+	// resolveStaticClientIdentities.
+	if err := resolveStaticClientIdentities(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	// If a secret file path is configured, load secrets from that file
 	// and apply secrets to the config (clearing secret fields first).
 	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
@@ -174,6 +183,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		}
 		cfg.ApplySecrets(secrets)
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
+	}
+
+	if err := resolveStaticClientSecrets(cfg, serviceName); err != nil {
+		return nil, err
 	}
 
 	// Before anything else looks at the config: a deployment still carrying
