@@ -306,6 +306,7 @@ func (m *RegistryManager) dispatch(ctx context.Context, req *authzen.EvaluationR
 		return resp, err
 	}
 	markEvaluationFailures(resp)
+	applyDisplayName(req, resp)
 	return attachTrustData(resp, freshnessBefore, trustDataSnapshot(applicable)), nil
 }
 
