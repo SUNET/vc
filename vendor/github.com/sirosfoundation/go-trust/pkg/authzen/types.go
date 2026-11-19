@@ -78,12 +78,47 @@ type EvaluationResponseContext struct {
 	// For OpenID Federation: contains the Entity Configuration
 	// This field is set when trust_metadata is requested or for resolution-only requests.
 	TrustMetadata interface{} `json:"trust_metadata,omitempty" swaggertype:"object"` // DID Document or Entity Configuration
+	// DisplayName is a human-facing name for the subject, for consent UIs. It is
+	// the registry's own name for the entity when it has one, otherwise the
+	// normalized domain name of the subject's origin when one can be derived.
+	// Present only on positive decisions. Presentation only: never a trust
+	// input, and absence is not an error. The wallet's label chain is
+	// display_name, then client metadata's client_name, then the client_id's
+	// domain, then the raw client_id (demoted to a details view); a present
+	// display_name overrides the verifier's own label.
+	DisplayName string `json:"display_name,omitempty" example:"Acme Bank AB"`
+	// DisplayNameL10n carries the registry's names for the subject by language
+	// tag (lower-case BCP 47, e.g. "en", "sv"), for clients that pick a language
+	// of their own. DisplayName is the registry's preferred entry of the
+	// same name set (English when present); the member is absent when the name has no language-tagged source (for example the
+	// origin-domain fallback).
+	DisplayNameL10n map[string]string `json:"display_name_l10n,omitempty"`
 	// VerifierIDs lists verifier identifiers the PDP derived from authenticated
 	// material, for wallets that need a stable identifier string for the relying
 	// party (for example as input to a pseudonym function). It is present only
 	// when the policy enables it (constraints.return_verifier_ids), the decision
 	// is true, and the identifier was verified. Informational, never critical.
 	VerifierIDs []VerifierID `json:"verifier_ids,omitempty"` // Verified verifier identifiers
+	// TrustData reports how fresh the data behind the decision is, one entry
+	// per registry consulted. Callers that cache decisions use next_update as
+	// an upper bound on how long the answer can be kept. Absence of the member,
+	// or of next_update in an entry, means "unknown": the caller applies its own
+	// conservative cap.
+	TrustData []TrustData `json:"trust_data,omitempty"`
+}
+
+// TrustData describes the freshness of one registry's data.
+// @Description Freshness of the data one registry decided from
+type TrustData struct {
+	// Registry is the registry's configured name.
+	Registry string `json:"registry" example:"etsi"`
+	// AsOf is when the registry last loaded its data (RFC 3339, UTC). Omitted
+	// when the registry has not loaded data or has no such notion.
+	AsOf string `json:"as_of,omitempty" example:"2026-10-19T00:00:00Z"`
+	// NextUpdate is the earliest moment the source data is due to be replaced
+	// (RFC 3339, UTC), for example an ETSI TSL NextUpdate or a VICAL nextUpdate.
+	// Omitted when the registry has no such notion (static, whitelist).
+	NextUpdate string `json:"next_update,omitempty" example:"2026-10-26T00:00:00Z"`
 }
 
 // Verifier identifier types a PDP can return in EvaluationResponseContext.VerifierIDs.

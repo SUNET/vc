@@ -208,6 +208,57 @@ func (e *BindingError) Error() string {
 	return fmt.Sprintf("WRPAC organization_identifier %q does not match WRPRC sub.id %q (ARF RPRC_16, TS 119 475 §5.1)", e.WRPACOrgID, e.WRPRCSubID)
 }
 
+// IntermediaryBindingError is returned when the presenting WRPAC does not
+// bind to the intermediary the registrar recorded in the WRPRC's `act` claim
+// (ETSI TS 119 475 V1.2.1 Table 10, GEN-5.2.4-09).
+type IntermediaryBindingError struct {
+	WRPACOrgID         string
+	ActingIntermediary string
+}
+
+func (e *IntermediaryBindingError) Error() string {
+	return fmt.Sprintf(
+		"WRPAC organization_identifier %q does not match the WRPRC acting intermediary %q"+
+			" — the registrar issued this certificate for a different intermediary"+
+			" (ETSI TS 119 475 Table 10 `act`)",
+		e.WRPACOrgID, e.ActingIntermediary,
+	)
+}
+
+// CheckWRPACWRPRCPresentationBinding verifies that the WRPAC presenting the
+// request binds to the WRPRC for the presentation actually being made.
+//
+// In a DIRECT presentation the presenting party is the relying party itself
+// and the binding is ARF RPRC_16: the WRPAC organization_identifier must
+// match the WRPRC subject — this is CheckWRPACWRPRCBinding.
+//
+// In an INTERMEDIATED presentation (ETSI TS 119 475 V1.2.1: the WRPRC
+// carries the `act` claim naming the intermediary it was issued for, and the
+// registrar issues a separate WRPRC per intermediary per point 14 of Annex I
+// to CIR (EU) 2025/848) the presenting WRPAC is the INTERMEDIARY's access
+// certificate and the binding is against the recorded intermediary, not the
+// fronted relying party: the WRPRC subject always identifies the FINAL
+// relying party, never the presenting intermediary.
+//
+// Empty-argument semantics match CheckWRPACWRPRCBinding: a missing WRPAC
+// org ID or a nil WRPRC means the check is not enforced, so callers that
+// cannot extract an organization identifier do not get a spurious error.
+func CheckWRPACWRPRCPresentationBinding(wrpacOrgID string, wrprc *RPEntitlements) error {
+	if wrprc == nil || wrprc.ActingIntermediary == "" {
+		return CheckWRPACWRPRCBinding(wrpacOrgID, wrprc)
+	}
+	if wrpacOrgID == "" {
+		return nil
+	}
+	if wrpacOrgID != wrprc.ActingIntermediary {
+		return &IntermediaryBindingError{
+			WRPACOrgID:         wrpacOrgID,
+			ActingIntermediary: wrprc.ActingIntermediary,
+		}
+	}
+	return nil
+}
+
 // CheckWRPACWRPRCBinding verifies that the organization_identifier from the WRPAC
 // matches the sub.id of the WRPRC per ARF RPRC_16 and ETSI TS 119 475 §5.1.
 //

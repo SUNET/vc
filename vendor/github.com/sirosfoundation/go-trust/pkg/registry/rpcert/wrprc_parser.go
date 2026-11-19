@@ -121,6 +121,7 @@ func ParseWRPRCClaims(payload []byte) (*RPEntitlements, error) {
 	}
 
 	ent.AllowedAttributes = topLevelClaimNames(p.Credentials)
+	ent.AllowedClaimPaths = claimPathGrants(p.Credentials)
 	ent.ProvidedAttestations = credentialQueries(firstNonEmptyCreds(p.ProvidesAttestations, p.ProvidedAttestations))
 
 	return ent, nil

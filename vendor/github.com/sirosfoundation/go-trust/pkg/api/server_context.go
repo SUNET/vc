@@ -15,12 +15,13 @@ import (
 // The ServerContext always has a configured Logger for API operations. If none is provided
 // during initialization, a default logger is used.
 type ServerContext struct {
-	mu              sync.RWMutex              // Mutex for thread-safe access
-	RegistryManager *registry.RegistryManager // Multi-registry manager
-	Logger          logging.Logger            // Logger for API operations (never nil)
-	RateLimiter     *RateLimiter              // Rate limiter for API endpoints (optional)
-	Metrics         *Metrics                  // Prometheus metrics (optional)
-	BaseURL         string                    // Base URL for the PDP (e.g., "https://pdp.example.com") for .well-known discovery
+	mu                  sync.RWMutex              // Mutex for thread-safe access
+	RegistryManager     *registry.RegistryManager // Multi-registry manager
+	Logger              logging.Logger            // Logger for API operations (never nil)
+	RateLimiter         *RateLimiter              // Rate limiter for API endpoints (optional)
+	Metrics             *Metrics                  // Prometheus metrics (optional)
+	BaseURL             string                    // Base URL for the PDP (e.g., "https://pdp.example.com") for .well-known discovery
+	MaxBatchEvaluations int                       // Item limit of POST /evaluations; 0 means DefaultMaxBatchEvaluations
 }
 
 // Lock locks the ServerContext for writing.
@@ -67,5 +68,7 @@ func (s *ServerContext) WithLogger(logger logging.Logger) *ServerContext {
 		RateLimiter:     s.RateLimiter,
 		Metrics:         s.Metrics,
 		BaseURL:         s.BaseURL,
+
+		MaxBatchEvaluations: s.MaxBatchEvaluations,
 	}
 }

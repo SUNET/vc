@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/sirosfoundation/g119612/pkg/logging"
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 )
@@ -55,6 +58,76 @@ func getRegistryCount(serverCtx *ServerContext) int {
 // maxEvaluationBodyBytes bounds an /evaluation request body (certificate
 // chains included) so an oversized body cannot exhaust server memory.
 const maxEvaluationBodyBytes = 1 << 20
+
+// evaluator is what the evaluation handlers need from the registry manager.
+type evaluator interface {
+	Evaluate(ctx context.Context, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error)
+}
+
+// evaluateAndRecord runs one evaluation against the registry manager and
+// logs it and records its metrics. It is shared by /evaluation and
+// /evaluations so that both behave identically per item. A non-nil error
+// means the evaluation could not be carried out.
+func evaluateAndRecord(c *gin.Context, serverCtx *ServerContext, registryMgr evaluator, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
+	actionName := ""
+	if req.Action != nil {
+		actionName = req.Action.Name
+	}
+	serverCtx.Logger.Debug("Processing AuthZEN request",
+		logging.F("remote_ip", c.ClientIP()),
+		logging.F("subject_id", req.Subject.ID),
+		logging.F("subject_type", req.Subject.Type),
+		logging.F("resource_type", req.Resource.Type),
+		logging.F("resource_id", req.Resource.ID),
+		logging.F("action", actionName),
+		logging.F("has_key", len(req.Resource.Key) > 0),
+		logging.F("has_context", req.Context != nil))
+
+	start := time.Now()
+	resp, evalErr := registryMgr.Evaluate(c.Request.Context(), req)
+	validationDuration := time.Since(start)
+
+	if evalErr != nil {
+		serverCtx.Logger.Error("AuthZEN evaluation error",
+			logging.F("remote_ip", c.ClientIP()),
+			logging.F("subject_id", req.Subject.ID),
+			logging.F("error", evalErr.Error()))
+		if serverCtx.Metrics != nil {
+			serverCtx.Metrics.RecordError("evaluation_error", "authzen_decision")
+		}
+		return nil, evalErr
+	}
+
+	if resp.Decision {
+		serverCtx.Logger.Debug("AuthZEN request approved",
+			logging.F("remote_ip", c.ClientIP()),
+			logging.F("subject_id", req.Subject.ID),
+			logging.F("resource_type", req.Resource.Type),
+			logging.F("duration_ms", validationDuration.Milliseconds()))
+		if serverCtx.Metrics != nil {
+			serverCtx.Metrics.RecordCertValidation(validationDuration, true)
+		}
+	} else {
+		serverCtx.Logger.Debug("AuthZEN request denied",
+			logging.F("remote_ip", c.ClientIP()),
+			logging.F("subject_id", req.Subject.ID),
+			logging.F("resource_type", req.Resource.Type),
+			logging.F("duration_ms", validationDuration.Milliseconds()))
+		if serverCtx.Metrics != nil {
+			serverCtx.Metrics.RecordCertValidation(validationDuration, false)
+		}
+	}
+
+	if resp.Context != nil && resp.Context.Reason != nil {
+		if regName, ok := resp.Context.Reason["registry"]; ok {
+			serverCtx.Logger.Debug("AuthZEN response details",
+				logging.F("decision", resp.Decision),
+				logging.F("registry", regName),
+				logging.F("duration_ms", validationDuration.Milliseconds()))
+		}
+	}
+	return resp, nil
+}
 
 // AuthZENDecisionHandler godoc
 // @Summary Evaluate trust decision (AuthZEN Trust Registry Profile)
@@ -105,91 +178,152 @@ func AuthZENDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
 			return
 		}
 
-		// Log valid request with full trace details
-		actionName := ""
-		if req.Action != nil {
-			actionName = req.Action.Name
-		}
-		serverCtx.Logger.Debug("Processing AuthZEN request",
-			logging.F("remote_ip", c.ClientIP()),
-			logging.F("subject_id", req.Subject.ID),
-			logging.F("subject_type", req.Subject.Type),
-			logging.F("resource_type", req.Resource.Type),
-			logging.F("resource_id", req.Resource.ID),
-			logging.F("action", actionName),
-			logging.F("has_key", len(req.Resource.Key) > 0),
-			logging.F("has_context", req.Context != nil))
-
-		start := time.Now()
-
 		// Use RegistryManager for trust evaluation
 		serverCtx.RLock()
 		registryMgr := serverCtx.RegistryManager
 		serverCtx.RUnlock()
-
-		var resp *authzen.EvaluationResponse
-		var evalErr error
 
 		if registryMgr == nil {
 			c.JSON(500, gin.H{"error": "server not configured: no registry manager"})
 			return
 		}
 
-		resp, evalErr = registryMgr.Evaluate(c.Request.Context(), &req)
-
-		validationDuration := time.Since(start)
-
+		resp, evalErr := evaluateAndRecord(c, serverCtx, registryMgr, &req)
 		if evalErr != nil {
-			serverCtx.Logger.Error("AuthZEN evaluation error",
-				logging.F("remote_ip", c.ClientIP()),
-				logging.F("subject_id", req.Subject.ID),
-				logging.F("error", evalErr.Error()))
-
-			// Record error metrics
-			if serverCtx.Metrics != nil {
-				serverCtx.Metrics.RecordError("evaluation_error", "authzen_decision")
-			}
-
 			c.JSON(500, buildResponse(false, "internal evaluation error"))
 			return
 		}
 
-		if resp.Decision {
-			serverCtx.Logger.Debug("AuthZEN request approved",
-				logging.F("remote_ip", c.ClientIP()),
-				logging.F("subject_id", req.Subject.ID),
-				logging.F("resource_type", req.Resource.Type),
-				logging.F("duration_ms", validationDuration.Milliseconds()))
-
-			// Record successful validation metrics
-			if serverCtx.Metrics != nil {
-				serverCtx.Metrics.RecordCertValidation(validationDuration, true)
-			}
-		} else {
-			serverCtx.Logger.Debug("AuthZEN request denied",
-				logging.F("remote_ip", c.ClientIP()),
-				logging.F("subject_id", req.Subject.ID),
-				logging.F("resource_type", req.Resource.Type),
-				logging.F("duration_ms", validationDuration.Milliseconds()))
-
-			// Record failed validation metrics
-			if serverCtx.Metrics != nil {
-				serverCtx.Metrics.RecordCertValidation(validationDuration, false)
-			}
-		}
-
-		// Debug trace: response details
-		if resp.Context != nil && resp.Context.Reason != nil {
-			if registry, ok := resp.Context.Reason["registry"]; ok {
-				serverCtx.Logger.Debug("AuthZEN response details",
-					logging.F("decision", resp.Decision),
-					logging.F("registry", registry),
-					logging.F("duration_ms", validationDuration.Milliseconds()))
-			}
-		}
-
 		c.JSON(200, resp)
 	}
+}
+
+// DefaultMaxBatchEvaluations is the item limit of POST /evaluations when none is configured.
+const DefaultMaxBatchEvaluations = 50
+
+// maxBatchBodyBytes bounds a /evaluations request body. Each item may carry a
+// certificate chain, so it is a multiple of the single-evaluation bound.
+const maxBatchBodyBytes = 8 * maxEvaluationBodyBytes
+
+// AuthZENBatchDecisionHandler godoc
+// @Summary Evaluate several trust decisions (AuthZEN access evaluations)
+// @Description Evaluates many name-to-key bindings in one request. The top-level subject, resource,
+// @Description action and context are defaults; each item of `evaluations` may replace any of them.
+// @Description The response has one result per item, in request order, each shaped like a
+// @Description POST /evaluation response (including context.id and context.trust_data).
+// @Description
+// @Description An item that is invalid or cannot be evaluated yields decision=false for that item and
+// @Description does not fail the request. A request with more items than the configured limit
+// @Description (server.max_batch_evaluations, default 50) is refused with 400.
+// @Description
+// @Description options.evaluations_semantic may be execute_all (default), deny_on_first_deny or
+// @Description permit_on_first_permit; the latter two end the response after the deciding item.
+// @Tags AuthZEN
+// @Accept json
+// @Produce json
+// @Param request body authzen.BatchEvaluationRequest true "AuthZEN access evaluations request"
+// @Success 200 {object} authzen.BatchEvaluationResponse "One decision per evaluated item"
+// @Failure 400 {object} map[string]string "Malformed request, no items, too many items or unknown semantic"
+// @Failure 413 {object} map[string]string "Request body too large"
+// @Router /evaluations [post]
+func AuthZENBatchDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		req, semantic, ok := bindBatchRequest(c, serverCtx)
+		if !ok {
+			return
+		}
+
+		serverCtx.RLock()
+		registryMgr := serverCtx.RegistryManager
+		serverCtx.RUnlock()
+		if registryMgr == nil {
+			c.JSON(500, gin.H{"error": "server not configured: no registry manager"})
+			return
+		}
+
+		results := make([]authzen.EvaluationResponse, 0, len(req.Evaluations))
+		for i := range req.Evaluations {
+			result := evaluateBatchItem(c, serverCtx, registryMgr, req, i)
+			results = append(results, result)
+			if batchDecided(semantic, result.Decision) {
+				break
+			}
+		}
+		c.JSON(200, authzen.BatchEvaluationResponse{Evaluations: results})
+	}
+}
+
+// bindBatchRequest parses and checks a batch request. On a refusal it has
+// already written the response and returns ok=false.
+func bindBatchRequest(c *gin.Context, serverCtx *ServerContext) (req *authzen.BatchEvaluationRequest, semantic string, ok bool) {
+	req = &authzen.BatchEvaluationRequest{}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBatchBodyBytes)
+	if err := c.ShouldBindJSON(req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return nil, "", false
+		}
+		serverCtx.Logger.Error("Invalid AuthZEN batch request",
+			logging.F("remote_ip", c.ClientIP()),
+			logging.F("error", err.Error()))
+		c.JSON(400, gin.H{"error": "invalid request"})
+		return nil, "", false
+	}
+	if len(req.Evaluations) == 0 {
+		c.JSON(400, gin.H{"error": "evaluations must contain at least one item"})
+		return nil, "", false
+	}
+
+	serverCtx.RLock()
+	limit := serverCtx.MaxBatchEvaluations
+	serverCtx.RUnlock()
+	if limit <= 0 {
+		limit = DefaultMaxBatchEvaluations
+	}
+	if len(req.Evaluations) > limit {
+		c.JSON(400, gin.H{"error": fmt.Sprintf("too many evaluations: %d, limit is %d", len(req.Evaluations), limit)})
+		return nil, "", false
+	}
+	semantic, err := req.Semantic()
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return nil, "", false
+	}
+	return req, semantic, true
+}
+
+// evaluateBatchItem evaluates item i. A malformed item or a failure to
+// evaluate is a denial of that item with an error reason and a decision id; it
+// never fails the batch.
+func evaluateBatchItem(c *gin.Context, serverCtx *ServerContext, registryMgr evaluator, batch *authzen.BatchEvaluationRequest, i int) authzen.EvaluationResponse {
+	item, err := batch.Item(i)
+	if err != nil {
+		return batchDenial(err.Error())
+	}
+	resp, err := evaluateAndRecord(c, serverCtx, registryMgr, item)
+	if err != nil {
+		return batchDenial("internal evaluation error")
+	}
+	return *resp
+}
+
+// batchDenial is the decision=false result of an item that was not evaluated.
+func batchDenial(reason string) authzen.EvaluationResponse {
+	resp := buildResponse(false, reason)
+	resp.Context.ID = uuid.NewString()
+	return resp
+}
+
+// batchDecided reports whether the semantic ends the batch after a decision.
+func batchDecided(semantic string, decision bool) bool {
+	switch semantic {
+	case authzen.EvaluationsSemanticDenyOnFirstDeny:
+		return !decision
+	case authzen.EvaluationsSemanticPermitOnFirstPermit:
+		return decision
+	}
+	return false
 }
 
 // InfoHandler godoc
@@ -315,10 +449,10 @@ func WellKnownHandler(baseURL string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Construct metadata according to AuthZEN spec Section 9.1
 		metadata := authzen.PDPMetadata{
-			PolicyDecisionPoint:      baseURL,
-			AccessEvaluationEndpoint: baseURL + "/evaluation",
+			PolicyDecisionPoint:       baseURL,
+			AccessEvaluationEndpoint:  baseURL + "/evaluation",
+			AccessEvaluationsEndpoint: baseURL + "/evaluations",
 			// Optional endpoints - not implemented yet
-			// AccessEvaluationsEndpoint: baseURL + "/evaluations",
 			// SearchSubjectEndpoint: baseURL + "/search/subject",
 			// SearchResourceEndpoint: baseURL + "/search/resource",
 			// SearchActionEndpoint: baseURL + "/search/action",
