@@ -88,6 +88,10 @@
 
 ### Fixed
 
+- **Bulk uploads refuse null entries**: a null value under `documents` in
+  `POST /api/v1/datastore/bulk` or under `mappings` in
+  `POST /api/v1/identity/mapping/bulk` made the handler panic, and the request
+  ended with a 500. Such a request answers 400.
 - **SPOCP resource rules hold for the selector a handler receives**: the
   authorization middleware and `Binding.Request` could read different
   `authentic_source` or `scope` values from one `/api/v1` request. Every
