@@ -121,7 +121,7 @@ comma                   := ,
 	docker-build docker-build-% docker-push docker-push-% docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
-	bbs-native-lib bbs-native-lib-staged bbs-native-lib-ensure \
+	bbs-native-lib bbs-native-lib-staged bbs-native-lib-ensure bbs-native-lib-normalize \
 	zk-native-lib zk-native-lib-staged zk-native-lib-ensure \
 	zk-native-lib-vega zk-native-lib-vega-staged zk-native-lib-vega-ensure \
 	_check-native-host \
@@ -432,18 +432,32 @@ zk-native-lib-ensure: _check-native-host ## Stage zk-cred-longfellow only when i
 	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_nymauth.h" || $(MAKE) --no-print-directory zk-native-lib
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
-	@# Header for cgo compile, archive for the static link (pkg/bbs uses -l:libzk_cred_bbs.a).
+	@# Header for cgo compile, archive for the static link (pkg/bbs uses plain -lzk_cred_bbs).
 	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || ( \
 		echo "zk-cred-bbs is not staged, but the issuer build requires it." >&2; \
 		echo "Both $(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a and $(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h are required." >&2; \
 		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain)." >&2; \
 		exit 1)
+	@$(MAKE) --no-print-directory bbs-native-lib-normalize
 
 bbs-native-lib-ensure: _check-native-host ## Stage zk-cred-bbs only when it's missing (for local build-*)
 	@# Same presence test as -staged but fetches on miss instead of erroring
 	@# so a fresh checkout can run `make build-*` without a separate step.
 	@# CI keeps the strict -staged guard on test-* targets.
 	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || $(MAKE) --no-print-directory bbs-native-lib
+	@$(MAKE) --no-print-directory bbs-native-lib-normalize
+
+bbs-native-lib-normalize: ## Make an already-staged zk-cred-bbs static-only and free of LLVM sections
+	@# Stages from older recipes hold a .so beside the .a (plain -l would pick it)
+	@# and an archive with LLVM sections (Go 1.27.4 rejects it). Touch the stage only
+	@# when needed so parallel test-* targets do not rewrite the archive.
+	@lib="$(ZK_CRED_BBS_STAGE)/lib"; \
+	if [ -f "$$lib/libzk_cred_bbs.a" ]; then \
+		if ls "$$lib"/libzk_cred_bbs.so* >/dev/null 2>&1; then rm -f "$$lib"/libzk_cred_bbs.so*; fi; \
+		if objdump -h "$$lib/libzk_cred_bbs.a" 2>/dev/null | grep -q -E '\.llvm(bc|cmd)'; then \
+			objcopy --remove-section .llvmbc --remove-section .llvmcmd "$$lib/libzk_cred_bbs.a"; \
+		fi; \
+	fi
 
 bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issuance
 	$(info Fetching/building zk-cred-bbs's go-cabi target from $(ZK_CRED_BBS_REPO)@$(ZK_CRED_BBS_REF))
