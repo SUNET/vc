@@ -88,6 +88,11 @@
 
 ### Fixed
 
+- **`CloneNestedClaims` deep-copies arrays**: it assigned every `[]any`,
+  `[]string`, `bson.A` and `bson.D` by reference, including arrays inside
+  copied objects, so a write through the copy into an array reached the
+  caller's claims. The derivation pipeline walks objects only, so this affects
+  code that writes into array elements.
 - **SPOCP resource rules hold for the selector a handler receives**: the
   authorization middleware and `Binding.Request` could read different
   `authentic_source` or `scope` values from one `/api/v1` request. Every
