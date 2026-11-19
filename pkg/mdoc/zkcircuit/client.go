@@ -182,7 +182,9 @@ func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 	}
 	switch n := v.(type) {
 	case float64:
-		if n != math.Trunc(n) || n < math.MinInt || n > math.MaxInt {
+		// math.MaxInt rounds up to 2^63 as a float64; -math.MinInt is exact
+		// and one past it.
+		if n != math.Trunc(n) || n < math.MinInt || n >= -math.MinInt {
 			return 0, false
 		}
 		return int(n), true

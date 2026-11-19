@@ -764,6 +764,8 @@ func TestParamInt_RejectsNonIntegralAndOutOfRange(t *testing.T) {
 		{"native int", 3, true, 3},
 		{"fractional float64", 2.5, false, 0},
 		{"too large for int64-range float64", math.MaxFloat64, false, 0},
+		{"one past math.MaxInt", -float64(math.MinInt), false, 0},
+		{"math.MinInt", float64(math.MinInt), true, math.MinInt},
 		{"negative infinity", math.Inf(-1), false, 0},
 		{"NaN", math.NaN(), false, 0},
 		{"non-numeric", "not-a-number", false, 0},

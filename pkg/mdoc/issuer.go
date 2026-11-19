@@ -395,7 +395,9 @@ func convertElementValue(meta ClaimMetadata, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("expected number for int, got %T", raw)
 		}
-		if f != math.Trunc(f) || f < math.MinInt64 || f > math.MaxInt64 {
+		// math.MaxInt64 rounds up to 2^63 as a float64, so the bounds are
+		// the powers of two themselves.
+		if f != math.Trunc(f) || f < -0x1p63 || f >= 0x1p63 {
 			return nil, fmt.Errorf("value %v is not a valid int64", raw)
 		}
 		return int64(f), nil
@@ -404,7 +406,7 @@ func convertElementValue(meta ClaimMetadata, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("expected number for uint, got %T", raw)
 		}
-		if f != math.Trunc(f) || f < 0 || f > math.MaxUint64 {
+		if f != math.Trunc(f) || f < 0 || f >= 0x1p64 {
 			return nil, fmt.Errorf("value %v is not a valid uint64", raw)
 		}
 		return uint64(f), nil

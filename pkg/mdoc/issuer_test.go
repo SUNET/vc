@@ -784,6 +784,18 @@ func TestConvertElementValue(t *testing.T) {
 		{"uint rejects negative value", "uint", -1.0, true, nil},
 		{"int rejects out-of-range value", "int", math.MaxFloat64, true, nil},
 		{"uint rejects out-of-range value", "uint", math.MaxFloat64, true, nil},
+		{"int rejects 2^63", "int", 0x1p63, true, nil},
+		{"uint rejects 2^64", "uint", 0x1p64, true, nil},
+		{"int accepts -2^63", "int", -0x1p63, false, func(t *testing.T, got any) {
+			if got != int64(math.MinInt64) {
+				t.Errorf("got %#v, want int64(math.MinInt64)", got)
+			}
+		}},
+		{"uint accepts the largest float64 below 2^64", "uint", 0x1p64 - 0x1p11, false, func(t *testing.T, got any) {
+			if got != uint64(18446744073709549568) {
+				t.Errorf("got %#v, want uint64(18446744073709549568)", got)
+			}
+		}},
 		{"int accepts large exact integer", "int", 9007199254740992.0, false, func(t *testing.T, got any) {
 			if got != int64(9007199254740992) {
 				t.Errorf("got %#v, want int64(9007199254740992)", got)
