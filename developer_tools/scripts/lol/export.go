@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
@@ -201,13 +202,16 @@ func readCerts(path string) ([]*x509.Certificate, error) {
 			break
 		}
 		if b.Type != "CERTIFICATE" {
-			continue
+			return nil, fmt.Errorf("%s: unexpected PEM block %q", path, b.Type)
 		}
 		cert, err := x509.ParseCertificate(b.Bytes)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		out = append(out, cert)
+	}
+	if bytes.Contains(data, []byte("-----BEGIN")) {
+		return nil, fmt.Errorf("%s: malformed or truncated PEM block", path)
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s: no certificates found", path)

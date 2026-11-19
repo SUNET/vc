@@ -178,7 +178,22 @@ func exportBundle(ctx context.Context, client *http.Client, req exportRequest) i
 	if req.signer.State != "ok" {
 		fatal(fmt.Errorf("refusing to export, LoTL signature not verified against %s: %s", req.pinnedFile, req.signer.Error))
 	}
+	if err := checkFresh(req.info.NextUpdate, req.now); err != nil {
+		fatal(fmt.Errorf("refusing to export, LoTL %w", err))
+	}
 	return runExport(ctx, client, req)
+}
+
+// checkFresh rejects a missing, unparseable or past NextUpdate, so a replayed old LoTL cannot be exported.
+func checkFresh(nextUpdate string, now time.Time) error {
+	next, err := time.Parse(time.RFC3339, nextUpdate)
+	if err != nil {
+		return fmt.Errorf("NextUpdate %q is missing or invalid: %w", nextUpdate, err)
+	}
+	if !next.After(now) {
+		return fmt.Errorf("NextUpdate %s has passed", next.UTC().Format(dateLayout))
+	}
+	return nil
 }
 
 func printHeader(lotlURL string, info schemeInfo, signer signerResult, now time.Time) {
@@ -511,13 +526,13 @@ func cleanKind(s string) string {
 }
 
 func loadAnchors(path string) (*x509.CertPool, error) {
-	pem, err := os.ReadFile(path)
+	certs, err := readCerts(path)
 	if err != nil {
 		return nil, err
 	}
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("%s: no certificates found", path)
+	for _, cert := range certs {
+		pool.AddCert(cert)
 	}
 	return pool, nil
 }
