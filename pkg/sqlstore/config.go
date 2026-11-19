@@ -63,6 +63,8 @@ type MariaDBConfig struct {
 	Port int `yaml:"port" default:"3306"`
 	// User is the MariaDB connection user. Required when Common.SQL.Backend
 	// is "mariadb" (see Host doc comment for why this isn't a required_if tag).
+	// Schema migrations run as this user at startup and need the LOCK TABLES
+	// privilege on the database, which ALL includes.
 	User string `yaml:"user" validate:"omitempty"`
 	// Password is the MariaDB connection password. May also be set via secrets.yaml
 	// (Common.SQL.MariaDB.Password), following the same split as Mongo.URI.

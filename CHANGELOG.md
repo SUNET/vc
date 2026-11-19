@@ -13,6 +13,27 @@
   **Migration:** if APIGW fails to start with `apigw.data_sources.datastore.scopes: ... name no scope in common.credential_metadata`, either add the missing `common.credential_metadata` entry or drop the scope from `auth_scopes`. The error lists every offending `<scope>.auth_scopes.<auth_scope>` pair.
 
   A `credential_metadata` key present but empty (a YAML typo) is likewise rejected now rather than dereferenced at startup, as is a VCTM document holding the literal `null`, which used to load and then fail every issuance after a successful `/token`.
+- **MariaDB identifiers compare byte for byte**: on MariaDB a variant spelling reached another source's document, because every string column compared under the server's case-, accent- and trailing-space-folding collation. A subject whose SPOCP rule names only `a` could read, replace and delete the document of `A`. Every string column now has the NO PAD binary collation, matching Postgres, MongoDB and SPOCP: `A`, `a` and `A ` name three different documents, clients and credential offers, and `Á` reaches none of them.
+
+  **Migration:** a client that relied on a variant spelling must send the stored spelling. The variant now gets "not found", and a write through it creates a separate row. Migration `000010` rebuilds each table at the first startup and holds `LOCK TABLES` on all ten tables for its whole run, in both directions. Every read and write on them waits, from replicas of the old version too, so take a backup and allow downtime in proportion to the table sizes. Identity mapping rows written through a variant take the spelling of their document.
+
+  Two causes stop the migration before any row or table changes: a database user without the `LOCK TABLES` privilege, with `Error 1044 Access denied`, and a server with neither `utf8mb4_nopad_bin` nor `utf8mb4_0900_bin`, with `Unknown collation`. Later starts then refuse with `Dirty database version 10`. Fix the cause, run `UPDATE schema_migrations SET version = 9, dirty = 0`, and restart.
+
+  On a Galera cluster the lock holds only on the node running the migration, so stop writers on every other node first. A write from another node stalls replication on the migrating node and throttles writes across the cluster, other databases included. `KILL` leaves the stall in place. Restarting the node clears it, and the run has then failed partway: restore the backup.
+
+  Start one service and let the migration finish before starting the other. APIGW and the verifier both run migrations at startup, and golang-migrate's MariaDB driver waits only 10 seconds for its advisory lock before giving up, a timeout its source fixes rather than reads from configuration. A rebuild that outlasts those 10 seconds therefore panics the second service, which then restarts until the first one is done. Measured on MariaDB 11.8: a database of 200,000 documents, 600,000 identity mapping rows, 183,000 identities and 200,000 credential subjects, 66 MB of table and index data, took 11 seconds up and 7 seconds down, and a reader running against it throughout was blocked for all but 70 ms of the run. The lock window is the whole migration, and it grows with the table sizes.
+
+  A document now reaches an identity only when its `identity_mapping_ids` entry spells the identity's `authentic_source_person_id` exactly. The migration leaves links that relied on folding as they are, because a variant can be another person. Before upgrading, this query lists them. It spans authentic sources, as the lookup by identity does:
+
+  ```sql
+  SELECT m.authentic_source, m.scope, m.document_id, m.identity_mapping_id,
+         i.authentic_source AS identity_source, i.authentic_source_person_id
+  FROM datastore_identity_mapping m
+  JOIN identity_mappings i ON m.identity_mapping_id = i.authentic_source_person_id
+  WHERE BINARY m.identity_mapping_id <> BINARY i.authentic_source_person_id;
+  ```
+
+  `ListAuthenticSources` and a document's `identity_mapping_ids` sort in byte order on MariaDB. Search folds case on JSON fields as well, where MariaDB compared `family_name`, `given_name`, `email`, `birthdate` and `birth_date` case-sensitively. Search on key columns keeps folding case and stops folding accents.
 - **Status-list and DCQL changes** — see the entries below. The Docker image
   still ships `/metadata`: an earlier revision of this branch removed it, but
   the in-repo Fly environment configures `common.credential_metadata` with
