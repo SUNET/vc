@@ -440,7 +440,7 @@ register_apigw_issuer_on_wallet_backend() {
     done
     if [[ -z "$ready" ]]; then
         echo "    (wallet-backend admin API did not become ready; skipping issuer registration)"
-        kill "$proxy_pid" 2>/dev/null
+        kill "$proxy_pid" 2>/dev/null || true
         wait "$proxy_pid" 2>/dev/null || true
         return 0
     fi
@@ -484,7 +484,7 @@ register_apigw_issuer_on_wallet_backend() {
         *)   echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
     esac
 
-    kill "$proxy_pid" 2>/dev/null
+    kill "$proxy_pid" 2>/dev/null || true
     wait "$proxy_pid" 2>/dev/null || true
     rm -f "$body_file"
 }
