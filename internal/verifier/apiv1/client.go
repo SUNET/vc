@@ -211,6 +211,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		statusListChecker, err := revocation.NewStatusListChecker(
 			revocation.WithCache(statusCache),
 			revocation.WithMaxCacheTTL(cacheTTL),
+			revocation.WithMaxEntries(cfg.Verifier.Revocation.MaxStatusListEntries),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
 		)

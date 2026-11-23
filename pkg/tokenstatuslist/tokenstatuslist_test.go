@@ -8,7 +8,9 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -859,4 +861,120 @@ func verifyCOSESignature(t *testing.T, cwtBytes []byte, pub *rsa.PublicKey, hash
 		SaltLength: rsa.PSSSaltLengthEqualsHash,
 	})
 	require.NoError(t, err, "RSA-PSS signature verification failed")
+}
+
+func compressRaw(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	out, err := CompressStatuses(raw)
+	require.NoError(t, err)
+	return out
+}
+
+// Draft-21 section 4.1 examples: bits=1 gives 0xB9 0xA3, bits=2 gives 0xC9 0x44 0xF9.
+func TestExpandStatuses_DraftExamples(t *testing.T) {
+	t.Run("bits 1", func(t *testing.T) {
+		got, err := ExpandStatuses(compressRaw(t, []byte{0xb9, 0xa3}), 1, 0)
+		require.NoError(t, err)
+		assert.Equal(t, []uint8{1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1}, got)
+	})
+
+	t.Run("bits 2", func(t *testing.T) {
+		got, err := ExpandStatuses(compressRaw(t, []byte{0xc9, 0x44, 0xf9}), 2, 0)
+		require.NoError(t, err)
+		assert.Equal(t, []uint8{1, 2, 0, 3, 0, 1, 0, 1, 1, 2, 3, 3}, got)
+	})
+
+	t.Run("bits 4", func(t *testing.T) {
+		got, err := ExpandStatuses(compressRaw(t, []byte{0x21, 0x43}), 4, 0)
+		require.NoError(t, err)
+		assert.Equal(t, []uint8{1, 2, 3, 4}, got)
+	})
+
+	t.Run("bits 8", func(t *testing.T) {
+		got, err := ExpandStatuses(compressRaw(t, []byte{7, 9}), 8, 0)
+		require.NoError(t, err)
+		assert.Equal(t, []uint8{7, 9}, got)
+	})
+}
+
+func TestExpandStatuses_Limits(t *testing.T) {
+	lst := compressRaw(t, make([]byte, 1000))
+
+	for _, bits := range []int{0, 3, 5, 16, -1} {
+		_, err := ExpandStatuses(lst, bits, 0)
+		require.Error(t, err, "bits %d", bits)
+		assert.Contains(t, err.Error(), "unsupported status list bits")
+	}
+
+	// 1000 bytes at bits=1 hold 8000 entries.
+	_, err := ExpandStatuses(lst, 1, 8000)
+	require.NoError(t, err)
+	_, err = ExpandStatuses(lst, 1, 7992)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds maximum size")
+
+	// Padding in the last byte is allowed.
+	_, err = ExpandStatuses(compressRaw(t, make([]byte, 1)), 1, 5)
+	require.NoError(t, err)
+}
+
+func TestStatusAt(t *testing.T) {
+	raw := []byte{0xb9, 0xa3}
+	want := []uint8{1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1}
+	for i, w := range want {
+		got, err := StatusAt(raw, 1, int64(i))
+		require.NoError(t, err)
+		assert.Equal(t, w, got, "index %d", i)
+	}
+
+	_, err := StatusAt(raw, 1, 16)
+	assert.ErrorIs(t, err, ErrInvalidStatusIndex)
+	_, err = StatusAt(raw, 1, -1)
+	assert.ErrorIs(t, err, ErrInvalidStatusIndex)
+	_, err = StatusAt(raw, 3, 0)
+	assert.Error(t, err)
+}
+
+func TestGetStatusFromJWT_HonoursBits(t *testing.T) {
+	lst := base64.RawURLEncoding.EncodeToString(compressRaw(t, []byte{0xb9, 0xa3}))
+	claims := &JWTClaims{StatusList: StatusListClaim{Bits: 1, Lst: lst}}
+
+	// Entry 9 is bit 1 of byte 1, not byte 9.
+	got, err := GetStatusFromJWT(claims, 9)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(1), got)
+
+	_, err = GetStatusFromJWT(claims, 16)
+	assert.Error(t, err)
+
+	claims.StatusList.Bits = 3
+	_, err = GetStatusFromJWT(claims, 0)
+	assert.Error(t, err)
+}
+
+func TestGetStatusFromCWT_HonoursBits(t *testing.T) {
+	lst := compressRaw(t, []byte{0xb9, 0xa3})
+	claims := map[int]any{cwtClaimStatusList: map[any]any{int64(1): uint64(1), int64(2): lst}}
+
+	got, err := GetStatusFromCWT(claims, 9)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(1), got)
+
+	_, err = GetStatusFromCWT(claims, 16)
+	assert.Error(t, err)
+
+	claims[cwtClaimStatusList] = map[int]any{2: lst}
+	_, err = GetStatusFromCWT(claims, 0)
+	require.Error(t, err, "missing bits must be rejected")
+}
+
+// A huge configured limit must not overflow the byte limit and reject a valid list.
+func TestExpandStatuses_HugeLimit(t *testing.T) {
+	for _, bits := range []int{1, 2, 4, 8} {
+		for _, limit := range []int64{math.MaxInt64, math.MaxInt64 - 1, 1 << 62} {
+			got, err := ExpandStatuses(compressRaw(t, []byte{0x01}), bits, limit)
+			require.NoError(t, err, "bits %d limit %d", bits, limit)
+			assert.Len(t, got, 8/bits)
+		}
+	}
 }
