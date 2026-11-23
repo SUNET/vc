@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -614,5 +615,44 @@ func TestStatusListChecker_JWTNullClaims(t *testing.T) {
 		tok, err := checker.parseJWTStatusList(t.Context(), uri, sign(map[string]any{"ttl": 0}))
 		require.NoError(t, err)
 		assert.True(t, tok.ttlSet)
+	})
+}
+
+func TestStatusListChecker_JWTQuotedClaims(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil)
+
+	compressed, err := tokenstatuslist.CompressStatuses([]uint8{0})
+	require.NoError(t, err)
+	statusList := map[string]any{"bits": 8, "lst": base64.RawURLEncoding.EncodeToString(compressed)}
+
+	sign := func(extra map[string]any) []byte {
+		claims := jwt.MapClaims{"iss": "x", "sub": uri, "status_list": statusList}
+		maps.Copy(claims, extra)
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+		signed, err := tok.SignedString(key)
+		require.NoError(t, err)
+		return []byte(signed)
+	}
+
+	future := time.Now().Add(time.Hour).Unix()
+	for name, extra := range map[string]map[string]any{
+		"quoted exp": {"exp": strconv.FormatInt(future, 10)},
+		"quoted ttl": {"ttl": "60"},
+	} {
+		t.Run(name+" is rejected", func(t *testing.T) {
+			_, err := checker.parseJWTStatusList(t.Context(), uri, sign(extra))
+			require.Error(t, err)
+		})
+	}
+
+	t.Run("numeric exp and ttl are accepted", func(t *testing.T) {
+		tok, err := checker.parseJWTStatusList(t.Context(), uri, sign(map[string]any{"exp": future, "ttl": 60}))
+		require.NoError(t, err)
+		assert.False(t, tok.exp.IsZero())
+		assert.Equal(t, time.Minute, tok.ttl)
 	})
 }

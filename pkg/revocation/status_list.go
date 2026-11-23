@@ -56,7 +56,7 @@ type statusListJWTClaims struct {
 	StatusList *tokenstatuslist.StatusListClaim `json:"status_list"`
 }
 
-// UnmarshalJSON rejects an explicit null exp or ttl, which encoding/json would otherwise read as omitted.
+// UnmarshalJSON rejects a null or quoted exp or ttl, which encoding/json would otherwise read as omitted or as a number.
 func (c *statusListJWTClaims) UnmarshalJSON(data []byte) error {
 	type plain statusListJWTClaims
 	if err := json.Unmarshal(data, (*plain)(c)); err != nil {
@@ -71,8 +71,13 @@ func (c *statusListJWTClaims) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	for name, v := range map[string]json.RawMessage{"exp": raw.Exp, "ttl": raw.TTL} {
-		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+		v = bytes.TrimSpace(v)
+		switch {
+		case len(v) == 0:
+		case bytes.Equal(v, []byte("null")):
 			return fmt.Errorf("%s claim must not be null", name)
+		case v[0] == '"':
+			return fmt.Errorf("%s claim must be a JSON number", name)
 		}
 	}
 	return nil
