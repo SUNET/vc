@@ -46,6 +46,7 @@
         "externalapi",
         "extldflags",
         "fsnotify",
+        "fxamacker",
         "ginratelimit",
         "GOARCH",
         "gobuild",
