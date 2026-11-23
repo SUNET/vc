@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -56,28 +57,57 @@ type statusListJWTClaims struct {
 	StatusList *tokenstatuslist.StatusListClaim `json:"status_list"`
 }
 
-// UnmarshalJSON rejects a null or quoted exp or ttl, which encoding/json would otherwise read as omitted or as a number.
+var (
+	statusListJWTClaimNames = []string{"iss", "sub", "aud", "exp", "nbf", "iat", "jti", "ttl", "status_list"}
+	statusListMemberNames   = []string{"bits", "lst", "aggregation_uri"}
+)
+
+// UnmarshalJSON rejects what encoding/json would read differently from a case-sensitive JWT parser:
+// a null or quoted exp or ttl, and a claim spelled with different case such as EXP.
 func (c *statusListJWTClaims) UnmarshalJSON(data []byte) error {
 	type plain statusListJWTClaims
 	if err := json.Unmarshal(data, (*plain)(c)); err != nil {
 		return err
 	}
 
-	var raw struct {
-		Exp json.RawMessage `json:"exp"`
-		TTL json.RawMessage `json:"ttl"`
-	}
+	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	for name, v := range map[string]json.RawMessage{"exp": raw.Exp, "ttl": raw.TTL} {
-		v = bytes.TrimSpace(v)
+	if err := rejectCaseVariants(raw, statusListJWTClaimNames); err != nil {
+		return err
+	}
+
+	if sl := raw["status_list"]; len(sl) > 0 {
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(sl, &members); err != nil {
+			return err
+		}
+		if err := rejectCaseVariants(members, statusListMemberNames); err != nil {
+			return err
+		}
+	}
+
+	for _, name := range []string{"exp", "ttl"} {
+		v := bytes.TrimSpace(raw[name])
 		switch {
 		case len(v) == 0:
 		case bytes.Equal(v, []byte("null")):
 			return fmt.Errorf("%s claim must not be null", name)
 		case v[0] == '"':
 			return fmt.Errorf("%s claim must be a JSON number", name)
+		}
+	}
+	return nil
+}
+
+// rejectCaseVariants fails on a key that matches a known name only after case folding.
+func rejectCaseVariants(m map[string]json.RawMessage, known []string) error {
+	for key := range m {
+		for _, name := range known {
+			if key != name && strings.EqualFold(key, name) {
+				return fmt.Errorf("claim %q must be spelled %q", key, name)
+			}
 		}
 	}
 	return nil

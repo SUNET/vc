@@ -646,3 +646,38 @@ func TestStatusListChecker_JWTQuotedClaims(t *testing.T) {
 		assert.Equal(t, time.Minute, tok.ttl)
 	})
 }
+
+// A claim spelled with different case is read differently by encoding/json than by a case-sensitive parser.
+func TestStatusListChecker_JWTCaseVariantClaims(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	checker, sign := jwtClaimsFixture(t, uri)
+	future := time.Now().Add(time.Hour).Unix()
+
+	for name, extra := range map[string]map[string]any{
+		"EXP beside exp": {"exp": 1, "EXP": future},
+		"EXP alone":      {"EXP": future},
+		"TTL beside ttl": {"ttl": 0, "TTL": 3600},
+		"Sub":            {"Sub": uri},
+		"Status_List":    {"Status_List": map[string]any{"bits": 8, "lst": "x"}},
+	} {
+		t.Run(name+" is rejected", func(t *testing.T) {
+			_, err := checker.parseJWTStatusList(t.Context(), uri, sign(extra))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must be spelled")
+		})
+	}
+
+	t.Run("case variant of a status_list member is rejected", func(t *testing.T) {
+		_, err := checker.parseJWTStatusList(t.Context(), uri, sign(map[string]any{
+			"status_list": map[string]any{"bits": 8, "LST": "x", "lst": "x"},
+		}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be spelled")
+	})
+
+	t.Run("unrelated claims and exact names are accepted", func(t *testing.T) {
+		tok, err := checker.parseJWTStatusList(t.Context(), uri, sign(map[string]any{"exp": future, "ttl": 60, "custom": 1, "Custom": 2}))
+		require.NoError(t, err)
+		assert.False(t, tok.exp.IsZero())
+	})
+}
