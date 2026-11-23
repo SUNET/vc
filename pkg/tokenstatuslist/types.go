@@ -191,25 +191,90 @@ func CompressAndEncode(statuses []uint8) (string, error) {
 // This prevents zip-bomb attacks where a small compressed payload expands to exhaust memory.
 const maxDecompressedSize = 50 << 20
 
+// DefaultMaxEntries is the default limit on the entries in one status list read by a verifier.
+const DefaultMaxEntries = 1 << 24
+
 // DecompressStatuses decompresses a zlib-compressed status byte array.
 // The decompressed output is limited to maxDecompressedSize to prevent zip-bomb attacks.
 func DecompressStatuses(compressed []byte) ([]uint8, error) {
+	return DecompressStatusesLimit(compressed, maxDecompressedSize)
+}
+
+// DecompressStatusesLimit is DecompressStatuses with a caller-chosen limit on the decompressed size in bytes.
+func DecompressStatusesLimit(compressed []byte, maxBytes int64) ([]uint8, error) {
 	r, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
 
-	limited := io.LimitReader(r, maxDecompressedSize+1)
+	limited := io.LimitReader(r, maxBytes+1)
 	b, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(b)) > maxDecompressedSize {
-		return nil, fmt.Errorf("decompressed status list exceeds maximum size (%d bytes)", maxDecompressedSize)
+	if int64(len(b)) > maxBytes {
+		return nil, fmt.Errorf("decompressed status list exceeds maximum size (%d bytes)", maxBytes)
 	}
 
 	return b, nil
+}
+
+func validateBits(bits int) error {
+	switch bits {
+	case 1, 2, 4, 8:
+		return nil
+	}
+	return fmt.Errorf("unsupported status list bits value: %d", bits)
+}
+
+// ExpandStatuses decompresses lst and returns one status value per byte for any bits value.
+// A list may hold up to maxEntries entries plus padding to the next byte;
+// zero or less means DefaultMaxEntries.
+func ExpandStatuses(lst []byte, bits int, maxEntries int64) ([]uint8, error) {
+	if err := validateBits(bits); err != nil {
+		return nil, err
+	}
+	if maxEntries <= 0 {
+		maxEntries = DefaultMaxEntries
+	}
+
+	raw, err := DecompressStatusesLimit(lst, (maxEntries*int64(bits)+7)/8)
+	if err != nil {
+		return nil, err
+	}
+	if bits == 8 {
+		return raw, nil
+	}
+
+	perByte := 8 / bits
+	mask := uint8(1<<bits - 1)
+	out := make([]uint8, len(raw)*perByte)
+	for i, b := range raw {
+		for j := range perByte {
+			out[i*perByte+j] = (b >> (j * bits)) & mask
+		}
+	}
+	return out, nil
+}
+
+// StatusAt returns the entry at index from a decompressed list packed with the given bits,
+// least significant bits first (draft-ietf-oauth-status-list Section 4.1).
+func StatusAt(raw []uint8, bits int, index int64) (uint8, error) {
+	if err := validateBits(bits); err != nil {
+		return 0, err
+	}
+	if index < 0 {
+		return 0, ErrInvalidStatusIndex
+	}
+	perByte := int64(8 / bits)
+	byteIdx := index / perByte
+	if byteIdx >= int64(len(raw)) {
+		return 0, ErrInvalidStatusIndex
+	}
+	shift := uint((index % perByte) * int64(bits))
+	mask := uint8(1<<bits - 1)
+	return (raw[byteIdx] >> shift) & mask, nil
 }
 
 // DecodeAndDecompress decodes a base64url string and decompresses it.

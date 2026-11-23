@@ -1314,6 +1314,9 @@ type RevocationConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
 	// CacheTTL is the duration in seconds to cache fetched status list tokens.
 	CacheTTL int `yaml:"cache_ttl" json:"cache_ttl" default:"300"`
+	// MaxStatusListEntries is the largest number of entries accepted in one status list.
+	// Each entry costs one byte of memory per cached list, whatever its bits value.
+	MaxStatusListEntries int64 `yaml:"max_status_list_entries" json:"max_status_list_entries" default:"16777216" validate:"omitempty,min=1"`
 	// FailOpen determines behavior when the status list is unreachable or unparseable:
 	//   - true: log warning and allow the credential through (fail-open)
 	//   - false: reject the credential (fail-closed)

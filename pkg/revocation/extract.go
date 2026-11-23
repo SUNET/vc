@@ -25,8 +25,8 @@ func ExtractStatusListReference(claims map[string]any) *Reference {
 		return nil
 	}
 
-	uri, _ := statusList["uri"].(string)
-	if uri == "" {
+	uri, ok := statusList["uri"].(string)
+	if !ok || uri == "" {
 		return nil
 	}
 

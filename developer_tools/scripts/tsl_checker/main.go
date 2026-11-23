@@ -412,22 +412,7 @@ func statusFromJWTClaims(claims *tokenstatuslist.JWTClaims, idx int64) (uint8, e
 
 // statusAt unpacks a single status entry from the decompressed lst.
 func statusAt(lst []byte, bits int, idx int64) (uint8, error) {
-	switch bits {
-	case 1, 2, 4, 8:
-	default:
-		return 0, fmt.Errorf("unsupported status list bits value: %d", bits)
-	}
-	if idx < 0 {
-		return 0, fmt.Errorf("index out of range: %d", idx)
-	}
-	entriesPerByte := int64(8 / bits)
-	byteIdx := idx / entriesPerByte
-	if byteIdx >= int64(len(lst)) {
-		return 0, fmt.Errorf("index %d out of range for status list of %d entries", idx, int64(len(lst))*entriesPerByte)
-	}
-	shift := uint((idx % entriesPerByte) * int64(bits))
-	mask := uint8((1 << bits) - 1)
-	return (lst[byteIdx] >> shift) & mask, nil
+	return tokenstatuslist.StatusAt(lst, bits, idx)
 }
 
 func parseJWTClaimsUnverified(tokenStr string) (*tokenstatuslist.JWTClaims, error) {

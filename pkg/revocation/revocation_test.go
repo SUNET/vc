@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/base64"
 	"maps"
 	"math"
 	"net/http"
@@ -184,7 +185,7 @@ func TestStatusListChecker_RejectsBadTokens(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("jwt without typ", func(t *testing.T) {
-		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": "u", "status_list": map[string]any{"lst": lst}})
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": "u", "status_list": map[string]any{"bits": 8, "lst": lst}})
 		signed, err := tok.SignedString(key)
 		require.NoError(t, err)
 		checker, srv, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, []byte(signed))
@@ -219,7 +220,7 @@ func TestStatusListChecker_RejectsBadTokens(t *testing.T) {
 
 	t.Run("jwt with exp 0", func(t *testing.T) {
 		const uri = "https://registry.example.com/statuslists/1"
-		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": uri, "exp": 0, "status_list": map[string]any{"lst": lst}})
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": uri, "exp": 0, "status_list": map[string]any{"bits": 8, "lst": lst}})
 		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
 		signed, err := tok.SignedString(key)
 		require.NoError(t, err)
@@ -307,27 +308,27 @@ func TestCWTToken_NumericClaims(t *testing.T) {
 	lst, err := tokenstatuslist.CompressStatuses([]uint8{0, 1})
 	require.NoError(t, err)
 	claims := func(extra map[int]any) map[int]any {
-		m := map[int]any{cwtClaimSub: uri, cwtClaimStatusList: map[int]any{statusListKeyLst: lst}}
+		m := map[int]any{cwtClaimSub: uri, cwtClaimStatusList: map[int]any{1: 8, statusListKeyLst: lst}}
 		maps.Copy(m, extra)
 		return m
 	}
 	now := time.Now()
 
 	t.Run("float exp in the past is rejected", func(t *testing.T) {
-		_, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: float64(now.Add(-time.Hour).Unix()) + 0.5}))
+		_, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: float64(now.Add(-time.Hour).Unix()) + 0.5}), 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expired")
 	})
 
 	t.Run("float exp in the future sets the deadline", func(t *testing.T) {
-		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: float64(now.Add(time.Hour).Unix()) + 0.5}))
+		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: float64(now.Add(time.Hour).Unix()) + 0.5}), 0)
 		require.NoError(t, err)
 		assert.WithinDuration(t, now.Add(time.Hour), tok.exp, 2*time.Second)
 	})
 
 	t.Run("integer widths are accepted", func(t *testing.T) {
 		for _, exp := range []any{int64(now.Add(time.Hour).Unix()), uint64(now.Add(time.Hour).Unix()), int(now.Add(time.Hour).Unix())} {
-			tok, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: exp}))
+			tok, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: exp}), 0)
 			require.NoError(t, err, "%T", exp)
 			assert.False(t, tok.exp.IsZero())
 		}
@@ -335,32 +336,32 @@ func TestCWTToken_NumericClaims(t *testing.T) {
 
 	t.Run("present but non-numeric exp is rejected", func(t *testing.T) {
 		for _, exp := range []any{"tomorrow", []byte{1}, math.NaN(), math.Inf(1), nil} {
-			_, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: exp}))
+			_, err := cwtToken(uri, claims(map[int]any{cwtClaimExp: exp}), 0)
 			require.Error(t, err, "%v", exp)
 			assert.Contains(t, err.Error(), "invalid exp")
 		}
 	})
 
 	t.Run("ttl accepts integers and floats", func(t *testing.T) {
-		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: int64(60)}))
+		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: int64(60)}), 0)
 		require.NoError(t, err)
 		assert.Equal(t, time.Minute, tok.ttl)
 
-		tok, err = cwtToken(uri, claims(map[int]any{cwtClaimTTL: 1.5}))
+		tok, err = cwtToken(uri, claims(map[int]any{cwtClaimTTL: 1.5}), 0)
 		require.NoError(t, err)
 		assert.Equal(t, 1500*time.Millisecond, tok.ttl)
 	})
 
 	t.Run("present but invalid ttl is rejected", func(t *testing.T) {
 		for _, ttl := range []any{"soon", -1, math.NaN(), 1e30} {
-			_, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: ttl}))
+			_, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: ttl}), 0)
 			require.Error(t, err, "%v", ttl)
 			assert.Contains(t, err.Error(), "invalid ttl")
 		}
 	})
 
 	t.Run("absent exp and ttl are fine", func(t *testing.T) {
-		tok, err := cwtToken(uri, claims(nil))
+		tok, err := cwtToken(uri, claims(nil), 0)
 		require.NoError(t, err)
 		assert.True(t, tok.exp.IsZero())
 		assert.Zero(t, tok.ttl)
@@ -368,7 +369,7 @@ func TestCWTToken_NumericClaims(t *testing.T) {
 	})
 
 	t.Run("explicit zero ttl is recorded as set", func(t *testing.T) {
-		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: int64(0)}))
+		tok, err := cwtToken(uri, claims(map[int]any{cwtClaimTTL: int64(0)}), 0)
 		require.NoError(t, err)
 		assert.True(t, tok.ttlSet)
 		assert.Zero(t, tok.ttl)
@@ -387,7 +388,7 @@ func TestStatusListChecker_ExplicitZeroTTLIsNotCached(t *testing.T) {
 		hits.Add(1)
 		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 			"iss": "x", "sub": "http://" + r.Host + r.URL.Path, "ttl": 0,
-			"status_list": map[string]any{"lst": lst},
+			"status_list": map[string]any{"bits": 8, "lst": lst},
 		})
 		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
 		signed, err := tok.SignedString(key)
@@ -479,4 +480,97 @@ func TestStatusListChecker_Supports(t *testing.T) {
 
 	assert.True(t, checker.Supports(SchemeStatusList))
 	assert.False(t, checker.Supports(Scheme("ocsp")))
+}
+
+func signedJWTWithBits(t *testing.T, key *ecdsa.PrivateKey, sub string, statusList map[string]any) []byte {
+	t.Helper()
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "x", "sub": sub, "status_list": statusList})
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	signed, err := tok.SignedString(key)
+	require.NoError(t, err)
+	return []byte(signed)
+}
+
+// Entry 9 of a bits=1 list is bit 1 of byte 1; reading byte 9 would hide a revocation.
+func TestStatusListChecker_PackedBits(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil)
+
+	raw := make([]byte, 16)
+	raw[1] = 0b10 // entry 9
+	compressed, err := tokenstatuslist.CompressStatuses(raw)
+	require.NoError(t, err)
+	lst := base64.RawURLEncoding.EncodeToString(compressed)
+
+	t.Run("jwt bits 1", func(t *testing.T) {
+		tok, err := checker.parseJWTStatusList(t.Context(), uri, signedJWTWithBits(t, key, uri, map[string]any{"bits": 1, "lst": lst}))
+		require.NoError(t, err)
+		require.Len(t, tok.statuses, 128)
+		assert.Equal(t, tokenstatuslist.StatusInvalid, tok.statuses[9])
+		assert.Equal(t, tokenstatuslist.StatusValid, tok.statuses[8])
+		assert.Equal(t, tokenstatuslist.StatusValid, tok.statuses[10])
+	})
+
+	t.Run("jwt bad bits", func(t *testing.T) {
+		for _, bits := range []any{nil, "8", 0, 3, 16, 1.5, -1} {
+			_, err := checker.parseJWTStatusList(t.Context(), uri, signedJWTWithBits(t, key, uri, map[string]any{"bits": bits, "lst": lst}))
+			require.Error(t, err, "bits %v", bits)
+		}
+	})
+
+	t.Run("jwt missing bits", func(t *testing.T) {
+		_, err := checker.parseJWTStatusList(t.Context(), uri, signedJWTWithBits(t, key, uri, map[string]any{"lst": lst}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bits")
+	})
+
+	t.Run("cwt bits 1", func(t *testing.T) {
+		claims := map[int]any{cwtClaimSub: uri, cwtClaimStatusList: map[int]any{1: 1, statusListKeyLst: compressed}}
+		tok, err := cwtToken(uri, claims, 0)
+		require.NoError(t, err)
+		assert.Equal(t, tokenstatuslist.StatusInvalid, tok.statuses[9])
+		assert.Equal(t, tokenstatuslist.StatusValid, tok.statuses[8])
+	})
+
+	t.Run("cwt bad or missing bits", func(t *testing.T) {
+		for _, sl := range []map[int]any{
+			{statusListKeyLst: compressed},
+			{1: 3, statusListKeyLst: compressed},
+			{1: "8", statusListKeyLst: compressed},
+		} {
+			_, err := cwtToken(uri, map[int]any{cwtClaimSub: uri, cwtClaimStatusList: sl}, 0)
+			require.Error(t, err, "%v", sl)
+		}
+	})
+}
+
+func TestStatusListChecker_MaxEntries(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	compressed, err := tokenstatuslist.CompressStatuses(make([]byte, 100)) // 800 entries at bits=1
+	require.NoError(t, err)
+	lst := base64.RawURLEncoding.EncodeToString(compressed)
+	token := signedJWTWithBits(t, key, uri, map[string]any{"bits": 1, "lst": lst})
+
+	t.Run("within limit", func(t *testing.T) {
+		checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil, WithMaxEntries(800))
+		tok, err := checker.parseJWTStatusList(t.Context(), uri, token)
+		require.NoError(t, err)
+		assert.Len(t, tok.statuses, 800)
+	})
+
+	t.Run("over limit", func(t *testing.T) {
+		checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil, WithMaxEntries(792))
+		_, err := checker.parseJWTStatusList(t.Context(), uri, token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum size")
+	})
+
+	t.Run("default is 2^24", func(t *testing.T) {
+		assert.Equal(t, int64(1<<24), int64(tokenstatuslist.DefaultMaxEntries))
+	})
 }

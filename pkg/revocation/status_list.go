@@ -3,6 +3,7 @@ package revocation
 import (
 	"context"
 	"crypto"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +44,14 @@ type StatusListChecker struct {
 	cache       cache.Cache[[]uint8]
 	keyResolver KeyResolver
 	maxCacheTTL time.Duration
+	maxEntries  int64
+}
+
+// statusListJWTClaims is the claim set of a Status List Token JWT.
+type statusListJWTClaims struct {
+	jwt.RegisteredClaims
+	TTL        *float64                         `json:"ttl"`
+	StatusList *tokenstatuslist.StatusListClaim `json:"status_list"`
 }
 
 // statusListToken is a verified Status List Token reduced to what the checker needs.
@@ -82,6 +91,14 @@ func WithCache(ch cache.Cache[[]uint8]) StatusListCheckerOption {
 func WithMaxCacheTTL(d time.Duration) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.maxCacheTTL = d
+	}
+}
+
+// WithMaxEntries caps the entries accepted in one status list. Zero or less means
+// tokenstatuslist.DefaultMaxEntries. Memory use is about one byte per entry per cached list.
+func WithMaxEntries(n int64) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.maxEntries = n
 	}
 }
 
@@ -268,7 +285,14 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, 
 	if err != nil {
 		return nil, err
 	}
-	issuer, _ := parts.claims[cwtClaimIss].(string)
+	var issuer string
+	if raw, present := parts.claims[cwtClaimIss]; present {
+		s, ok := raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid iss claim in CWT: %T", raw)
+		}
+		issuer = s
+	}
 
 	key, err := c.keyResolver.ResolveKey(ctx, issuer, parts.kid)
 	if err != nil {
@@ -279,7 +303,7 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, 
 	}
 
 	// Claims are only trusted after the signature check above.
-	return cwtToken(uri, parts.claims)
+	return cwtToken(uri, parts.claims, c.maxEntries)
 }
 
 // cwtParts is a decoded but not yet verified Status List Token CWT.
@@ -305,10 +329,22 @@ func decodeCWT(data []byte) (*cwtParts, error) {
 		return nil, fmt.Errorf("invalid COSE_Sign1 structure")
 	}
 
-	protectedBytes, _ := components[0].([]byte)
-	unprotected, _ := components[1].(map[any]any)
-	payloadBytes, _ := components[2].([]byte)
-	signature, _ := components[3].([]byte)
+	protectedBytes, ok := components[0].([]byte)
+	if !ok {
+		return nil, errors.New("invalid COSE_Sign1 protected header")
+	}
+	unprotected, ok := components[1].(map[any]any)
+	if !ok {
+		return nil, errors.New("invalid COSE_Sign1 unprotected header")
+	}
+	payloadBytes, ok := components[2].([]byte)
+	if !ok {
+		return nil, errors.New("invalid COSE_Sign1 payload")
+	}
+	signature, ok := components[3].([]byte)
+	if !ok {
+		return nil, errors.New("invalid COSE_Sign1 signature")
+	}
 
 	sign1 := &mdoc.COSESign1{
 		Protected:   protectedBytes,
@@ -322,11 +358,17 @@ func decodeCWT(data []byte) (*cwtParts, error) {
 	if err := cbor.Unmarshal(protectedBytes, &headers); err != nil {
 		return nil, fmt.Errorf("failed to decode CWT protected headers: %w", err)
 	}
-	kid, _ := headers[mdoc.HeaderKeyID].(string)
-	if kidBytes, ok := headers[mdoc.HeaderKeyID].([]byte); ok {
-		kid = string(kidBytes)
+	var kid string
+	switch v := headers[mdoc.HeaderKeyID].(type) {
+	case nil:
+	case string:
+		kid = v
+	case []byte:
+		kid = string(v)
+	default:
+		return nil, fmt.Errorf("invalid CWT kid header: %T", v)
 	}
-	if typ, _ := headers[cwtHeaderTyp].(string); typ != tokenstatuslist.CWTTypHeader {
+	if typ, ok := headers[cwtHeaderTyp].(string); !ok || typ != tokenstatuslist.CWTTypHeader {
 		return nil, fmt.Errorf("invalid CWT typ header: expected %s", tokenstatuslist.CWTTypHeader)
 	}
 
@@ -364,8 +406,8 @@ func verifyCWTSignature(sign1 *mdoc.COSESign1, key any) error {
 
 // cwtToken turns verified CWT claims into a statusListToken. A present exp or
 // ttl that is not a usable number is an error, never silently ignored.
-func cwtToken(uri string, claims map[int]any) (*statusListToken, error) {
-	if sub, _ := claims[cwtClaimSub].(string); sub != uri {
+func cwtToken(uri string, claims map[int]any, maxEntries int64) (*statusListToken, error) {
+	if sub, ok := claims[cwtClaimSub].(string); !ok || sub != uri {
 		return nil, fmt.Errorf("status list token sub %q does not match referenced uri %q", sub, uri)
 	}
 
@@ -393,37 +435,16 @@ func cwtToken(uri string, claims map[int]any) (*statusListToken, error) {
 	if !ok {
 		return nil, errors.New("status_list claim not found in CWT")
 	}
-	lst, err := cwtLst(statusListRaw)
+	lst, bits, err := tokenstatuslist.ParseCWTStatusListClaim(statusListRaw)
 	if err != nil {
 		return nil, err
 	}
 
-	tok.statuses, err = tokenstatuslist.DecompressStatuses(lst)
+	tok.statuses, err = tokenstatuslist.ExpandStatuses(lst, bits, maxEntries)
 	if err != nil {
 		return nil, err
 	}
 	return tok, nil
-}
-
-// cwtLst extracts the compressed lst bytes (key 2) from a CWT status_list claim.
-func cwtLst(raw any) ([]byte, error) {
-	var lst []byte
-	switch sl := raw.(type) {
-	case map[any]any:
-		for k, v := range sl {
-			if n, ok := cwtInt(k); ok && n == statusListKeyLst {
-				lst, _ = v.([]byte)
-			}
-		}
-	case map[int]any:
-		lst, _ = sl[statusListKeyLst].([]byte)
-	default:
-		return nil, fmt.Errorf("invalid status_list claim format: %T", raw)
-	}
-	if lst == nil {
-		return nil, errors.New("lst not found in status_list claim")
-	}
-	return lst, nil
 }
 
 // cwtInt reads an integer that CBOR may decode as any integer width.
@@ -481,16 +502,25 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 
 	// Build a jwt.Keyfunc that delegates to the generic KeyResolver
 	keyFunc := func(token *jwt.Token) (any, error) {
-		claims, _ := token.Claims.(jwt.MapClaims)
-		issuer, _ := claims["iss"].(string)
-		kid, _ := token.Header["kid"].(string)
-		if issuer == "" {
+		claims, ok := token.Claims.(*statusListJWTClaims)
+		if !ok {
+			return nil, errors.New("unexpected status list token claims type")
+		}
+		if claims.Issuer == "" {
 			return nil, errors.New("status list token missing iss claim")
 		}
-		return c.keyResolver.ResolveKey(ctx, issuer, kid)
+		var kid string
+		if raw, present := token.Header["kid"]; present {
+			kid, ok = raw.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid kid header: %T", raw)
+			}
+		}
+		return c.keyResolver.ResolveKey(ctx, claims.Issuer, kid)
 	}
 
-	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{
+	claims := &statusListJWTClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, keyFunc, jwt.WithValidMethods([]string{
 		"ES256", "ES384", "ES512",
 		"RS256", "RS384", "RS512",
 		"PS256", "PS384", "PS512",
@@ -503,51 +533,39 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 		return nil, errors.New("invalid JWT token")
 	}
 
-	if typ, _ := token.Header["typ"].(string); typ != tokenstatuslist.JWTTypHeader {
+	if typ, ok := token.Header["typ"].(string); !ok || typ != tokenstatuslist.JWTTypHeader {
 		return nil, fmt.Errorf("invalid typ header: expected %s", tokenstatuslist.JWTTypHeader)
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, errors.New("failed to extract JWT claims")
+	if claims.Subject != uri {
+		return nil, fmt.Errorf("status list token sub %q does not match referenced uri %q", claims.Subject, uri)
 	}
 
-	if sub, _ := claims.GetSubject(); sub != uri {
-		return nil, fmt.Errorf("status list token sub %q does not match referenced uri %q", sub, uri)
-	}
-
-	statusListClaim, ok := claims["status_list"].(map[string]any)
-	if !ok {
+	if claims.StatusList == nil {
 		return nil, errors.New("status_list claim not found or invalid")
 	}
-
-	lst, ok := statusListClaim["lst"].(string)
-	if !ok {
+	if claims.StatusList.Lst == "" {
 		return nil, errors.New("lst not found in status_list claim")
 	}
 
 	tok := &statusListToken{}
-	// jwt.MapClaims treats exp 0 as absent, so a present exp is checked here.
-	if raw, ok := claims["exp"]; ok {
-		exp, ok := numericDate(raw)
-		if !ok {
-			return nil, fmt.Errorf("invalid exp claim: %v", raw)
-		}
-		if !exp.After(time.Now()) {
-			return nil, errors.New("status list token expired")
-		}
-		tok.exp = exp
+	if claims.ExpiresAt != nil {
+		tok.exp = claims.ExpiresAt.Time
 	}
-	if raw, ok := claims["ttl"]; ok {
-		ttl, ok := numericSeconds(raw)
+	if claims.TTL != nil {
+		ttl, ok := numericSeconds(*claims.TTL)
 		if !ok {
-			return nil, fmt.Errorf("invalid ttl claim: %v", raw)
+			return nil, fmt.Errorf("invalid ttl claim: %v", *claims.TTL)
 		}
 		tok.ttl = ttl
 		tok.ttlSet = true
 	}
 
-	tok.statuses, err = tokenstatuslist.DecodeAndDecompress(lst)
+	compressed, err := base64.RawURLEncoding.DecodeString(claims.StatusList.Lst)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode lst: %w", err)
+	}
+	tok.statuses, err = tokenstatuslist.ExpandStatuses(compressed, claims.StatusList.Bits, c.maxEntries)
 	if err != nil {
 		return nil, err
 	}

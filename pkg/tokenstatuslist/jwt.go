@@ -190,7 +190,7 @@ func GetStatusFromJWT(claims *JWTClaims, index int) (uint8, error) {
 		return 0, fmt.Errorf("failed to decode status list: %w", err)
 	}
 
-	return GetStatus(statuses, index)
+	return StatusAt(statuses, claims.StatusList.Bits, int64(index))
 }
 
 // publicKeyToJWK converts a crypto.PublicKey to a JWK map for embedding in JWT headers.
