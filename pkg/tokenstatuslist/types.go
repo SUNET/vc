@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"math"
 	"time"
 )
 
@@ -208,8 +209,11 @@ func DecompressStatusesLimit(compressed []byte, maxBytes int64) ([]uint8, error)
 	}
 	defer r.Close()
 
-	limited := io.LimitReader(r, maxBytes+1)
-	b, err := io.ReadAll(limited)
+	readLimit := maxBytes
+	if readLimit < math.MaxInt64 {
+		readLimit++
+	}
+	b, err := io.ReadAll(io.LimitReader(r, readLimit))
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +243,13 @@ func ExpandStatuses(lst []byte, bits int, maxEntries int64) ([]uint8, error) {
 		maxEntries = DefaultMaxEntries
 	}
 
-	raw, err := DecompressStatusesLimit(lst, (maxEntries*int64(bits)+7)/8)
+	perByte := int64(8 / bits)
+	maxBytes := maxEntries / perByte
+	if maxEntries%perByte != 0 {
+		maxBytes++
+	}
+
+	raw, err := DecompressStatusesLimit(lst, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -247,12 +257,11 @@ func ExpandStatuses(lst []byte, bits int, maxEntries int64) ([]uint8, error) {
 		return raw, nil
 	}
 
-	perByte := 8 / bits
 	mask := uint8(1<<bits - 1)
-	out := make([]uint8, len(raw)*perByte)
+	out := make([]uint8, len(raw)*int(perByte))
 	for i, b := range raw {
-		for j := range perByte {
-			out[i*perByte+j] = (b >> (j * bits)) & mask
+		for j := range int(perByte) {
+			out[i*int(perByte)+j] = (b >> (j * bits)) & mask
 		}
 	}
 	return out, nil

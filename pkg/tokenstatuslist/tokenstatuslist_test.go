@@ -10,6 +10,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -965,4 +966,15 @@ func TestGetStatusFromCWT_HonoursBits(t *testing.T) {
 	claims[cwtClaimStatusList] = map[int]any{2: lst}
 	_, err = GetStatusFromCWT(claims, 0)
 	require.Error(t, err, "missing bits must be rejected")
+}
+
+// A huge configured limit must not overflow the byte limit and reject a valid list.
+func TestExpandStatuses_HugeLimit(t *testing.T) {
+	for _, bits := range []int{1, 2, 4, 8} {
+		for _, limit := range []int64{math.MaxInt64, math.MaxInt64 - 1, 1 << 62} {
+			got, err := ExpandStatuses(compressRaw(t, []byte{0x01}), bits, limit)
+			require.NoError(t, err, "bits %d limit %d", bits, limit)
+			assert.Len(t, got, 8/bits)
+		}
+	}
 }
