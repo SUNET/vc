@@ -1,9 +1,11 @@
 package revocation
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -52,6 +54,28 @@ type statusListJWTClaims struct {
 	jwt.RegisteredClaims
 	TTL        *float64                         `json:"ttl"`
 	StatusList *tokenstatuslist.StatusListClaim `json:"status_list"`
+}
+
+// UnmarshalJSON rejects an explicit null exp or ttl, which encoding/json would otherwise read as omitted.
+func (c *statusListJWTClaims) UnmarshalJSON(data []byte) error {
+	type plain statusListJWTClaims
+	if err := json.Unmarshal(data, (*plain)(c)); err != nil {
+		return err
+	}
+
+	var raw struct {
+		Exp json.RawMessage `json:"exp"`
+		TTL json.RawMessage `json:"ttl"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for name, v := range map[string]json.RawMessage{"exp": raw.Exp, "ttl": raw.TTL} {
+		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return fmt.Errorf("%s claim must not be null", name)
+		}
+	}
+	return nil
 }
 
 // statusListToken is a verified Status List Token reduced to what the checker needs.

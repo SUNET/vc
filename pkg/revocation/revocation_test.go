@@ -574,3 +574,45 @@ func TestStatusListChecker_MaxEntries(t *testing.T) {
 		assert.Equal(t, int64(1<<24), int64(tokenstatuslist.DefaultMaxEntries))
 	})
 }
+
+func TestStatusListChecker_JWTNullClaims(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil)
+
+	compressed, err := tokenstatuslist.CompressStatuses([]uint8{0})
+	require.NoError(t, err)
+	statusList := map[string]any{"bits": 8, "lst": base64.RawURLEncoding.EncodeToString(compressed)}
+
+	sign := func(extra map[string]any) []byte {
+		claims := jwt.MapClaims{"iss": "x", "sub": uri, "status_list": statusList}
+		maps.Copy(claims, extra)
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+		tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+		signed, err := tok.SignedString(key)
+		require.NoError(t, err)
+		return []byte(signed)
+	}
+
+	for _, claim := range []string{"exp", "ttl"} {
+		t.Run(claim+" null is rejected", func(t *testing.T) {
+			_, err := checker.parseJWTStatusList(t.Context(), uri, sign(map[string]any{claim: nil}))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must not be null")
+		})
+	}
+
+	t.Run("omitted exp and ttl are accepted", func(t *testing.T) {
+		tok, err := checker.parseJWTStatusList(t.Context(), uri, sign(nil))
+		require.NoError(t, err)
+		assert.True(t, tok.exp.IsZero())
+		assert.False(t, tok.ttlSet)
+	})
+
+	t.Run("explicit zero ttl is still accepted", func(t *testing.T) {
+		tok, err := checker.parseJWTStatusList(t.Context(), uri, sign(map[string]any{"ttl": 0}))
+		require.NoError(t, err)
+		assert.True(t, tok.ttlSet)
+	})
+}
