@@ -381,21 +381,9 @@ func GetStatusFromCWT(claims map[int]any, index int) (uint8, error) {
 func ParseCWTStatusListClaim(raw any) (lst []byte, bits int, err error) {
 	switch sl := raw.(type) {
 	case map[any]any:
-		for k, v := range sl {
-			key, ok := cborInt(k)
-			if !ok {
-				continue
-			}
-			switch key {
-			case statusListKeyBits:
-				bits = cborSmallInt(v)
-			case statusListKeyLst:
-				b, ok := v.([]byte)
-				if !ok {
-					return nil, 0, fmt.Errorf("lst in status_list is not a byte string: %T", v)
-				}
-				lst = b
-			}
+		lst, bits, err = cwtStatusListFromAnyMap(sl)
+		if err != nil {
+			return nil, 0, err
 		}
 	case map[int]any:
 		bits = cborSmallInt(sl[statusListKeyBits])
@@ -416,6 +404,27 @@ func ParseCWTStatusListClaim(raw any) (lst []byte, bits int, err error) {
 	}
 	if err := validateBits(bits); err != nil {
 		return nil, 0, err
+	}
+	return lst, bits, nil
+}
+
+// cwtStatusListFromAnyMap reads lst and bits from a map whose keys CBOR decoded as any integer width.
+func cwtStatusListFromAnyMap(m map[any]any) (lst []byte, bits int, err error) {
+	for k, v := range m {
+		key, ok := cborInt(k)
+		if !ok {
+			continue
+		}
+		switch key {
+		case statusListKeyBits:
+			bits = cborSmallInt(v)
+		case statusListKeyLst:
+			b, ok := v.([]byte)
+			if !ok {
+				return nil, 0, fmt.Errorf("lst in status_list is not a byte string: %T", v)
+			}
+			lst = b
+		}
 	}
 	return lst, bits, nil
 }
