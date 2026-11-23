@@ -62,16 +62,16 @@ var (
 	statusListMemberNames   = []string{"bits", "lst", "aggregation_uri"}
 )
 
-// UnmarshalJSON rejects what encoding/json would read differently from a case-sensitive JWT parser:
-// a null or quoted exp or ttl, and a claim spelled with different case such as EXP.
+// UnmarshalJSON rejects what encoding/json would read differently from a strict JWT parser:
+// a repeated claim, a claim spelled with different case such as EXP, and a null or quoted exp, nbf or ttl.
 func (c *statusListJWTClaims) UnmarshalJSON(data []byte) error {
 	type plain statusListJWTClaims
 	if err := json.Unmarshal(data, (*plain)(c)); err != nil {
 		return err
 	}
 
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	raw, err := decodeUniqueObject(data)
+	if err != nil {
 		return err
 	}
 	if err := rejectCaseVariants(raw, statusListJWTClaimNames); err != nil {
@@ -79,17 +79,53 @@ func (c *statusListJWTClaims) UnmarshalJSON(data []byte) error {
 	}
 
 	if sl := raw["status_list"]; len(sl) > 0 {
-		var members map[string]json.RawMessage
-		if err := json.Unmarshal(sl, &members); err != nil {
-			return err
+		members, err := decodeUniqueObject(sl)
+		if err != nil {
+			return fmt.Errorf("status_list: %w", err)
 		}
 		if err := rejectCaseVariants(members, statusListMemberNames); err != nil {
 			return err
 		}
 	}
 
-	for _, name := range []string{"exp", "ttl"} {
-		v := bytes.TrimSpace(raw[name])
+	return requireNumbers(raw, "exp", "nbf", "ttl")
+}
+
+// decodeUniqueObject splits a JSON object into its members and fails on a repeated key.
+func decodeUniqueObject(data []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil {
+		return nil, err
+	} else if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, errors.New("must be a JSON object")
+	}
+
+	members := map[string]json.RawMessage{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected object key %v", keyTok)
+		}
+		if _, repeated := members[key]; repeated {
+			return nil, fmt.Errorf("claim %q appears more than once", key)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		members[key] = value
+	}
+	return members, nil
+}
+
+// requireNumbers rejects a present member that is null or a quoted string.
+func requireNumbers(members map[string]json.RawMessage, names ...string) error {
+	for _, name := range names {
+		v := bytes.TrimSpace(members[name])
 		switch {
 		case len(v) == 0:
 		case bytes.Equal(v, []byte("null")):

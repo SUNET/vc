@@ -681,3 +681,70 @@ func TestStatusListChecker_JWTCaseVariantClaims(t *testing.T) {
 		assert.False(t, tok.exp.IsZero())
 	})
 }
+
+// signRaw signs a token from a hand-written payload, so a repeated key can be sent as is.
+func signRaw(t *testing.T, key *ecdsa.PrivateKey, payload string) []byte {
+	t.Helper()
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, rawPayloadClaims(payload))
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	signed, err := tok.SignedString(key)
+	require.NoError(t, err)
+	return []byte(signed)
+}
+
+type rawPayloadClaims string
+
+func (r rawPayloadClaims) MarshalJSON() ([]byte, error) { return []byte(r), nil }
+
+func (r rawPayloadClaims) GetExpirationTime() (*jwt.NumericDate, error) { return nil, nil }
+func (r rawPayloadClaims) GetIssuedAt() (*jwt.NumericDate, error)       { return nil, nil }
+func (r rawPayloadClaims) GetNotBefore() (*jwt.NumericDate, error)      { return nil, nil }
+func (r rawPayloadClaims) GetIssuer() (string, error)                   { return "", nil }
+func (r rawPayloadClaims) GetSubject() (string, error)                  { return "", nil }
+func (r rawPayloadClaims) GetAudience() (jwt.ClaimStrings, error)       { return nil, nil }
+
+func TestStatusListChecker_JWTRepeatedAndNbfClaims(t *testing.T) {
+	const uri = "https://registry.example.com/statuslists/1"
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	checker, _, _ := serveToken(t, key, tokenstatuslist.MediaTypeJWT, nil)
+
+	compressed, err := tokenstatuslist.CompressStatuses([]uint8{0})
+	require.NoError(t, err)
+	list := `{"bits":8,"lst":"` + base64.RawURLEncoding.EncodeToString(compressed) + `"}`
+	base := `"iss":"x","sub":"` + uri + `","status_list":` + list
+
+	for name, payload := range map[string]struct{ json, want string }{
+		"exp repeated":         {`{` + base + `,"exp":4102444800,"exp":4102444801}`, "more than once"},
+		"exp repeated null":    {`{` + base + `,"exp":null,"exp":4102444800}`, "more than once"},
+		"ttl repeated":         {`{` + base + `,"ttl":0,"ttl":3600}`, "more than once"},
+		"sub repeated":         {`{` + base + `,"sub":"` + uri + `"}`, "more than once"},
+		"status_list repeated": {`{` + base + `,"status_list":` + list + `}`, "more than once"},
+		"bits repeated":        {`{"iss":"x","sub":"` + uri + `","status_list":{"bits":8,"bits":1,"lst":"x"}}`, "more than once"},
+		"nbf null":             {`{` + base + `,"nbf":null}`, "must not be null"},
+		"nbf quoted past":      {`{` + base + `,"nbf":"1"}`, "must be a JSON number"},
+		"nbf quoted future":    {`{` + base + `,"nbf":"4102444800"}`, "must be a JSON number"},
+	} {
+		t.Run(name+" is rejected", func(t *testing.T) {
+			_, err := checker.parseJWTStatusList(t.Context(), uri, signRaw(t, key, payload.json))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), payload.want)
+		})
+	}
+
+	t.Run("numeric nbf in the past is accepted", func(t *testing.T) {
+		_, err := checker.parseJWTStatusList(t.Context(), uri, signRaw(t, key, `{`+base+`,"nbf":1}`))
+		require.NoError(t, err)
+	})
+
+	t.Run("numeric nbf in the future is still rejected", func(t *testing.T) {
+		_, err := checker.parseJWTStatusList(t.Context(), uri, signRaw(t, key, `{`+base+`,"nbf":4102444800}`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not valid yet")
+	})
+
+	t.Run("a single claim of each name is accepted", func(t *testing.T) {
+		_, err := checker.parseJWTStatusList(t.Context(), uri, signRaw(t, key, `{`+base+`,"exp":4102444800,"ttl":60}`))
+		require.NoError(t, err)
+	})
+}
