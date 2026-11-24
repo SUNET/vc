@@ -336,7 +336,7 @@ func (c *Client) validatePrepareRequest(req *PrepareIssuanceRequest) (model.Cred
 func (c *Client) validateExternalAPIParams(req *PrepareIssuanceRequest, source model.CredentialSource, isExternalAPI bool) error {
 	set := req.ExternalAPI.Set()
 	switch {
-	case !isExternalAPI && len(set) > 0:
+	case !isExternalAPI && req.ExternalAPI != nil:
 		return helpers.NewErrorDetailsWithStatus("external_api_not_allowed",
 			fmt.Sprintf("scope %q is not served from an external API, so external_api is not accepted", req.Scope), 400)
 	case !isExternalAPI:

@@ -137,17 +137,22 @@ func TestPrepareIssuance_ExternalAPI(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("external_api on a datastore scope is refused", func(t *testing.T) {
-		client := newChallengeClient(t)
+	for name, ext := range map[string]*cache.ExternalAPIParams{
+		"an eduapi block": eduOffering("co-2"),
+		"an empty object": {},
+	} {
+		t.Run("external_api on a datastore scope is refused with "+name, func(t *testing.T) {
+			client := newChallengeClient(t)
 
-		_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
-			Scope:         challengeScope,
-			ExternalAPI:   eduOffering("co-2"),
-			IdentityMatch: portalMatch(),
+			_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+				Scope:         challengeScope,
+				ExternalAPI:   ext,
+				IdentityMatch: portalMatch(),
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "external_api")
 		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "external_api")
-	})
+	}
 
 	refused := []struct {
 		name       string
