@@ -482,7 +482,7 @@ github.com/kaptinlin/jsonschema/pkg/tagparser
 # github.com/kelseyhightower/envconfig v1.4.0
 ## explicit
 github.com/kelseyhightower/envconfig
-# github.com/klauspost/compress v1.20.4
+# github.com/klauspost/compress v1.20.5
 ## explicit; go 1.25
 github.com/klauspost/compress
 github.com/klauspost/compress/flate
