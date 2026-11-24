@@ -92,7 +92,7 @@ func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTyp
 	wg.Wait()
 
 	if personErr != nil {
-		return fmt.Errorf("oeapi: fetch person %s: %w", personID, personErr)
+		return personFetchError("oeapi", personID, personErr)
 	}
 
 	claims := person.Flatten()

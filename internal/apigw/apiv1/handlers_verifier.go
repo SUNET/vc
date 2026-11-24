@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -20,7 +19,6 @@ import (
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/oauth2client"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -775,8 +773,7 @@ func (c *Client) fetchExternalAPIDocuments(ctx context.Context, authCtx *cache.A
 		return nil, serverFault(fmt.Errorf("external API data source requested for %q but no remote is enabled", scope))
 	}
 	if err := c.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, personID, scope, authCtx.SessionID, authCtx.ExternalAPI); err != nil {
-		var statusErr *oauth2client.StatusError
-		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound {
+		if errors.Is(err, externalapi.ErrPersonNotFound) {
 			c.log.Error(err, "person not found at external API", "scope", scope, "remote", authCtx.RemoteName)
 			return nil, errors.New("no person found for the provided identity")
 		}

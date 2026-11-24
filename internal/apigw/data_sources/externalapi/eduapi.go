@@ -91,7 +91,7 @@ func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTy
 	wg.Wait()
 
 	if personErr != nil {
-		return fmt.Errorf("eduapi: fetch person %s: %w", personID, personErr)
+		return personFetchError("eduapi", personID, personErr)
 	}
 
 	// Flatten person data
