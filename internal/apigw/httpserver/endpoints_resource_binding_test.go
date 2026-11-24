@@ -431,14 +431,15 @@ type bindingHarness struct {
 	token   string
 }
 
-func newBindingHarness(t *testing.T) *bindingHarness {
+// newTestHelpers builds the http helpers of a service and installs their request
+// validator in gin's binding, as the real server does.
+func newTestHelpers(t *testing.T, name string) (*model.Cfg, *logger.Log, *trace.Tracer, *httphelpers.Client) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	ctx := t.Context()
 
-	log, err := logger.New("binding-test", "", false)
+	log, err := logger.New(name, t.TempDir(), true)
 	require.NoError(t, err)
-	tracer, err := trace.NewForTesting(ctx, "binding-test", log)
+	tracer, err := trace.NewForTesting(ctx, name, log)
 	require.NoError(t, err)
 	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
 	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
@@ -449,6 +450,16 @@ func newBindingHarness(t *testing.T) *bindingHarness {
 	previous := binding.Validator
 	binding.Validator = validator
 	t.Cleanup(func() { binding.Validator = previous })
+
+	return cfg, log, tracer, helpers
+}
+
+func newBindingHarness(t *testing.T) *bindingHarness {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	ctx := t.Context()
+
+	cfg, log, tracer, helpers := newTestHelpers(t, "binding-test")
 
 	priv, pubSet := generateKeyPair(t)
 	raw, err := json.Marshal(pubSet)

@@ -60,52 +60,43 @@ func oeapiOffering(course, programme string) *pkgcache.ExternalAPIParams {
 }
 
 func TestOEAPIAssociationChoice(t *testing.T) {
-	t.Run("no params keeps the first association of each kind", func(t *testing.T) {
-		data, err := fetchOEAPI(t, http.StatusOK, nil)
-		require.NoError(t, err)
-		assert.Equal(t, "ca-1", data["course.associationId"])
-		assert.Equal(t, "pa-1", data["programme.associationId"])
+	picks := []struct {
+		name       string
+		params     *pkgcache.ExternalAPIParams
+		wantCourse string
+		wantProg   string
+		wantState  string
+	}{
+		{"no params keeps the first association of each kind", nil, "ca-1", "pa-1", ""},
+		{"a requested course offering picks that association", oeapiOffering("co-2", ""), "ca-2", "pa-1", ""},
+		{"a requested programme offering picks that association", oeapiOffering("", "po-2"), "ca-1", "pa-2", ""},
+		{"a non-associated association is matched when its offering is requested", oeapiOffering("co-3", ""), "ca-3", "pa-1", "withdrawn"},
+	}
+	for _, tc := range picks {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := fetchOEAPI(t, http.StatusOK, tc.params)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCourse, data["course.associationId"])
+			assert.Equal(t, tc.wantProg, data["programme.associationId"])
+			if tc.wantState != "" {
+				assert.Equal(t, tc.wantState, data["course.state"])
+			}
+		})
+	}
+
+	t.Run("an offering the person is not associated with fails", func(t *testing.T) {
+		for _, params := range []*pkgcache.ExternalAPIParams{oeapiOffering("co-9", ""), oeapiOffering("", "po-9")} {
+			_, err := fetchOEAPI(t, http.StatusOK, params)
+			require.ErrorIs(t, err, ErrNotEnrolled)
+		}
 	})
 
-	t.Run("a requested course offering picks that association", func(t *testing.T) {
-		data, err := fetchOEAPI(t, http.StatusOK, oeapiOffering("co-2", ""))
-		require.NoError(t, err)
-		assert.Equal(t, "ca-2", data["course.associationId"])
-		assert.Equal(t, "pa-1", data["programme.associationId"], "an unset id keeps the first programme")
-	})
-
-	t.Run("a requested programme offering picks that association", func(t *testing.T) {
-		data, err := fetchOEAPI(t, http.StatusOK, oeapiOffering("", "po-2"))
-		require.NoError(t, err)
-		assert.Equal(t, "pa-2", data["programme.associationId"])
-		assert.Equal(t, "ca-1", data["course.associationId"])
-	})
-
-	t.Run("a course offering the person is not associated with fails", func(t *testing.T) {
-		_, err := fetchOEAPI(t, http.StatusOK, oeapiOffering("co-9", ""))
-		require.ErrorIs(t, err, ErrNotEnrolled)
-	})
-
-	t.Run("a non-associated association is matched when its offering is requested", func(t *testing.T) {
-		data, err := fetchOEAPI(t, http.StatusOK, oeapiOffering("co-3", ""))
-		require.NoError(t, err)
-		assert.Equal(t, "ca-3", data["course.associationId"])
-		assert.Equal(t, "withdrawn", data["course.state"])
-	})
-
-	t.Run("a programme offering the person is not associated with fails", func(t *testing.T) {
-		_, err := fetchOEAPI(t, http.StatusOK, oeapiOffering("", "po-9"))
-		require.ErrorIs(t, err, ErrNotEnrolled)
-	})
-
-	t.Run("a failed association call fails when its offering is requested", func(t *testing.T) {
+	t.Run("a failed association call fails only when its offering is requested", func(t *testing.T) {
 		_, err := fetchOEAPI(t, http.StatusInternalServerError, oeapiOffering("co-2", ""))
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, ErrNotEnrolled)
-	})
 
-	t.Run("a failed association call is tolerated without an offering", func(t *testing.T) {
-		_, err := fetchOEAPI(t, http.StatusInternalServerError, nil)
+		_, err = fetchOEAPI(t, http.StatusInternalServerError, nil)
 		require.NoError(t, err)
 	})
 }

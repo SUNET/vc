@@ -22,7 +22,6 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -358,20 +357,7 @@ func newPrepareEngine(t *testing.T, setup func(*gin.Engine)) (*gin.Engine, *prep
 	t.Helper()
 	ctx := t.Context()
 
-	log, err := logger.New("prepare-test", t.TempDir(), true)
-	require.NoError(t, err)
-	tracer, err := trace.NewForTesting(ctx, "prepare-test", log)
-	require.NoError(t, err)
-
-	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
-	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
-	require.NoError(t, err)
-
-	validator, err := helpers.Binding.Validator()
-	require.NoError(t, err)
-	previous := binding.Validator
-	binding.Validator = validator
-	t.Cleanup(func() { binding.Validator = previous })
+	cfg, log, tracer, helpers := newTestHelpers(t, "prepare-test")
 
 	api := &prepareAPI{}
 	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
