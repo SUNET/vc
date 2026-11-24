@@ -44,7 +44,15 @@ func NewEduAPI(ctx context.Context, remote model.Remote, scopes map[string]model
 // personID is the Edu-API sourcedId that identifies the student.
 // credentialType is the credential type being issued (e.g. "EuropeanStudentID").
 // vciSessionID is the OpenID4VCI session to associate the document with.
-func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string) error {
+// params may carry an education offering to issue for; it is matched whatever
+// the enrollment's status. Without one, the person's first active course
+// enrollment is used.
+func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string, params *pkgcache.ExternalAPIParams) error {
+	offeringID := ""
+	if params != nil && params.EduAPI != nil {
+		offeringID = params.EduAPI.EducationOfferingID
+	}
+
 	s.log.Info("Fetching Edu-API data for VCI",
 		"person_id", personID,
 		"credential_type", credentialType,
@@ -74,22 +82,31 @@ func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTy
 	}()
 	go func() {
 		defer wg.Done()
-		enrollments, enrollErr = s.client.ListActiveEnrollments(fetchCtx, personID)
+		if offeringID != "" {
+			enrollments, enrollErr = s.client.ListEnrollments(fetchCtx, personID)
+		} else {
+			enrollments, enrollErr = s.client.ListActiveEnrollments(fetchCtx, personID)
+		}
 	}()
 	wg.Wait()
 
 	if personErr != nil {
-		return fmt.Errorf("eduapi: fetch person %s: %w", personID, personErr)
+		return personFetchError("eduapi", personID, personErr)
 	}
 
 	// Flatten person data
 	claims := person.Flatten()
 
-	// Merge the first active enrollment and its course offering / organisation.
-	if enrollErr != nil {
+	// Merge the chosen enrollment and its course offering / organisation.
+	switch {
+	case enrollErr != nil && offeringID != "":
+		return fmt.Errorf("eduapi: list enrollments for %s: %w", personID, enrollErr)
+	case enrollErr != nil:
 		s.log.Info("Could not fetch enrollments, continuing without", "error", enrollErr)
-	} else {
-		s.mergeEnrollmentClaims(ctx, claims, enrollments)
+	default:
+		if err := s.mergeEnrollmentClaims(ctx, claims, enrollments, offeringID); err != nil {
+			return err
+		}
 	}
 
 	// Apply the configured mapper and store the resulting VCI document.
@@ -106,14 +123,30 @@ func (s *EduAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTy
 	return nil
 }
 
-// mergeEnrollmentClaims flattens the first course enrollment and, best-effort,
-// its course offering and the offering's organisation into claims. Missing
-// references and failed lookups are logged and skipped, not treated as errors.
-func (s *EduAPI) mergeEnrollmentClaims(ctx context.Context, claims map[string]any, enrollments []eduapi.Enrollment) {
-	e := firstCourseEnrollment(enrollments)
-	if e == nil {
-		return
+// mergeEnrollmentClaims flattens the enrollment in offeringID, or the first
+// course enrollment when offeringID is empty, and, best-effort, its course
+// offering and the offering's organisation into claims. Missing references and
+// failed lookups are logged and skipped. A requested offering the person has no
+// enrollment in, in any status, is an error: no other course is substituted.
+func (s *EduAPI) mergeEnrollmentClaims(ctx context.Context, claims map[string]any, enrollments []eduapi.Enrollment, offeringID string) error {
+	if offeringID != "" {
+		e := enrollmentInOffering(enrollments, offeringID)
+		if e == nil {
+			return ErrNotEnrolled
+		}
+		s.mergeEnrollment(ctx, claims, e)
+		return nil
 	}
+
+	if e := firstCourseEnrollment(enrollments); e != nil {
+		s.mergeEnrollment(ctx, claims, e)
+	}
+	return nil
+}
+
+// mergeEnrollment flattens one enrollment and, best-effort, its course offering
+// and the offering's organisation into claims.
+func (s *EduAPI) mergeEnrollment(ctx context.Context, claims map[string]any, e *eduapi.Enrollment) {
 	mergeClaims(claims, "enrollment.", e.Flatten())
 
 	course, err := s.client.GetCourseOffering(ctx, e.EducationOffering)
@@ -132,6 +165,24 @@ func (s *EduAPI) mergeEnrollmentClaims(ctx context.Context, claims map[string]an
 		return
 	}
 	mergeClaims(claims, "organization.", org.Flatten())
+}
+
+// enrollmentInOffering returns the enrollment in the given education offering,
+// preferring an active one when the person has several, or nil.
+func enrollmentInOffering(enrollments []eduapi.Enrollment, offeringID string) *eduapi.Enrollment {
+	var found *eduapi.Enrollment
+	for i := range enrollments {
+		if enrollments[i].EducationOffering != offeringID {
+			continue
+		}
+		if enrollments[i].IsActive {
+			return &enrollments[i]
+		}
+		if found == nil {
+			found = &enrollments[i]
+		}
+	}
+	return found
 }
 
 // firstCourseEnrollment returns the first enrollment in a course offering, or nil.

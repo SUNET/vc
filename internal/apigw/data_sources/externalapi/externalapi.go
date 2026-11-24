@@ -5,7 +5,9 @@ package externalapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential"
@@ -13,6 +15,22 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2client"
 )
+
+// ErrNotEnrolled means the person has no enrollment, in any status, in the requested offering.
+var ErrNotEnrolled = errors.New("person has no enrollment in the requested offering")
+
+// ErrPersonNotFound means the remote does not know the person. A 404 from any other
+// call, such as an enrollment listing, is not this.
+var ErrPersonNotFound = errors.New("person not found at the remote")
+
+// personFetchError wraps a person lookup failure, marking a 404 as ErrPersonNotFound.
+func personFetchError(source, personID string, err error) error {
+	var statusErr *oauth2client.StatusError
+	if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound {
+		err = errors.Join(ErrPersonNotFound, err)
+	}
+	return fmt.Errorf("%s: fetch person %s: %w", source, personID, err)
+}
 
 // service is the shared base for the external-API data sources: it owns the
 // authenticated HTTP client, the per-credential-type attribute mappers, the

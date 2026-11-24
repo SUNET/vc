@@ -180,6 +180,19 @@ func TestListActiveEnrollmentsFollowsNextAndFiltersInactive(t *testing.T) {
 	}
 }
 
+func TestListEnrollmentsKeepsInactive(t *testing.T) {
+	_, client := enrollmentServer(t, sampleEnrollments(), linkRootRelative, nil)
+
+	got, err := client.ListEnrollments(context.Background(), "p-lisa")
+	require.NoError(t, err)
+
+	var ids []string
+	for _, e := range got {
+		ids = append(ids, e.SourcedID)
+	}
+	assert.Equal(t, []string{"e1", "e2", "e3", "e4", "e5"}, ids)
+}
+
 func TestListActiveEnrollmentsEmpty(t *testing.T) {
 	_, client := enrollmentServer(t, []Enrollment{}, linkRootRelative, nil)
 

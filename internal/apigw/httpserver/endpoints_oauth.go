@@ -345,7 +345,7 @@ func (s *Service) fetchExternalAPIDocuments(ctx context.Context, dataSource, sco
 		return nil
 	}
 
-	if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, authCtx.AuthenticSourcePersonID, scope, sessionID); err != nil {
+	if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, authCtx.AuthenticSourcePersonID, scope, sessionID, authCtx.ExternalAPI); err != nil {
 		return err
 	}
 	s.log.Debug("External API data fetched and stored", "session_id", sessionID, "scope", scope, "remote", authCtx.RemoteName)

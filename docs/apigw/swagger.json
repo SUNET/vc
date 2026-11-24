@@ -511,6 +511,10 @@
                         "maxLength": 256,
                         "type": "string"
                     },
+                    "external_api": {
+                        "$ref": "#/components/schemas/cache.ExternalAPIParams",
+                        "description": "ExternalAPI names the offering to issue for, with one block per remote\ntype. Required for an external_api scope: exactly one block, matching the\ntype of the remote the scope is served from, with its offering id set.\nRefused for any other scope.\nKept on the server with the issuance and never put in the offer."
+                    },
                     "identity_match": {
                         "$ref": "#/components/schemas/openid4vci.IdentityMatch",
                         "description": "IdentityMatch decides whether the Holder who turns up is the one\nthis issuance was prepared for.\n\nREQUIRED. An issuance prepared without one is an offer anybody's\nwallet may complete, which is what the pre-authorized grant already\nprovides and what this endpoint exists to improve on. A caller that\nwants that should ask for it by name rather than by omission."
@@ -610,6 +614,45 @@
                     "token_status_list_section": {
                         "description": "Token Status List section",
                         "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "cache.EduAPIParams": {
+                "properties": {
+                    "education_offering_id": {
+                        "description": "EducationOfferingID is the sourcedId of the education offering to issue\nfor, matched whatever the enrollment's status.",
+                        "maxLength": 256,
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "education_offering_id"
+                ],
+                "type": "object"
+            },
+            "cache.ExternalAPIParams": {
+                "properties": {
+                    "eduapi": {
+                        "$ref": "#/components/schemas/cache.EduAPIParams"
+                    },
+                    "oeapi": {
+                        "$ref": "#/components/schemas/cache.OEAPIParams"
+                    }
+                },
+                "type": "object"
+            },
+            "cache.OEAPIParams": {
+                "properties": {
+                    "course_offering_id": {
+                        "description": "CourseOfferingID is the courseOfferingId of the course offering to issue for.",
+                        "maxLength": 256,
+                        "type": "string"
+                    },
+                    "programme_offering_id": {
+                        "description": "ProgrammeOfferingID is the programmeOfferingId of the programme offering to issue for.",
+                        "maxLength": 256,
+                        "type": "string"
                     }
                 },
                 "type": "object"

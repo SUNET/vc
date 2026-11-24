@@ -410,6 +410,14 @@ components:
             a holder cannot swap it for another person's.
           maxLength: 256
           type: string
+        external_api:
+          $ref: '#/components/schemas/cache.ExternalAPIParams'
+          description: |-
+            ExternalAPI names the offering to issue for, with one block per remote
+            type. Required for an external_api scope: exactly one block, matching the
+            type of the remote the scope is served from, with its offering id set.
+            Refused for any other scope.
+            Kept on the server with the issuance and never put in the offer.
         identity_match:
           $ref: '#/components/schemas/openid4vci.IdentityMatch'
           description: |-
@@ -487,6 +495,37 @@ components:
         token_status_list_section:
           description: Token Status List section
           type: integer
+      type: object
+    cache.EduAPIParams:
+      properties:
+        education_offering_id:
+          description: |-
+            EducationOfferingID is the sourcedId of the education offering to issue
+            for, matched whatever the enrollment's status.
+          maxLength: 256
+          type: string
+      required:
+      - education_offering_id
+      type: object
+    cache.ExternalAPIParams:
+      properties:
+        eduapi:
+          $ref: '#/components/schemas/cache.EduAPIParams'
+        oeapi:
+          $ref: '#/components/schemas/cache.OEAPIParams'
+      type: object
+    cache.OEAPIParams:
+      properties:
+        course_offering_id:
+          description: CourseOfferingID is the courseOfferingId of the course offering
+            to issue for.
+          maxLength: 256
+          type: string
+        programme_offering_id:
+          description: ProgrammeOfferingID is the programmeOfferingId of the programme
+            offering to issue for.
+          maxLength: 256
+          type: string
       type: object
     helpers.Error:
       properties:

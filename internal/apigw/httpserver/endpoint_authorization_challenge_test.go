@@ -350,34 +350,40 @@ func TestEndpointAuthorizationChallenge_TypedFailuresArePassedThrough(t *testing
 	assert.Equal(t, "auth_session is not valid", oauthErr.ErrorDescription)
 }
 
-// An anonymous admin session issued before the configuration changed stays
-// valid for its lifetime, and SessionOrAPIAuth accepts it in place of a
-// bearer token. The startup check cannot revoke it; the endpoint must.
-func TestEndpointPrepareIssuance_RefusesAnAnonymousAdminSession(t *testing.T) {
+// newPrepareEngine serves /issuance/prepare from a recording API with the
+// request validator installed as the real server does. setup, when set,
+// registers middleware and routes before the endpoint.
+func newPrepareEngine(t *testing.T, setup func(*gin.Engine)) (*gin.Engine, *prepareAPI) {
+	t.Helper()
 	ctx := t.Context()
 
-	log, err := logger.New("prepare-anonymous-test", t.TempDir(), true)
-	require.NoError(t, err)
-	tracer, err := trace.NewForTesting(ctx, "prepare-anonymous-test", log)
-	require.NoError(t, err)
-
-	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
-	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
-	require.NoError(t, err)
+	cfg, log, tracer, helpers := newTestHelpers(t, "prepare-test")
 
 	api := &prepareAPI{}
 	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
 
-	store := cookie.NewStore([]byte("12345678901234567890123456789012"), []byte("1234567890123456"))
 	engine := gin.New()
-	engine.Use(sessions.Sessions("admin_session", store))
-	engine.GET("/login", func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Set(adminSessionKey, true)
-		session.Set("admin_subject", c.Query("subject"))
-		_ = session.Save()
-	})
+	if setup != nil {
+		setup(engine)
+	}
 	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+	return engine, api
+}
+
+// An anonymous admin session issued before the configuration changed stays
+// valid for its lifetime, and SessionOrAPIAuth accepts it in place of a
+// bearer token. The startup check cannot revoke it; the endpoint must.
+func TestEndpointPrepareIssuance_RefusesAnAnonymousAdminSession(t *testing.T) {
+	store := cookie.NewStore([]byte("12345678901234567890123456789012"), []byte("1234567890123456"))
+	engine, api := newPrepareEngine(t, func(e *gin.Engine) {
+		e.Use(sessions.Sessions("admin_session", store))
+		e.GET("/login", func(c *gin.Context) {
+			session := sessions.Default(c)
+			session.Set(adminSessionKey, true)
+			session.Set("admin_subject", c.Query("subject"))
+			_ = session.Save()
+		})
+	})
 
 	prepare := func(subject string) *httptest.ResponseRecorder {
 		login := httptest.NewRecorder()
@@ -401,4 +407,47 @@ func TestEndpointPrepareIssuance_RefusesAnAnonymousAdminSession(t *testing.T) {
 	w = prepare("alice")
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.NotNil(t, api.seen, "an authenticated session must still be served")
+}
+
+// The offering ids are required by validate tags, so a request that names none
+// is refused while the body is bound, before PrepareIssuance runs.
+func TestEndpointPrepareIssuance_RefusesAnEmptyOfferingID(t *testing.T) {
+	engine, api := newPrepareEngine(t, nil)
+
+	prepare := func(externalAPI string) *httptest.ResponseRecorder {
+		body := `{"scope":"sis","identity_match":{"claims":{"given_name":{"equals":"Alice"}}},"external_api":` + externalAPI + `}`
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	for name, block := range map[string]string{
+		"eduapi without an id":      `{"eduapi":{}}`,
+		"eduapi with an empty id":   `{"eduapi":{"education_offering_id":""}}`,
+		"oeapi without either id":   `{"oeapi":{}}`,
+		"oeapi with both ids empty": `{"oeapi":{"course_offering_id":"","programme_offering_id":""}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			api.seen = nil
+			w := prepare(block)
+			assert.GreaterOrEqual(t, w.Code, 400, w.Body.String())
+			assert.Less(t, w.Code, 500, w.Body.String())
+			assert.Nil(t, api.seen, "the request must be refused before PrepareIssuance")
+		})
+	}
+
+	for name, block := range map[string]string{
+		"eduapi with an id":         `{"eduapi":{"education_offering_id":"co-1"}}`,
+		"oeapi with a course id":    `{"oeapi":{"course_offering_id":"co-1"}}`,
+		"oeapi with a programme id": `{"oeapi":{"programme_offering_id":"po-1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			api.seen = nil
+			w := prepare(block)
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.NotNil(t, api.seen)
+		})
+	}
 }

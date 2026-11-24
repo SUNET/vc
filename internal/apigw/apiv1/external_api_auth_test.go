@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func externalAPIAuthClient(t *testing.T, sisStatus int, withRemote bool) *Client {
+func externalAPIAuthClient(t *testing.T, sisStatus, enrollmentsStatus int, withRemote bool) *Client {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -31,6 +31,10 @@ func externalAPIAuthClient(t *testing.T, sisStatus int, withRemote bool) *Client
 		_, _ = w.Write([]byte(`{"sourcedId":"p-lisa","recordLanguage":"en","recordStatus":"active"}`))
 	})
 	mux.HandleFunc("/base/enrollments", func(w http.ResponseWriter, _ *http.Request) {
+		if enrollmentsStatus != http.StatusOK {
+			http.Error(w, "nope", enrollmentsStatus)
+			return
+		}
 		_, _ = w.Write([]byte(`[]`))
 	})
 	srv := httptest.NewServer(mux)
@@ -66,7 +70,7 @@ func TestFetchExternalAPIDocuments(t *testing.T) {
 	authCtx := &cache.AuthorizationContext{SessionID: "sess-1", RemoteName: "sis"}
 
 	t.Run("a known person is fetched and cached for the session", func(t *testing.T) {
-		c := externalAPIAuthClient(t, http.StatusOK, true)
+		c := externalAPIAuthClient(t, http.StatusOK, http.StatusOK, true)
 
 		docs, err := c.fetchExternalAPIDocuments(t.Context(), authCtx, "sis_enrollment", "p-lisa")
 		require.NoError(t, err)
@@ -78,7 +82,7 @@ func TestFetchExternalAPIDocuments(t *testing.T) {
 	})
 
 	t.Run("an unknown person is the wallet's problem", func(t *testing.T) {
-		c := externalAPIAuthClient(t, http.StatusNotFound, true)
+		c := externalAPIAuthClient(t, http.StatusNotFound, http.StatusOK, true)
 
 		_, err := c.fetchExternalAPIDocuments(t.Context(), authCtx, "sis_enrollment", "p-lisa")
 		require.Error(t, err)
@@ -88,15 +92,23 @@ func TestFetchExternalAPIDocuments(t *testing.T) {
 		assert.False(t, cached)
 	})
 
+	t.Run("a missing enrollment listing is ours, not an unknown person", func(t *testing.T) {
+		c := externalAPIAuthClient(t, http.StatusOK, http.StatusNotFound, true)
+		offered := &cache.AuthorizationContext{SessionID: "sess-1", RemoteName: "sis", ExternalAPI: eduOffering("co-1")}
+
+		_, err := c.fetchExternalAPIDocuments(t.Context(), offered, "sis_enrollment", "p-lisa")
+		require.ErrorIs(t, err, ErrIssuanceAuthServerFault)
+	})
+
 	t.Run("a failing remote is ours", func(t *testing.T) {
-		c := externalAPIAuthClient(t, http.StatusInternalServerError, true)
+		c := externalAPIAuthClient(t, http.StatusInternalServerError, http.StatusOK, true)
 
 		_, err := c.fetchExternalAPIDocuments(t.Context(), authCtx, "sis_enrollment", "p-lisa")
 		require.ErrorIs(t, err, ErrIssuanceAuthServerFault)
 	})
 
 	t.Run("no enabled remote is ours", func(t *testing.T) {
-		c := externalAPIAuthClient(t, http.StatusOK, false)
+		c := externalAPIAuthClient(t, http.StatusOK, http.StatusOK, false)
 
 		_, err := c.fetchExternalAPIDocuments(t.Context(), authCtx, "sis_enrollment", "p-lisa")
 		require.ErrorIs(t, err, ErrIssuanceAuthServerFault)

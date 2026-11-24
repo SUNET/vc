@@ -41,7 +41,15 @@ func NewOEAPI(ctx context.Context, remote model.Remote, scopes map[string]model.
 // personID is the OEAPI personId that identifies the student.
 // credentialType is the credential type being issued.
 // vciSessionID is the OpenID4VCI session to associate the document with.
-func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string) error {
+// params may carry a course and/or programme offering to issue for; it is matched
+// whatever the association's state. An unset id keeps the person's first active
+// association of that kind.
+func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string, params *pkgcache.ExternalAPIParams) error {
+	var want pkgcache.OEAPIParams
+	if params != nil && params.OEAPI != nil {
+		want = *params.OEAPI
+	}
+
 	s.log.Info("Fetching OEAPI data for VCI",
 		"person_id", personID,
 		"credential_type", credentialType,
@@ -84,32 +92,16 @@ func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTyp
 	wg.Wait()
 
 	if personErr != nil {
-		return fmt.Errorf("oeapi: fetch person %s: %w", personID, personErr)
+		return personFetchError("oeapi", personID, personErr)
 	}
 
 	claims := person.Flatten()
 
-	// Merge first active programme association and its embedded result.
-	if programmeErr != nil {
-		s.log.Info("Could not fetch programme offering associations, continuing without", "error", programmeErr)
-	} else if a := firstActiveProgrammeAssociation(programmeAssociations); a != nil {
-		// The collection omits the programme offering, so pull the selected
-		// association from the instance endpoint (which supports expand).
-		if a.ProgrammeOffering == nil && a.AssociationID != "" {
-			if full, err := s.client.GetProgrammeOfferingAssociation(ctx, a.AssociationID, oeapi.WithExpand("programme_offering")); err != nil {
-				s.log.Info("Could not expand programme offering association, continuing without", "association_id", a.AssociationID, "error", err)
-			} else {
-				a = full
-			}
-		}
-		mergeClaims(claims, "programme.", a.Flatten())
+	if err := s.mergeProgramme(ctx, claims, personID, programmeAssociations, programmeErr, want.ProgrammeOfferingID); err != nil {
+		return err
 	}
-
-	// Merge first active course association and its embedded result.
-	if courseErr != nil {
-		s.log.Info("Could not fetch course offering associations, continuing without", "error", courseErr)
-	} else if a := firstActiveCourseAssociation(courseAssociations); a != nil {
-		mergeClaims(claims, "course.", a.Flatten())
+	if err := s.mergeCourse(claims, personID, courseAssociations, courseErr, want.CourseOfferingID); err != nil {
+		return err
 	}
 
 	// Apply the configured mapper and store the resulting VCI document.
@@ -124,6 +116,115 @@ func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTyp
 		"claims_count", count)
 
 	return nil
+}
+
+// mergeProgramme merges the chosen programme association and its embedded
+// result into claims. A failed listing is an error only when an offering was
+// requested; otherwise it is logged and skipped.
+func (s *OEAPI) mergeProgramme(ctx context.Context, claims map[string]any, personID string, associations []oeapi.ProgrammeOfferingAssociation, listErr error, offeringID string) error {
+	if listErr != nil {
+		if offeringID != "" {
+			return fmt.Errorf("oeapi: list programme offering associations for %s: %w", personID, listErr)
+		}
+		s.log.Info("Could not fetch programme offering associations, continuing without", "error", listErr)
+		return nil
+	}
+
+	a, err := chooseProgrammeAssociation(associations, offeringID)
+	if err != nil || a == nil {
+		return err
+	}
+
+	// The collection omits the programme offering, so pull the selected
+	// association from the instance endpoint (which supports expand).
+	if a.ProgrammeOffering == nil && a.AssociationID != "" {
+		full, err := s.client.GetProgrammeOfferingAssociation(ctx, a.AssociationID, oeapi.WithExpand("programme_offering"))
+		if err != nil {
+			s.log.Info("Could not expand programme offering association, continuing without", "association_id", a.AssociationID, "error", err)
+		} else {
+			a = full
+		}
+	}
+	mergeClaims(claims, "programme.", a.Flatten())
+	return nil
+}
+
+// mergeCourse merges the chosen course association and its embedded result
+// into claims, with the same error rule as mergeProgramme.
+func (s *OEAPI) mergeCourse(claims map[string]any, personID string, associations []oeapi.CourseOfferingAssociation, listErr error, offeringID string) error {
+	if listErr != nil {
+		if offeringID != "" {
+			return fmt.Errorf("oeapi: list course offering associations for %s: %w", personID, listErr)
+		}
+		s.log.Info("Could not fetch course offering associations, continuing without", "error", listErr)
+		return nil
+	}
+
+	a, err := chooseCourseAssociation(associations, offeringID)
+	if err != nil || a == nil {
+		return err
+	}
+	mergeClaims(claims, "course.", a.Flatten())
+	return nil
+}
+
+// chooseProgrammeAssociation returns the association with the given programme
+// offering in any state, preferring an "associated" one, or the first active one
+// when offeringID is empty. A requested offering the person has no association
+// with is ErrNotEnrolled.
+func chooseProgrammeAssociation(associations []oeapi.ProgrammeOfferingAssociation, offeringID string) (*oeapi.ProgrammeOfferingAssociation, error) {
+	if offeringID == "" {
+		return firstActiveProgrammeAssociation(associations), nil
+	}
+	var found *oeapi.ProgrammeOfferingAssociation
+	for i := range associations {
+		a := &associations[i]
+		id := a.ProgrammeOfferingID
+		if id == "" && a.ProgrammeOffering != nil {
+			id = a.ProgrammeOffering.ProgrammeOfferingID
+		}
+		if id != offeringID {
+			continue
+		}
+		if a.State == "associated" {
+			return a, nil
+		}
+		if found == nil {
+			found = a
+		}
+	}
+	if found == nil {
+		return nil, ErrNotEnrolled
+	}
+	return found, nil
+}
+
+// chooseCourseAssociation is chooseProgrammeAssociation for course offerings.
+func chooseCourseAssociation(associations []oeapi.CourseOfferingAssociation, offeringID string) (*oeapi.CourseOfferingAssociation, error) {
+	if offeringID == "" {
+		return firstActiveCourseAssociation(associations), nil
+	}
+	var found *oeapi.CourseOfferingAssociation
+	for i := range associations {
+		a := &associations[i]
+		id := a.CourseOfferingID
+		if id == "" && a.CourseOffering != nil {
+			id = a.CourseOffering.CourseOfferingID
+		}
+		if id != offeringID {
+			continue
+		}
+		if a.State == "associated" {
+			return a, nil
+		}
+		if found == nil {
+			found = a
+		}
+	}
+	if found == nil {
+		return nil, ErrNotEnrolled
+	}
+	return found, nil
 }
 
 // firstActiveProgrammeAssociation returns the first "associated" programme

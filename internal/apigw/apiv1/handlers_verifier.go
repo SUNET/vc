@@ -8,18 +8,17 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/internal/apigw/data_sources/externalapi"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/oauth2client"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -773,11 +772,14 @@ func (c *Client) fetchExternalAPIDocuments(ctx context.Context, authCtx *cache.A
 	if c.dataSources == nil || !c.dataSources.AnyEnabled() {
 		return nil, serverFault(fmt.Errorf("external API data source requested for %q but no remote is enabled", scope))
 	}
-	if err := c.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, personID, scope, authCtx.SessionID); err != nil {
-		var statusErr *oauth2client.StatusError
-		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound {
+	if err := c.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, personID, scope, authCtx.SessionID, authCtx.ExternalAPI); err != nil {
+		if errors.Is(err, externalapi.ErrPersonNotFound) {
 			c.log.Error(err, "person not found at external API", "scope", scope, "remote", authCtx.RemoteName)
 			return nil, errors.New("no person found for the provided identity")
+		}
+		if errors.Is(err, externalapi.ErrNotEnrolled) {
+			c.log.Error(err, "person not enrolled in requested offering", "scope", scope, "remote", authCtx.RemoteName)
+			return nil, externalapi.ErrNotEnrolled
 		}
 		c.log.Error(err, "external API fetch failed", "scope", scope, "remote", authCtx.RemoteName)
 		return nil, serverFault(err)
