@@ -9,7 +9,6 @@ import (
 	"time"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2client/oauth2clienttest"
 	"github.com/SUNET/vc/pkg/oeapi"
@@ -48,29 +47,12 @@ func fetchOEAPI(t *testing.T, courseStatus int, params *pkgcache.ExternalAPIPara
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	log, err := logger.New("test", "", false)
+	docs := newTestDocCache()
+	src, err := NewOEAPI(context.Background(), testRemote(model.RemoteTypeOEAPI, srv.URL, ""), nil,
+		docs, pkgcache.NewMemoryCache[string](time.Hour), newTestLog(t))
 	require.NoError(t, err)
 
-	docs := pkgcache.NewMemoryCache[map[string]*model.CompleteDocument](time.Hour)
-	src, err := NewOEAPI(context.Background(), model.Remote{
-		Type:         model.RemoteTypeOEAPI,
-		BaseURL:      srv.URL,
-		TokenURL:     srv.URL + "/oauth2/token",
-		ClientID:     "vc",
-		ClientSecret: "secret",
-		Timeout:      5 * time.Second,
-	}, nil, docs, pkgcache.NewMemoryCache[string](time.Hour), log)
-	require.NoError(t, err)
-
-	if err := src.FetchAndStoreForVCI(context.Background(), "p-1", "any", "session-1", params); err != nil {
-		return nil, err
-	}
-	stored, ok := docs.Get(context.Background(), "session-1")
-	require.True(t, ok)
-	for _, d := range stored {
-		return d.DocumentData, nil
-	}
-	return nil, nil
+	return fetchStored(t, src, docs, params)
 }
 
 func oeapiOffering(course, programme string) *pkgcache.ExternalAPIParams {
