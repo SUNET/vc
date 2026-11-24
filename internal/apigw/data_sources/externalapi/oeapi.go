@@ -97,37 +97,11 @@ func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTyp
 
 	claims := person.Flatten()
 
-	// Merge the chosen programme association and its embedded result.
-	if programmeErr != nil && want.ProgrammeOfferingID != "" {
-		return fmt.Errorf("oeapi: list programme offering associations for %s: %w", personID, programmeErr)
-	}
-	if programmeErr != nil {
-		s.log.Info("Could not fetch programme offering associations, continuing without", "error", programmeErr)
-	} else if a, err := chooseProgrammeAssociation(programmeAssociations, want.ProgrammeOfferingID); err != nil {
+	if err := s.mergeProgramme(ctx, claims, personID, programmeAssociations, programmeErr, want.ProgrammeOfferingID); err != nil {
 		return err
-	} else if a != nil {
-		// The collection omits the programme offering, so pull the selected
-		// association from the instance endpoint (which supports expand).
-		if a.ProgrammeOffering == nil && a.AssociationID != "" {
-			if full, err := s.client.GetProgrammeOfferingAssociation(ctx, a.AssociationID, oeapi.WithExpand("programme_offering")); err != nil {
-				s.log.Info("Could not expand programme offering association, continuing without", "association_id", a.AssociationID, "error", err)
-			} else {
-				a = full
-			}
-		}
-		mergeClaims(claims, "programme.", a.Flatten())
 	}
-
-	// Merge the chosen course association and its embedded result.
-	if courseErr != nil && want.CourseOfferingID != "" {
-		return fmt.Errorf("oeapi: list course offering associations for %s: %w", personID, courseErr)
-	}
-	if courseErr != nil {
-		s.log.Info("Could not fetch course offering associations, continuing without", "error", courseErr)
-	} else if a, err := chooseCourseAssociation(courseAssociations, want.CourseOfferingID); err != nil {
+	if err := s.mergeCourse(claims, personID, courseAssociations, courseErr, want.CourseOfferingID); err != nil {
 		return err
-	} else if a != nil {
-		mergeClaims(claims, "course.", a.Flatten())
 	}
 
 	// Apply the configured mapper and store the resulting VCI document.
@@ -141,6 +115,56 @@ func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialTyp
 		"credential_type", credentialType,
 		"claims_count", count)
 
+	return nil
+}
+
+// mergeProgramme merges the chosen programme association and its embedded
+// result into claims. A failed listing is an error only when an offering was
+// requested; otherwise it is logged and skipped.
+func (s *OEAPI) mergeProgramme(ctx context.Context, claims map[string]any, personID string, associations []oeapi.ProgrammeOfferingAssociation, listErr error, offeringID string) error {
+	if listErr != nil {
+		if offeringID != "" {
+			return fmt.Errorf("oeapi: list programme offering associations for %s: %w", personID, listErr)
+		}
+		s.log.Info("Could not fetch programme offering associations, continuing without", "error", listErr)
+		return nil
+	}
+
+	a, err := chooseProgrammeAssociation(associations, offeringID)
+	if err != nil || a == nil {
+		return err
+	}
+
+	// The collection omits the programme offering, so pull the selected
+	// association from the instance endpoint (which supports expand).
+	if a.ProgrammeOffering == nil && a.AssociationID != "" {
+		full, err := s.client.GetProgrammeOfferingAssociation(ctx, a.AssociationID, oeapi.WithExpand("programme_offering"))
+		if err != nil {
+			s.log.Info("Could not expand programme offering association, continuing without", "association_id", a.AssociationID, "error", err)
+		} else {
+			a = full
+		}
+	}
+	mergeClaims(claims, "programme.", a.Flatten())
+	return nil
+}
+
+// mergeCourse merges the chosen course association and its embedded result
+// into claims, with the same error rule as mergeProgramme.
+func (s *OEAPI) mergeCourse(claims map[string]any, personID string, associations []oeapi.CourseOfferingAssociation, listErr error, offeringID string) error {
+	if listErr != nil {
+		if offeringID != "" {
+			return fmt.Errorf("oeapi: list course offering associations for %s: %w", personID, listErr)
+		}
+		s.log.Info("Could not fetch course offering associations, continuing without", "error", listErr)
+		return nil
+	}
+
+	a, err := chooseCourseAssociation(associations, offeringID)
+	if err != nil || a == nil {
+		return err
+	}
+	mergeClaims(claims, "course.", a.Flatten())
 	return nil
 }
 
