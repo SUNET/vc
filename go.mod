@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	filippo.io/edwards25519 v1.2.0
-	github.com/IBM/sarama v1.61.1
+	github.com/IBM/sarama v1.62.0
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.8.1
 	github.com/biter777/countries v1.7.5

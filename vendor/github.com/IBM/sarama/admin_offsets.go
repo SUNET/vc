@@ -102,18 +102,22 @@ func (ca *clusterAdmin) ListOffsets(partitions map[string]map[int32]int64, optio
 
 	for broker, req := range requests {
 		wg.Go(func() {
-			var resp *OffsetResponse
-			err := ca.retryOnError(isRetriableBrokerError, func() error {
-				var err error
-				_ = broker.Open(ca.client.Config())
-				resp, err = broker.GetAvailableOffsets(req.request)
+			var (
+				b    *Broker
+				resp *OffsetResponse
+			)
+			err := ca.retryOnError(isRetriableBrokerError, func() (err error) {
+				if b, err = ca.findBroker(broker.ID()); err != nil {
+					return err
+				}
+				resp, err = b.GetAvailableOffsets(req.request)
 				return err
 			})
 			if err != nil {
 				results <- brokerOffsetResult{err: err}
 				return
 			}
-			broker.handleThrottledResponse(resp)
+			b.handleThrottledResponse(resp)
 
 			partitionResults := make(map[topicPartition]*OffsetResult, len(req.partitions))
 			for _, tp := range req.partitions {
@@ -154,9 +158,9 @@ func (ca *clusterAdmin) ListOffsets(partitions map[string]map[int32]int64, optio
 
 // AlterConsumerGroupOffsets retries on transport-level errors and on
 // per-partition coordinator errors (NOT_COORDINATOR,
-// COORDINATOR_NOT_AVAILABLE, EOF). Other per-partition errors
-// (e.g. UNKNOWN_TOPIC_OR_PARTITION) are returned to the caller in
-// OffsetCommitResponse.Errors without retry.
+// COORDINATOR_NOT_AVAILABLE, COORDINATOR_LOAD_IN_PROGRESS, EOF). Other
+// per-partition errors (e.g. UNKNOWN_TOPIC_OR_PARTITION) are returned to the
+// caller in OffsetCommitResponse.Errors without retry.
 func (ca *clusterAdmin) AlterConsumerGroupOffsets(group string, offsets map[string]map[int32]OffsetAndMetadata, _ *AlterConsumerGroupOffsetsOptions) (*OffsetCommitResponse, error) {
 	if len(offsets) == 0 {
 		return nil, ConfigurationError("no offsets provided")
