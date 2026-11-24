@@ -48,6 +48,13 @@ type PrepareIssuanceRequest struct {
 	// a holder cannot swap it for another person's.
 	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" validate:"omitempty,max=256,printascii"`
 
+	// ExternalAPI names the offering to issue for, with one block per remote
+	// type. Required for an external_api scope: exactly one block, matching the
+	// type of the remote the scope is served from, with its offering id set.
+	// Refused for any other scope.
+	// Kept on the server with the issuance and never put in the offer.
+	ExternalAPI *cache.ExternalAPIParams `json:"external_api,omitempty" validate:"omitempty"`
+
 	// AuthenticSource names the source this credential will be issued
 	// from, and is checked against the one the scope actually resolves to.
 	//
@@ -165,6 +172,7 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		DataSource:              string(source.DataSource),
 		RemoteName:              source.RemoteName,
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
+		ExternalAPI:             req.ExternalAPI,
 		AuthenticSource:         source.AuthenticSource,
 		ExpiresAt:               time.Now().Add(time.Duration(ttl) * time.Second).Unix(),
 	}
@@ -282,6 +290,10 @@ func (c *Client) validatePrepareRequest(req *PrepareIssuanceRequest) (model.Cred
 			fmt.Sprintf("scope %q is not served from an external API, so authentic_source_person_id is not accepted", req.Scope), 400)
 	}
 
+	if err := c.validateExternalAPIParams(req, source, isExternalAPI); err != nil {
+		return model.CredentialSource{}, 0, err
+	}
+
 	// A rule naming a claim the request will not ask for can never pass.
 	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
 		return model.CredentialSource{}, 0, err
@@ -315,6 +327,34 @@ func (c *Client) validatePrepareRequest(req *PrepareIssuanceRequest) (model.Cred
 	}
 
 	return source, ttl, nil
+}
+
+// validateExternalAPIParams requires, for a scope served from an external API,
+// one block matching the type of the scope's remote, and refuses external_api
+// on any other scope. The offering ids inside a block are required by the
+// validate tags on the block's type.
+func (c *Client) validateExternalAPIParams(req *PrepareIssuanceRequest, source model.CredentialSource, isExternalAPI bool) error {
+	set := req.ExternalAPI.Set()
+	switch {
+	case !isExternalAPI && len(set) > 0:
+		return helpers.NewErrorDetailsWithStatus("external_api_not_allowed",
+			fmt.Sprintf("scope %q is not served from an external API, so external_api is not accepted", req.Scope), 400)
+	case !isExternalAPI:
+		return nil
+	case len(set) == 0:
+		return helpers.NewErrorDetailsWithStatus("external_api_required",
+			fmt.Sprintf("scope %q is served from an external API, so external_api naming the offering to issue for is required", req.Scope), 400)
+	case len(set) > 1:
+		return helpers.NewErrorDetailsWithStatus("external_api_ambiguous",
+			"external_api accepts one block, matching the type of the scope's remote", 400)
+	}
+
+	remoteType := c.cfg.APIGW.Remotes[source.RemoteName].Type
+	if string(remoteType) != set[0] {
+		return helpers.NewErrorDetailsWithStatus("external_api_type_mismatch",
+			fmt.Sprintf("scope %q is served from a %q remote, not %q", req.Scope, remoteType, set[0]), 400)
+	}
+	return nil
 }
 
 // validateIdentityMatchIsAskable refuses a rule that names a claim the

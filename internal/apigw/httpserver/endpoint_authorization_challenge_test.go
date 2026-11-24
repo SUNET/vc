@@ -22,6 +22,7 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -401,4 +402,68 @@ func TestEndpointPrepareIssuance_RefusesAnAnonymousAdminSession(t *testing.T) {
 	w = prepare("alice")
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.NotNil(t, api.seen, "an authenticated session must still be served")
+}
+
+// The offering ids are required by validate tags, so a request that names none
+// is refused while the body is bound, before PrepareIssuance runs.
+func TestEndpointPrepareIssuance_RefusesAnEmptyOfferingID(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-offering-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-offering-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	validator, err := helpers.Binding.Validator()
+	require.NoError(t, err)
+	previous := binding.Validator
+	binding.Validator = validator
+	t.Cleanup(func() { binding.Validator = previous })
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	prepare := func(externalAPI string) *httptest.ResponseRecorder {
+		body := `{"scope":"sis","identity_match":{"claims":{"given_name":{"equals":"Alice"}}},"external_api":` + externalAPI + `}`
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	for name, block := range map[string]string{
+		"eduapi without an id":      `{"eduapi":{}}`,
+		"eduapi with an empty id":   `{"eduapi":{"education_offering_id":""}}`,
+		"oeapi without either id":   `{"oeapi":{}}`,
+		"oeapi with both ids empty": `{"oeapi":{"course_offering_id":"","programme_offering_id":""}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			api.seen = nil
+			w := prepare(block)
+			assert.GreaterOrEqual(t, w.Code, 400, w.Body.String())
+			assert.Less(t, w.Code, 500, w.Body.String())
+			assert.Nil(t, api.seen, "the request must be refused before PrepareIssuance")
+		})
+	}
+
+	for name, block := range map[string]string{
+		"eduapi with an id":         `{"eduapi":{"education_offering_id":"co-1"}}`,
+		"oeapi with a course id":    `{"oeapi":{"course_offering_id":"co-1"}}`,
+		"oeapi with a programme id": `{"oeapi":{"programme_offering_id":"po-1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			api.seen = nil
+			w := prepare(block)
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.NotNil(t, api.seen)
+		})
+	}
 }

@@ -5,6 +5,7 @@ package externalapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
@@ -13,6 +14,9 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2client"
 )
+
+// ErrNotEnrolled means the person has no enrollment, in any status, in the requested offering.
+var ErrNotEnrolled = errors.New("person has no enrollment in the requested offering")
 
 // service is the shared base for the external-API data sources: it owns the
 // authenticated HTTP client, the per-credential-type attribute mappers, the

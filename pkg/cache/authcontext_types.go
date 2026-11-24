@@ -17,6 +17,46 @@ import (
 // error messages for every other field on this struct. Only the constructor
 // is separate: the safe_key guard itself comes from openid4vci.
 
+// ExternalAPIParams holds what the preparing caller says about the data to
+// fetch from an external API, one typed block per remote type.
+type ExternalAPIParams struct {
+	EduAPI *EduAPIParams `json:"eduapi,omitempty" bson:"eduapi,omitempty" validate:"omitempty"`
+	OEAPI  *OEAPIParams  `json:"oeapi,omitempty" bson:"oeapi,omitempty" validate:"omitempty"`
+}
+
+// EduAPIParams selects the data to fetch from an Edu-API remote.
+type EduAPIParams struct {
+	// EducationOfferingID is the sourcedId of the education offering to issue
+	// for, matched whatever the enrollment's status.
+	EducationOfferingID string `json:"education_offering_id" bson:"education_offering_id" validate:"required,max=256,printascii"`
+}
+
+// OEAPIParams selects the data to fetch from an OEAPI remote. The two ids are
+// independent and at least one is required. An empty one keeps the person's
+// first active association of that kind.
+type OEAPIParams struct {
+	// CourseOfferingID is the courseOfferingId of the course offering to issue for.
+	CourseOfferingID string `json:"course_offering_id,omitempty" bson:"course_offering_id,omitempty" validate:"required_without=ProgrammeOfferingID,omitempty,max=256,printascii"`
+
+	// ProgrammeOfferingID is the programmeOfferingId of the programme offering to issue for.
+	ProgrammeOfferingID string `json:"programme_offering_id,omitempty" bson:"programme_offering_id,omitempty" validate:"required_without=CourseOfferingID,omitempty,max=256,printascii"`
+}
+
+// Set returns the names of the blocks that are present.
+func (p *ExternalAPIParams) Set() []string {
+	if p == nil {
+		return nil
+	}
+	var names []string
+	if p.EduAPI != nil {
+		names = append(names, "eduapi")
+	}
+	if p.OEAPI != nil {
+		names = append(names, "oeapi")
+	}
+	return names
+}
+
 // SessionStatus represents the status of an OIDC session
 type SessionStatus string
 
@@ -202,6 +242,9 @@ type AuthorizationContext struct {
 	AuthProvider            string `json:"auth_provider,omitempty" bson:"auth_provider,omitempty" validate:"omitempty,max=32,printascii"`
 	DataSource              string `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
 	RemoteName              string `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// ExternalAPI is set by PrepareIssuance and never put in the offer.
+	ExternalAPI *ExternalAPIParams `json:"external_api,omitempty" bson:"external_api,omitempty" validate:"omitempty"`
 
 	// DynamicParams holds key-value parameters bound directly from the PAR
 	// caller's request body at flow initiation time (see PARRequest.DynamicParams

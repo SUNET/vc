@@ -13,7 +13,7 @@ import (
 
 // source is the common contract implemented by every external data source.
 type source interface {
-	FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string) error
+	FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string, params *pkgcache.ExternalAPIParams) error
 }
 
 // Service manages all external data sources for credential issuance, keyed by
@@ -59,12 +59,12 @@ func (s *Service) AnyEnabled() bool { return len(s.sources) > 0 }
 // FetchAndStoreForVCI dispatches the external-API fetch to the data source
 // configured under remoteName and stores the resulting VCI document in the
 // session cache.
-func (s *Service) FetchAndStoreForVCI(ctx context.Context, remoteName, personID, credentialType, vciSessionID string) error {
+func (s *Service) FetchAndStoreForVCI(ctx context.Context, remoteName, personID, credentialType, vciSessionID string, params *pkgcache.ExternalAPIParams) error {
 	src, ok := s.sources[remoteName]
 	if !ok {
 		return fmt.Errorf("no external API data source enabled for remote %q", remoteName)
 	}
-	return src.FetchAndStoreForVCI(ctx, personID, credentialType, vciSessionID)
+	return src.FetchAndStoreForVCI(ctx, personID, credentialType, vciSessionID, params)
 }
 
 // scopesForRemote returns the external_api scopes (keyed by credential type)

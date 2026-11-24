@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// maxEnrollmentPages bounds how many pages ListActiveEnrollments follows.
+// maxEnrollmentPages bounds how many pages ListEnrollments follows.
 const maxEnrollmentPages = 100
 
 // getJSON GETs path (relative to the base URL) and decodes the bare JSON body into out.
@@ -34,9 +34,24 @@ func (c *Client) GetPerson(ctx context.Context, personID string) (*Person, error
 	return &p, nil
 }
 
-// ListActiveEnrollments returns the active enrollments of a person using the
-// spec's generic filter on /enrollments, following rel="next" links until none is left.
+// ListActiveEnrollments returns the enrollments of a person that have isActive set.
 func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]Enrollment, error) {
+	all, err := c.ListEnrollments(ctx, personID)
+	if err != nil {
+		return nil, err
+	}
+	var active []Enrollment
+	for _, e := range all {
+		if e.IsActive {
+			active = append(active, e)
+		}
+	}
+	return active, nil
+}
+
+// ListEnrollments returns every enrollment of a person, finished or not, using the
+// spec's generic filter on /enrollments, following rel="next" links until none is left.
+func (c *Client) ListEnrollments(ctx context.Context, personID string) ([]Enrollment, error) {
 	if strings.ContainsAny(personID, "'\\") {
 		return nil, errors.New("eduapi: person id contains a quote or backslash")
 	}
@@ -44,7 +59,7 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 	q := url.Values{"filter": {"person='" + personID + "'"}}
 	resp, err := c.http.GetResponse(ctx, "/enrollments", q)
 
-	var active []Enrollment
+	var all []Enrollment
 	for page := 1; ; page++ {
 		if err != nil {
 			return nil, err
@@ -53,15 +68,11 @@ func (c *Client) ListActiveEnrollments(ctx context.Context, personID string) ([]
 		if err := json.Unmarshal(resp.Body, &enrollments); err != nil {
 			return nil, fmt.Errorf("eduapi: decode enrollments: %w", err)
 		}
-		for _, e := range enrollments {
-			if e.IsActive {
-				active = append(active, e)
-			}
-		}
+		all = append(all, enrollments...)
 
 		next := nextLink(resp.Header)
 		if next == "" {
-			return active, nil
+			return all, nil
 		}
 		if page >= maxEnrollmentPages {
 			return nil, fmt.Errorf("eduapi: enrollments exceed %d pages", maxEnrollmentPages)
