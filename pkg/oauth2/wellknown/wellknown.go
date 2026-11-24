@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const wellKnownPrefix = "/.well-known/"
+
 // URL builds the URL at which an entity publishes a well-known
 // document, per RFC 8615 §3.
 //
@@ -35,7 +37,7 @@ func URL(entity, suffix string) string {
 
 	parsed, err := url.Parse(entity)
 	if err != nil || parsed.Host == "" {
-		return entity + "/.well-known/" + suffix
+		return entity + wellKnownPrefix + suffix
 	}
 
 	// EscapedPath, not Path: Path is DECODED, so an identifier whose path
@@ -46,7 +48,7 @@ func URL(entity, suffix string) string {
 	path := strings.TrimPrefix(parsed.EscapedPath(), "/")
 	base := parsed.Scheme + "://" + parsed.Host
 	if path == "" {
-		return base + "/.well-known/" + suffix
+		return base + wellKnownPrefix + suffix
 	}
-	return base + "/.well-known/" + suffix + "/" + path
+	return base + wellKnownPrefix + suffix + "/" + path
 }
