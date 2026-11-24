@@ -299,3 +299,6 @@ jobs:
           go mod edit -require github.com/SUNET/vc@v0.0.0 -replace github.com/SUNET/vc="$GITHUB_WORKSPACE"
           go mod tidy
           go build ./...
+
+      - name: Run the BBS stub tests without the tag
+        run: go test ./pkg/bbs/ ./internal/issuer/apiv1/
