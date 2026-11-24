@@ -1,3 +1,5 @@
+//go:build bbsnative
+
 // Package bbsnative is a cgo wrapper around zk-cred-bbs's plain C-ABI Go
 // binding (src/go_ffi.rs / include/zk_cred_bbs_go.h in that crate). The
 // static library is staged by the repository Makefile's `bbs-native-lib`

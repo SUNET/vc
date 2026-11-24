@@ -1,3 +1,5 @@
+//go:build bbsnative
+
 package bbs
 
 import (
@@ -102,7 +104,7 @@ func (n native) VerifyPresentation(suite Suite, presentedJWP string, publicKey [
 	return &out, nil
 }
 
-// Native returns the cgo-backed implementation.
+// Native returns the cgo-backed implementation, built with -tags bbsnative.
 func Native() interface {
 	BlindSigner
 	ProofVerifier

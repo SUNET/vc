@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/oauth2/wellknown"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -476,7 +476,7 @@ func TestParseRawKeysEmptyArray(t *testing.T) {
 	assert.Contains(t, err.Error(), "JWKS contains no keys")
 }
 
-// Retained after the helper moved to pkg/openid4vci: these are the cases
+// Retained after the helper moved to pkg/oauth2/wellknown: these are the cases
 // pkg/trust depends on, and they should keep passing wherever the function
 // lives. Its own package covers the rule itself, including the trailing
 // slash that OpenID4VCI 1.1 adds.
@@ -502,7 +502,7 @@ func TestBuildWellKnownURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.entity, func(t *testing.T) {
-			got := openid4vci.WellKnownURL(tt.entity, tt.suffix)
+			got := wellknown.URL(tt.entity, tt.suffix)
 			assert.Equal(t, tt.want, got)
 		})
 	}
