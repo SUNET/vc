@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -27,6 +28,10 @@ type Target struct {
 
 	messageQueue chan *cdproto.Message
 
+	// detached closes after the target has handled every message that the
+	// browser routed to it before the detach.
+	detached chan struct{}
+
 	// events holds the subscriptions made with Subscribe.
 	events subscribers
 
@@ -36,7 +41,7 @@ type Target struct {
 	exposed    map[string]struct{}
 	exposedSeq int
 
-	// frameMu protects frames, execContexts, and cur.
+	// frameMu protects frames, execContexts, cur and worldGen.
 	frameMu sync.RWMutex
 	// frames is the set of encountered frames.
 	frames       map[cdp.FrameID]*Frame
@@ -46,6 +51,14 @@ type Target struct {
 	execUniqueIDs map[cdp.FrameID]string
 	// cur is the current top level frame.
 	cur cdp.FrameID
+	// worldGen counts the calls of dropWorlds, so that execContext does not
+	// keep a world that it created for an old document.
+	worldGen uint64
+
+	// noRuntime is true when the target did not get Runtime.enable. Then
+	// execContexts holds the isolated worlds that execContext creates.
+	// attachTarget sets it before run starts. See WithRuntimeDisabled.
+	noRuntime bool
 
 	// logging funcs
 	logf, errf func(string, ...any)
@@ -77,14 +90,17 @@ func (t *Target) enclosingFrame(node *Node) cdp.FrameID {
 // ensureFrame makes sure that the top frame of this target is loaded. It
 // returns the top frame, the root node, and the ExecutionContextID of the top
 // frame. Otherwise it returns false as its last return value.
-func (t *Target) ensureFrame() (*Frame, *Node, runtime.ExecutionContextID, bool) {
+//
+// Without the Runtime domain, it can send a command. So it must not run on the
+// goroutines of Target.run.
+func (t *Target) ensureFrame(ctx context.Context) (*Frame, *Node, runtime.ExecutionContextID, bool) {
 	t.frameMu.RLock()
-	frame := t.frames[t.cur]
-	execCtx := t.execContexts[t.cur]
+	cur := t.cur
+	frame := t.frames[cur]
 	t.frameMu.RUnlock()
 
 	// the frame has not loaded yet.
-	if frame == nil || execCtx == 0 {
+	if frame == nil {
 		return nil, nil, 0, false
 	}
 
@@ -96,7 +112,69 @@ func (t *Target) ensureFrame() (*Frame, *Node, runtime.ExecutionContextID, bool)
 		// not root node yet?
 		return nil, nil, 0, false
 	}
+
+	execCtx, err := t.execContext(ctx, cur)
+	if err != nil || execCtx == 0 {
+		return nil, nil, 0, false
+	}
 	return frame, root, execCtx, true
+}
+
+// worldName is the name of the isolated world that a target without the
+// Runtime domain creates in a frame. The page cannot see an isolated world.
+const worldName = "chromedp"
+
+// execContext returns the execution context of the frame with the id, where
+// the queries and Poll run their scripts.
+//
+// With the Runtime domain, it is the main world of the frame, as the Runtime
+// events reported it, or 0 when there is none yet. Without the Runtime domain,
+// it is an isolated world. execContext creates it with Page.createIsolatedWorld
+// on the first call for the document of the frame. dropWorlds forgets it when
+// the frame navigates or detaches, or when the document is updated.
+//
+// Without the Runtime domain, it sends a command. So it must not run on the
+// goroutines of Target.run.
+func (t *Target) execContext(ctx context.Context, id cdp.FrameID) (runtime.ExecutionContextID, error) {
+	t.frameMu.RLock()
+	execCtx, gen := t.execContexts[id], t.worldGen
+	t.frameMu.RUnlock()
+	if execCtx != 0 || !t.noRuntime || id == "" {
+		return execCtx, nil
+	}
+	res, err := cdp.Call(ctx, t, page.CreateIsolatedWorld, page.CreateIsolatedWorldParams{
+		FrameID:   id,
+		WorldName: worldName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("creating an isolated world in frame %s: %w", id, err)
+	}
+	// When the frame navigated between the command and the reply, the world
+	// can belong to the old document. Use it for this call, and do not keep it.
+	t.frameMu.Lock()
+	if t.worldGen == gen {
+		t.execContexts[id] = res.ExecutionContextID
+	}
+	t.frameMu.Unlock()
+	return res.ExecutionContextID, nil
+}
+
+// dropWorlds forgets the isolated world of the frame with the id, or of every
+// frame when the id is empty, because a new document has none of the old
+// worlds. With the Runtime domain, it does nothing, because the Runtime events
+// keep execContexts.
+func (t *Target) dropWorlds(id cdp.FrameID) {
+	if !t.noRuntime {
+		return
+	}
+	t.frameMu.Lock()
+	defer t.frameMu.Unlock()
+	if id == "" {
+		clear(t.execContexts)
+	} else {
+		delete(t.execContexts, id)
+	}
+	t.worldGen++
 }
 
 func (t *Target) run(ctx context.Context) {
@@ -121,6 +199,10 @@ func (t *Target) run(ctx context.Context) {
 				return
 
 			case msg := <-t.messageQueue:
+				if msg == detachedMessage {
+					close(t.detached)
+					continue
+				}
 				if msg.ID != 0 {
 					t.listenersMu.Lock()
 					t.listeners = runListeners(t.listeners, msg)
@@ -172,10 +254,16 @@ func (t *Target) run(ctx context.Context) {
 	}
 }
 
+// detachedMessage is the message that the browser puts in the queue of a target
+// after the last message that it routes to the target.
+var detachedMessage = new(cdproto.Message)
+
 // Call sends the command to the target, waits for the response, and decodes
 // the result into res. It satisfies [cdp.Session].
 //
-// Call returns a browser error as a [*cdproto.Error]. It returns an error when
+// Call returns a browser error as a [*cdproto.Error]. It returns an error that
+// wraps [ErrTargetDetached] when the browser detaches the target before it
+// replies, for example when the page closes. It returns an error when
 // the connection to the browser is lost, also when ctx never ends. The error
 // wraps the reason of the loss and [context.Canceled].
 func (t *Target) Call(ctx context.Context, method string, params, res any) error {
@@ -218,6 +306,8 @@ func (t *Target) Call(ctx context.Context, method string, params, res any) error
 		return ctx.Err()
 	case <-t.browser.LostConnection:
 		return t.browser.lostError(ctx)
+	case <-t.detached:
+		return t.detachedError()
 	case t.browser.cmdQueue <- cmd:
 	}
 
@@ -237,7 +327,21 @@ func (t *Target) Call(ctx context.Context, method string, params, res any) error
 		return t.browser.lostError(ctx)
 	case msg := <-ch:
 		return decodeReply(msg, res)
+	case <-t.detached:
+		// The target handled every earlier message before it closed detached,
+		// so a reply that exists is in the channel by now.
+		select {
+		case msg := <-ch:
+			return decodeReply(msg, res)
+		default:
+		}
+		return t.detachedError()
 	}
+}
+
+// detachedError returns the error of a command on a detached target.
+func (t *Target) detachedError() error {
+	return fmt.Errorf("target %s: %w: inspected target navigated or closed", t.TargetID, ErrTargetDetached)
 }
 
 // Subscribe starts to buffer the target events with the method, and returns
@@ -302,11 +406,12 @@ func (t *Target) documentUpdated(ctx context.Context) {
 	// invalidate nodes
 	if f.Root != nil {
 		close(f.Root.Invalidated)
+		f.Root = nil
 	}
 
 	f.Nodes = make(map[cdp.NodeID]*Node)
 	res, err := cdp.Call(ctx, t, dom.GetDocument, dom.GetDocumentParams{})
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, ErrTargetDetached) {
 		return // TODO: perhaps not necessary, but useful to keep the tests less noisy
 	}
 	if err != nil {
@@ -325,6 +430,7 @@ func (t *Target) pageEvent(ev any) {
 
 	switch e := ev.(type) {
 	case *page.EventFrameNavigated:
+		t.dropWorlds(e.Frame.ID)
 		t.frameMu.Lock()
 		t.frames[e.Frame.ID] = &Frame{Frame: e.Frame}
 		if e.Frame.ParentID == "" {
@@ -339,6 +445,7 @@ func (t *Target) pageEvent(ev any) {
 		id, op = e.FrameID, frameAttached(e.ParentFrameID)
 
 	case *page.EventFrameDetached:
+		t.dropWorlds(e.FrameID)
 		id, op = e.FrameID, frameDetached
 
 	case *page.EventFrameStartedLoading:
@@ -401,6 +508,7 @@ func (t *Target) domEvent(ctx context.Context, ev any) {
 
 	switch e := ev.(type) {
 	case *dom.EventDocumentUpdated:
+		t.dropWorlds("")
 		t.documentUpdated(ctx)
 		return
 

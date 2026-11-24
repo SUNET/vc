@@ -54,9 +54,10 @@ type Context struct {
 	// separate browser tab (page).
 	Target *Target
 
-	// targetMu protects the write of Target in attachTarget and the read of
-	// Target in the cancellation watcher of NewContext. The watcher runs on
-	// its own goroutine, and the context can end while attachTarget runs. The
+	// targetMu protects the write of Target in attachTarget, and the reads of
+	// Target in the cancellation watcher of NewContext and in Detached. The
+	// watcher runs on its own goroutine, and the context can end while
+	// attachTarget runs. Detached can run on any goroutine. The
 	// goroutine that runs the actions needs no lock to read Target, because it
 	// is the only one that writes it.
 	targetMu sync.Mutex
@@ -94,6 +95,14 @@ type Context struct {
 	// has a BrowserContextID that is not empty. The context copies it from the
 	// parent context.
 	BrowserContextID cdp.BrowserContextID
+
+	// listeners holds the funcs of WithListener. attachTarget adds them to the
+	// target before it sends a command to the target.
+	listeners []func(ev any)
+
+	// noRuntime is set by WithRuntimeDisabled. attachTarget then does not
+	// send Runtime.enable to the target.
+	noRuntime bool
 
 	// browserOpts holds the browser options that NewContext receives from
 	// WithBrowserOption. Run uses them when it allocates a browser.
@@ -568,6 +577,13 @@ func (c *Context) attachTarget(ctx context.Context, targetID target.ID) error {
 	if err != nil {
 		return err
 	}
+	// Add the funcs of WithListener before the target reads a message, so
+	// that they see every event that reaches the target.
+	for _, fn := range c.listeners {
+		t.listen(ctx, eventsOnly(fn))
+	}
+	// Set the field before run starts, because run reads it.
+	t.noRuntime = c.noRuntime
 	c.targetMu.Lock()
 	c.Target = t
 	c.targetMu.Unlock()
@@ -577,8 +593,11 @@ func (c *Context) attachTarget(ctx context.Context, targetID target.ID) error {
 	// Find out whether this is a worker target. A worker cannot use
 	// Target.getTargetInfo or Target.getTargets, so find out whether "self"
 	// refers to a WorkerGlobalScope or a ServiceWorkerGlobalScope.
-	if _, err := cdp.Call(ctx, c.Target, runtime.Enable, cdp.Empty{}); err != nil {
-		return err
+	// Runtime.evaluate works without Runtime.enable. See WithRuntimeDisabled.
+	if !c.noRuntime {
+		if _, err := cdp.Call(ctx, c.Target, runtime.Enable, cdp.Empty{}); err != nil {
+			return err
+		}
 	}
 	self, err := cdp.Call(ctx, c.Target, runtime.Evaluate, runtime.EvaluateParams{Expression: "self"})
 	if err != nil {
@@ -722,6 +741,62 @@ func WithDetachOnCancel() ContextOption {
 // docs/decisions/2026-10-04-keep-site-isolation-on.md.
 func WithTargetID(id target.ID) ContextOption {
 	return func(c *Context) { c.targetID = id }
+}
+
+// WithListener makes the context call fn for each event of its target, from
+// the first message of the target. It is [Listen] from the start of the target.
+// The first Run adds fn to the target before it sends a command to the target,
+// for a new tab and for a target that [WithTargetID] names.
+//
+// So fn sees the events that the start causes. For example, the start sends
+// Runtime.enable, unless the context has [WithRuntimeDisabled], and Chrome
+// answers with a [runtime.EventExecutionContextCreated]
+// for each JavaScript context that the target already has. A func that Listen
+// adds after the first Run does not see these events.
+//
+// The rules of Listen hold for fn. fn gets the events only. It runs on the
+// goroutine that reads the messages of the tab, in the order of arrival. It
+// must return fast, it must not run a command or call Listen, and it must not
+// panic. fn gets events as long as the target runs. The target runs as long as
+// the context that the first Run gets, which can be a child of this context.
+//
+// Give the option more than once to add several funcs. The target calls them
+// in the order of the options. A child context does not inherit them.
+func WithListener(fn func(ev any)) ContextOption {
+	return func(c *Context) { c.listeners = append(c.listeners, fn) }
+}
+
+// WithRuntimeDisabled makes the context attach to its target with the Runtime
+// domain disabled. By default, the first Run sends Runtime.enable, and with
+// this option it does not.
+//
+// While the Runtime domain is enabled, Chrome prepares each argument of a
+// console call for the protocol, and a page can see this work. For example,
+// Chrome formats the stack of an error that the page logs, so a func of the
+// page in Error.prepareStackTrace runs. So any page can tell that a program
+// drives it. With the domain disabled, Chrome does not do this work.
+//
+// With the Runtime domain disabled, Chrome sends no events of the domain. So:
+//
+//   - [Console] gets only the entries of the browser log, and no console API
+//     calls and no uncaught exceptions.
+//   - [Listen], [Events] and [WithListener] get no events of the Runtime
+//     domain.
+//   - [ExposeFunc] returns an error that wraps [ErrRuntimeDisabled], because Chrome
+//     adds no binding to the page.
+//
+// The queries and [Poll] need an execution context in each frame, which they
+// otherwise learn from the Runtime events. With this option, the target
+// creates an isolated world in the frame with Page.createIsolatedWorld, and
+// keeps it until the frame navigates or detaches. An isolated world shares the
+// DOM with the page, but not its JavaScript globals. So a predicate of [Poll]
+// or [PollFunction], and a func of [WaitFunc], see the DOM and not the
+// variables of the scripts of the page. [Evaluate] runs in the main world of
+// the page, as before.
+//
+// A child context does not inherit the option.
+func WithRuntimeDisabled() ContextOption {
+	return func(c *Context) { c.noRuntime = true }
 }
 
 // CreateBrowserContextOption is an option for the creation of a BrowserContext.

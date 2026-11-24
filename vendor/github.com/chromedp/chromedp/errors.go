@@ -92,6 +92,19 @@ const (
 	// ErrChannelClosed is the channel closed error.
 	ErrChannelClosed Error = "channel closed"
 
+	// ErrTargetDetached is the error of a command on a target that the browser
+	// detached, for example because the page closed. The browser sends no reply
+	// to a command that is still pending when this happens.
+	ErrTargetDetached Error = "target detached"
+
+	// ErrRuntimeDisabled is the error of an action that needs the Runtime
+	// domain, on a context that has [WithRuntimeDisabled].
+	ErrRuntimeDisabled Error = "the Runtime domain is disabled, because the context has WithRuntimeDisabled"
+
+	// ErrNoTarget is the error of a func that reads the target of a context
+	// that has no target yet. The first Run opens the target.
+	ErrNoTarget Error = "context has no target"
+
 	// ErrInvalidTarget is the invalid target error.
 	ErrInvalidTarget Error = "invalid target"
 
