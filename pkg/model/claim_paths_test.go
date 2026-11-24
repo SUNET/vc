@@ -14,8 +14,8 @@ import (
 // loader, each next to the configuration that differs only in what the rule
 // refuses and loads.
 func TestCheckClaimPathsRefusals(t *testing.T) {
-	datastore := func(authScope string) string {
-		return "datastore:\n  scopes:\n    ehic:\n      auth_provider: openid4vp\n      auth_scopes:\n        pid:\n" + authScope
+	authScopes := func(source, authScope string) string {
+		return source + ":\n  scopes:\n    ehic:\n      auth_provider: openid4vp\n      auth_scopes:\n        pid:\n" + authScope
 	}
 	tests := []struct {
 		name              string
@@ -23,8 +23,13 @@ func TestCheckClaimPathsRefusals(t *testing.T) {
 	}{
 		{
 			name:     "a copy targets a top-level claim of the issued document",
-			refused:  datastore("          auth_claims: [[given_name]]\n          document_claims:\n            - {from: [birthdate], to: [a, b]}\n"),
-			accepted: datastore("          auth_claims: [[given_name]]\n          document_claims:\n            - {from: [birthdate], to: [a]}\n"),
+			refused:  authScopes("datastore", "          auth_claims: [[given_name]]\n          document_claims:\n            - {from: [birthdate], to: [a, b]}\n"),
+			accepted: authScopes("datastore", "          auth_claims: [[given_name]]\n          document_claims:\n            - {from: [birthdate], to: [a]}\n"),
+		},
+		{
+			name:     "an external_api copy targets a top-level claim of the issued document",
+			refused:  authScopes("external_api", "          auth_claims: [[given_name]]\n          document_claims:\n            - {from: [birthdate], to: [a, b]}\n"),
+			accepted: authScopes("external_api", "          auth_claims: [[given_name]]\n          document_claims:\n            - {from: [birthdate], to: [a]}\n"),
 		},
 		{
 			name:     "a derivation input names one claim",
