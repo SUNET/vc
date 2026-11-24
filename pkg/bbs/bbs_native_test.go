@@ -1,3 +1,5 @@
+//go:build bbsnative
+
 package bbs
 
 import (

@@ -1,5 +1,8 @@
 name: test-golang
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   test:
@@ -20,10 +23,9 @@ jobs:
           node-version: '22'
 
       # pkg/pki and pkg/jose exercise SoftHSM2 via miekg/pkcs11; pkg/bbs
-      # links zk-cred-bbs's cgo backend. Both are compiled into every
-      # standard build (Design A: opt-in build tags removed, feature
-      # activation is by config at runtime), so the default test path
-      # needs the C/Rust toolchains and SoftHSM present.
+      # links zk-cred-bbs's cgo backend under -tags bbsnative, which the
+      # Makefile sets for every build and test. The default test path
+      # therefore needs the C/Rust toolchains and SoftHSM present.
       - name: Install SoftHSM + native toolchains
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends softhsm2 opensc cmake pkg-config build-essential
 
@@ -61,8 +63,8 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
         run: |
-          go vet -tags integration ./...
-          go vet -tags integration_cross_device ./...
+          go vet -tags integration,bbsnative ./...
+          go vet -tags integration_cross_device,bbsnative ./...
 
       - name: Run apigw integration tests
         env:
@@ -183,10 +185,9 @@ jobs:
             third_party/.zk-cred-vega-src/target
           key: zk-cred-vega-${{ runner.os }}-${{ steps.crate.outputs.vega_sha }}
 
-      # pkg/mdoc/zkvegaworker transitively imports pkg/bbs/bbsnative
-      # (via pkg/openid4vci → pkg/bbs), which is compiled unconditionally
-      # and links libzk_cred_bbs — so `go test ./pkg/mdoc/...` fails to
-      # build without it staged.
+      # test-zknative runs with -tags zknative,bbsnative, so
+      # pkg/mdoc/zkvegaworker links libzk_cred_bbs and `go test ./pkg/mdoc/...`
+      # fails to build without it staged.
       - name: Cache the built zk-cred-bbs C ABI library
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -265,3 +266,39 @@ jobs:
       # reached by nothing else here.
       - name: Build the issuer
         run: make build-issuer
+
+  # Third-party programs import vc packages without Rust or zk-cred-bbs.
+  # Nothing is staged and no tag is set here, so this fails if pkg/bbs's
+  # cgo code leaks into the default build or the verifier-side packages
+  # grow a dependency on issuer-side code again.
+  consumer:
+    name: Third-party consumer build (no bbsnative)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/*.sum"
+
+      - name: Verifier-side packages do not depend on pkg/bbs
+        run: |
+          if go list -deps ./pkg/openid4vp ./pkg/trust ./pkg/sdjwtvc | grep -q 'SUNET/vc/pkg/bbs'; then
+            echo "::error::pkg/openid4vp, pkg/trust or pkg/sdjwtvc depends on pkg/bbs"
+            exit 1
+          fi
+
+      - name: Build an external module that imports pkg/openid4vp
+        run: |
+          mkdir "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
+          go mod init example.com/consumer
+          printf 'package main\n\nimport _ "github.com/SUNET/vc/pkg/openid4vp"\n\nfunc main() {}\n' > main.go
+          go mod edit -require github.com/SUNET/vc@v0.0.0 -replace github.com/SUNET/vc="$GITHUB_WORKSPACE"
+          go mod tidy
+          go build ./...
+
+      - name: Run the BBS stub tests without the tag
+        run: go test ./pkg/bbs/ ./internal/issuer/apiv1/

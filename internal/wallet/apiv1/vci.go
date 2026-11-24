@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/internal/wallet/config"
 	"github.com/SUNET/vc/internal/wallet/credential"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/oauth2/wellknown"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
@@ -424,7 +425,7 @@ func (c *Client) fetchIssuerMetadata(ctx context.Context, issuerURL string) (*op
 	// with a tenant path publishes at the host root (OpenID4VCI 1.0
 	// §12.2.2). Appending sent the request to the tenant path instead, so
 	// a multi-tenant issuer was unreachable from this wallet.
-	metaURL := openid4vci.WellKnownURL(issuerURL, "openid-credential-issuer")
+	metaURL := wellknown.URL(issuerURL, "openid-credential-issuer")
 	resp, err := c.httpClient.Get(metaURL)
 	if err != nil {
 		return nil, err
@@ -482,7 +483,7 @@ func (m *oauth2ServerMetadata) interactiveAuthorizationRequired() bool {
 
 func (c *Client) fetchOAuth2Metadata(ctx context.Context, serverURL string) (*oauth2ServerMetadata, error) {
 	// Same insertion rule, from RFC 8414 §3.
-	metaURL := openid4vci.WellKnownURL(serverURL, "oauth-authorization-server")
+	metaURL := wellknown.URL(serverURL, "oauth-authorization-server")
 	resp, err := c.httpClient.Get(metaURL)
 	if err != nil {
 		return nil, err

@@ -283,6 +283,9 @@ func bbsTestKeyPair(t *testing.T) (secretB64, publicB64 string) {
 	secret := make([]byte, 32)
 	secret[31] = 7
 	public, err := bbs.Native().SkToPk(secret)
+	if errors.Is(err, bbs.ErrNotBuilt) {
+		t.Skip("needs -tags bbsnative")
+	}
 	if err != nil {
 		t.Fatalf("deriving a test public key: %v", err)
 	}

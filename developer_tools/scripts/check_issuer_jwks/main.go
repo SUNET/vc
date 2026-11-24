@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/oauth2/wellknown"
 )
 
 var version = "n/a"
@@ -100,7 +100,7 @@ func main() {
 	fmt.Printf("Host: %s%s%s\n\n", c.cyan, hostURL, c.reset)
 
 	// Step 1: Fetch issuer metadata
-	wellKnownURL := openid4vci.WellKnownURL(hostURL, "openid-credential-issuer")
+	wellKnownURL := wellknown.URL(hostURL, "openid-credential-issuer")
 	fmt.Printf("%s[1] Fetching %s%s\n", c.heading, wellKnownURL, c.reset)
 
 	body, err := httpGet(wellKnownURL)

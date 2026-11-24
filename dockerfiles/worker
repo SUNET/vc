@@ -29,7 +29,7 @@ FROM gobuild AS builder
 
 ARG SERVICE_NAME
 ARG BUILDTAG
-ARG BUILD_TAGS="netgo,osusergo"
+ARG BUILD_TAGS="netgo,osusergo,bbsnative"
 
 # Pinned commit SHAs for the third_party native libraries. Docker-build-
 # push.yml resolves each mutable ref (main / a tag) to a SHA once and
@@ -51,7 +51,7 @@ COPY . .
 RUN make swagger-${SERVICE_NAME} swagger-fmt
 RUN make proto-${SERVICE_NAME}
 
-# Every worker links libzk_cred_bbs.so via pkg/openid4vci → pkg/bbs.
+# Every worker links libzk_cred_bbs statically via pkg/bbs (-tags bbsnative).
 RUN make bbs-native-lib ${ZK_CRED_BBS_REF:+ZK_CRED_BBS_REF="$ZK_CRED_BBS_REF"}
 
 # Only the verifier links libzk_cred_longfellow.so (native ZK/PPID via the
@@ -96,7 +96,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} \
         CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-vega/include" \
         CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-vega/lib -lzk_cred_vega" \
-        go build -v -tags "zknative" -o bin/zkvegaverifyworker -ldflags "-w -s" ./cmd/zkvegaverifyworker; \
+        go build -v -tags "zknative,bbsnative" -o bin/zkvegaverifyworker -ldflags "-w -s" ./cmd/zkvegaverifyworker; \
     fi
 
 # Verifier variant defined FIRST so `runtime` below is the LAST (default)

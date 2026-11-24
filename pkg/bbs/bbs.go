@@ -120,6 +120,10 @@ var (
 	// second is an incident. Collapsing them into one error hides
 	// breakage inside an expected failure path.
 	ErrInternal = errors.New("bbs: native call failed")
+
+	// ErrNotBuilt is returned by every native operation in a build without
+	// -tags bbsnative.
+	ErrNotBuilt = errors.New("bbs: native backend not built in, rebuild with -tags bbsnative")
 )
 
 // BlindSigner is the issuer's half.

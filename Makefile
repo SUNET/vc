@@ -66,9 +66,12 @@ _RELEASE_MODE           ?=
 RESERVED_TAGS           := latest testing demo dev
 
 # `zknative` cgo build tag: verifier only (zk-cred-longfellow + zk-cred-vega).
-# `pkg/bbs` is plain cgo, no tag, linked into every worker.
+# `bbsnative` cgo build tag: pkg/bbs's zk-cred-bbs backend, set by every
+# vc build and test. Without it pkg/bbs is a stub, so third parties that
+# import vc packages need no Rust library.
 # netgo,osusergo ride along under CGO to bypass glibc NSS.
 ZKNATIVE_TAG            := zknative
+BBSNATIVE_TAG           := bbsnative
 ZK_CRED_LONGFELLOW_REPO ?= https://github.com/sirosfoundation/zk-cred-longfellow.git
 # Pinned; bump deliberately. This is main plus the nym_auth commits of
 # that crate's `feat/nymauth-prove` branch, which is what carries
@@ -109,7 +112,7 @@ ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 # Worker build flags. netgo,osusergo route DNS and user lookups through
 # pure-Go implementations so `--extldflags '-static'` can link without
 # glibc NSS.
-WORKER_BUILD_TAGS       := netgo,osusergo
+WORKER_BUILD_TAGS       := netgo,osusergo,$(BBSNATIVE_TAG)
 
 # Literal comma, for extending tag lists inside $(if ...) where make's
 # argument parser would otherwise eat the commas.
@@ -299,7 +302,7 @@ define TEST_TEMPLATE
 test-$(1): bbs-native-lib-staged ## Test $(1) service
 	$$(info Testing $(1))
 	LD_LIBRARY_PATH=$$(CURDIR)/$$(ZK_CRED_BBS_STAGE)/lib \
-		$$(CGO_ENABLED_DYNAMIC) go test -v ./cmd/$(1)/... ./internal/$(1)/...
+		$$(CGO_ENABLED_DYNAMIC) go test -v -tags $$(BBSNATIVE_TAG) ./cmd/$(1)/... ./internal/$(1)/...
 
 endef
 
@@ -312,7 +315,7 @@ test-env: ## Set up test environment
 test-pkg: bbs-native-lib-staged ## Test the shared packages under pkg/
 	$(info Testing pkg)
 	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
-		$(CGO_ENABLED_DYNAMIC) go test ./pkg/...
+		$(CGO_ENABLED_DYNAMIC) go test -tags $(BBSNATIVE_TAG) ./pkg/...
 
 test-js: test-js-deps ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
@@ -346,7 +349,7 @@ test-pkcs11: ## Test pkg/pki and pkg/jose (cgo, PKCS#11 code paths)
 test-apigw-integration: bbs-native-lib-staged ## Test internal/apigw/integration and internal/apigw/httpserver (integration tag, mocks only)
 	$(info Testing internal/apigw/integration and internal/apigw/httpserver)
 	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
-		$(CGO_ENABLED_DYNAMIC) go test -v -count=1 -tags integration ./internal/apigw/integration/... ./internal/apigw/httpserver/...
+		$(CGO_ENABLED_DYNAMIC) go test -v -count=1 -tags integration,$(BBSNATIVE_TAG) ./internal/apigw/integration/... ./internal/apigw/httpserver/...
 
 # ==============================================================================
 # Native ZK/PPID Proof Verification (zk-cred-longfellow, cgo, opt-in)
@@ -487,7 +490,7 @@ bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issu
 test-bbsnative: bbs-native-lib-staged ## Run pkg/bbs's cgo tests (requires: make bbs-native-lib)
 	$(info Testing pkg/bbs (cgo))
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
-		go test -v ./pkg/bbs/...
+		go test -v -tags $(BBSNATIVE_TAG) ./pkg/bbs/...
 
 # Same shape as zk-native-lib above, for zk-cred-vega instead - see that
 # target's own doc comment for the fetch/build/stage mechanics (identical
@@ -537,7 +540,7 @@ zk-native-lib-vega-ensure: _check-native-host ## Stage zk-cred-vega only when it
 test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run the zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
-		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/...
+		go test -tags $(ZKNATIVE_TAG),$(BBSNATIVE_TAG) -v ./pkg/mdoc/... ./pkg/nymauth/...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
@@ -903,7 +906,7 @@ build-verifier-zknative: bbs-native-lib-ensure zk-native-lib-ensure ## Build ver
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/include" \
 		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib -lzk_cred_longfellow" \
-		go build -tags $(ZKNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_verifier-zknative \
+		go build -tags $(ZKNATIVE_TAG),$(BBSNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_verifier-zknative \
 		$(LDFLAGS_DYNAMIC) ./cmd/verifier/
 	@echo "Run with: LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 
@@ -912,7 +915,7 @@ build-zkvegaverifyworker: bbs-native-lib-ensure zk-native-lib-vega-ensure ## Bui
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/include" \
 		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib -lzk_cred_vega" \
-		go build -tags $(ZKNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/zkvegaverifyworker \
+		go build -tags $(ZKNATIVE_TAG),$(BBSNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/zkvegaverifyworker \
 		$(LDFLAGS_DYNAMIC) ./cmd/zkvegaverifyworker/
 	@echo "Run the verifier with: PATH=$(CURDIR)/bin:\$$PATH LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 	@echo "(zkvegaverifyworker resolves via PATH by default - see ZkVerifierConfig.VegaWorkerPath to override)"
