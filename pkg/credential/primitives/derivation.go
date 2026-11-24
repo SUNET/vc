@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 )
 
 // Adding a primitive: add an Args struct + Apply method in a file in this
@@ -12,11 +14,16 @@ import (
 // `yaml:"..."` tag. No changes needed in the dispatcher, validator, or docs
 // generator. Derivation is the single source of truth: gen_config_docs walks
 // these fields, and the derivation_entry struct-level validator (registered
-// in pkg/helpers) enforces the exactly-one-field rule.
+// in pkg/helpers) enforces the exactly-one-field rule. A primitive reads the
+// claim at its claimpath.Ref field Input and writes the claim at its field
+// Output, a claimpath.Pointer or a claimpath.Ref, which defaults to Input;
+// CheckDerivations finds both by these names.
 
 // Derivation is one post-verification claim computation configured on a scope; exactly one field must be set and that field's Apply method runs.
 //
-// Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
+// Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: [email] }`). The subsections below catalog the primitives and their parameters.
+//
+// Every claim a primitive reads or writes is a claims path pointer (OpenID4VP 1.0 section 7). An output is a claim of the issued credential's document. An input is a claim of the source data - the presented credential for a presentation source, the document otherwise - and a claim of the issued document when an earlier derivation of the list writes it or a claim above it.
 type Derivation struct {
 	// AgeOverThresholds emits two boolean claims per configured threshold
 	// N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at
@@ -67,14 +74,39 @@ type Derivation struct {
 // pointer field on Derivation must point at a type implementing Applier;
 // the reflection-based dispatcher below relies on it.
 type Applier interface {
-	Apply(claims map[string]any, now time.Time) (map[string]any, error)
+	Apply(claims Claims, now time.Time) ([]Write, error)
+}
+
+// Claims is what a derivation reads.
+type Claims interface {
+	// Input returns the claim an input names. An input upgraded from a
+	// dotted name reads the top-level key of that name when the claims
+	// hold it. Otherwise it reads its pointer: in the issued claims when
+	// an earlier derivation of the list writes the pointer or a prefix of
+	// it, in the source claims otherwise. A claim the claims hold in
+	// another structure than the pointer selects is absent.
+	Input(r claimpath.Ref) (any, bool, error)
+	// Issued returns the claim at a pointer into the issued claims. A Ref
+	// upgraded from a dotted name reads the top-level key of that name
+	// when the claims hold it.
+	Issued(r claimpath.Ref) (any, bool, error)
+	// Named returns the pointer into the issued claims of a claim a
+	// primitive names itself, such as age_over_18.
+	Named(name string) (claimpath.Pointer, error)
+}
+
+// Write is a value a derivation writes at Path, a pointer into the issued
+// claims.
+type Write struct {
+	Path  claimpath.Pointer
+	Value any
 }
 
 // Apply runs whichever primitive is configured on d. Returns an error when
 // zero or more than one field is set; the struct-level validator catches
 // that case at config load time, but Apply stays defensive for callers
 // that build a Derivation programmatically (tests, bootstrapping tools).
-func (d *Derivation) Apply(claims map[string]any, now time.Time) (map[string]any, error) {
+func (d *Derivation) Apply(claims Claims, now time.Time) ([]Write, error) {
 	a, name, err := d.selected()
 	if err != nil {
 		return nil, err
@@ -86,18 +118,74 @@ func (d *Derivation) Apply(claims map[string]any, now time.Time) (map[string]any
 	return out, nil
 }
 
-// InputClaim returns the claim path the configured primitive reads, or ""
-// when it reads none.
-func (d *Derivation) InputClaim() string {
+// Input returns the claim the configured primitive reads.
+func (d *Derivation) Input() (claimpath.Ref, bool) {
 	a, _, err := d.selected()
 	if err != nil {
-		return ""
+		return claimpath.Ref{}, false
 	}
+	return inputOf(a)
+}
+
+// ownOutputs is a primitive that names the claims it writes itself.
+type ownOutputs interface {
+	outputs(named func(string) (claimpath.Pointer, error)) ([]claimpath.Pointer, error)
+}
+
+// Outputs returns the pointers of the claims the configured primitive
+// writes: its Output, or its Input when it writes in place. named returns
+// the pointer of a claim a primitive names itself.
+func (d *Derivation) Outputs(named func(string) (claimpath.Pointer, error)) ([]claimpath.Pointer, error) {
+	a, _, err := d.selected()
+	if err != nil {
+		return nil, err
+	}
+	if own, ok := a.(ownOutputs); ok {
+		return own.outputs(named)
+	}
+	output, ok := outputOf(a)
+	if !ok {
+		return nil, nil
+	}
+	return []claimpath.Pointer{output}, nil
+}
+
+// outputOf returns the claim a primitive writes: its Output, or its Input
+// when Output is unset.
+func outputOf(a Applier) (claimpath.Pointer, bool) {
+	if output, ok := claimField(a, "Output"); ok && !output.IsZero() {
+		return output.Path, true
+	}
+	if input, ok := inputOf(a); ok {
+		return input.Path, true
+	}
+	return claimpath.Pointer{}, false
+}
+
+// inputOf returns a primitive's claimpath.Ref field Input.
+func inputOf(a Applier) (claimpath.Ref, bool) {
 	f := reflect.ValueOf(a).Elem().FieldByName("Input")
-	if !f.IsValid() || f.Kind() != reflect.String {
-		return ""
+	if !f.IsValid() {
+		return claimpath.Ref{}, false
 	}
-	return f.String()
+	input, ok := f.Interface().(claimpath.Ref)
+	return input, ok
+}
+
+// claimField returns a primitive's field name, a claimpath.Pointer or a
+// claimpath.Ref, as a Ref.
+func claimField(a Applier, name string) (claimpath.Ref, bool) {
+	f := reflect.ValueOf(a).Elem().FieldByName(name)
+	if !f.IsValid() {
+		return claimpath.Ref{}, false
+	}
+	switch claim := f.Interface().(type) {
+	case claimpath.Pointer:
+		return claimpath.Ref{Path: claim}, true
+	case claimpath.Ref:
+		return claim, true
+	}
+	return claimpath.Ref{}, false
 }
 
 // ReformatsInput reports whether the configured primitive's output is a

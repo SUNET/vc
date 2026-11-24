@@ -1,6 +1,10 @@
 package eduapi
 
-import "time"
+import (
+	"time"
+
+	"github.com/SUNET/vc/pkg/claimpath"
+)
 
 // DefaultScope is the Edu-API read-only scope requested when a remote sets none.
 const DefaultScope = "http://purl.1edtech.org/spec/eduapi/v1p0/scope/core.readonly" // NOSONAR — scope identifier from the Edu-API spec, not an endpoint
@@ -45,8 +49,9 @@ type AttributeMapping map[string]AttributeConfig
 // (canonicalisation, case folding, date reformatting) is expressed as
 // derivations on the target scope.
 type AttributeConfig struct {
-	// Claim is the target claim name (supports dot-notation for nesting)
-	Claim string `yaml:"claim" validate:"required"`
+	// Claim is the claims path pointer of the target claim in the
+	// credential's document.
+	Claim claimpath.Pointer `yaml:"claim" validate:"required"`
 
 	// Required indicates if this attribute must be present
 	Required bool `yaml:"required" default:"false"`

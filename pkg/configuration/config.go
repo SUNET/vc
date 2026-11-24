@@ -12,6 +12,8 @@ import (
 
 	"github.com/SUNET/vc/pkg/issuance"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+	vctmfilter "github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -136,9 +138,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, errors.New("config is a folder")
 	}
 
-	if err := yaml.Unmarshal(configFile, cfg); err != nil {
+	deprecations, err := decodeShared(configPath, configFile, cfg)
+	if err != nil {
 		return nil, err
 	}
+	cfg.Deprecations = deprecations
 
 	if err := refuseRemovedSeedSettings(configFile, &seedConfigProbe{}); err != nil {
 		return nil, err
@@ -233,12 +237,16 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
 		}
-
-		// Needs the schemas, so it runs after the loop above.
-		if err := checkAuxiliaryData(cfg, serviceName); err != nil {
+		if err := recordVCTMSpellings(cfg); err != nil {
 			return nil, err
 		}
-		deriveAuxiliaryDataRequired(cfg)
+
+		// Reads each claim of a data source in its credential's schema.
+		if serviceName == "apigw" {
+			if err := readDataSources(cfg, configPath, configFile); err != nil {
+				return nil, err
+			}
+		}
 
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
@@ -265,6 +273,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		cfg.APIGW, cfg.Issuer, cfg.Verifier = nil, nil, nil
 	case "apigw":
 		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
+	}
+
+	// Needs the schemas, and reads only the sections this service keeps.
+	if err := checkClaimPaths(cfg, serviceName); err != nil {
+		return nil, err
 	}
 
 	// An auth stanza left behind by a deployment that has since closed
@@ -342,6 +355,63 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	return cfg, nil
 }
 
+// readDataSources decodes apigw.data_sources into cfg with its defaults,
+// and adds the claim spellings of earlier releases it upgraded to
+// cfg.Deprecations. The credential schemas must be loaded.
+func readDataSources(cfg *model.Cfg, file string, src []byte) error {
+	if cfg.APIGW == nil {
+		return nil
+	}
+	dataSources, rewrites, err := decodeDataSources(file, src, cfg)
+	if err != nil {
+		return err
+	}
+	if err := defaults.Set(&dataSources); err != nil {
+		return err
+	}
+	cfg.APIGW.DataSources = dataSources
+	cfg.Deprecations = append(cfg.Deprecations, rewrites...)
+	return nil
+}
+
+// checkClaimPaths checks each claim of the configuration against the shape
+// of its credential, and then the auxiliary_data, which reads the claims.
+func checkClaimPaths(cfg *model.Cfg, serviceName string) error {
+	if err := cfg.CheckClaimPaths(); err != nil {
+		return err
+	}
+	if !servicesRequiringVCTM[serviceName] {
+		return nil
+	}
+	if err := checkFilterable(cfg); err != nil {
+		return err
+	}
+	if err := checkAuxiliaryData(cfg, serviceName); err != nil {
+		return err
+	}
+	deriveAuxiliaryDataRequired(cfg)
+	return nil
+}
+
+// checkFilterable refuses the VCTM of a presentation-sourced scope that
+// credential.FilterAgainstVCTM cannot filter. The filter issues only the
+// claims the VCTM declares from a presented credential.
+func checkFilterable(cfg *model.Cfg) error {
+	if cfg.APIGW == nil {
+		return nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Presentation.Scopes)) {
+		meta := cfg.GetCredentialMetadata(scope)
+		if meta == nil {
+			continue
+		}
+		if err := vctmfilter.CheckFilterable(meta.GetVCTM()); err != nil {
+			return fmt.Errorf("apigw.data_sources.presentation.scopes.%s: %w", scope, err)
+		}
+	}
+	return nil
+}
+
 // checkCredentialMetadataEntries refuses a common.credential_metadata key
 // whose value is nil.
 //
@@ -390,7 +460,7 @@ func checkSourceOpenings(cfg *model.Cfg) error {
 		if err := checkHashCommitmentDerivations(src, toWalletPaths(meta)); err != nil {
 			return err
 		}
-		if err := checkOpeningClaims(src, meta); err != nil {
+		if err := checkOpeningClaims(cfg, src, meta); err != nil {
 			return err
 		}
 	}
@@ -432,9 +502,9 @@ func checkAuxiliaryDataList(meta *model.CredentialMetadata, where string, entrie
 		if err := checkHashCommitmentEntry(meta, entry); err != nil {
 			return fmt.Errorf("%s[%d]: %w", where, i, err)
 		}
-		key := claimsPathKey(entry.Path)
+		key := entry.Path.String()
 		if seen[key] {
-			return fmt.Errorf("%s[%d]: a second entry for path %q", where, i, entry.Path)
+			return fmt.Errorf("%s[%d]: a second entry for path %s", where, i, entry.Path)
 		}
 		seen[key] = true
 	}
@@ -449,7 +519,7 @@ func checkHashCommitmentEntry(meta *model.CredentialMetadata, entry openid4vci.A
 		return fmt.Errorf("type %q; this issuer implements %q", entry.Type, openid4vci.AuxiliaryDataTypeHashCommitment)
 	case entry.Alg != openid4vci.HashCommitmentAlgSHA256:
 		return fmt.Errorf("alg %q; this issuer implements %q", entry.Alg, openid4vci.HashCommitmentAlgSHA256)
-	case len(entry.Path) == 0:
+	case entry.Path.IsZero():
 		return errors.New("the path is empty; it names the claim that holds the commitment")
 	case entry.Opening != "" || entry.Commitment != "":
 		return errors.New("metadata carries no opening or commitment")
@@ -472,22 +542,22 @@ func deriveAuxiliaryDataRequired(cfg *model.Cfg) {
 	}
 }
 
-// toWalletPaths returns the to_wallet paths of a credential, by
-// claimsPathKey.
-func toWalletPaths(meta *model.CredentialMetadata) map[string][]string {
-	paths := map[string][]string{}
+// toWalletPaths returns the to_wallet paths of a credential, by their
+// rendering.
+func toWalletPaths(meta *model.CredentialMetadata) map[string]claimpath.Pointer {
+	paths := map[string]claimpath.Pointer{}
 	if meta == nil || meta.AuxiliaryData == nil {
 		return paths
 	}
 	for _, entry := range meta.AuxiliaryData.ToWallet {
-		paths[claimsPathKey(entry.Path)] = entry.Path
+		paths[entry.Path.String()] = entry.Path
 	}
 	return paths
 }
 
 // checkHashCommitmentDerivations requires a source scope to fulfil each
 // to_wallet path with exactly one hash_commitment derivation.
-func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][]string) error {
+func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string]claimpath.Pointer) error {
 	fulfilled := map[string]bool{}
 	for i, d := range src.Derivations {
 		if d.HashCommitment == nil {
@@ -499,31 +569,26 @@ func checkHashCommitmentDerivations(src model.SourceScope, toWallet map[string][
 	}
 	for _, key := range slices.Sorted(maps.Keys(toWallet)) {
 		if !fulfilled[key] {
-			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %q of common.credential_metadata.%s.auxiliary_data",
+			return fmt.Errorf("%s: no hash_commitment derivation fulfils to_wallet path %s of common.credential_metadata.%s.auxiliary_data",
 				src.Where(), toWallet[key], src.Scope)
 		}
 	}
 	return nil
 }
 
-func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string][]string, fulfilled map[string]bool) error {
-	key := claimsPathKey(hc.Path)
+func checkHashCommitmentDerivation(hc *primitives.HashCommitmentArgs, toWallet map[string]claimpath.Pointer, fulfilled map[string]bool) error {
+	key := hc.Path.String()
 	if _, ok := toWallet[key]; !ok {
-		return fmt.Errorf("path %q is no to_wallet entry of the credential's auxiliary_data", hc.Path)
+		return fmt.Errorf("path %s is no to_wallet entry of the credential's auxiliary_data", hc.Path)
 	}
 	if fulfilled[key] {
-		return fmt.Errorf("path %q is fulfilled twice", hc.Path)
+		return fmt.Errorf("path %s is fulfilled twice", hc.Path)
 	}
 	fulfilled[key] = true
 	if err := hc.Opening.Validate(); err != nil {
 		return fmt.Errorf("opening: %w", err)
 	}
 	return nil
-}
-
-// claimsPathKey is a map key for a claims path pointer.
-func claimsPathKey(path []string) string {
-	return strings.Join(path, "\x00")
 }
 
 // checkRandomDerivations refuses the random primitive on a presentation
@@ -1193,6 +1258,54 @@ func checkAuthScopes(cfg *model.Cfg) error {
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("apigw.data_sources: %s name no scope in common.credential_metadata, so no credential can be requested for them", strings.Join(problems, ", "))
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Datastore.Scopes)) {
+		credential := cfg.APIGW.DataSources.Datastore.Scopes[scope]
+		if credential.AuthProvider != model.AuthProviderOpenID4VP {
+			continue
+		}
+		if err := checkAuthScopeClaims(cfg, "apigw.data_sources.datastore.scopes."+scope, credential.AuthScopes); err != nil {
+			return err
+		}
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.ExternalAPI.Scopes)) {
+		credential := cfg.APIGW.DataSources.ExternalAPI.Scopes[scope]
+		if credential.AuthProvider != model.AuthProviderOpenID4VP {
+			continue
+		}
+		if err := checkAuthScopeClaims(cfg, "apigw.data_sources.external_api.scopes."+scope, credential.AuthScopes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkAuthScopeClaims runs checkPresentedClaims on each auth scope of the
+// scope at where.
+func checkAuthScopeClaims(cfg *model.Cfg, where string, authScopes map[string]model.AuthScopeEntry) error {
+	for _, authScope := range slices.Sorted(maps.Keys(authScopes)) {
+		if err := checkPresentedClaims(where+".auth_scopes."+authScope, cfg.GetFormatForScope(authScope), authScopes[authScope]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkPresentedClaims refuses a claim of the presented credential that a
+// presentation of format holds at no location, such as an mdoc claim other
+// than [namespace, element]: it is never present, so its auth scope would
+// refuse every presentation.
+func checkPresentedClaims(where, format string, entry model.AuthScopeEntry) error {
+	shape := openid4vp.PresentedShape(format)
+	for i, claim := range entry.AuthClaims {
+		if _, err := shape.Locate(claim); err != nil {
+			return fmt.Errorf("%s.auth_claims[%d]: %w", where, i, err)
+		}
+	}
+	for i, claim := range entry.DocumentClaims {
+		if _, err := shape.Locate(claim.From); err != nil {
+			return fmt.Errorf("%s.document_claims[%d].from: %w", where, i, err)
+		}
 	}
 	return nil
 }

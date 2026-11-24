@@ -8,8 +8,6 @@ import (
 )
 
 func TestClaimsExtractor_ExtractNestedClaim(t *testing.T) {
-	ce := NewClaimsExtractor()
-
 	tests := []struct {
 		name      string
 		claims    map[string]any
@@ -87,7 +85,7 @@ func TestClaimsExtractor_ExtractNestedClaim(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ce.extractNestedClaim(tt.claims, tt.path)
+			got, err := extractNestedClaim(tt.claims, tt.path)
 
 			if tt.wantError {
 				assert.Error(t, err)

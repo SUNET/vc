@@ -7,10 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"hash"
-	"maps"
-	"os"
-	"strings"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/claimpath"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +26,7 @@ var (
 	mockVCTM_v1 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeFirstName},
+				Path: claimpath.Keys(mockAttributeFirstName),
 				SD:   "always",
 			},
 		},
@@ -36,11 +35,11 @@ var (
 	mockVCTM_v2 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeAddress},
+				Path: claimpath.Keys(mockAttributeAddress),
 				SD:   "always",
 			},
 			{
-				Path: []*string{&mockAttributeFirstName},
+				Path: claimpath.Keys(mockAttributeFirstName),
 				SD:   "never",
 			},
 		},
@@ -49,7 +48,7 @@ var (
 	mockVCTM_v3 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeAddress, &mockAttributeAddressStreet},
+				Path: claimpath.Keys(mockAttributeAddress, mockAttributeAddressStreet),
 				SD:   "always",
 			},
 		},
@@ -58,7 +57,7 @@ var (
 	mockVCTM_v4 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeAddress, &mockAttributeAddressPostal},
+				Path: claimpath.Keys(mockAttributeAddress, mockAttributeAddressPostal),
 				SD:   "always",
 			},
 		},
@@ -67,7 +66,7 @@ var (
 	mockVCTM_v5 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeAddress, &mockAttributeAddressPostal, &mockAttributeAddressPostalCode},
+				Path: claimpath.Keys(mockAttributeAddress, mockAttributeAddressPostal, mockAttributeAddressPostalCode),
 				SD:   "always",
 			},
 		},
@@ -77,11 +76,11 @@ var (
 	mockVCTM_v6 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeAddress, &mockAttributeAddressPostal},
+				Path: claimpath.Keys(mockAttributeAddress, mockAttributeAddressPostal),
 				SD:   "always",
 			},
 			{
-				Path: []*string{&mockAttributeAddress},
+				Path: claimpath.Keys(mockAttributeAddress),
 				SD:   "always",
 			},
 		},
@@ -91,7 +90,7 @@ var (
 	mockVCTM_v7 = &VCTM{
 		Claims: []Claim{
 			{
-				Path: []*string{&mockAttributeWorkCountries},
+				Path: claimpath.Keys(mockAttributeWorkCountries),
 				SD:   "always",
 			},
 		},
@@ -296,7 +295,7 @@ func TestMakeCredential(t *testing.T) {
 func TestSaltEntropy(t *testing.T) {
 	vctm := &VCTM{
 		Claims: []Claim{
-			{Path: []*string{&mockAttributeFirstName}, SD: "always"},
+			{Path: claimpath.Keys(mockAttributeFirstName), SD: "always"},
 		},
 	}
 
@@ -342,7 +341,7 @@ func TestNoDuplicateDigests(t *testing.T) {
 	claim1 := "claim1"
 	vctm := &VCTM{
 		Claims: []Claim{
-			{Path: []*string{&claim1}, SD: "always"},
+			{Path: claimpath.Keys(claim1), SD: "always"},
 		},
 	}
 
@@ -412,15 +411,15 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 			vctm: &VCTM{
 				Claims: []Claim{
 					{
-						Path: []*string{new("user"), new("profile"), new("contact")},
+						Path: claimpath.Keys("user", "profile", "contact"),
 						SD:   "always",
 					},
 					{
-						Path: []*string{new("user"), new("profile")},
+						Path: claimpath.Keys("user", "profile"),
 						SD:   "always",
 					},
 					{
-						Path: []*string{new("user")},
+						Path: claimpath.Keys("user"),
 						SD:   "always",
 					},
 				},
@@ -432,15 +431,15 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 			vctm: &VCTM{
 				Claims: []Claim{
 					{
-						Path: []*string{new("user")},
+						Path: claimpath.Keys("user"),
 						SD:   "always",
 					},
 					{
-						Path: []*string{new("user"), new("profile")},
+						Path: claimpath.Keys("user", "profile"),
 						SD:   "always",
 					},
 					{
-						Path: []*string{new("user"), new("profile"), new("contact")},
+						Path: claimpath.Keys("user", "profile", "contact"),
 						SD:   "always",
 					},
 				},
@@ -452,15 +451,15 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 			vctm: &VCTM{
 				Claims: []Claim{
 					{
-						Path: []*string{new("user"), new("profile")},
+						Path: claimpath.Keys("user", "profile"),
 						SD:   "always",
 					},
 					{
-						Path: []*string{new("user")},
+						Path: claimpath.Keys("user"),
 						SD:   "always",
 					},
 					{
-						Path: []*string{new("user"), new("profile"), new("contact")},
+						Path: claimpath.Keys("user", "profile", "contact"),
 						SD:   "always",
 					},
 				},
@@ -632,107 +631,76 @@ func TestMakeCredential_AlternativeHashAlgorithms(t *testing.T) {
 	}
 }
 
-func TestProcessClaimPath_ErrorCases(t *testing.T) {
+// TestDiscloseClaim checks which claims a claims path pointer makes
+// selectively disclosable, by the payload that is left.
+func TestDiscloseClaim(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"name":          "Arthur Dent",
+			"address":       map[string]any{"locality": "Milliways", "postal_code": "12345"},
+			"nationalities": []any{"British", "Betelgeusian"},
+			"degrees": []any{
+				map[string]any{"type": "BSc", "university": "Betelgeuse"},
+				map[string]any{"type": "MSc", "university": "Betelgeuse"},
+			},
+		}
+	}
+	placeholder := func(v any) bool {
+		m, ok := v.(map[string]any)
+		_, has := m["..."]
+		return ok && has && len(m) == 1
+	}
+	tests := []struct {
+		name        string
+		path        claimpath.Pointer
+		disclosures int
+		hidden      func(map[string]any) bool
+	}{
+		{"property", claimpath.Keys("name"), 1, func(d map[string]any) bool { _, ok := d["name"]; return !ok }},
+		{"nested property", claimpath.Keys("address", "locality"), 1, func(d map[string]any) bool {
+			_, ok := d["address"].(map[string]any)["locality"]
+			return !ok
+		}},
+		{"missing claim", claimpath.Keys("middle_name"), 0, func(map[string]any) bool { return true }},
+		{"every element", claimpath.New(claimpath.Key("nationalities"), claimpath.All()), 2, func(d map[string]any) bool {
+			n := d["nationalities"].([]any)
+			return placeholder(n[0]) && placeholder(n[1])
+		}},
+		{"one element", claimpath.New(claimpath.Key("nationalities"), claimpath.Index(1)), 1, func(d map[string]any) bool {
+			n := d["nationalities"].([]any)
+			return n[0] == "British" && placeholder(n[1])
+		}},
+		{"a property of every element", claimpath.New(claimpath.Key("degrees"), claimpath.All(), claimpath.Key("type")), 2, func(d map[string]any) bool {
+			for _, degree := range d["degrees"].([]any) {
+				if _, ok := degree.(map[string]any)["type"]; ok {
+					return false
+				}
+			}
+			return true
+		}},
+	}
 	client := New()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := document()
+			disclosures, err := client.discloseClaim(data, tt.path, sha256.New())
+			require.NoError(t, err)
+			assert.Len(t, disclosures, tt.disclosures)
+			assert.True(t, tt.hidden(data), "payload %v", data)
+		})
+	}
 
-	t.Run("empty path", func(t *testing.T) {
-		data := map[string]any{"test": "value"}
-		_, _, err := client.processClaimPath(data, []*string{}, sha256.New())
+	t.Run("key in a non-object", func(t *testing.T) {
+		_, err := client.discloseClaim(document(), claimpath.Keys("name", "first"), sha256.New())
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "empty path")
-	})
-
-	t.Run("nil path element", func(t *testing.T) {
-		data := map[string]any{"test": "value"}
-		_, _, err := client.processClaimPath(data, []*string{nil}, sha256.New())
-		assert.Error(t, err)
-		// Single nil element is invalid (array element disclosure needs at least 2 elements)
-		assert.Contains(t, err.Error(), "array element path must have at least 2 elements")
-	})
-
-	t.Run("non-existent path", func(t *testing.T) {
-		data := map[string]any{"test": "value"}
-		nonExistent := "nonexistent"
-		_, _, err := client.processClaimPath(data, []*string{&nonExistent}, sha256.New())
-		// Should return empty disclosure, not error
-		assert.NoError(t, err)
-	})
-
-	t.Run("array element with null path", func(t *testing.T) {
-		data := map[string]any{
-			"nationalities": []any{"US", "CA", "FR"},
-		}
-		arr := "nationalities"
-		_, _, err := client.processClaimPath(data, []*string{&arr, nil}, sha256.New())
-		assert.NoError(t, err)
-		// Array should be replaced with SD array
-		result, ok := data["nationalities"].([]any)
-		assert.True(t, ok)
-		assert.Len(t, result, 3)
-		// Each element should be an object with "..."
-		for i, elem := range result {
-			elemMap, ok := elem.(map[string]any)
-			assert.True(t, ok, "element %d should be a map", i)
-			_, hasEllipsis := elemMap["..."]
-			assert.True(t, hasEllipsis, "element %d should have '...' key", i)
-		}
-	})
-
-	t.Run("non-object in path", func(t *testing.T) {
-		data := map[string]any{
-			"field": "string_value",
-		}
-		field := "field"
-		next := "sub"
-		_, _, err := client.processClaimPath(data, []*string{&field, &next}, sha256.New())
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid path")
 	})
 }
 
-func TestAddHashToPath_ErrorCases(t *testing.T) {
-	client := New()
-
-	t.Run("nil path element", func(t *testing.T) {
-		data := map[string]any{"test": map[string]any{}}
-		err := client.addHashToPath(data, []*string{nil}, "hash123")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nil path element")
-	})
-
-	t.Run("path not found", func(t *testing.T) {
-		data := map[string]any{"test": "value"}
-		nonExistent := "nonexistent"
-		err := client.addHashToPath(data, []*string{&nonExistent}, "hash123")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "path not found")
-	})
-
-	t.Run("non-object at path", func(t *testing.T) {
-		data := map[string]any{"test": "value"}
-		test := "test"
-		err := client.addHashToPath(data, []*string{&test}, "hash123")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "non-object")
-	})
-
-	t.Run("_sd is not an array", func(t *testing.T) {
-		data := map[string]any{
-			"_sd": "not_an_array",
-		}
-		err := client.addHashToPath(data, []*string{}, "hash123")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "_sd is not an array")
-	})
-
-	t.Run("duplicate digest", func(t *testing.T) {
-		data := map[string]any{
-			"_sd": []any{"hash123"},
-		}
-		err := client.addHashToPath(data, []*string{}, "hash123")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "duplicate digest")
-	})
+// TestAddDigest_Refusals covers the _sd member rules of section 4.2.4.1
+// and section 7.1 step 4.
+func TestAddDigest_Refusals(t *testing.T) {
+	assert.Error(t, addDigest(map[string]any{"_sd": "not_an_array"}, "hash123"))
+	assert.Error(t, addDigest(map[string]any{"_sd": []any{"hash123"}}, "hash123"))
 }
 
 func TestGenerateSalt_Uniqueness(t *testing.T) {
@@ -813,17 +781,17 @@ func TestSortSDArray_NonStringElements(t *testing.T) {
 func TestSortClaimsByDepth(t *testing.T) {
 	t.Run("sorts_claims_by_depth_descending", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{new("a")}, SD: "always"},                     // depth 1
-			{Path: []*string{new("a"), new("b"), new("c")}, SD: "always"}, // depth 3
-			{Path: []*string{new("a"), new("b")}, SD: "always"},           // depth 2
+			{Path: claimpath.Keys("a"), SD: "always"},           // depth 1
+			{Path: claimpath.Keys("a", "b", "c"), SD: "always"}, // depth 3
+			{Path: claimpath.Keys("a", "b"), SD: "always"},      // depth 2
 		}
 
 		sorted := sortClaimsByDepth(claims)
 
 		// Should be ordered: depth 3, depth 2, depth 1
-		assert.Len(t, sorted[0].Path, 3)
-		assert.Len(t, sorted[1].Path, 2)
-		assert.Len(t, sorted[2].Path, 1)
+		assert.Equal(t, 3, sorted[0].Path.Len())
+		assert.Equal(t, 2, sorted[1].Path.Len())
+		assert.Equal(t, 1, sorted[2].Path.Len())
 	})
 
 	t.Run("handles_empty_slice", func(t *testing.T) {
@@ -834,17 +802,17 @@ func TestSortClaimsByDepth(t *testing.T) {
 
 	t.Run("handles_single_claim", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{new("a")}, SD: "always"},
+			{Path: claimpath.Keys("a"), SD: "always"},
 		}
 		sorted := sortClaimsByDepth(claims)
 		assert.Len(t, sorted, 1)
-		assert.Len(t, sorted[0].Path, 1)
+		assert.Equal(t, 1, sorted[0].Path.Len())
 	})
 
 	t.Run("does_not_modify_original", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{new("a")}, SD: "always"},
-			{Path: []*string{new("a"), new("b")}, SD: "always"},
+			{Path: claimpath.Keys("a"), SD: "always"},
+			{Path: claimpath.Keys("a", "b"), SD: "always"},
 		}
 
 		original := make([]Claim, len(claims))
@@ -858,9 +826,9 @@ func TestSortClaimsByDepth(t *testing.T) {
 
 	t.Run("stable_sort_for_equal_depths", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{new("first")}, SD: "always"},
-			{Path: []*string{new("second")}, SD: "always"},
-			{Path: []*string{new("third")}, SD: "always"},
+			{Path: claimpath.Keys("first"), SD: "always"},
+			{Path: claimpath.Keys("second"), SD: "always"},
+			{Path: claimpath.Keys("third"), SD: "always"},
 		}
 
 		sorted := sortClaimsByDepth(claims)
@@ -868,7 +836,7 @@ func TestSortClaimsByDepth(t *testing.T) {
 		// All have depth 1, order might vary but should all be present
 		assert.Len(t, sorted, 3)
 		for _, claim := range sorted {
-			assert.Len(t, claim.Path, 1)
+			assert.Equal(t, 1, claim.Path.Len())
 		}
 	})
 }
@@ -887,7 +855,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			VCT: "TestCredential",
 			Claims: []Claim{
 				{
-					Path: []*string{new("nationalities"), nil},
+					Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 					SD:   "always",
 				},
 			},
@@ -950,7 +918,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			VCT: "TestCredential",
 			Claims: []Claim{
 				{
-					Path: []*string{new("person"), new("languages"), nil},
+					Path: claimpath.New(claimpath.Key("person"), claimpath.Key("languages"), claimpath.All()),
 					SD:   "always",
 				},
 			},
@@ -987,7 +955,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			VCT: "TestCredential",
 			Claims: []Claim{
 				{
-					Path: []*string{new("items"), nil},
+					Path: claimpath.New(claimpath.Key("items"), claimpath.All()),
 					SD:   "always",
 				},
 			},
@@ -1019,13 +987,13 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Array element disclosure (processed first - depth 2)
-					Path: []*string{new("nationalities"), nil},
+					Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 					SD:   "always",
 				},
 				{
 					// Whole array disclosure (processed second - depth 1)
 					// Makes the entire SD array recursively selectively disclosable
-					Path: []*string{new("nationalities")},
+					Path: claimpath.Keys("nationalities"),
 					SD:   "always",
 				},
 			},
@@ -1079,7 +1047,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Array element disclosure for single element
-					Path: []*string{new("nationalities"), nil},
+					Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 					SD:   "always",
 				},
 			},
@@ -1129,12 +1097,12 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Array element disclosure (processed first - depth 2)
-					Path: []*string{new("nationalities"), nil},
+					Path: claimpath.New(claimpath.Key("nationalities"), claimpath.All()),
 					SD:   "always",
 				},
 				{
 					// Whole array disclosure (processed second - depth 1)
-					Path: []*string{new("nationalities")},
+					Path: claimpath.Keys("nationalities"),
 					SD:   "always",
 				},
 			},
@@ -1157,462 +1125,4 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 		require.True(t, ok, "_sd should be an array")
 		assert.Len(t, sdSlice, 1, "Should have 1 hash in _sd array")
 	})
-}
-
-func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
-	// Load the actual PID VCTM file
-	vctmData, err := os.ReadFile("../../metadata/vctm_pid.json")
-	require.NoError(t, err, "Failed to read vctm_pid.json")
-
-	var vctm VCTM
-	err = json.Unmarshal(vctmData, &vctm)
-	require.NoError(t, err, "Failed to unmarshal VCTM")
-
-	require.NotEmpty(t, vctm.Claims, "VCTM should have claims")
-	t.Logf("Loaded VCTM with %d claims", len(vctm.Claims))
-
-	client := &Client{}
-	hashMethod := sha256.New()
-
-	t.Run("simple_top_level_claim_family_name", func(t *testing.T) {
-		// Test with family_name claim from PID
-		data := map[string]any{
-			"family_name": "Doe",
-			"given_name":  "John",
-			"birthdate":   "1990-01-01",
-		}
-
-		path := []*string{new("family_name")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure, "Disclosure should be generated")
-		assert.NotEmpty(t, hash, "Hash should be generated")
-		assert.NotContains(t, data, "family_name", "family_name should be removed from data")
-		assert.Contains(t, data, "given_name", "Other claims should remain")
-
-		// Verify disclosure structure
-		decoded, err := base64.RawURLEncoding.DecodeString(disclosure)
-		require.NoError(t, err)
-		var disclosureArray []any
-		err = json.Unmarshal(decoded, &disclosureArray)
-		require.NoError(t, err)
-		assert.Len(t, disclosureArray, 3, "Disclosure should have [salt, claim_name, value]")
-		assert.Equal(t, "family_name", disclosureArray[1])
-		assert.Equal(t, "Doe", disclosureArray[2])
-	})
-
-	t.Run("nested_claim_address_street_address", func(t *testing.T) {
-		// Test with nested address.street_address from PID
-		data := map[string]any{
-			"family_name": "Doe",
-			"address": map[string]any{
-				"street_address": "123 Main St",
-				"locality":       "Springfield",
-				"postal_code":    "12345",
-				"country":        "US",
-			},
-		}
-
-		path := []*string{new("address"), new("street_address")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure, "Disclosure should be generated")
-		assert.NotEmpty(t, hash, "Hash should be generated")
-
-		// Check that street_address was removed from the nested object
-		address, ok := data["address"].(map[string]any)
-		require.True(t, ok, "address should still be a map")
-		assert.NotContains(t, address, "street_address", "street_address should be removed")
-		assert.Contains(t, address, "locality", "Other nested claims should remain")
-
-		// Verify disclosure
-		decoded, err := base64.RawURLEncoding.DecodeString(disclosure)
-		require.NoError(t, err)
-		var disclosureArray []any
-		err = json.Unmarshal(decoded, &disclosureArray)
-		require.NoError(t, err)
-		assert.Equal(t, "street_address", disclosureArray[1])
-		assert.Equal(t, "123 Main St", disclosureArray[2])
-	})
-
-	t.Run("nested_claim_place_of_birth_locality", func(t *testing.T) {
-		// Test with place_of_birth.locality from PID
-		data := map[string]any{
-			"place_of_birth": map[string]any{
-				"locality": "Boston",
-				"region":   "MA",
-				"country":  "US",
-			},
-		}
-
-		path := []*string{new("place_of_birth"), new("locality")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure)
-		assert.NotEmpty(t, hash)
-
-		pob, ok := data["place_of_birth"].(map[string]any)
-		require.True(t, ok)
-		assert.NotContains(t, pob, "locality", "locality should be removed")
-		assert.Contains(t, pob, "region", "Other fields should remain")
-	})
-
-	t.Run("non_existent_claim_path", func(t *testing.T) {
-		// Test with a path that doesn't exist in the data
-		data := map[string]any{
-			"family_name": "Doe",
-			"given_name":  "John",
-		}
-
-		path := []*string{new("non_existent_claim")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err, "Should not error on non-existent claim")
-		assert.Empty(t, disclosure, "No disclosure should be generated")
-		assert.Empty(t, hash, "No hash should be generated")
-		assert.Contains(t, data, "family_name", "Existing claims should remain")
-	})
-
-	t.Run("non_existent_nested_path", func(t *testing.T) {
-		// Test with a nested path where parent exists but child doesn't
-		data := map[string]any{
-			"address": map[string]any{
-				"locality": "Springfield",
-				"country":  "US",
-			},
-		}
-
-		path := []*string{new("address"), new("non_existent_field")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err)
-		assert.Empty(t, disclosure, "No disclosure for non-existent nested claim")
-		assert.Empty(t, hash, "No hash for non-existent nested claim")
-
-		address, ok := data["address"].(map[string]any)
-		require.True(t, ok)
-		assert.Contains(t, address, "locality", "Existing nested claims should remain")
-	})
-
-	t.Run("reserved_claim_name_underscore_sd", func(t *testing.T) {
-		// Test that _sd claim name is rejected
-		data := map[string]any{
-			"_sd": []any{"some_hash"},
-		}
-
-		path := []*string{new("_sd")}
-		_, _, err := client.processClaimPath(data, path, hashMethod)
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot be '_sd'")
-	})
-
-	t.Run("reserved_claim_name_ellipsis", func(t *testing.T) {
-		// Test that ... claim name is rejected
-		data := map[string]any{
-			"...": "value",
-		}
-
-		path := []*string{new("...")}
-		_, _, err := client.processClaimPath(data, path, hashMethod)
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot be '_sd' or '...'")
-	})
-
-	t.Run("complex_nested_object_disclosure", func(t *testing.T) {
-		// Test disclosing an entire complex nested structure
-		data := map[string]any{
-			"family_name": "Doe",
-			"address": map[string]any{
-				"street_address": "123 Main St",
-				"locality":       "Springfield",
-				"postal_code":    "12345",
-				"country":        "US",
-			},
-		}
-
-		// Disclose the entire address object
-		path := []*string{new("address")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure)
-		assert.NotEmpty(t, hash)
-		assert.NotContains(t, data, "address", "Entire address object should be removed")
-		assert.Contains(t, data, "family_name", "Other top-level claims should remain")
-
-		// Verify the disclosed value contains all the nested data
-		decoded, err := base64.RawURLEncoding.DecodeString(disclosure)
-		require.NoError(t, err)
-		var disclosureArray []any
-		err = json.Unmarshal(decoded, &disclosureArray)
-		require.NoError(t, err)
-		assert.Equal(t, "address", disclosureArray[1])
-
-		disclosedAddress, ok := disclosureArray[2].(map[string]any)
-		require.True(t, ok, "Disclosed value should be an object")
-		assert.Equal(t, "123 Main St", disclosedAddress["street_address"])
-		assert.Equal(t, "Springfield", disclosedAddress["locality"])
-	})
-
-	t.Run("disclosure_format_validation", func(t *testing.T) {
-		// Verify the disclosure is properly base64url encoded
-		data := map[string]any{
-			"given_name": "Alice",
-		}
-
-		path := []*string{new("given_name")}
-		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
-
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure)
-		assert.NotEmpty(t, hash)
-
-		// Disclosure should be base64url encoded (no padding, uses - and _ instead of + and /)
-		assert.NotContains(t, disclosure, "+", "Should use base64url, not base64")
-		assert.NotContains(t, disclosure, "/", "Should use base64url, not base64")
-		assert.NotContains(t, disclosure, "=", "Should not have padding")
-
-		// Hash should be base64url encoded
-		assert.NotContains(t, hash, "+", "Hash should use base64url")
-		assert.NotContains(t, hash, "/", "Hash should use base64url")
-		assert.NotContains(t, hash, "=", "Hash should not have padding")
-
-		// Hash should be 256 bits (32 bytes) -> 43 characters in base64url
-		assert.Len(t, hash, 43, "SHA-256 hash should be 43 characters in base64url")
-	})
-
-	t.Run("multiple_claims_from_same_object", func(t *testing.T) {
-		// Test removing multiple claims from the same nested object
-		data := map[string]any{
-			"address": map[string]any{
-				"street_address": "123 Main St",
-				"locality":       "Springfield",
-				"postal_code":    "12345",
-				"country":        "US",
-			},
-		}
-
-		// First disclosure
-		path1 := []*string{new("address"), new("street_address")}
-		disclosure1, hash1, err := client.processClaimPath(data, path1, hashMethod)
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure1)
-		assert.NotEmpty(t, hash1)
-
-		// Reset hashMethod for second disclosure
-		hashMethod.Reset()
-
-		// Second disclosure from the same object
-		path2 := []*string{new("address"), new("postal_code")}
-		disclosure2, hash2, err := client.processClaimPath(data, path2, hashMethod)
-		require.NoError(t, err)
-		assert.NotEmpty(t, disclosure2)
-		assert.NotEmpty(t, hash2)
-
-		// Verify both claims were removed
-		address, ok := data["address"].(map[string]any)
-		require.True(t, ok)
-		assert.NotContains(t, address, "street_address")
-		assert.NotContains(t, address, "postal_code")
-		assert.Contains(t, address, "locality", "Non-disclosed claims should remain")
-		assert.Contains(t, address, "country", "Non-disclosed claims should remain")
-
-		// Hashes should be different (different claims)
-		assert.NotEqual(t, hash1, hash2, "Different claims should produce different hashes")
-
-		// Disclosures should be different
-		assert.NotEqual(t, disclosure1, disclosure2, "Different claims should produce different disclosures")
-	})
-
-	t.Run("all_pid_top_level_claims", func(t *testing.T) {
-		// Test with a complete PID document containing PID Rulebook v1.0 fields
-		data := map[string]any{
-			"family_name":                    "Doe",
-			"given_name":                     "John",
-			"birth_family_name":              "Smith",
-			"birthdate":                      "1990-01-01",
-			"nationalities":                  []any{"US"},
-			"date_of_issuance":               "2023-01-01",
-			"date_of_expiry":                 "2033-01-01",
-			"issuing_authority":              "State Department",
-			"document_number":                "AB123456",
-			"issuing_country":                "US",
-			"issuing_jurisdiction":           "California",
-			"personal_administrative_number": "SSN-123-45-6789",
-		}
-
-		// Test a selection of different claim types
-		testClaims := []string{
-			"family_name",
-			"given_name",
-			"birthdate",
-			"issuing_country",
-			"nationalities",
-		}
-
-		for _, claimName := range testClaims {
-			// Make a copy of data for each test
-			dataCopy := make(map[string]any)
-			maps.Copy(dataCopy, data)
-
-			path := []*string{new(claimName)}
-			disclosure, hash, err := client.processClaimPath(dataCopy, path, sha256.New())
-
-			require.NoError(t, err, "Failed for claim: %s", claimName)
-			assert.NotEmpty(t, disclosure, "Disclosure should be generated for: %s", claimName)
-			assert.NotEmpty(t, hash, "Hash should be generated for: %s", claimName)
-			assert.NotContains(t, dataCopy, claimName, "Claim should be removed: %s", claimName)
-
-			// Verify disclosure structure
-			decoded, err := base64.RawURLEncoding.DecodeString(disclosure)
-			require.NoError(t, err, "Failed to decode disclosure for: %s", claimName)
-			var disclosureArray []any
-			err = json.Unmarshal(decoded, &disclosureArray)
-			require.NoError(t, err, "Failed to unmarshal disclosure for: %s", claimName)
-			assert.Equal(t, claimName, disclosureArray[1], "Claim name should match")
-
-			// For value comparison, handle type conversions from JSON
-			expectedValue := data[claimName]
-			actualValue := disclosureArray[2]
-
-			// JSON unmarshaling converts int to float64, so we need to compare carefully
-			switch v := expectedValue.(type) {
-			case int:
-				// JSON will unmarshal as float64
-				actualFloat, ok := actualValue.(float64)
-				assert.True(t, ok, "Expected float64 for int claim: %s", claimName)
-				assert.Equal(t, float64(v), actualFloat, "Claim value should match for: %s", claimName)
-			default:
-				assert.Equal(t, expectedValue, actualValue, "Claim value should match for: %s", claimName)
-			}
-		}
-	})
-
-	t.Run("process_claims_according_to_vctm", func(t *testing.T) {
-		// Create realistic PID test data
-		data := map[string]any{
-			"family_name": "Anderson",
-			"given_name":  "Emma",
-			"birthdate":   "1985-03-15",
-			"address": map[string]any{
-				"street_address": "456 Oak Avenue",
-				"locality":       "Portland",
-				"postal_code":    "97201",
-				"country":        "US",
-			},
-			"place_of_birth": map[string]any{
-				"locality": "Seattle",
-				"region":   "WA",
-				"country":  "US",
-			},
-			"nationalities": []any{"US"},
-		}
-
-		// Test a subset of claims from the VCTM
-		var testedClaims int
-		maxClaims := 10 // Test up to 10 claims
-
-		for _, claim := range vctm.Claims {
-			if testedClaims >= maxClaims {
-				break
-			}
-
-			if claim.SD == "always" && len(claim.Path) > 0 {
-				// Skip array element claims (with null in path) for now
-				hasNull := false
-				for _, p := range claim.Path {
-					if p == nil {
-						hasNull = true
-						break
-					}
-				}
-				if hasNull {
-					continue
-				}
-
-				// Check if this claim exists in our test data
-				exists := checkPathExists(data, claim.Path)
-				if !exists {
-					continue
-				}
-
-				// Make a copy of data for this test
-				dataCopy := make(map[string]any)
-				b, _ := json.Marshal(data)
-				json.Unmarshal(b, &dataCopy) // #nosec G104
-
-				disclosure, hash, err := client.processClaimPath(dataCopy, claim.Path, sha256.New())
-				require.NoError(t, err, "Failed to process claim path: %v", claim.Path)
-				assert.NotEmpty(t, disclosure, "Disclosure should be generated for path: %v", claim.Path)
-				assert.NotEmpty(t, hash, "Hash should be generated for path: %v", claim.Path)
-
-				t.Logf("Tested claim path: %v", formatPath(claim.Path))
-				testedClaims++
-			}
-		}
-
-		assert.Greater(t, testedClaims, 0, "Should have tested at least one claim from VCTM")
-		t.Logf("Successfully tested %d claims from VCTM", testedClaims)
-	})
-}
-
-// Helper function to check if a path exists in data
-func checkPathExists(data map[string]any, path []*string) bool {
-	if len(path) == 0 {
-		return false
-	}
-
-	current := data
-	for i := 0; i < len(path)-1; i++ {
-		if path[i] == nil {
-			return false
-		}
-		next, ok := current[*path[i]]
-		if !ok {
-			return false
-		}
-		nextMap, ok := next.(map[string]any)
-		if !ok {
-			return false
-		}
-		current = nextMap
-	}
-
-	// Check if the final claim exists
-	if path[len(path)-1] == nil {
-		return false
-	}
-	_, exists := current[*path[len(path)-1]]
-	return exists
-}
-
-// Helper function to format path for logging
-func formatPath(path []*string) string {
-	parts := make([]string, len(path))
-	for i, p := range path {
-		if p == nil {
-			parts[i] = "<null>"
-		} else {
-			parts[i] = *p
-		}
-	}
-	return "[" + joinStrings(parts, ", ") + "]"
-}
-
-// Helper function to join strings (since strings.Join requires []string)
-func joinStrings(parts []string, sep string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	var result strings.Builder
-	result.WriteString(parts[0])
-	for i := 1; i < len(parts); i++ {
-		result.WriteString(sep + parts[i])
-	}
-	return result.String()
 }

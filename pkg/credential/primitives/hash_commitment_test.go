@@ -10,29 +10,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// OpeningInputs keeps the claims the openings read, as copies, under their
-// paths, and nothing else.
+// OpeningInputs keeps the claims the openings read, as copies, where the
+// source holds them, and nothing else.
 func TestOpeningInputs(t *testing.T) {
-	path := []string{"ns", "ssc"}
 	list := []Derivation{
-		{Lowercase: &LowercaseArgs{Input: "email"}},
-		{HashCommitment: &HashCommitmentArgs{Path: path, Opening: OpeningArgs{
-			HKDF: &HKDFOpeningArgs{SecretPath: "/unused", Inputs: []string{"country", "subject.pan", "absent"}, Bytes: 16},
+		{Lowercase: &LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}}},
+		{HashCommitment: &HashCommitmentArgs{Path: claimpath.Keys("ns", "ssc"), Opening: OpeningArgs{
+			HKDF: &HKDFOpeningArgs{SecretPath: "/unused", Inputs: []claimpath.Ref{{Path: claimpath.Keys("country")}, {Path: claimpath.Keys("subject", "pan")}, {Path: claimpath.Keys("absent")}}, Bytes: 16},
 		}}},
 	}
-	source := map[string]any{"country": "SE", "subject": map[string]any{"pan": "pan-1"}, "email": "A@B.se"}
+	source := map[string]any{"country": "SE", "subject": map[string]any{"pan": "pan-1", "name": "Ada"}, "email": "A@B.se"}
 
-	got := OpeningInputs(list, source)
-	assert.Equal(t, map[string]any{"country": "SE", "subject.pan": "pan-1"}, got)
+	got, err := OpeningInputs(list, source, claimpath.Nested())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"country": "SE", "subject": map[string]any{"pan": "pan-1"}}, got)
 
 	source["subject"].(map[string]any)["pan"] = "changed"
-	assert.Equal(t, "pan-1", got["subject.pan"], "a later write into the source does not reach the copy")
+	assert.Equal(t, "pan-1", got["subject"].(map[string]any)["pan"], "a later write into the source does not reach the copy")
 
-	assert.Nil(t, OpeningInputs([]Derivation{{Lowercase: &LowercaseArgs{Input: "email"}}}, source), "no opening, no claims")
+	none, err := OpeningInputs([]Derivation{{Lowercase: &LowercaseArgs{Input: claimpath.Ref{Path: claimpath.Keys("email")}}}}, source, claimpath.Nested())
+	require.NoError(t, err)
+	assert.Nil(t, none, "no opening, no claims")
 }
 
 // Known answers from a separate RFC 5869 HKDF-SHA256 and RFC 2104
@@ -52,10 +56,10 @@ func TestKeyedOpening(t *testing.T) {
 		opening  func(secretPath string, n, inputs int) ValueOpener
 	}{
 		{"hkdf", 64, func(secretPath string, n, inputs int) ValueOpener {
-			return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]string, inputs), Bytes: n}
+			return &HKDFOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Ref, inputs), Bytes: n}
 		}},
 		{"hmac", 32, func(secretPath string, n, inputs int) ValueOpener {
-			return &HMACOpeningArgs{SecretPath: secretPath, Inputs: make([]string, inputs), Bytes: n}
+			return &HMACOpeningArgs{SecretPath: secretPath, Inputs: make([]claimpath.Ref, inputs), Bytes: n}
 		}},
 	}
 	hkdf, hmac := generators[0], generators[1]
@@ -99,7 +103,7 @@ func TestKeyedOpening(t *testing.T) {
 // One fixture per refusal of a claim opening. Each error names the claim
 // and never its value, which is a secret.
 func TestClaimOpeningRefusals(t *testing.T) {
-	opening := &ClaimOpeningArgs{Input: "subject.opening"}
+	opening := &ClaimOpeningArgs{Input: claimpath.Ref{Path: claimpath.Keys("subject", "opening")}}
 	for rule, tc := range map[string]struct {
 		value any
 		want  string
@@ -114,9 +118,9 @@ func TestClaimOpeningRefusals(t *testing.T) {
 		if tc.value != nil {
 			claims["subject"] = map[string]any{"opening": tc.value}
 		}
-		_, err := opening.open(claims)
+		_, err := opening.open(claims, claimpath.Nested())
 		require.ErrorIs(t, err, ErrInvalidClaimInput, rule)
-		assert.ErrorContains(t, err, `"subject.opening"`, rule)
+		assert.ErrorContains(t, err, `["subject","opening"]`, rule)
 		assert.ErrorContains(t, err, tc.want, rule)
 		if s, ok := tc.value.(string); ok {
 			assert.NotContains(t, err.Error(), s, rule)

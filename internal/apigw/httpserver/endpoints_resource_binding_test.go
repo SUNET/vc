@@ -181,8 +181,8 @@ const (
 	bindingUploadGoRest = `IdentityMappingIDs=x&DocumentData=%7B%22k%22%3A%22v%22%7D`
 	bindingAttrs        = `"attributes":{"k":"v"}`
 	bindingAttrsGo      = `Attributes=%7B%22k%22%3A%22v%22%7D`
-	bindingMatch        = `"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}`
-	bindingMatchGo      = `IdentityMatch=%7B%22claims%22%3A%7B%22given_name%22%3A%7B%22equals%22%3A%22Alice%22%7D%7D%7D`
+	bindingMatch        = `"identity_match":{"claims":[{"path":["given_name"],"equals":"Alice"}]}`
+	bindingMatchGo      = `IdentityMatch=%7B%22claims%22%3A%5B%7B%22path%22%3A%5B%22given_name%22%5D%2C%22equals%22%3A%22Alice%22%7D%5D%7D`
 )
 
 func bindingRoutes() []bindingRoute {

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +26,6 @@ import (
 // copier drops it.
 func TestCopyDCQLCarriesEveryCredentialQueryField(t *testing.T) {
 	yes := true
-	path := "ssc"
 
 	original := CredentialQuery{
 		ID:       "nym_attestation",
@@ -39,7 +40,7 @@ func TestCopyDCQLCarriesEveryCredentialQueryField(t *testing.T) {
 		},
 		TrustedAuthorities:                []TrustedAuthority{{Type: "aki", Values: []string{"v"}}},
 		RequireCryptographicHolderBinding: &yes,
-		Claims:                            []ClaimQuery{{ID: "c", Path: []*string{&path}, Values: []any{"v"}}},
+		Claims:                            []ClaimQuery{{ID: "c", Path: claimpath.Keys("ssc"), Values: []any{"v"}}},
 		ClaimSet:                          [][]string{{"c"}},
 		Req: []ReqItem{{
 			FnID: FunctionPseudonym, Return: "nym-123",

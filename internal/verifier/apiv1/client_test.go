@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/claimpath"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -268,13 +269,13 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 						Name: "Diploma Credential",
 						Claims: []sdjwtvc.Claim{
 							{
-								Path: []*string{new("given_name")},
+								Path: claimpath.Keys("given_name"),
 								Display: []sdjwtvc.ClaimDisplay{
 									{Locale: "en", Label: "Given Name"},
 								},
 							},
 							{
-								Path: []*string{new("family_name")},
+								Path: claimpath.Keys("family_name"),
 								Display: []sdjwtvc.ClaimDisplay{
 									{Locale: "en", Label: "Family Name"},
 								},

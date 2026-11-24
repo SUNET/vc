@@ -1,10 +1,13 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"strings"
 
@@ -750,20 +753,63 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
-	request := &apiv1.PrepareIssuanceRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+	legacy, err := s.legacyIdentityMatch(ctx, c)
+	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
 		return nil, err
 	}
-
-	reply, err := s.apiv1.PrepareIssuance(ctx, request)
+	var reply *apiv1.PrepareIssuanceReply
+	if legacy {
+		reply, err = s.prepareLegacyIssuance(ctx, c)
+	} else {
+		reply, err = s.prepareIssuance(ctx, c)
+	}
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}
+
+// identityMatchDeprecation is the RFC 9745 Deprecation header of a
+// /issuance/prepare request in the earlier release's form: deprecated
+// since 2026-11-05, as a Structured Field Date.
+const identityMatchDeprecation = "@1793836800"
+
+// prepareIssuance binds and prepares a request in the current form.
+func (s *Service) prepareIssuance(ctx context.Context, c *gin.Context) (*apiv1.PrepareIssuanceReply, error) {
+	request := &apiv1.PrepareIssuanceRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+	reply, err := s.apiv1.PrepareIssuance(ctx, request)
+	if err != nil {
 		s.log.Error(err, "prepare issuance error")
 		return nil, err
 	}
+	return reply, nil
+}
 
+// prepareLegacyIssuance binds and prepares a request whose
+// identity_match.claims is the earlier release's object from dotted claim
+// names to tests. Every answer carries the Deprecation header.
+func (s *Service) prepareLegacyIssuance(ctx context.Context, c *gin.Context) (*apiv1.PrepareIssuanceReply, error) {
+	c.Header("Deprecation", identityMatchDeprecation)
+	request := &apiv1.LegacyPrepareIssuanceRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+	s.log.Warn("deprecated identity_match form: identity_match.claims is an object from dotted claim names; "+
+		"write it as a list of {path, equals} entries, each path a claims path pointer (OpenID4VP 1.0 section 7)",
+		"scope", request.Scope, "claims", request.IdentityMatch.ClaimPaths())
+	reply, err := s.apiv1.PrepareLegacyIssuance(ctx, request)
+	if err != nil {
+		s.log.Error(err, "prepare issuance error")
+		return nil, err
+	}
 	return reply, nil
 }
 
@@ -789,6 +835,59 @@ func (s *Service) endpointIssuanceStatus(ctx context.Context, c *gin.Context) (a
 		return nil, err
 	}
 	return reply, nil
+}
+
+// legacyIdentityMatch reports whether the request's identity_match.claims
+// is a JSON object, the earlier release's form. It binds identity_match
+// from every place Binding.Request binds PrepareIssuanceRequest from, and
+// leaves the body in place for the binding that follows.
+func (s *Service) legacyIdentityMatch(ctx context.Context, c *gin.Context) (bool, error) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return false, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	var request identityMatchForm
+	err = s.httpHelpers.Binding.Request(ctx, c, &request)
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+	return request.IdentityMatch != nil && request.IdentityMatch.legacy, nil
+}
+
+// identityMatchForm binds identity_match as PrepareIssuanceRequest and
+// LegacyPrepareIssuanceRequest bind it: the field name and the json tag
+// are theirs.
+type identityMatchForm struct {
+	IdentityMatch *claimsForm `json:"identity_match"`
+}
+
+// claimsForm records the form of an identity_match.
+type claimsForm struct {
+	// legacy reports that claims is a JSON object.
+	legacy bool
+}
+
+// UnmarshalJSON reads an identity_match. A value other than an object is in
+// neither form, and the binding of the current form refuses it.
+func (f *claimsForm) UnmarshalJSON(data []byte) error {
+	if !isJSONObject(data) {
+		return nil
+	}
+	var match struct {
+		Claims json.RawMessage `json:"claims"`
+	}
+	if err := json.Unmarshal(data, &match); err != nil {
+		return err
+	}
+	f.legacy = isJSONObject(match.Claims)
+	return nil
+}
+
+// isJSONObject reports whether raw is a JSON object.
+func isJSONObject(raw []byte) bool {
+	return bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{"))
 }
 
 // isAnonymousAdminSession reports whether the request is authenticated by

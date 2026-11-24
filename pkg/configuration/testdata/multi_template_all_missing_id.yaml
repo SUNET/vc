@@ -14,7 +14,8 @@ templates:
           claims:
             - path: ["name"]
     claim_mappings:
-      name: "name"
+      cred1:
+        - {path: [name], claim: "name"}
 
   - name: "No ID template 2"
     description: "Also missing id"
@@ -31,4 +32,5 @@ templates:
           claims:
             - path: ["value"]
     claim_mappings:
-      value: "value"
+      cred2:
+        - {path: [value], claim: "value"}

@@ -1,5 +1,11 @@
 package sdjwtvc
 
+import (
+	"encoding/json"
+
+	"github.com/SUNET/vc/pkg/claimpath"
+)
+
 // VCTM is the Verifiable Credential Type Metadata per SD-JWT VC draft-13 section 6.
 // Type Metadata provides information about credential types including:
 // - Display properties for rendering credentials in wallets
@@ -135,9 +141,11 @@ type SVGTemplateProperties struct {
 
 // Claim represents credential claim metadata per section 9.
 type Claim struct {
-	// Path indicates the claim(s) being addressed per section 9.1 (REQUIRED).
-	// Elements: string selects a key, nil selects all array elements.
-	Path []*string `json:"path" bson:"path" validate:"required,min=1"`
+	// Path indicates the claim(s) being addressed per section 9.1
+	// (REQUIRED): a claims path pointer. The empty array decodes as
+	// claimpath.EmptyArray, and a missing or null path leaves Path unset,
+	// as the earlier release loaded them; validation refuses both.
+	Path claimpath.Pointer `json:"path" bson:"path" validate:"required,min=1"`
 
 	// Display contains locale-specific display information per section 9.2 (OPTIONAL).
 	Display []ClaimDisplay `json:"display,omitempty" bson:"display,omitempty" validate:"omitempty,dive"`
@@ -151,6 +159,23 @@ type Claim struct {
 
 	// SVGID is the identifier for SVG template placeholders per section 8.1.2.2 (OPTIONAL).
 	SVGID string `json:"svg_id,omitempty" bson:"svg_id,omitempty"`
+}
+
+// UnmarshalJSON reads a claim. Its path decodes as claimpath.Lenient
+// decodes it. A member the JSON leaves out keeps its value, as
+// encoding/json keeps it in a struct.
+func (c *Claim) UnmarshalJSON(data []byte) error {
+	type plain Claim
+	claim := struct {
+		plain
+		Path claimpath.Lenient `json:"path"`
+	}{plain: plain(*c), Path: claimpath.Lenient{Pointer: c.Path}}
+	if err := json.Unmarshal(data, &claim); err != nil {
+		return err
+	}
+	*c = Claim(claim.plain)
+	c.Path = claim.Path.Pointer
+	return nil
 }
 
 // ClaimDisplay provides locale-specific claim display information per section 9.2.

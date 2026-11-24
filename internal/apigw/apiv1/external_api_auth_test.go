@@ -52,7 +52,7 @@ func externalAPIAuthClient(t *testing.T, sisStatus int, withRemote bool) *Client
 	}
 	svc, err := datasources.New(t.Context(), remotes, model.ExternalAPIConfig{
 		Scopes: map[string]model.ExternalAPIScope{"sis_enrollment": {Remote: "sis", AuthProvider: model.AuthProviderOpenID4VP}},
-	}, docs, log)
+	}, (&model.Cfg{}).DocumentShape, docs, log)
 	require.NoError(t, err)
 
 	return &Client{

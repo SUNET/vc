@@ -156,6 +156,8 @@ common:
     type: jaeger
 ```
 
+Each file in `presentation_requests_dir` holds presentation request templates. [docs/CLAIM_PATHS.md](../CLAIM_PATHS.md) describes their claims paths and `claim_mappings`.
+
 ### Run
 
 ```bash

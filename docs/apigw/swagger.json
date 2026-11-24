@@ -1003,11 +1003,26 @@
                 ],
                 "type": "object"
             },
-            "openid4vci.ClaimTest": {
+            "openid4vci.ClaimMatch": {
                 "properties": {
                     "equals": {
                         "description": "Equals is the exact value the claim must have. Where the claim is an\narray, at least one element must equal it.\n\nExact, and deliberately not case-folded or otherwise normalised:\nfolding a personal name is locale-dependent and gets it wrong for\nsomeone. A caller comparing values that came from two different\nauthorities should expect to normalise before it gets here, or to\nmatch on an identifier rather than a name - see the package\ndocumentation on IdentityMatch for why that is usually the better\nrule anyway.",
                         "type": "string"
+                    },
+                    "path": {
+                        "description": "Path is the claim.",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -1171,11 +1186,13 @@
             "openid4vci.IdentityMatch": {
                 "properties": {
                     "claims": {
-                        "additionalProperties": {
-                            "$ref": "#/components/schemas/openid4vci.ClaimTest"
+                        "description": "Claims lists the claims of the presented credential, each with the\ntest it must pass. A path is a claims path pointer (OpenID4VP 1.0\nsection 7) into the presented credential: [namespace, element] for\nan mdoc.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vci.ClaimMatch"
                         },
-                        "description": "Claims maps a claim path on the presented credential to the test it\nmust pass.\n\nThe path is interpreted the way the presented credential's format\ninterprets it - nested for SD-JWT VC, one literal namespace-\nqualified key for mdoc - so a caller writes the same path it would\nwrite anywhere else in this API.",
-                        "type": "object"
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "required": [
