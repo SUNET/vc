@@ -967,7 +967,7 @@ components:
       required:
       - type
       type: object
-    openid4vci.ClaimTest:
+    openid4vci.ClaimMatch:
       properties:
         equals:
           description: |-
@@ -982,6 +982,14 @@ components:
             documentation on IdentityMatch for why that is usually the better
             rule anyway.
           type: string
+        path:
+          description: Path is the claim.
+          items:
+            oneOf:
+            - type: string
+            - type: integer
+          type: array
+          uniqueItems: false
       type: object
     openid4vci.CredentialOfferResult:
       properties:
@@ -1211,17 +1219,16 @@ components:
     openid4vci.IdentityMatch:
       properties:
         claims:
-          additionalProperties:
-            $ref: '#/components/schemas/openid4vci.ClaimTest'
           description: |-
-            Claims maps a claim path on the presented credential to the test it
-            must pass.
-
-            The path is interpreted the way the presented credential's format
-            interprets it - nested for SD-JWT VC, one literal namespace-
-            qualified key for mdoc - so a caller writes the same path it would
-            write anywhere else in this API.
-          type: object
+            Claims lists the claims of the presented credential, each with the
+            test it must pass. A path is a claims path pointer (OpenID4VP 1.0
+            section 7) into the presented credential: [namespace, element] for
+            an mdoc.
+          items:
+            $ref: '#/components/schemas/openid4vci.ClaimMatch'
+          minItems: 1
+          type: array
+          uniqueItems: false
       required:
       - claims
       type: object

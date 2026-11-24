@@ -1,0 +1,4 @@
+// claimpath.Pointer marshals as a JSON array. swag reads []error as an
+// array of any JSON values. A pointer field narrows its items with a
+// oneOf tag, such as oneOf:"string,uint".
+replace claimpath.Pointer []error

@@ -47,7 +47,7 @@ type IdentityMatch struct {
 // must pass.
 type ClaimMatch struct {
 	// Path is the claim.
-	Path claimpath.Pointer `json:"path"`
+	Path claimpath.Pointer `json:"path" oneOf:"string,uint"`
 	ClaimTest
 }
 
