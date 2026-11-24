@@ -146,6 +146,7 @@ const (
 	CommandBluetoothEmulationAddDescriptor                           = bluetoothemulation.CommandAddDescriptor
 	CommandBluetoothEmulationRemoveDescriptor                        = bluetoothemulation.CommandRemoveDescriptor
 	CommandBluetoothEmulationSimulateGATTDisconnection               = bluetoothemulation.CommandSimulateGATTDisconnection
+	CommandBluetoothEmulationSimulateGATTMtuChange                   = bluetoothemulation.CommandSimulateGATTMtuChange
 	EventBluetoothEmulationGattOperationReceived                     = "BluetoothEmulation.gattOperationReceived"
 	EventBluetoothEmulationCharacteristicOperationReceived           = "BluetoothEmulation.characteristicOperationReceived"
 	EventBluetoothEmulationDescriptorOperationReceived               = "BluetoothEmulation.descriptorOperationReceived"
@@ -167,7 +168,6 @@ const (
 	CommandBrowserSetContentsSize                                    = browser.CommandSetContentsSize
 	CommandBrowserSetDockTile                                        = browser.CommandSetDockTile
 	CommandBrowserExecuteBrowserCommand                              = browser.CommandExecuteBrowserCommand
-	CommandBrowserAddPrivacySandboxEnrollmentOverride                = browser.CommandAddPrivacySandboxEnrollmentOverride
 	CommandBrowserGetGlobalPrivacyControl                            = browser.CommandGetGlobalPrivacyControl
 	CommandBrowserSetGlobalPrivacyControl                            = browser.CommandSetGlobalPrivacyControl
 	EventBrowserDownloadWillBegin                                    = "Browser.downloadWillBegin"
@@ -329,6 +329,7 @@ const (
 	CommandDebuggerEnable                                            = debugger.CommandEnable
 	CommandDebuggerEvaluateOnCallFrame                               = debugger.CommandEvaluateOnCallFrame
 	CommandDebuggerGetPossibleBreakpoints                            = debugger.CommandGetPossibleBreakpoints
+	CommandDebuggerGetScopeChain                                     = debugger.CommandGetScopeChain
 	CommandDebuggerGetScriptSource                                   = debugger.CommandGetScriptSource
 	CommandDebuggerDisassembleWasmModule                             = debugger.CommandDisassembleWasmModule
 	CommandDebuggerNextWasmDisassemblyChunk                          = debugger.CommandNextWasmDisassemblyChunk
@@ -1087,6 +1088,8 @@ func UnmarshalMessage(msg *Message, opts ...jsonv2.Options) (any, error) {
 		return emptyVal, nil
 	case CommandBluetoothEmulationSimulateGATTDisconnection:
 		return emptyVal, nil
+	case CommandBluetoothEmulationSimulateGATTMtuChange:
+		return emptyVal, nil
 	case EventBluetoothEmulationGattOperationReceived:
 		v = new(bluetoothemulation.EventGattOperationReceived)
 	case EventBluetoothEmulationCharacteristicOperationReceived:
@@ -1128,8 +1131,6 @@ func UnmarshalMessage(msg *Message, opts ...jsonv2.Options) (any, error) {
 	case CommandBrowserSetDockTile:
 		return emptyVal, nil
 	case CommandBrowserExecuteBrowserCommand:
-		return emptyVal, nil
-	case CommandBrowserAddPrivacySandboxEnrollmentOverride:
 		return emptyVal, nil
 	case CommandBrowserGetGlobalPrivacyControl:
 		v = new(browser.GetGlobalPrivacyControlResult)
@@ -1453,6 +1454,8 @@ func UnmarshalMessage(msg *Message, opts ...jsonv2.Options) (any, error) {
 		v = new(debugger.EvaluateOnCallFrameResult)
 	case CommandDebuggerGetPossibleBreakpoints:
 		v = new(debugger.GetPossibleBreakpointsResult)
+	case CommandDebuggerGetScopeChain:
+		v = new(debugger.GetScopeChainResult)
 	case CommandDebuggerGetScriptSource:
 		v = new(debugger.GetScriptSourceResult)
 	case CommandDebuggerDisassembleWasmModule:
