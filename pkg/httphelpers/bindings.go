@@ -98,11 +98,17 @@ func requestHasBody(c *gin.Context) bool {
 	}
 
 	buffered := bufio.NewReader(c.Request.Body)
+	var body io.Reader = buffered
 	_, err := buffered.Peek(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		// Peek hands a read error over once and clears it. No byte arrived, so
+		// the body reads as that error from here on.
+		body = failingReader{err: err}
+	}
 	c.Request.Body = struct {
 		io.Reader
 		io.Closer
-	}{buffered, c.Request.Body}
+	}{body, c.Request.Body}
 	return !errors.Is(err, io.EOF)
 }
 

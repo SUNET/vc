@@ -322,6 +322,9 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 		// incomplete: the body ends with io.ErrUnexpectedEOF, short of its
 		// Content-Length, as net/http reads a cut connection.
 		incomplete bool
+		// failsOnce: the body declares no length and ends with
+		// io.ErrUnexpectedEOF on one read, then io.EOF.
+		failsOnce  bool
 		typeOnly   bool
 		wantStatus int
 		wantTitle  string
@@ -337,6 +340,7 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 		{name: "custom decoder refusal", body: `{"rejecting":1}`, target: newClientBody, wantStatus: http.StatusBadRequest, wantTitle: "json_value_error"},
 		{name: "over the size limit", body: `{"name":"x"}`, target: newClientBody, maxBytes: 4, wantStatus: http.StatusRequestEntityTooLarge, wantTitle: "internal_server_error"},
 		{name: "incomplete after a valid value", body: `{"name":"x"}`, target: newClientBody, incomplete: true, wantStatus: http.StatusBadRequest, wantTitle: "incomplete_request_body"},
+		{name: "fails once before its first byte", target: newClientBody, failsOnce: true, wantStatus: http.StatusBadRequest, wantTitle: "incomplete_request_body"},
 	} {
 		for _, binder := range binders {
 			if binder.typeOnly && !tc.typeOnly {
@@ -365,6 +369,10 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 						req.Body = io.NopCloser(io.MultiReader(strings.NewReader(tc.body), iotest.ErrReader(io.ErrUnexpectedEOF)))
 						req.ContentLength = int64(len(tc.body)) + 1
 					}
+					if tc.failsOnce {
+						req.Body = io.NopCloser(io.MultiReader(strings.NewReader(tc.body), &failsOnceReader{err: io.ErrUnexpectedEOF}))
+						req.ContentLength = -1
+					}
 					req.Header.Set("Content-Type", "application/json")
 					w := httptest.NewRecorder()
 					engine.ServeHTTP(w, req)
@@ -379,6 +387,20 @@ func TestClientJSONBodyErrorStatus(t *testing.T) {
 			}
 		}
 	}
+}
+
+// failsOnceReader returns err from its first read and io.EOF from every later one.
+type failsOnceReader struct {
+	err error
+}
+
+func (r *failsOnceReader) Read([]byte) (int, error) {
+	if r.err == nil {
+		return 0, io.EOF
+	}
+	err := r.err
+	r.err = nil
+	return 0, err
 }
 
 // A chunked request has ContentLength -1. The authorization middleware and the
