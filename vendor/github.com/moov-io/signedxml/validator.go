@@ -122,7 +122,7 @@ func (v *Validator) SetXML(xml string) error {
 
 // SigningCert returns the certificate, if any, that was used to successfully
 // validate the signature of the XML document. This will be a zero value
-// x509.Certificate before Validator.Validate is successfully called.
+// x509.Certificate before Validator.ValidateReferences is successfully called.
 func (v *Validator) SigningCert() x509.Certificate {
 	return v.signingCert
 }
@@ -437,6 +437,9 @@ func (v *Validator) verifyRSAPSSSignature(certDer, data, sig []byte) error {
 	hash, ok := rsaPSSHashAlgorithms[v.sigAlgorithm]
 	if !ok {
 		return fmt.Errorf("unsupported RSA-PSS algorithm: %v", v.sigAlgorithm)
+	}
+	if err := requireAvailableHash(hash); err != nil {
+		return err
 	}
 
 	h := hash.New()
