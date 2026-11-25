@@ -28,7 +28,6 @@ func init() {
 		"http://www.w3.org/2001/04/xmlenc#sha256":       crypto.SHA256,
 		"http://www.w3.org/2001/04/xmldsig-more#sha384": crypto.SHA384,
 		"http://www.w3.org/2001/04/xmlenc#sha512":       crypto.SHA512,
-		"http://www.w3.org/2001/04/xmlenc#ripemd160":    crypto.RIPEMD160,
 	}
 
 	signatureAlgorithms = map[string]x509.SignatureAlgorithm{
@@ -54,7 +53,6 @@ func init() {
 
 	CanonicalizationAlgorithms = map[string]CanonicalizationAlgorithm{
 		"http://www.w3.org/2000/09/xmldsig#enveloped-signature": EnvelopedSignature{},
-		"http://www.w3.org/TR/2001/REC-xml-c14n-20010315":       ExclusiveCanonicalization{},
 		"http://www.w3.org/2001/10/xml-exc-c14n#":               ExclusiveCanonicalization{},
 		"http://www.w3.org/2001/10/xml-exc-c14n#WithComments":   ExclusiveCanonicalization{WithComments: true},
 		dsig.CanonicalXML11AlgorithmId.String():                 &c14N11Canonicalizer{},
@@ -95,9 +93,13 @@ type CanonicalizationAlgorithm interface {
 //
 // Implementations are provided for the following transforms:
 //
+//	http://www.w3.org/2000/09/xmldsig#enveloped-signature (EnvelopedSignature)
+//	http://www.w3.org/TR/2001/REC-xml-c14n-20010315 (C14N 1.0)
+//	http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments (C14N 1.0 WithComments)
 //	http://www.w3.org/2001/10/xml-exc-c14n# (ExclusiveCanonicalization)
 //	http://www.w3.org/2001/10/xml-exc-c14n#WithComments (ExclusiveCanonicalizationWithComments)
-//	http://www.w3.org/2000/09/xmldsig#enveloped-signature (EnvelopedSignature)
+//	http://www.w3.org/2006/12/xml-c14n11 (C14N 1.1)
+//	http://www.w3.org/2006/12/xml-c14n11#WithComments (C14N 1.1 WithComments)
 //
 // Custom implementations can be added to the map
 var CanonicalizationAlgorithms map[string]CanonicalizationAlgorithm
@@ -141,7 +143,7 @@ func (s *signatureData) parseEnvelopedSignature() error {
 	} else {
 		return errors.New("signedxml: Unable to find a unique signature element " +
 			"in the xml document. The signature must either be enveloped in the " +
-			"xml doc or externally assigned to Validator.SetSignature")
+			"xml doc or assigned with SetSignature")
 	}
 	return nil
 }
@@ -427,6 +429,15 @@ func processTransform(transform *etree.Element,
 	return docOut, nil
 }
 
+// requireAvailableHash returns an error when the hash is known but not
+// linked into this Go build.
+func requireAvailableHash(h crypto.Hash) error {
+	if !h.Available() {
+		return fmt.Errorf("signedxml: hash algorithm %s is not available", h)
+	}
+	return nil
+}
+
 // getDigestAlgorithm extracts the digest hash algorithm from a Reference element.
 func getDigestAlgorithm(reference *etree.Element) (crypto.Hash, error) {
 	digestMethodElement := reference.SelectElement("DigestMethod")
@@ -443,6 +454,9 @@ func getDigestAlgorithm(reference *etree.Element) (crypto.Hash, error) {
 	if !ok {
 		return 0, fmt.Errorf("signedxml: unable to find matching hash"+
 			"algorithm for %s in hashAlgorithms", digestMethodURI)
+	}
+	if err := requireAvailableHash(digestAlgo); err != nil {
+		return 0, err
 	}
 	return digestAlgo, nil
 }

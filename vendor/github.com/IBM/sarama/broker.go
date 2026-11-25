@@ -62,8 +62,10 @@ type Broker struct {
 	kerberosAuthenticator               GSSAPIKerberosAuth
 	clientSessionReauthenticationTimeMs int64
 
-	throttleTimer     *time.Timer
-	throttleTimerLock sync.Mutex
+	throttleLock            sync.Mutex
+	throttleDeadline        time.Time
+	throttleNotify          chan struct{}
+	throttleWaitInterrupted bool
 }
 
 // SASLMechanism specifies the SASL mechanism the client uses to authenticate with the broker
@@ -202,6 +204,7 @@ func (b *Broker) Open(conf *Config) error {
 	}
 
 	b.lock.Lock()
+	b.enableThrottleWaits()
 
 	if b.metricRegistry == nil {
 		b.metricRegistry = newCleanupRegistry(conf.MetricRegistry)
@@ -374,6 +377,11 @@ func (b *Broker) TLSConnectionState() (state tls.ConnectionState, ok bool) {
 
 // Close closes the broker resources
 func (b *Broker) Close() error {
+	// Wake a send waiting on a broker-provided throttle before acquiring
+	// b.lock. The send owns b.lock while waiting, so acquiring it first would
+	// make Close wait for the complete throttle duration.
+	b.interruptThrottleWaits()
+
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -396,6 +404,8 @@ func (b *Broker) maybeCloseLocked(err error) bool {
 // closeLocked closes the broker connection and resets state.
 // NOTE: caller must hold b.lock.
 func (b *Broker) closeLocked() error {
+	b.interruptThrottleWaits()
+
 	if b.conn == nil {
 		return ErrNotConnected
 	}
@@ -1198,7 +1208,9 @@ func (b *Broker) sendInternal(rb protocolBody, promise *responsePromise) error {
 	}
 
 	// check and wait if throttled
-	b.waitIfThrottled()
+	if err := b.waitIfThrottled(); err != nil {
+		return err
+	}
 
 	// take a slot before writing, otherwise a request is written while its
 	// promise waits for room in b.responses and MaxOpenRequests+1 are in
@@ -1421,10 +1433,21 @@ func getHeaderLength(headerVersion int16) int8 {
 	}
 }
 
+// connFatalError wraps an error after which the connection is no longer in
+// step with the broker and must be closed.
+type connFatalError struct{ err error }
+
+func (e connFatalError) Error() string { return e.err.Error() }
+func (e connFatalError) Unwrap() error { return e.err }
+
 // shouldCloseBrokerConn reports whether a transport error should trigger closing.
 func shouldCloseBrokerConn(err error) bool {
 	if err == nil {
 		return false
+	}
+
+	if _, ok := errors.AsType[connFatalError](err); ok {
+		return true
 	}
 
 	if errors.Is(err, io.EOF) {
@@ -1447,12 +1470,34 @@ func shouldCloseBrokerConn(err error) bool {
 		return true
 	}
 
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if netErr, ok := errors.AsType[net.Error](err); ok {
 		return !netErr.Timeout()
 	}
 
 	return false
+}
+
+// decodeResponseHeaderV0 decodes a non-flexible response header read outside
+// responseReceiver and returns the length of the body that follows it.
+func decodeResponseHeaderV0(buf []byte, correlationID int32, metricRegistry metrics.Registry) (int, error) {
+	var header responseHeader
+	if err := versionedDecode(buf, &header, 0, metricRegistry); err != nil {
+		return 0, err
+	}
+	if header.correlationID != correlationID {
+		return 0, PacketDecodingError{fmt.Sprintf("correlation ID didn't match, wanted %d, got %d", correlationID, header.correlationID)}
+	}
+	return int(header.length) - 4, nil
+}
+
+// decodeSASLv0Length decodes the 4-byte length prefix of a SASL v0 token,
+// which is sent without a Kafka response header.
+func decodeSASLv0Length(buf []byte) (int, error) {
+	length := int32(binary.BigEndian.Uint32(buf))
+	if length < 0 || length > MaxResponseSize {
+		return 0, PacketDecodingError{fmt.Sprintf("SASL response of length %d too large or too small", length)}
+	}
+	return int(length), nil
 }
 
 func (b *Broker) sendAndReceiveApiVersions(v int16) (*ApiVersionsResponse, error) {
@@ -1491,11 +1536,15 @@ func (b *Broker) sendAndReceiveApiVersions(v int16) (*ApiVersionsResponse, error
 		return nil, err
 	}
 
-	length := binary.BigEndian.Uint32(header[:4])
-	// we're not using the correlation ID here, but it is part of the response header
-	// correlationID := binary.BigEndian.Uint32(header[4:])
+	bodyLength, err := decodeResponseHeaderV0(header, req.correlationID, b.metricRegistry)
+	if err != nil {
+		b.addRequestInFlightMetrics(-1)
+		Logger.Printf("Failed to decode ApiVersionsResponse V%d header from %s: %s\n", v, b.addr, err)
+		// the body is still unread, so the connection cannot be reused for the v0 retry
+		return nil, connFatalError{err}
+	}
 
-	payload := make([]byte, length-4)
+	payload := make([]byte, bodyLength)
 	n, err := b.readFull(payload)
 	if err != nil {
 		b.addRequestInFlightMetrics(-1)
@@ -1635,8 +1684,14 @@ func (b *Broker) sendAndReceiveSASLHandshake(saslType SASLMechanism, version int
 		return err
 	}
 
-	length := binary.BigEndian.Uint32(header[:4])
-	payload := make([]byte, length-4)
+	bodyLength, err := decodeResponseHeaderV0(header, req.correlationID, b.metricRegistry)
+	if err != nil {
+		b.addRequestInFlightMetrics(-1)
+		Logger.Printf("Failed to decode SASL handshake header : %s\n", err.Error())
+		return err
+	}
+
+	payload := make([]byte, bodyLength)
 	n, err := b.readFull(payload)
 	if err != nil {
 		b.addRequestInFlightMetrics(-1)
@@ -1801,11 +1856,12 @@ func (b *Broker) sendAndReceiveSASLSCRAMv0() error {
 			Logger.Printf("Failed to read response header while authenticating with SASL to broker %s: %s\n", b.addr, err.Error())
 			return err
 		}
-		payloadLength := binary.BigEndian.Uint32(header)
-		if int64(payloadLength) > int64(MaxResponseSize) {
-			return PacketDecodingError{fmt.Sprintf("SASL response of length %d too large", payloadLength)}
+		payloadLength, err := decodeSASLv0Length(header)
+		if err != nil {
+			b.addRequestInFlightMetrics(-1)
+			return err
 		}
-		payload := make([]byte, int(payloadLength))
+		payload := make([]byte, payloadLength)
 		n, err := b.readFull(payload)
 		if err != nil {
 			b.addRequestInFlightMetrics(-1)
@@ -2009,25 +2065,65 @@ func (b *Broker) handleThrottledResponse(resp protocolBody) {
 }
 
 func (b *Broker) setThrottle(throttleTime time.Duration) {
-	b.throttleTimerLock.Lock()
-	defer b.throttleTimerLock.Unlock()
-	if b.throttleTimer != nil {
-		// if there is an existing timer stop/clear it
-		if !b.throttleTimer.Stop() {
-			<-b.throttleTimer.C
-		}
-	}
-	b.throttleTimer = time.NewTimer(throttleTime)
+	b.throttleLock.Lock()
+	defer b.throttleLock.Unlock()
+
+	b.throttleDeadline = time.Now().Add(throttleTime)
+	b.notifyThrottleWaitersLocked()
 }
 
-func (b *Broker) waitIfThrottled() {
-	b.throttleTimerLock.Lock()
-	defer b.throttleTimerLock.Unlock()
-	if b.throttleTimer != nil {
+func (b *Broker) waitIfThrottled() error {
+	for {
+		b.throttleLock.Lock()
+		if b.throttleWaitInterrupted {
+			b.throttleLock.Unlock()
+			return ErrNotConnected
+		}
+		remaining := time.Until(b.throttleDeadline)
+		if remaining <= 0 {
+			b.throttleLock.Unlock()
+			return nil
+		}
+		if b.throttleNotify == nil {
+			b.throttleNotify = make(chan struct{})
+		}
+		notify := b.throttleNotify
+		b.throttleLock.Unlock()
+
 		DebugLogger.Printf("broker/%d waiting for throttle timer\n", b.ID())
-		<-b.throttleTimer.C
-		b.throttleTimer = nil
+		select {
+		case <-time.After(remaining):
+		case <-notify:
+		}
 	}
+}
+
+// interruptThrottleWaits interrupts active throttle waits for the current connection
+// while preserving the deadline for a subsequent connection. It must be called
+// before Close attempts to acquire b.lock.
+func (b *Broker) interruptThrottleWaits() {
+	b.throttleLock.Lock()
+	defer b.throttleLock.Unlock()
+
+	b.throttleWaitInterrupted = true
+	b.notifyThrottleWaitersLocked()
+}
+
+// enableThrottleWaits enables throttle waits for a newly opened connection without
+// discarding the remaining broker-provided throttle duration.
+func (b *Broker) enableThrottleWaits() {
+	b.throttleLock.Lock()
+	defer b.throttleLock.Unlock()
+
+	b.throttleWaitInterrupted = false
+	b.notifyThrottleWaitersLocked()
+}
+
+func (b *Broker) notifyThrottleWaitersLocked() {
+	if b.throttleNotify != nil {
+		close(b.throttleNotify)
+	}
+	b.throttleNotify = make(chan struct{})
 }
 
 func (b *Broker) updateThrottleMetric(throttleTime time.Duration) {

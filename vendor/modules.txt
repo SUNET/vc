@@ -9,7 +9,7 @@ filippo.io/edwards25519/field
 ## explicit; go 1.25.0
 github.com/Azure/go-ansiterm
 github.com/Azure/go-ansiterm/winterm
-# github.com/IBM/sarama v1.61.1
+# github.com/IBM/sarama v1.62.0
 ## explicit; go 1.26.0
 github.com/IBM/sarama
 github.com/IBM/sarama/internal/queue
@@ -482,7 +482,7 @@ github.com/kaptinlin/jsonschema/pkg/tagparser
 # github.com/kelseyhightower/envconfig v1.4.0
 ## explicit
 github.com/kelseyhightower/envconfig
-# github.com/klauspost/compress v1.20.4
+# github.com/klauspost/compress v1.20.5
 ## explicit; go 1.25
 github.com/klauspost/compress
 github.com/klauspost/compress/flate
@@ -637,7 +637,7 @@ github.com/moby/patternmatcher/ignorefile
 # github.com/moby/sys/sequential v0.7.0
 ## explicit; go 1.24.0
 github.com/moby/sys/sequential
-# github.com/moby/sys/user v0.5.0
+# github.com/moby/sys/user v0.5.1
 ## explicit; go 1.24
 github.com/moby/sys/user
 # github.com/moby/sys/userns v0.2.1
@@ -656,7 +656,7 @@ github.com/modern-go/reflect2
 # github.com/moogar0880/problems v1.0.1
 ## explicit; go 1.24
 github.com/moogar0880/problems
-# github.com/moov-io/signedxml v1.4.2
+# github.com/moov-io/signedxml v1.4.3
 ## explicit; go 1.26.0
 github.com/moov-io/signedxml
 # github.com/mr-tron/base58 v1.3.0
@@ -696,7 +696,7 @@ github.com/pelletier/go-toml/v2
 github.com/pelletier/go-toml/v2/internal/parserbridge
 github.com/pelletier/go-toml/v2/internal/tracker
 github.com/pelletier/go-toml/v2/unstable
-# github.com/pierrec/lz4/v4 v4.1.33
+# github.com/pierrec/lz4/v4 v4.1.34
 ## explicit; go 1.22
 github.com/pierrec/lz4/v4
 github.com/pierrec/lz4/v4/internal/lz4block
@@ -740,7 +740,7 @@ github.com/prometheus/procfs/internal/parsers
 # github.com/quic-go/qpack v0.6.0
 ## explicit; go 1.24
 github.com/quic-go/qpack
-# github.com/quic-go/quic-go v0.65.0
+# github.com/quic-go/quic-go v0.66.0
 ## explicit; go 1.26.0
 github.com/quic-go/quic-go
 github.com/quic-go/quic-go/http3
@@ -751,6 +751,7 @@ github.com/quic-go/quic-go/internal/handshake
 github.com/quic-go/quic-go/internal/monotime
 github.com/quic-go/quic-go/internal/protocol
 github.com/quic-go/quic-go/internal/qerr
+github.com/quic-go/quic-go/internal/udp
 github.com/quic-go/quic-go/internal/utils
 github.com/quic-go/quic-go/internal/utils/linkedlist
 github.com/quic-go/quic-go/internal/utils/minheap
@@ -763,16 +764,20 @@ github.com/quic-go/quic-go/quicvarint
 # github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9
 ## explicit
 github.com/rcrowley/go-metrics
-# github.com/redis/go-redis/v9 v9.23.0
+# github.com/redis/go-redis/v9 v9.24.0
 ## explicit; go 1.26.0
 github.com/redis/go-redis/v9
 github.com/redis/go-redis/v9/auth
 github.com/redis/go-redis/v9/internal
 github.com/redis/go-redis/v9/internal/auth/streaming
+github.com/redis/go-redis/v9/internal/callbackqueue
+github.com/redis/go-redis/v9/internal/circuitbreaker
+github.com/redis/go-redis/v9/internal/failuredetector
 github.com/redis/go-redis/v9/internal/hashtag
 github.com/redis/go-redis/v9/internal/hscan
 github.com/redis/go-redis/v9/internal/interfaces
 github.com/redis/go-redis/v9/internal/maintnotifications/logs
+github.com/redis/go-redis/v9/internal/multidb
 github.com/redis/go-redis/v9/internal/otel
 github.com/redis/go-redis/v9/internal/pool
 github.com/redis/go-redis/v9/internal/proto
@@ -928,7 +933,7 @@ github.com/youmark/pkcs8
 # github.com/yusufpapurcu/wmi v1.2.4
 ## explicit; go 1.16
 github.com/yusufpapurcu/wmi
-# go.mongodb.org/mongo-driver/v2 v2.10.0
+# go.mongodb.org/mongo-driver/v2 v2.10.1
 ## explicit; go 1.25.0
 go.mongodb.org/mongo-driver/v2/bson
 go.mongodb.org/mongo-driver/v2/event
@@ -980,8 +985,8 @@ go.mongodb.org/mongo-driver/v2/x/mongo/driver/ocsp
 go.mongodb.org/mongo-driver/v2/x/mongo/driver/session
 go.mongodb.org/mongo-driver/v2/x/mongo/driver/topology
 go.mongodb.org/mongo-driver/v2/x/mongo/driver/wiremessage
-# go.opentelemetry.io/auto/sdk v1.2.1
-## explicit; go 1.24.0
+# go.opentelemetry.io/auto/sdk v1.2.2
+## explicit; go 1.25.0
 go.opentelemetry.io/auto/sdk
 go.opentelemetry.io/auto/sdk/internal/telemetry
 # go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
@@ -1181,10 +1186,10 @@ golang.org/x/text/width
 # golang.org/x/time v0.16.0
 ## explicit; go 1.26.0
 golang.org/x/time/rate
-# google.golang.org/genproto/googleapis/api v0.0.0-20261118221215-c8830f628b3f
+# google.golang.org/genproto/googleapis/api v0.0.0-20261123191846-1e707ab9fbc2
 ## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/api/httpbody
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20261118221215-c8830f628b3f
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20261123191846-1e707ab9fbc2
 ## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.85.0
