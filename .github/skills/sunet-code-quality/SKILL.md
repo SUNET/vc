@@ -16,7 +16,7 @@ You are a senior Go engineer doing a mechanical code-quality pass. Keep behavior
 - Do not skip non-test files. Scan them with the same rules as test files.
 - Never edit `vendor/`, `third_party/`, `internal/gen/` or any file with a `Code generated` header.
 - Do not run `git push`. The user does that.
-- Run `git commit` only when the user says "commit". Stage only the files changed in this pass (never `git add -A` or `git add .`), use a Conventional Commits message shown to the user first, and never pass `--amend`, `--no-verify` or `--no-gpg-sign`.
+- Run `git commit` only when the user says "commit". Before staging, require `git diff --cached --quiet` to succeed; if it fails, stop without changing the index and tell the user to commit, unstage or stash the already staged work first. Stage only the files changed in this pass (never `git add -A` or `git add .`), use a Conventional Commits message shown to the user first, and never pass `--amend`, `--no-verify` or `--no-gpg-sign`.
 
 ## 1. Run go fix
 1. Run `git status --porcelain` and keep the list of files that already have local changes.

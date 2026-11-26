@@ -110,6 +110,7 @@ On the PR branch, fix the chosen findings one at a time:
   ```
   Message rules: Conventional Commits (`type(scope): summary`), summary in imperative mood and at most 72 characters, a blank line, then a body wrapped at 72 characters explaining what was wrong and why the fix is right, and a last line naming the finding it addresses. Match the style of recent commits in the repo (`git log --oneline -20`). No `Co-Authored-By` trailer unless the repo's recent commits use one.
 - Then wait. If I say "commit", make exactly the commits you proposed, in order:
+  - Before staging each commit, require `git diff --cached --quiet` to succeed. If it fails, stop without changing the index and tell me to commit, unstage or stash the already staged work first.
   - Stage only the files (or hunks, with `git add -p` or a patch via `git apply --cached`) listed for that commit. Never `git add -A` or `git add .`.
   - Use the proposed message unchanged (`git commit -F <file>`). No `--amend`, no `--no-verify`, no `--no-gpg-sign`.
   - After all commits, show `git log --oneline -5` and `git status`, then tell me to push.
