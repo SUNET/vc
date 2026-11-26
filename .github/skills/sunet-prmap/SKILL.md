@@ -33,7 +33,7 @@ For each PR also get, when useful:
 Build a dependency graph. PR B depends on PR A if ANY of these holds (record which signal you used):
 1. **Base branch:** B's `baseRefName` equals A's `headRefName` (same repo or same fork owner).
 2. **Description:** B's body mentions A as a dependency or stack position ("depends on #A", "based on #A", "stacked on", "after #A merges", "contains A's commit", "part 2/3", "A: #814, B: #815").
-3. **Shared commits:** B contains commits whose SHAs also appear in A (typical for fork PRs that all target `main` but are actually stacked). Compare commit lists.
+3. **Shared commits:** B depends on A only when all of A's commit SHAs appear in B and B has extra commits on top (A's commits are a strict subset of B's). This is typical for fork PRs that all target `main` but are actually stacked. If commits overlap but neither set contains the other, do not infer a direction: record it as an uncertain link under "Possible conflicts".
 4. **Weak signal — overlapping files only:** many of the same files changed. Do not treat this as a dependency; list it under "Possible conflicts" instead.
 
 Group linked PRs into **stacks**, ordered bottom (merge first) to top. A PR with no links is a **standalone**. Flag anything odd: cycles, a PR whose base PR is closed/merged (needs rebase), a stack where a lower PR is failing CI or has requested changes (blocks everything above it).
