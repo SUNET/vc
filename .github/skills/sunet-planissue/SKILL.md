@@ -62,7 +62,7 @@ Use exactly this structure.
 Then ask me whether the plan is OK. Do nothing until I approve it.
 
 ## 4. Start the branch (only after I approve the plan)
-- Require a clean working tree (`git status --porcelain` is empty). If not, stop and tell me.
+- Ignore unstaged and untracked files; they carry over to the new branch and are never committed. Require nothing staged (`git diff --cached --quiet` succeeds). If not, stop and tell me.
 - Run `git fetch origin <default-branch>`. If it fails, stop and show the error.
 - Run the `git switch -c` command from the report. If it fails, stop and show the error. Do not commit.
 - Make one empty initial commit with `git commit --allow-empty`. Show me the message first.
