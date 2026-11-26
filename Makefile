@@ -1296,6 +1296,9 @@ vscode: test-env gh-install ## Set up VS Code development environment
     sudo chmod +x /usr/local/bin/yq
 	$(info Installing act for local GitHub Actions testing)
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
+	$(info Installing sync-skills)
+	sudo curl -fsSL -o /usr/local/bin/sync-skills.sh https://github.com/masv3971/coding-skills/releases/latest/download/sync-skills.sh &&\
+	sudo chmod +x /usr/local/bin/sync-skills.sh
 	$(info Installing flyctl)
 	curl -sL https://fly.io/install.sh | sh
 	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/flyctl
