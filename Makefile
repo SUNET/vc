@@ -1430,17 +1430,17 @@ release: ## Create and push a git tag from main (BUMP=major|minor|patch)
 	echo ""; \
 	echo "Bumping $$LATEST -> $$NEW_TAG ($(BUMP))"; \
 	echo ""; \
-	echo "Building Docker images for $$NEW_TAG before creating the git tag..."; \
-	echo ""; \
-	$(MAKE) docker-build VERSION=$$NEW_TAG _RELEASE_MODE=1; \
-	echo ""; \
-	echo "==> Docker images built for $$NEW_TAG. Updating changelog..."; \
+	echo "Updating changelog for $$NEW_TAG before the build, so the images embed the release commit..."; \
 	echo ""; \
 	bash scripts/release-changelog.sh "$$NEW_TAG" "$$LATEST"; \
 	git add CHANGELOG.md; \
 	git diff --cached --quiet -- CHANGELOG.md || git commit -m "chore: changelog for $$NEW_TAG" -- CHANGELOG.md; \
 	echo ""; \
-	echo "==> Creating and pushing git tag..."; \
+	echo "Building Docker images for $$NEW_TAG before creating the git tag..."; \
+	echo ""; \
+	$(MAKE) docker-build VERSION=$$NEW_TAG _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Docker images built for $$NEW_TAG. Creating and pushing git tag..."; \
 	echo ""; \
 	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
 	git push --atomic origin HEAD "$$NEW_TAG"; \

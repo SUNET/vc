@@ -30,10 +30,17 @@ resolve_handle() {
 
 # A PR belongs to the release when its merge commit is in HEAD but not in the previous tag.
 in_range() {
-	git merge-base --is-ancestor "$1" HEAD 2>/dev/null || return 1
+	local oid=$1
+	git merge-base --is-ancestor "$oid" HEAD 2>/dev/null || return 1
 	git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null || return 0
-	! git merge-base --is-ancestor "$1" "$PREV_TAG" 2>/dev/null
+	! git merge-base --is-ancestor "$oid" "$PREV_TAG" 2>/dev/null
 }
+
+# A re-run after a failed build must not add a second section.
+if grep -qE "^## $NEW_TAG( |$)" "$FILE"; then
+	echo "$FILE already has a section for $NEW_TAG, unchanged"
+	exit 0
+fi
 
 RANGE="$PREV_TAG..HEAD"
 git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null || RANGE=HEAD
