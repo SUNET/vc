@@ -61,6 +61,14 @@ func (rl *RateLimiter) cleanupVisitors() {
 }
 
 // Middleware returns a Gin middleware handler that enforces rate limiting
+//
+// Buckets are keyed by c.ClientIP(), which is only as trustworthy as the
+// deployment's proxy configuration: gin trusts every proxy unless told
+// otherwise (its default trusted CIDRs are 0.0.0.0/0 and ::/0), and nothing
+// here calls SetTrustedProxies, so a directly reachable server takes the
+// caller's own X-Forwarded-For and a client that rotates it gets a fresh
+// bucket each time. True of every limiter on this server, not only this
+// one; SUNET/vc#962 is where that is fixed.
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Get client IP from request
@@ -89,6 +97,11 @@ type RateLimitConfig struct {
 	AuthorizeBurst             int
 	RegisterRequestsPerMinute  int
 	RegisterBurst              int
+	// InteractionRequestsPerMinute caps POST /ui/interaction, which
+	// authenticates no client and mints an authorization context, two
+	// request objects and a QR image per call.
+	InteractionRequestsPerMinute int
+	InteractionBurst             int
 }
 
 // DefaultRateLimitConfig returns sensible default rate limit values
@@ -105,5 +118,12 @@ func DefaultRateLimitConfig() *RateLimitConfig {
 		// Registration endpoint: Very restrictive (rarely used)
 		RegisterRequestsPerMinute: 5,
 		RegisterBurst:             2,
+
+		// Standalone presentation start: as the authorization endpoint,
+		// which is the same act reached through the OIDC flow. A person
+		// starting, reloading and retrying a presentation stays well
+		// inside it; a script minting sessions does not.
+		InteractionRequestsPerMinute: 60,
+		InteractionBurst:             10,
 	}
 }

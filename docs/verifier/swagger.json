@@ -1,5 +1,178 @@
 {
-    "components": {},
+    "components": {
+        "schemas": {
+            "apiv1.AuthorizeResponse": {
+                "properties": {
+                    "css_file": {
+                        "type": "string"
+                    },
+                    "deep_link_url": {
+                        "type": "string"
+                    },
+                    "logo_url": {
+                        "type": "string"
+                    },
+                    "poll_url": {
+                        "type": "string"
+                    },
+                    "preferred_formats": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "primary_color": {
+                        "type": "string"
+                    },
+                    "qr_code_data": {
+                        "type": "string"
+                    },
+                    "qr_code_image_url": {
+                        "type": "string"
+                    },
+                    "response_mode": {
+                        "type": "string"
+                    },
+                    "secondary_color": {
+                        "type": "string"
+                    },
+                    "session_id": {
+                        "type": "string"
+                    },
+                    "subtitle": {
+                        "type": "string"
+                    },
+                    "theme": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "wallet_links": {
+                        "items": {
+                            "$ref": "#/components/schemas/apiv1.WalletLink"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "apiv1.PollSessionResponse": {
+                "properties": {
+                    "redirect_uri": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "apiv1.UIInteractionReply": {
+                "properties": {
+                    "authorization_request": {
+                        "description": "AuthorizationRequest is the request reached through request_uri: the QR\ncode, the same-device link, and the polyfill's redirect fallback. Its\nresponse_mode is direct_post.jwt, because a wallet arriving this way\nhas no browser DC API call to answer inside.",
+                        "type": "string"
+                    },
+                    "dc_api_authorization_request": {
+                        "description": "DCAPIAuthorizationRequest is the request for navigator.credentials.get,\ncarrying response_mode dc_api.jwt. Empty when the Digital Credentials\nAPI is disabled.\n\nTwo requests rather than one, because response_mode has to follow the\ndelivery channel: dc_api modes are defined only for a request handed to\nthe browser DC API, where the response returns inside that call and the\ntranscript binds to the calling origin. Serving one request object to\nboth channels - which is what this flow did - meant every wallet that\nscanned the QR or followed the link got a mode it could not honour, and\nonly found out after the user had selected credentials and signed\n(SUNET/vc#652).",
+                        "type": "string"
+                    },
+                    "qr_code": {
+                        "type": "string"
+                    },
+                    "session_id": {
+                        "description": "SessionID identifies the authorization context this reply belongs to.\nReturned so the browser can address later POSTs (e.g. session-preference)\nto the exact request it was created for, rather than relying on the\nshared per-origin cookie session that any other tab can overwrite.",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "apiv1.UIInteractionRequest": {
+                "properties": {
+                    "dcql_query": {
+                        "description": "DCQLQuery is the query this presentation asks for, in the DCQL that\nOpenID4VP specifies.",
+                        "type": "object"
+                    },
+                    "payment": {
+                        "$ref": "#/components/schemas/apiv1.UIPaymentRequest",
+                        "description": "Payment, when set, makes this an EC TS12 payment SCA request: a\nurn:eudi:sca:payment:1 transaction_data entry is added to the request\nand the response is validated against it. Requires verifier.ts12.enable.\nA payment is never served from a reused session: every payment request\nis a new transaction."
+                    },
+                    "session_id": {
+                        "description": "SessionID is a reuse hint sourced ONLY from the request body (which\nmirrors the tab-scoped sessionStorage value). The HTTP layer\ndeliberately does NOT populate it from the shared gin cookie\nsession, because that cookie is overwritten by any sibling tab and\nwould otherwise let a fresh tab inherit another tab's in-flight\nauthorization context. When this id names a still-valid,\nstill-unclaimed context with the same DCQL / validations, the\nresponse returns that context's existing request_uri/QR so a\nreload mid-flow does not orphan the wallet's outstanding scan.\nOtherwise a fresh session id is minted and returned in the reply.",
+                        "maxLength": 128,
+                        "type": "string"
+                    },
+                    "validations": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "dcql_query"
+                ],
+                "type": "object"
+            },
+            "apiv1.UIPaymentRequest": {
+                "properties": {
+                    "amount": {
+                        "description": "Amount is the payment amount in major currency units, as a JSON number or a numeric string (\"49.99\"). Must be greater than zero.",
+                        "type": "string"
+                    },
+                    "credential_id": {
+                        "description": "CredentialID is the DCQL credential query id of the SCA attestation that authorizes the payment. Required when the DCQL query has more than one credential query.",
+                        "maxLength": 128,
+                        "type": "string"
+                    },
+                    "currency": {
+                        "description": "Currency is an ISO 4217 alpha-3 code.",
+                        "type": "string"
+                    },
+                    "payee_id": {
+                        "maxLength": 256,
+                        "type": "string"
+                    },
+                    "payee_name": {
+                        "description": "PayeeName and PayeeID are REQUIRED by the TS12 payment schema.",
+                        "maxLength": 256,
+                        "type": "string"
+                    },
+                    "payee_website": {
+                        "maxLength": 512,
+                        "type": "string"
+                    },
+                    "transaction_id": {
+                        "description": "TransactionID is the relying party's identifier of the interaction (1..36 characters). A fresh UUID when omitted.",
+                        "maxLength": 36,
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "amount",
+                    "currency",
+                    "payee_id",
+                    "payee_name"
+                ],
+                "type": "object"
+            },
+            "apiv1.WalletLink": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "qr_code_image_url": {
+                        "description": "QR code image URL for cross-device flow",
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            }
+        }
+    },
     "info": {
         "title": "",
         "version": ""
@@ -8,6 +181,212 @@
         "description": "",
         "url": ""
     },
-    "paths": {},
+    "paths": {
+        "/authorize": {
+            "get": {
+                "description": "OIDC authorization request. Returns the verifier's authorization page, or this response as JSON when the client sends `Accept: application/json`.",
+                "operationId": "oidc-authorize",
+                "parameters": [
+                    {
+                        "description": "OAuth 2.0 response type; `code`",
+                        "in": "query",
+                        "name": "response_type",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "The relying party's registered client id",
+                        "in": "query",
+                        "name": "client_id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Must match one registered for the client",
+                        "in": "query",
+                        "name": "redirect_uri",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Requested scopes",
+                        "in": "query",
+                        "name": "scope",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Returned unchanged on the callback",
+                        "in": "query",
+                        "name": "state",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Bound into the issued ID token",
+                        "in": "query",
+                        "name": "nonce",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "`application/json` for the embeddable response",
+                        "in": "header",
+                        "name": "Accept",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/apiv1.AuthorizeResponse"
+                                }
+                            }
+                        },
+                        "description": "Returned when the request prefers application/json. A browser, which does not, receives the authorization page as text/html instead."
+                    }
+                },
+                "summary": "Authorize",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        },
+        "/poll/{session_id}": {
+            "get": {
+                "description": "Current status of a presentation session. Requires no session cookie. `redirect_uri` is set once an authorization code has been issued.",
+                "operationId": "poll-session",
+                "parameters": [
+                    {
+                        "description": "Session id, as returned by /authorize",
+                        "in": "path",
+                        "name": "session_id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/apiv1.PollSessionResponse"
+                                }
+                            }
+                        },
+                        "description": "Success"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {}
+                        },
+                        "description": "Unknown session"
+                    }
+                },
+                "summary": "Poll session",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        },
+        "/qr/{session_id}": {
+            "get": {
+                "description": "The session's authorization request as a PNG QR code. Requires no session cookie, so it can be embedded directly from another origin.",
+                "operationId": "session-qr-code",
+                "parameters": [
+                    {
+                        "description": "Session id, as returned by /authorize",
+                        "in": "path",
+                        "name": "session_id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Name of a configured web wallet, for the cross-device flow",
+                        "in": "query",
+                        "name": "wallet",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "image/png": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "description": "PNG image"
+                    },
+                    "404": {
+                        "content": {
+                            "image/png": {}
+                        },
+                        "description": "Unknown session"
+                    }
+                },
+                "summary": "QR code",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        },
+        "/ui/interaction": {
+            "post": {
+                "description": "Starts a presentation from a caller-supplied DCQL query and returns the authorization request, a QR code, and the session id. The reply is data, so the caller renders the request on its own page. Note that this endpoint authenticates no client.",
+                "operationId": "ui-interaction",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/apiv1.UIInteractionRequest",
+                                "summary": "req",
+                                "description": " "
+                            }
+                        }
+                    },
+                    "description": " ",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/apiv1.UIInteractionReply"
+                                }
+                            }
+                        },
+                        "description": "Success"
+                    }
+                },
+                "summary": "UI interaction",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        }
+    },
     "openapi": "3.1.0"
 }

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	verifierdocs "github.com/SUNET/vc/docs/verifier"
 	"github.com/SUNET/vc/internal/verifier/apiv1"
@@ -25,7 +26,6 @@ import (
 	"github.com/SUNET/vc/pkg/swaggerui"
 	"github.com/SUNET/vc/pkg/trace"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/sessions"
 
 	"github.com/gin-gonic/gin"
@@ -33,22 +33,23 @@ import (
 
 // Service is the service object for httpserver
 type Service struct {
-	cfg              *model.Cfg
-	log              *logger.Log
-	server           *http.Server
-	apiv1            Apiv1
-	gin              *gin.Engine
-	tracer           *trace.Tracer
-	httpHelpers      *httphelpers.Client
-	notify           *notify.Service
-	sessionsOptions  sessions.Options
-	sessionsEncKey   string
-	sessionsAuthKey  string
-	sessionsName     string
-	tokenLimiter     *middleware.RateLimiter
-	authorizeLimiter *middleware.RateLimiter
-	registerLimiter  *middleware.RateLimiter
-	registerAuth     gin.HandlerFunc
+	cfg                *model.Cfg
+	log                *logger.Log
+	server             *http.Server
+	apiv1              Apiv1
+	gin                *gin.Engine
+	tracer             *trace.Tracer
+	httpHelpers        *httphelpers.Client
+	notify             *notify.Service
+	sessionsOptions    sessions.Options
+	sessionsEncKey     string
+	sessionsAuthKey    string
+	sessionsName       string
+	tokenLimiter       *middleware.RateLimiter
+	authorizeLimiter   *middleware.RateLimiter
+	registerLimiter    *middleware.RateLimiter
+	interactionLimiter *middleware.RateLimiter
+	registerAuth       gin.HandlerFunc
 
 	// openidFederationService is nil when OpenID Federation is not enabled.
 	// Built once here rather than per-request, since constructing a signer
@@ -62,6 +63,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// Initialize rate limiters with default configuration
 	rateLimitConfig := middleware.DefaultRateLimitConfig()
 
+	sessionsOptions, err := userSessionOptions(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Service{
 		cfg:              cfg,
 		log:              log.New("httpserver"),
@@ -74,15 +80,18 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
-		registerAuth:     func(c *gin.Context) { c.Next() },
-		sessionsOptions:  userSessionOptions(cfg),
+		// Unconditional, not gated on embedded_presentation: the endpoint
+		// authenticates no client either way, and a verifier serving its
+		// own page only is reachable by everyone who can reach that page.
+		interactionLimiter: middleware.NewRateLimiter(rateLimitConfig.InteractionRequestsPerMinute, rateLimitConfig.InteractionBurst),
+		registerAuth:       func(c *gin.Context) { c.Next() },
+		sessionsOptions:    sessionsOptions,
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
 	s.sessionsAuthKey = cacheService.SessionAuthKey
 	s.sessionsEncKey = cacheService.SessionEncKey
 
-	var err error
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
@@ -92,15 +101,20 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// OPTIONS preflight requests are handled correctly. Placing CORS on a
 	// router group causes preflight requests to hit Gin's NoRoute handler
 	// (404) because no explicit OPTIONS route is registered.
-	if s.cfg.Verifier.APIServer.CORS != nil && len(s.cfg.Verifier.APIServer.CORS.AllowedOrigins) > 0 {
-		corsConfig := cors.Config{
-			AllowOrigins:     s.cfg.Verifier.APIServer.CORS.AllowedOrigins,
-			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
-			AllowCredentials: true,
-			MaxAge:           12 * time.Hour,
-		}
-		s.gin.Use(cors.New(corsConfig))
+	//
+	// One handler for both of the verifier's CORS keys - see VerifierCORS
+	// for why they cannot be two.
+	corsHandler, err := middleware.VerifierCORS(s.cfg.Verifier.APIServer.CORS, s.cfg.Verifier.EmbeddedPresentation)
+	if err != nil {
+		return nil, err
+	}
+	if corsHandler != nil {
+		s.gin.Use(corsHandler)
+	}
+	if s.cfg.Verifier.EmbeddedPresentation.Enabled() {
+		s.log.Info("Standalone presentation endpoints are open to other origins",
+			"allowed_origins", s.cfg.Verifier.EmbeddedPresentation.AllowedOrigins,
+			"paths", slices.Sorted(maps.Keys(middleware.EmbeddedPresentationPaths)))
 	}
 
 	// Built only when registration is served. The constructor reads the
@@ -203,7 +217,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "payment", http.StatusOK, s.endpointPaymentPage)
 
 	rgUI := rgOAuthSession.Group("/ui")
-	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
+	s.registerUIInteraction(ctx, rgUI)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/notify", http.StatusOK, s.endpointUINotify)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/metadata", http.StatusOK, s.endpointUIMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/result", http.StatusOK, s.endpointUIResult)
@@ -257,6 +271,17 @@ func (s *Service) registerDynamicClientRegistrationEndpoints(ctx context.Context
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "register/:client_id", http.StatusOK, s.endpointGetClientConfiguration)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPut, "register/:client_id", http.StatusOK, s.endpointUpdateClient)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodDelete, "register/:client_id", http.StatusNoContent, s.endpointDeleteClient)
+}
+
+// registerUIInteraction registers POST /ui/interaction behind the rate
+// limiter.
+//
+// A group of its own only because RegEndpoint takes no middleware; the path
+// and the session middleware are the group's. A function of its own so a
+// test exercises this registration rather than a copy of it.
+func (s *Service) registerUIInteraction(ctx context.Context, rgUI *gin.RouterGroup) {
+	rgUIInteraction := rgUI.Group("", s.interactionLimiter.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUIInteraction, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
 }
 
 // Close closing httpserver
@@ -432,20 +457,18 @@ const defaultUserSessionMaxAge = 900
 // test. Spread across the constructor, nothing observed what MaxAge ended up
 // as, which is how it stayed pinned at 900 seconds while the key meant to
 // set it went unread (SUNET/vc#756).
-func userSessionOptions(cfg *model.Cfg) sessions.Options {
-	secure := false
+//
+// The cross-site attributes come from httphelpers.SessionCookieOptions,
+// which both this service and the apigw now share. It returns an error so
+// that a cookie no browser would store - SameSite=None without Secure -
+// stops the service at startup instead of failing every session silently.
+func userSessionOptions(cfg *model.Cfg) (sessions.Options, error) {
+	apiServer := model.APIServer{}
 	if cfg != nil && cfg.Verifier != nil {
-		secure = cfg.Verifier.APIServer.TLS.Enable
+		apiServer = cfg.Verifier.APIServer
 	}
 
-	return sessions.Options{
-		Path:     "/",
-		Domain:   "",
-		MaxAge:   userSessionMaxAge(cfg),
-		Secure:   secure,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	}
+	return httphelpers.SessionCookieOptions(apiServer, userSessionMaxAge(cfg))
 }
 
 func userSessionMaxAge(cfg *model.Cfg) int {
