@@ -38,7 +38,9 @@ in_range() {
 
 RANGE="$PREV_TAG..HEAD"
 git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null || RANGE=HEAD
-if [[ -z "$(git log --no-merges --format=%h "$RANGE")" ]]; then
+# The draft changelog commit of an earlier attempt for this tag is not a change.
+DRAFT=(--invert-grep --grep="^chore: changelog for $NEW_TAG\$")
+if [[ -z "$(git log --no-merges "${DRAFT[@]}" --format=%h "$RANGE")" ]]; then
 	echo "No commits since $PREV_TAG, changelog unchanged"
 	exit 0
 fi
@@ -56,7 +58,7 @@ while IFS='|' read -r sha name email; do
 	else
 		participants+=("$name")
 	fi
-done < <(git log --no-merges --format='%H|%an|%ae' "$RANGE")
+done < <(git log --no-merges "${DRAFT[@]}" --format='%H|%an|%ae' "$RANGE")
 
 # Not every merge keeps "(#N)" in the subject, so ask GitHub; fall back to commit SHAs.
 since=$(git log -1 --format=%cI "$PREV_TAG" 2>/dev/null || true)
@@ -74,8 +76,8 @@ if [[ -n "$prs" ]]; then
 	change_list=$prs
 	pr_count=$(printf '%s\n' "$prs" | wc -l | tr -d ' ')
 else
-	change_list=$(git log --no-merges --format='- %h: %s' "$RANGE")
-	pr_count=$(git log --no-merges --format=%s "$RANGE" | { grep -oE '\(#[0-9]+\)$' || true; } | sort -u | wc -l | tr -d ' ')
+	change_list=$(git log --no-merges "${DRAFT[@]}" --format='- %h: %s' "$RANGE")
+	pr_count=$(git log --no-merges "${DRAFT[@]}" --format=%s "$RANGE" | { grep -oE '\(#[0-9]+\)$' || true; } | sort -u | wc -l | tr -d ' ')
 fi
 
 closed_issues=
