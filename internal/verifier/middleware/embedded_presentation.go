@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
-	"slices"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -67,16 +69,21 @@ func VerifierCORS(serverWide *model.CORS, embedded *model.EmbeddedPresentationCo
 	if serverWide != nil {
 		serverWideOrigins = serverWide.AllowedOrigins
 	}
+	serverWideMatch := normalizeServerWideOrigins(serverWideOrigins)
 
 	var serverWideHandler gin.HandlerFunc
 	if len(serverWideOrigins) > 0 {
-		serverWideHandler = cors.New(cors.Config{
+		var err error
+		serverWideHandler, err = newCORSHandler(cors.Config{
 			AllowOrigins:     serverWideOrigins,
 			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodOptions},
 			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
 			AllowCredentials: true,
 			MaxAge:           12 * time.Hour,
-		})
+		}, "api_server.cors.allowed_origins")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var embeddedHandler gin.HandlerFunc
@@ -89,13 +96,17 @@ func VerifierCORS(serverWide *model.CORS, embedded *model.EmbeddedPresentationCo
 		// three take it on the query string, so the browser has no reason to
 		// send verifier_user_session - and an embedded page that cannot send
 		// it cannot be made to spend another visitor's session either.
-		embeddedHandler = cors.New(cors.Config{
+		var err error
+		embeddedHandler, err = newCORSHandler(cors.Config{
 			AllowOrigins:     embedded.AllowedOrigins,
 			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodOptions},
 			AllowHeaders:     []string{"Content-Type"},
 			AllowCredentials: false,
 			MaxAge:           12 * time.Hour,
-		})
+		}, "verifier.embedded_presentation.allowed_origins")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if serverWideHandler == nil && embeddedHandler == nil {
@@ -106,7 +117,7 @@ func VerifierCORS(serverWide *model.CORS, embedded *model.EmbeddedPresentationCo
 		origin := c.Request.Header.Get("Origin")
 		if embeddedHandler != nil &&
 			EmbeddedPresentationPaths[c.Request.URL.Path] &&
-			!allowedServerWide(serverWideOrigins, origin) {
+			!allowedServerWide(serverWideMatch, origin) {
 			embeddedHandler(c)
 			return
 		}
@@ -118,13 +129,75 @@ func VerifierCORS(serverWide *model.CORS, embedded *model.EmbeddedPresentationCo
 	}, nil
 }
 
-// allowedServerWide reports whether api_server.cors covers this origin, the
-// way gin-contrib/cors reads its own list: an exact match, or the "*" entry
-// that stands for every origin.
-func allowedServerWide(origins []string, origin string) bool {
+// newCORSHandler builds one gin-contrib/cors handler, asking the library to
+// check the configuration before it is handed over.
+//
+// cors.New panics on a configuration its own Validate rejects - an origin
+// with no scheme, say - so without this the verifier answers a typo in an
+// operator's allowed_origins with a stack trace at startup. Validate is the
+// library's own, so the check cannot disagree with what New would have done.
+func newCORSHandler(cfg cors.Config, key string) (gin.HandlerFunc, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+
+	return cors.New(cfg), nil
+}
+
+// serverWideOriginRegex is gin-contrib/cors's own test for "this list entry
+// is a regular expression, not a literal origin" (its originRegex).
+var serverWideOriginRegex = regexp.MustCompile(`^/(.+)/[gimuy]?$`)
+
+// normalizeServerWideOrigins prepares api_server.cors's list the way
+// gin-contrib/cors prepares its own: trimmed and lowercased (its normalize()),
+// once, rather than per request.
+func normalizeServerWideOrigins(origins []string) []string {
+	normalized := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		normalized = append(normalized, strings.ToLower(strings.TrimSpace(origin)))
+	}
+
+	return normalized
+}
+
+// allowedServerWide reports whether api_server.cors covers this origin.
+//
+// It has to answer exactly as gin-contrib/cors's validateOrigin would, since
+// the point of asking is to hand that origin to the handler that will accept
+// it. So it reads the list the same three ways: "*" stands for every origin,
+// a /…/ entry is a regular expression matched against the origin, and any
+// other entry is compared literally - against the ENTRY as normalized and the
+// origin as sent, which is what the library compares.
+//
+// Get this wrong in the narrow direction and an origin api_server.cors
+// accepts is handed to the embedded policy instead, which answers it with
+// 403 or drops its credentials. TestAllowedServerWideAgreesWithTheCORSLibrary
+// is a differential test against the library itself, so the two cannot drift.
+func allowedServerWide(normalizedOrigins []string, origin string) bool {
 	if origin == "" {
 		return false
 	}
 
-	return slices.Contains(origins, "*") || slices.Contains(origins, origin)
+	for _, value := range normalizedOrigins {
+		if value == "*" {
+			return true
+		}
+
+		if match := serverWideOriginRegex.FindStringSubmatch(value); match != nil {
+			// MatchString, not MustCompile: the library panics on a
+			// malformed pattern at request time, and a selector that
+			// panicked first would only move the crash.
+			if re, err := regexp.Compile(match[1]); err == nil && re.MatchString(origin) {
+				return true
+			}
+
+			continue
+		}
+
+		if value == origin {
+			return true
+		}
+	}
+
+	return false
 }

@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/helpers"
@@ -238,4 +239,111 @@ func TestVerifierCORSUnconfiguredInstallsNoHandler(t *testing.T) {
 	handler, err = VerifierCORS(&model.CORS{}, &model.EmbeddedPresentationConfig{})
 	require.NoError(t, err)
 	assert.Nil(t, handler)
+}
+
+// serverWideAccepts asks gin-contrib/cors itself whether a server-wide list
+// covers an origin: the handler answers one it does not know with 403, so
+// anything else is acceptance.
+//
+// Only lists the library accepts as configuration reach here; one it refuses
+// is a startup error, covered by TestVerifierCORSRefusesAMalformedOrigin.
+func serverWideAccepts(t *testing.T, origins []string, origin string) bool {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	handler, err := VerifierCORS(&model.CORS{AllowedOrigins: origins}, nil)
+	require.NoError(t, err)
+
+	engine := gin.New()
+	engine.Use(handler)
+	engine.POST("/token", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	return requestOrigin(engine, http.MethodPost, "/token", origin).Code != http.StatusForbidden
+}
+
+// TestAllowedServerWideAgreesWithTheCORSLibrary is a differential test: the
+// selector decides which policy a request gets, so a list entry the library
+// accepts and the selector does not is an origin handed to the embedded
+// policy, where it is answered with 403 or loses its credentials.
+//
+// Comparing against the library rather than against a list of expectations
+// is deliberate - the two cannot drift, whatever gin-contrib/cors does next
+// with normalization or regular expressions.
+func TestAllowedServerWideAgreesWithTheCORSLibrary(t *testing.T) {
+	lists := map[string][]string{
+		"literal":              {serverWideOrign},
+		"uppercase host":       {"https://" + strings.ToUpper(strings.TrimPrefix(serverWideOrign, "https://"))},
+		"regular expression":   {`/^https:\/\/.*\.example\.com$/`},
+		"regex with flag":      {`/^https:\/\/.*\.example\.com$/i`},
+		"wildcard":             {"*"},
+		"two literals":         {"https://a.example.com", "https://b.example.com"},
+		"literal beside regex": {serverWideOrign, `/^https:\/\/.*\.example\.net$/`},
+	}
+	origins := []string{
+		serverWideOrign,
+		"https://" + strings.ToUpper(strings.TrimPrefix(serverWideOrign, "https://")),
+		"https://a.example.com",
+		"https://deep.sub.example.com",
+		"https://other.example.net",
+		rpOrigin,
+	}
+
+	for name, list := range lists {
+		for _, origin := range origins {
+			t.Run(name+" vs "+origin, func(t *testing.T) {
+				assert.Equal(t,
+					serverWideAccepts(t, list, origin),
+					allowedServerWide(normalizeServerWideOrigins(list), origin),
+					"the selector must route this origin to the policy that will accept it")
+			})
+		}
+	}
+}
+
+// A request with no Origin, and a same-origin one, are not cross-origin at
+// all: gin-contrib/cors returns early for both. The selector answers "not
+// server-wide" for them and they reach the embedded handler, which returns
+// early in turn - so with both keys set they must still pass through.
+func TestVerifierCORSLetsNonCrossOriginRequestsThrough(t *testing.T) {
+	engine := engineWithCORS(t,
+		&model.CORS{AllowedOrigins: []string{serverWideOrign}},
+		&model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: []string{rpOrigin}})
+
+	for _, path := range []string{"/ui/interaction", "/token"} {
+		t.Run("no origin "+path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		})
+
+		t.Run("same origin "+path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set("Origin", "http://"+req.Host)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		})
+	}
+}
+
+// A malformed origin reaches cors.New as a panic. The verifier answers an
+// operator's typo with a startup error naming the key instead.
+func TestVerifierCORSRefusesAMalformedOrigin(t *testing.T) {
+	_, err := VerifierCORS(&model.CORS{AllowedOrigins: []string{"rp.example.com"}}, nil)
+	require.Error(t, err, "an origin with no scheme would panic cors.New")
+	assert.Contains(t, err.Error(), "api_server.cors.allowed_origins")
+
+	_, err = VerifierCORS(nil, &model.EmbeddedPresentationConfig{
+		Enable:         true,
+		AllowedOrigins: []string{"rp.example.com"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "verifier.embedded_presentation.allowed_origins")
+
+	// Surrounding whitespace is refused too: the library checks the scheme
+	// prefix on the raw entry and only lowercases/trims afterwards, so a
+	// padded origin never reaches matching at all.
+	_, err = VerifierCORS(&model.CORS{AllowedOrigins: []string{" " + serverWideOrign}}, nil)
+	require.Error(t, err)
 }
