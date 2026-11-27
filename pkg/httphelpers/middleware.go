@@ -273,16 +273,37 @@ func extractResourcePairs(c *gin.Context) []resourcePair {
 		pairs = append(pairs, resourcePair{authenticSource: qSource, scope: qScope})
 	}
 
-	// JSON body (POST/PUT/DELETE endpoints).
-	if c.Request.Body != nil && c.Request.ContentLength > 0 {
+	// JSON body (POST/PUT/DELETE endpoints). An unknown length (-1) is read too:
+	// the binding decodes that body, so its pairs must be authorized.
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
+		c.Request.Body = replayedBody(bodyBytes, err)
 		if err == nil {
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			pairs = append(pairs, extractBodyResourcePairs(bodyBytes)...)
 		}
 	}
 
 	return normalizeResourcePairs(c, pairs)
+}
+
+// replayedBody reads as the body that read data and then err did: data, then
+// err, or the end of the body when err is nil. A body cut short reads
+// io.ErrUnexpectedEOF once and then io.EOF, so a reader after the first one
+// sees the failure only through this replay.
+func replayedBody(data []byte, err error) io.ReadCloser {
+	if err == nil {
+		return io.NopCloser(bytes.NewReader(data))
+	}
+	return io.NopCloser(io.MultiReader(bytes.NewReader(data), failingReader{err: err}))
+}
+
+// failingReader returns err from every read.
+type failingReader struct {
+	err error
+}
+
+func (r failingReader) Read([]byte) (int, error) {
+	return 0, r.err
 }
 
 // extractBodyResourcePairs parses a JSON body and returns all
