@@ -129,7 +129,7 @@ func claimString(v any) (string, bool) {
 
 // normaliseFullDate turns a presented birth date into an RFC 3339 full-date
 // ("YYYY-MM-DD"), which the mdoc issuer then encodes as CBOR tag 1004
-// (convertElementValue). Accepted: a full-date string (SD-JWT PID
+// (ConvertElementValue). Accepted: a full-date string (SD-JWT PID
 // "birthdate"), an mdoc tag 1004 or tag 0 (tdate) value, a date-time string,
 // a time.Time, and a CBOR tag 1 epoch. Anything else - including a date that
 // does not exist - is an error.

@@ -10,12 +10,26 @@ import (
 	"github.com/SUNET/vc/pkg/base64url"
 )
 
-// HashCommitmentArgs fulfils the to_wallet hash_commitment entry at Path.
+// HashCommitmentArgs configures the hash_commitment primitive.
 type HashCommitmentArgs struct {
-	// Path is the claims path pointer of the to_wallet entry it fulfils.
+	// Path is the claims path pointer of the entry.
 	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]"`
-	// Opening produces the opening.
-	Opening OpeningArgs `yaml:"opening" validate:"required"`
+	// Opening produces the opening of a to_wallet entry. The wallet holds
+	// the opening of a to_issuer entry.
+	Opening *OpeningArgs `yaml:"opening,omitempty"`
+	// Unique sets the key the commitment is unique per.
+	Unique *UniqueArgs `yaml:"unique,omitempty"`
+}
+
+// UniqueArgs configures unique.
+//
+// The issuer accepts one commitment per value of key, until an operator
+// resets it. With a random opening each issuance draws a new commitment, so
+// the credential issues once per value of key until a reset.
+type UniqueArgs struct {
+	// Key lists claims path pointers of the credential. An empty list
+	// makes one commitment for the entry.
+	Key [][]string `yaml:"key" validate:"required,dive,min=1,dive,required" doc_example:"[[\"eu.europa.ec.eudi.nym_auth.1\", \"ssc\"]]"`
 }
 
 // OpeningArgs produces the opening of a hash commitment.
@@ -53,10 +67,10 @@ type ClaimOpeningArgs struct {
 	Input string `yaml:"input" validate:"required" doc_example:"\"nym_auth_opening\""`
 }
 
-// Apply implements Applier. The derivation pipeline skips hash_commitment,
-// whose opening comes from NewOpening.
+// Apply implements Applier. The Credential Endpoint applies
+// hash_commitment.
 func (a *HashCommitmentArgs) Apply(map[string]any, time.Time) (map[string]any, error) {
-	return nil, errors.New("hash_commitment produces its opening through NewOpening")
+	return nil, errors.New("the Credential Endpoint applies hash_commitment")
 }
 
 // HashCommitmentFor returns the hash_commitment derivation of list for
@@ -77,7 +91,7 @@ func HashCommitmentFor(list []Derivation, path []string) *HashCommitmentArgs {
 func OpeningInputs(list []Derivation, source map[string]any) map[string]any {
 	var out map[string]any
 	for _, d := range list {
-		if d.HashCommitment == nil {
+		if d.HashCommitment == nil || d.HashCommitment.Opening == nil {
 			continue
 		}
 		_, inputs, err := d.HashCommitment.Opening.Inputs()
@@ -100,6 +114,9 @@ func OpeningInputs(list []Derivation, source map[string]any) map[string]any {
 
 // NewOpening produces the opening from the claims of the source data.
 func (a *HashCommitmentArgs) NewOpening(claims map[string]any) ([]byte, error) {
+	if a.Opening == nil {
+		return nil, fmt.Errorf("hash_commitment %q configures no opening", a.Path)
+	}
 	generator, err := a.Opening.generator()
 	if err != nil {
 		return nil, err
