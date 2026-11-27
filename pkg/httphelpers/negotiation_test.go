@@ -45,3 +45,25 @@ func TestPrefersJSON(t *testing.T) {
 		})
 	}
 }
+
+// A qvalue is 0 to 1 (RFC 9110 12.4.2). Anything else is not a weaker or
+// stronger preference, it is not a qvalue - ignored, leaving the range at the
+// default of 1, exactly as rendering.go's Accept-Language parser treats it.
+func TestPrefersJSONIgnoresAQualityOutsideTheGrammar(t *testing.T) {
+	for name, accept := range map[string]string{
+		"above one":      "application/json;q=2, text/html",
+		"negative":       "application/json;q=-1, text/html",
+		"infinity":       "application/json;q=Inf, text/html",
+		"not a number":   "application/json;q=NaN, text/html",
+		"scientific one": "application/json;q=1e1, text/html",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.False(t, PrefersJSON(accept),
+				"a malformed q must not outrank a well-formed one and flip the page to JSON")
+		})
+	}
+
+	// The bound itself is still honoured at its edges.
+	assert.True(t, PrefersJSON("application/json;q=1, text/html;q=0.9"))
+	assert.False(t, PrefersJSON("application/json;q=0, text/html;q=0.1"))
+}

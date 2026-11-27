@@ -66,8 +66,14 @@ func acceptQuality(accept, mediaType, subType string) float64 {
 				continue
 			}
 			// RFC 9110 says to ignore a parameter that will not parse,
-			// not the range carrying it.
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+			// not the range carrying it. Out of range counts as will not
+			// parse: a qvalue is 0 to 1 (RFC 9110 12.4.2), so "q=2" is not a
+			// stronger preference than q=1, it is not a qvalue at all - and
+			// reading it as 2 would let a malformed header outrank a
+			// well-formed one and flip /authorize to JSON. The same bound
+			// the Accept-Language parser in rendering.go applies, which also
+			// excludes NaN and the infinities.
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && parsed >= 0 && parsed <= 1 {
 				quality = parsed
 			}
 		}
