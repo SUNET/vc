@@ -1432,10 +1432,16 @@ release: check_current_branch ## Create and push a git tag (BUMP=major|minor|pat
 	echo ""; \
 	$(MAKE) docker-build VERSION=$$NEW_TAG _RELEASE_MODE=1; \
 	echo ""; \
-	echo "==> Docker images built for $$NEW_TAG. Creating and pushing git tag..."; \
+	echo "==> Docker images built for $$NEW_TAG. Updating changelog..."; \
+	echo ""; \
+	bash scripts/release-changelog.sh "$$NEW_TAG" "$$LATEST"; \
+	git add CHANGELOG.md; \
+	git commit -m "chore: changelog for $$NEW_TAG" -- CHANGELOG.md || true; \
+	echo ""; \
+	echo "==> Creating and pushing git tag..."; \
 	echo ""; \
 	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
-	git push origin "$$NEW_TAG"; \
+	git push origin HEAD "$$NEW_TAG"; \
 	echo ""; \
 	echo "==> Release $$NEW_TAG created and pushed"; \
 	echo ""; \
