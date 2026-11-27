@@ -17,15 +17,27 @@ resolve_handle() {
 		echo "${local_part#*+}"
 		return
 		;;
+	*) ;;
 	esac
 	if command -v gh >/dev/null 2>&1; then
-		gh api "repos/$REPO/commits/$sha" --jq '.author.login // empty' 2>/dev/null || true
+		# gh prints the JSON error body to stdout on HTTP errors, so keep output only on success.
+		local login
+		if login=$(gh api "repos/$REPO/commits/$sha" --jq '.author.login // empty' 2>/dev/null); then
+			echo "$login"
+		fi
 	fi
+}
+
+# A PR belongs to the release when its merge commit is in HEAD but not in the previous tag.
+in_range() {
+	git merge-base --is-ancestor "$1" HEAD 2>/dev/null || return 1
+	git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null || return 0
+	! git merge-base --is-ancestor "$1" "$PREV_TAG" 2>/dev/null
 }
 
 RANGE="$PREV_TAG..HEAD"
 git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null || RANGE=HEAD
-if [ -z "$(git log --no-merges --format=%h "$RANGE")" ]; then
+if [[ -z "$(git log --no-merges --format=%h "$RANGE")" ]]; then
 	echo "No commits since $PREV_TAG, changelog unchanged"
 	exit 0
 fi
@@ -33,11 +45,11 @@ fi
 declare -A seen_email seen_handle
 participants=()
 while IFS='|' read -r sha name email; do
-	[ -n "${seen_email[$email]:-}" ] && continue
+	[[ -n "${seen_email[$email]:-}" ]] && continue
 	seen_email[$email]=1
 	handle=$(resolve_handle "$sha" "$email")
-	if [ -n "$handle" ]; then
-		[ -n "${seen_handle[$handle]:-}" ] && continue
+	if [[ -n "$handle" ]]; then
+		[[ -n "${seen_handle[$handle]:-}" ]] && continue
 		seen_handle[$handle]=1
 		participants+=("$name ($handle)")
 	else
@@ -48,19 +60,25 @@ done < <(git log --no-merges --format='%H|%an|%ae' "$RANGE")
 # Not every merge keeps "(#N)" in the subject, so ask GitHub; fall back to commit SHAs.
 since=$(git log -1 --format=%cI "$PREV_TAG" 2>/dev/null || true)
 prs=
-if [ -n "$since" ] && command -v gh >/dev/null 2>&1; then
-	prs=$(gh pr list -R "$REPO" --state merged --base main --search "merged:>$since" --limit 1000 --json number,title,mergedAt --jq 'sort_by(.mergedAt) | reverse | .[] | "- #\(.number): \(.title)"' 2>/dev/null || true)
+if [[ -n "$since" ]] && command -v gh >/dev/null 2>&1; then
+	candidates=$(gh pr list -R "$REPO" --state merged --base main --search "merged:>$since" --limit 1000 --json number,title,mergedAt,mergeCommit --jq 'sort_by(.mergedAt) | reverse | .[] | select(.mergeCommit != null) | "\(.mergeCommit.oid)\t\(.number)\t\(.title)"' 2>/dev/null || true)
+	while IFS=$'\t' read -r oid number title; do
+		[[ -n "$oid" ]] || continue
+		in_range "$oid" || continue
+		prs+="- #$number: $title"$'\n'
+	done <<<"$candidates"
+	prs=${prs%$'\n'}
 fi
-if [ -n "$prs" ]; then
+if [[ -n "$prs" ]]; then
 	change_list=$prs
 	pr_count=$(printf '%s\n' "$prs" | wc -l | tr -d ' ')
 else
 	change_list=$(git log --no-merges --format='- %h: %s' "$RANGE")
-	pr_count=$(git log --no-merges --format=%s "$RANGE" | grep -oE '\(#[0-9]+\)$' | sort -u | wc -l | tr -d ' ')
+	pr_count=$(git log --no-merges --format=%s "$RANGE" | { grep -oE '\(#[0-9]+\)$' || true; } | sort -u | wc -l | tr -d ' ')
 fi
 
 closed_issues=
-if [ -n "$since" ] && command -v gh >/dev/null 2>&1; then
+if [[ -n "$since" ]] && command -v gh >/dev/null 2>&1; then
 	closed_issues=$(gh issue list -R "$REPO" --state closed --search "closed:>$since" --limit 1000 --json number,title --jq 'sort_by(.number) | .[] | "- #\(.number): \(.title)"' 2>/dev/null || true)
 fi
 
@@ -75,7 +93,7 @@ trap 'rm -f "$section"' EXIT
 	echo
 	printf '%s\n' "$change_list"
 	echo
-	if [ -n "$closed_issues" ]; then
+	if [[ -n "$closed_issues" ]]; then
 		echo "Closed issues: $(printf '%s\n' "$closed_issues" | wc -l | tr -d ' ')"
 		echo
 		printf '%s\n' "$closed_issues"
