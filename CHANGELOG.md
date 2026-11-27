@@ -109,6 +109,10 @@
 
 ### Fixed
 
+- **Bulk uploads refuse null entries**: a null value under `documents` in
+  `POST /api/v1/datastore/bulk` or under `mappings` in
+  `POST /api/v1/identity/mapping/bulk` made the handler panic, and the request
+  ended with a 500. Such a request answers 400.
 - **mdoc integers at the top of their range are refused**: an mdoc element the
   MDDL declares as `int` with the value 2^63 overflowed into a signed credential.
   On amd64 it was issued as -2^63, and a `uint` of 2^64 or more as 2^63. Issuance
