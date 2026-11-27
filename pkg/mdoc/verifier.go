@@ -338,12 +338,45 @@ func (v *Verifier) verifyCertificateChain(chain []*x509.Certificate) error {
 // This delegates all trust decisions to go-trust which can use mdociaca, ETSI TSL,
 // OpenID Federation, or other registries for dynamic trust anchor resolution.
 func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain []*x509.Certificate, docType string) error {
+	if err := VerifyIssuerChain(ctx, v.trustEvaluator, chain, docType, v.issuerURL, v.clock()); err != nil {
+		return err
+	}
+
+	// TODO: Check revocation status if not skipped
+	if !v.skipRevocationCheck {
+		// Revocation checking would go here (CRL/OCSP)
+	}
+
+	return nil
+}
+
+// VerifyIssuerChain checks an issuer certificate chain's validity dates
+// and asks go-trust whether the issuer is trusted for this docType.
+//
+// Exported so that a presentation format which carries the chain
+// WITHOUT carrying a credential - a circuit_zk nym_auth proof, where
+// the circuit proves "signed by Q" and the chain is what says Q
+// belongs to a trusted issuer - is judged by exactly this, and not by
+// a second implementation that could come to disagree about what
+// "trusted issuer" means.
+//
+// issuerURL overrides the identifier taken from the certificate when a
+// deployment configures one; otherwise it comes from the DS
+// certificate's SANs. docType is the REQUEST's, never the response's:
+// it is what selects the issuer policy, so letting a response choose
+// it would let a holder pick the policy it is judged by.
+func VerifyIssuerChain(ctx context.Context, evaluator trust.TrustEvaluator, chain []*x509.Certificate, docType, issuerURL string, now time.Time) error {
 	if len(chain) == 0 {
 		return errors.New("empty certificate chain")
 	}
+	if evaluator == nil {
+		// Fail closed. An evaluator-less verifier cannot say whether
+		// an issuer is trusted, and "cannot say" must not read as
+		// "yes".
+		return errors.New("no trust evaluator configured, so no issuer can be trusted")
+	}
 
 	dsCert := chain[0]
-	now := v.clock()
 
 	// Check certificate validity period
 	if now.Before(dsCert.NotBefore) {
@@ -355,13 +388,13 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 
 	// Extract issuer identifier for trust evaluation.
 	// Priority: configured IssuerURL > certificate URI SAN > certificate Organization.
-	issuerID := v.issuerURL
+	issuerID := issuerURL
 	if issuerID == "" {
 		issuerID = extractMDocIssuerID(dsCert)
 	}
 
 	// Delegate trust decision to TrustEvaluator (go-trust)
-	decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
+	decision, err := evaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		SubjectID: issuerID,
 		KeyType:   trust.KeyTypeX5C,
 		Key:       chain,
@@ -375,12 +408,6 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 	if !decision.Trusted {
 		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
 	}
-
-	// TODO: Check revocation status if not skipped
-	if !v.skipRevocationCheck {
-		// Revocation checking would go here (CRL/OCSP)
-	}
-
 	return nil
 }
 
