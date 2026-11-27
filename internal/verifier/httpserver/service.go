@@ -62,6 +62,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// Initialize rate limiters with default configuration
 	rateLimitConfig := middleware.DefaultRateLimitConfig()
 
+	sessionsOptions, err := userSessionOptions(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Service{
 		cfg:              cfg,
 		log:              log.New("httpserver"),
@@ -75,14 +80,13 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
 		registerAuth:     func(c *gin.Context) { c.Next() },
-		sessionsOptions:  userSessionOptions(cfg),
+		sessionsOptions:  sessionsOptions,
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
 	s.sessionsAuthKey = cacheService.SessionAuthKey
 	s.sessionsEncKey = cacheService.SessionEncKey
 
-	var err error
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
@@ -432,20 +436,18 @@ const defaultUserSessionMaxAge = 900
 // test. Spread across the constructor, nothing observed what MaxAge ended up
 // as, which is how it stayed pinned at 900 seconds while the key meant to
 // set it went unread (SUNET/vc#756).
-func userSessionOptions(cfg *model.Cfg) sessions.Options {
-	secure := false
+//
+// The cross-site attributes come from httphelpers.SessionCookieOptions,
+// which both this service and the apigw now share. It returns an error so
+// that a cookie no browser would store - SameSite=None without Secure -
+// stops the service at startup instead of failing every session silently.
+func userSessionOptions(cfg *model.Cfg) (sessions.Options, error) {
+	apiServer := model.APIServer{}
 	if cfg != nil && cfg.Verifier != nil {
-		secure = cfg.Verifier.APIServer.TLS.Enable
+		apiServer = cfg.Verifier.APIServer
 	}
 
-	return sessions.Options{
-		Path:     "/",
-		Domain:   "",
-		MaxAge:   userSessionMaxAge(cfg),
-		Secure:   secure,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	}
+	return httphelpers.SessionCookieOptions(apiServer, userSessionMaxAge(cfg))
 }
 
 func userSessionMaxAge(cfg *model.Cfg) int {

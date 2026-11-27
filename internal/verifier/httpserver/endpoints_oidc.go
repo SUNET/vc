@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 
@@ -83,6 +84,17 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return nil, nil
+	}
+
+	// An integrator that asked for data gets the response itself, and
+	// renders the request on its own page: the authorization request URI,
+	// the QR image URL, and where to poll are all already in it. Returning
+	// it hands it to the JSON writer in service.go.
+	//
+	// Only when JSON is preferred over HTML, so that a browser - which
+	// accepts application/json through its */* range - still gets the page.
+	if httphelpers.PrefersJSON(c.GetHeader("Accept")) {
+		return response, nil
 	}
 
 	// Render authorization page with QR code and DC API support
