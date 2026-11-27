@@ -42,14 +42,17 @@ type Service struct {
 	eventPublisher  apiv1.EventPublisher
 	httpHelpers     *httphelpers.Client
 	sessionsOptions sessions.Options
-	sessionsEncKey  string
-	sessionsAuthKey string
-	sessionsName    string
-	authProviders   *authproviders.Service
-	dataSources     *datasources.Service
-	cacheService    *cache.Service
-	spocpEngine     *httphelpers.SafeEngine
-	metricsHandler  http.Handler
+	// adminSessionsOptions backs admin_session. Deliberately not
+	// sessionsOptions: see New.
+	adminSessionsOptions sessions.Options
+	sessionsEncKey       string
+	sessionsAuthKey      string
+	sessionsName         string
+	authProviders        *authproviders.Service
+	dataSources          *datasources.Service
+	cacheService         *cache.Service
+	spocpEngine          *httphelpers.SafeEngine
+	metricsHandler       http.Handler
 
 	// credentialEncryption decrypts Credential Requests and encrypts
 	// Credential Responses. nil when no encryption key is configured, which
@@ -60,29 +63,57 @@ type Service struct {
 // oauthUserSessionMaxAge is the lifetime, in seconds, of oauth_user_session.
 const oauthUserSessionMaxAge = 900
 
+// oauthUserSessionOptions builds the cookie options for oauth_user_session,
+// the end user's session with the OAuth flow.
+func oauthUserSessionOptions(cfg *model.Cfg) (sessions.Options, error) {
+	return httphelpers.SessionCookieOptions(cfg.APIGW.APIServer, oauthUserSessionMaxAge)
+}
+
+// adminSessionOptions builds the cookie options for admin_session.
+//
+// Deliberately NOT oauthUserSessionOptions, though one value used to serve
+// both. api_server.session_cookie exists for an end-user flow driven from
+// another site, and admin_session is a bearer credential for the whole API:
+// a shared options value would have sent the administrator's cookie to every
+// sibling host a configured domain names, where it can be captured and
+// replayed. The deployment's TLS still applies; only the operator's
+// cross-site keys are dropped.
+func adminSessionOptions(cfg *model.Cfg) (sessions.Options, error) {
+	apiServer := cfg.APIGW.APIServer
+	apiServer.SessionCookie = nil
+
+	return httphelpers.SessionCookieOptions(apiServer, oauthUserSessionMaxAge)
+}
+
 // New creates a new httpserver service
 func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, metricsHandler http.Handler, log *logger.Log) (*Service, error) {
 	// Register []string with gob so gin-contrib/sessions can serialize session values of that type
 	gob.Register([]string{})
 
-	sessionsOptions, err := httphelpers.SessionCookieOptions(cfg.APIGW.APIServer, oauthUserSessionMaxAge)
+	sessionsOptions, err := oauthUserSessionOptions(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	adminSessionsOptions, err := adminSessionOptions(cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Service{
-		cfg:             cfg,
-		log:             log.New("httpserver"),
-		apiv1:           apiv1,
-		gin:             gin.New(),
-		tracer:          tracer,
-		server:          &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
-		eventPublisher:  eventPublisher,
-		authProviders:   authProviders,
-		dataSources:     dataSources,
-		metricsHandler:  metricsHandler,
-		sessionsName:    "oauth_user_session",
-		sessionsOptions: sessionsOptions,
+		cfg:                  cfg,
+		log:                  log.New("httpserver"),
+		apiv1:                apiv1,
+		gin:                  gin.New(),
+		tracer:               tracer,
+		server:               &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
+		eventPublisher:       eventPublisher,
+		authProviders:        authProviders,
+		dataSources:          dataSources,
+		metricsHandler:       metricsHandler,
+		sessionsName:         "oauth_user_session",
+		sessionsOptions:      sessionsOptions,
+		adminSessionsOptions: adminSessionsOptions,
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
@@ -308,7 +339,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// Admin UI routes (login/logout only — CRUD goes through the real API)
 	if s.cfg.APIGW.AdminUIEnable {
 		rgAdminUI := rgRoot.Group("/ui")
-		rgAdminUI.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+		rgAdminUI.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.adminSessionsOptions))
 		rgAdminUI.Use(s.httpHelpers.Middleware.AdminCSP())
 		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "", http.StatusOK, s.endpointAdminUI)
 		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/login", http.StatusFound, s.endpointAdminLogin)
@@ -323,7 +354,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	rgAPIv1 := rgRoot.Group("api/v1")
 
 	// Add session middleware so admin session cookies are available for auth check.
-	rgAPIv1.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+	rgAPIv1.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.adminSessionsOptions))
 	// CSRF protection for session-authenticated users.
 	rgAPIv1.Use(s.httpHelpers.Middleware.CSRFProtection(adminSessionKey))
 	// Unified auth: session users go through the same SPOCP method+path+subject

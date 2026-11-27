@@ -130,6 +130,30 @@ new EventSource(`${verifier}/ui/notify?session_id=${sessionID}`);
 `session_id` on the query string is what makes this work from another
 origin; without it the endpoint falls back to the cookie session.
 
+**Reconcile on every `open`.** The notification bus is not durable and does
+not replay: a presentation that completes between starting the flow and the
+stream becoming live - or during a reconnect - publishes to nobody, and a
+page waiting only on SSE waits for ever. Check the session's state whenever
+the stream opens, which covers both the initial race and every reconnect:
+
+```js
+const source = new EventSource(`${verifier}/ui/notify?session_id=${sessionID}`);
+source.addEventListener("open", async () => {
+  const r = await fetch(`${verifier}/ui/completion?session_id=${sessionID}`);
+  const { status, response_code } = await r.json();
+  if (status === "complete") {
+    const claims = await fetch(`${verifier}/ui/result?response_code=${response_code}`);
+    // …
+  }
+});
+```
+
+`EventSource` firing `open` means the server has already subscribed the
+listener, so nothing published after that point is missed; `/ui/completion`
+covers the window before it. This is what the verifier's own page does, for
+the same reason. `/ui/result` is keyed by the `response_code` that
+`/ui/completion` returns, not by the session.
+
 ## Cross-origin configuration
 
 List the relying party's origin, or the verifier answers no preflight:
@@ -150,12 +174,17 @@ query parameter, falling back to the cookie only when it is absent.
 
 ### When the cookie settings are needed
 
-`verifier_user_session` backs the rest of `/ui/*` - `/ui/resume` and
-`/ui/completion` resolve their session from the cookie - along with `op/par`
-and the session-scoped `/verification/*` endpoints. An integration that
-stays on the endpoints above never sends it, and should leave these keys
-alone: widening a cookie that nothing in the flow reads exposes sessions to
-cross-site requests and to sibling hosts for no gain.
+Every endpoint named above takes its session id explicitly, and
+`verifier_user_session` is only the fallback for when one is not supplied -
+which is how the verifier's own page, served from the verifier's origin,
+uses it. `/ui/notify`, `/ui/completion` and `/ui/resume` all read
+`?session_id=` first.
+
+So an embedded integration that always passes the id never sends the cookie,
+and should leave these keys alone: widening a cookie that nothing in the
+flow reads exposes sessions to cross-site requests and to sibling hosts for
+no gain. They are here for a deployment that drives the verifier's own
+cookie-backed page from another site.
 
 For an integration that does reach a cookie-backed endpoint from another
 site:
