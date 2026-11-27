@@ -210,6 +210,251 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Nil(t, second)
 	})
 
+	// An outcome is claimed once, on both backends.
+	//
+	// In Mongo the check is a filter and in memory it is a branch under the
+	// lock, so the two can agree in the unit tests and still disagree on the
+	// cases that only a document store has - above all an omitted field: a
+	// session that never had a response code has no verifier_response_code
+	// MEMBER, not an empty one, and a predicate written for "" alone would
+	// match nothing and refuse every first claim.
+	t.Run("ClaimOutcome", func(t *testing.T) {
+		open := func(t *testing.T, sessionID, state string) {
+			t.Helper()
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID: sessionID,
+				State:     state,
+				Status:    SessionStatusAwaitingPresentation,
+			}))
+			// Never written, so in a document store it is absent rather
+			// than empty. This is the shape the first claim has to match.
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: sessionID})
+			require.NoError(t, err)
+			require.Empty(t, stored.VerifierResponseCode)
+			require.False(t, HasOutcome(stored), "the premise: nothing has answered yet")
+		}
+
+		t.Run("an unanswered session admits the first claim", func(t *testing.T) {
+			open(t, "contract-outcome-1", "contract-outcome-state-1")
+
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID:            "contract-outcome-1",
+				State:                "contract-outcome-state-1",
+				Status:               SessionStatusCompleted,
+				VerifierResponseCode: "contract-response-1",
+			})
+			require.NoError(t, err)
+			assert.True(t, won, "a session with no outcome must admit one")
+
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-1"})
+			require.NoError(t, err)
+			assert.Equal(t, SessionStatusCompleted, stored.Status)
+			assert.Equal(t, "contract-response-1", stored.VerifierResponseCode)
+
+			// And the second is told it lost, without changing anything.
+			won, err = store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-1",
+				State:     "contract-outcome-state-1",
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			})
+			require.NoError(t, err)
+			assert.False(t, won, "a session that has answered must not answer twice")
+
+			after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-1"})
+			require.NoError(t, err)
+			assert.Equal(t, SessionStatusCompleted, after.Status, "the loser must not overwrite the winner")
+			assert.Equal(t, "contract-response-1", after.VerifierResponseCode)
+			assert.Empty(t, after.Error)
+		})
+
+		// A response code with a status that is NOT terminal still counts:
+		// the code is minted as a presentation completes, so the browser has
+		// already been handed something to fetch with.
+		t.Run("a response code alone shuts the claim out", func(t *testing.T) {
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID:            "contract-outcome-2",
+				State:                "contract-outcome-state-2",
+				Status:               SessionStatusAwaitingPresentation,
+				VerifierResponseCode: "contract-response-2",
+			}))
+
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-2",
+				State:     "contract-outcome-state-2",
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			})
+			require.NoError(t, err)
+			assert.False(t, won)
+
+			after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-2"})
+			require.NoError(t, err)
+			assert.Equal(t, "contract-response-2", after.VerifierResponseCode)
+			assert.Empty(t, after.Error)
+		})
+
+		t.Run("a terminal status shuts the claim out", func(t *testing.T) {
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-3",
+				State:     "contract-outcome-state-3",
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			}))
+
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID:            "contract-outcome-3",
+				State:                "contract-outcome-state-3",
+				Status:               SessionStatusCompleted,
+				VerifierResponseCode: "contract-response-3",
+			})
+			require.NoError(t, err)
+			assert.False(t, won, "a declined session must not be completed afterwards")
+
+			after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-3"})
+			require.NoError(t, err)
+			assert.Equal(t, SessionStatusError, after.Status)
+			assert.Empty(t, after.VerifierResponseCode)
+		})
+
+		// A session nobody has heard of is a lost claim, not an error: the
+		// caller needs to know it did not record an outcome, and that is all.
+		t.Run("an unknown session loses without erroring", func(t *testing.T) {
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: "contract-outcome-nobody",
+				Status:    SessionStatusCompleted,
+			})
+			require.NoError(t, err)
+			assert.False(t, won)
+		})
+
+		t.Run("exactly one of many concurrent claims wins", func(t *testing.T) {
+			open(t, "contract-outcome-4", "contract-outcome-state-4")
+
+			const claimants = 16
+			var wins atomic.Int32
+			var start sync.WaitGroup
+			var done sync.WaitGroup
+			start.Add(1)
+
+			for i := range claimants {
+				done.Add(1)
+				go func(i int) {
+					defer done.Done()
+					outcome := &AuthorizationContext{
+						SessionID: "contract-outcome-4",
+						State:     "contract-outcome-state-4",
+					}
+					// Half claim the way a decline does and half the way a
+					// completed presentation does; either must shut the
+					// other out.
+					if i%2 == 0 {
+						outcome.Status = SessionStatusError
+						outcome.Error = "access_denied"
+					} else {
+						outcome.Status = SessionStatusCompleted
+						outcome.VerifierResponseCode = fmt.Sprintf("contract-response-4-%d", i)
+					}
+					start.Wait()
+					won, err := store.ClaimOutcome(ctx, outcome)
+					assert.NoError(t, err)
+					if won {
+						wins.Add(1)
+					}
+				}(i)
+			}
+
+			start.Done()
+			done.Wait()
+			assert.Equal(t, int32(1), wins.Load(), "exactly one claimant may record an outcome")
+
+			// The winner's fields moved together, not a mixture of both.
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-4"})
+			require.NoError(t, err)
+			require.True(t, HasOutcome(stored))
+			if stored.Status == SessionStatusError {
+				assert.Equal(t, "access_denied", stored.Error)
+				assert.Empty(t, stored.VerifierResponseCode, "a declined session has no response code to hand out")
+			} else {
+				assert.Equal(t, SessionStatusCompleted, stored.Status)
+				assert.NotEmpty(t, stored.VerifierResponseCode)
+				assert.Empty(t, stored.Error)
+			}
+		})
+
+		// Read, preference write, claim - in that order, which is the
+		// order the real flow produces.
+		//
+		// The verification handler reads the context, credential
+		// verification runs, and the browser posts the preference on
+		// its way to the wallet without awaiting it, so the write lands
+		// in between. A claim that committed the caller's copy would
+		// put wallet_follows_redirect back to the false it was read as,
+		// and the completed same-device presentation would answer
+		// without its redirect.
+		t.Run("a preference written after the read survives the claim", func(t *testing.T) {
+			open(t, "contract-outcome-pref", "contract-outcome-state-pref")
+
+			// What the handler holds: the context as it was BEFORE the
+			// preference was posted.
+			inHand, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref"})
+			require.NoError(t, err)
+			require.False(t, inHand.WalletFollowsRedirect, "the premise: not set when the handler read it")
+
+			follows := true
+			require.NoError(t, store.SetDisplayPreferences(ctx, "contract-outcome-pref", true, &follows))
+
+			claim := *inHand
+			claim.Status = SessionStatusCompleted
+			claim.VerifierResponseCode = "contract-response-pref"
+			won, err := store.ClaimOutcome(ctx, &claim)
+			require.NoError(t, err)
+			require.True(t, won)
+
+			assert.True(t, claim.WalletFollowsRedirect,
+				"the winner is told what was committed, because that is what decides the redirect")
+			assert.True(t, claim.ShowCredentialDetails)
+
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref"})
+			require.NoError(t, err)
+			assert.True(t, stored.WalletFollowsRedirect, "and the stored preference is the one that was posted")
+			assert.True(t, stored.ShowCredentialDetails)
+			assert.Equal(t, SessionStatusCompleted, stored.Status, "while the outcome is still the claimed one")
+			assert.Equal(t, "contract-response-pref", stored.VerifierResponseCode)
+		})
+
+		// And the other direction, which omitempty makes a separate
+		// case: a preference turned OFF is absent from a document
+		// store, so a claim that only merged fields it could see would
+		// write the caller's true straight back over it.
+		t.Run("a preference turned off after the read survives the claim", func(t *testing.T) {
+			require.NoError(t, store.Save(ctx, &AuthorizationContext{
+				SessionID:             "contract-outcome-pref-off",
+				State:                 "contract-outcome-state-pref-off",
+				Status:                SessionStatusAwaitingPresentation,
+				ShowCredentialDetails: true,
+			}))
+
+			inHand, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref-off"})
+			require.NoError(t, err)
+			require.True(t, inHand.ShowCredentialDetails, "the premise: on when the handler read it")
+
+			require.NoError(t, store.SetDisplayPreferences(ctx, "contract-outcome-pref-off", false, nil))
+
+			claim := *inHand
+			claim.Status = SessionStatusCompleted
+			claim.VerifierResponseCode = "contract-response-pref-off"
+			won, err := store.ClaimOutcome(ctx, &claim)
+			require.NoError(t, err)
+			require.True(t, won)
+			assert.False(t, claim.ShowCredentialDetails)
+
+			stored, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "contract-outcome-pref-off"})
+			require.NoError(t, err)
+			assert.False(t, stored.ShowCredentialDetails, "the preference that was turned off stays off")
+		})
+	})
+
 	t.Run("GetByQueryFields", func(t *testing.T) {
 		result, err := store.Get(ctx, &AuthorizationContext{State: "state-1"})
 		require.NoError(t, err)
@@ -912,4 +1157,244 @@ func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
 func TestMemoryStore_RetentionFollowsCreatedAt(t *testing.T) {
 	const ttl = 5 * time.Second
 	runAuthContextStoreRetentionTests(t, NewMemoryStore(ttl), ttl)
+}
+
+// Exactly one outcome is recorded, however many arrive at once.
+//
+// This is the race the verifier had: a wallet's error response and the
+// presentation it was racing each read the session, each found it still open,
+// and each saved its own copy. The last write won and the first outcome was
+// erased - after it had already been reported to the browser.
+func TestClaimOutcomeAdmitsExactlyOneWinner(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	const sessionID = "racing-session"
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "racing-state",
+		Status:    SessionStatusAwaitingPresentation,
+	}))
+
+	const claimants = 32
+	var wins atomic.Int32
+	var start sync.WaitGroup
+	var done sync.WaitGroup
+	start.Add(1)
+
+	for i := range claimants {
+		done.Add(1)
+		go func(i int) {
+			defer done.Done()
+			outcome := &AuthorizationContext{
+				SessionID: sessionID,
+				State:     "racing-state",
+			}
+			// Half claim the way a decline does, half the way a completed
+			// presentation does - both are outcomes, and either must shut
+			// the other out.
+			if i%2 == 0 {
+				outcome.Status = SessionStatusError
+				outcome.Error = "access_denied"
+			} else {
+				outcome.Status = SessionStatusCompleted
+				outcome.VerifierResponseCode = fmt.Sprintf("response-%d", i)
+			}
+
+			start.Wait()
+			won, err := store.ClaimOutcome(ctx, outcome)
+			assert.NoError(t, err)
+			if won {
+				wins.Add(1)
+			}
+		}(i)
+	}
+
+	start.Done()
+	done.Wait()
+
+	assert.Equal(t, int32(1), wins.Load(), "exactly one claimant may record an outcome")
+
+	// And the stored session carries the winner's outcome, not a mixture of
+	// both: the fields move together or not at all.
+	stored, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	require.True(t, HasOutcome(stored), "the session must end up answered")
+	if stored.Status == SessionStatusError {
+		assert.Equal(t, "access_denied", stored.Error)
+		assert.Empty(t, stored.VerifierResponseCode, "a declined session has no response code to hand out")
+	} else {
+		assert.Equal(t, SessionStatusCompleted, stored.Status)
+		assert.NotEmpty(t, stored.VerifierResponseCode)
+		assert.Empty(t, stored.Error)
+	}
+
+	// A late claimant is told it lost rather than erroring, and changes
+	// nothing.
+	before := *stored
+	won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "racing-state",
+		Status:    SessionStatusError,
+		Error:     "too_late",
+	})
+	require.NoError(t, err)
+	assert.False(t, won)
+
+	after, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, before.Status, after.Status)
+	assert.Equal(t, before.Error, after.Error)
+	assert.Equal(t, before.VerifierResponseCode, after.VerifierResponseCode)
+}
+
+// A display preference must never undo an outcome.
+//
+// The verifier's preference endpoint used to read the whole context and write it
+// back. The browser can send that while the user is deciding, so a decline - or a
+// presentation completing - landed between the read and the write, and the write
+// put the session back the way it had been read: pending, and open to a further
+// presentation. ClaimOutcome exists so the first outcome wins; writing only the
+// preference fields is what keeps a preference from being the second.
+//
+// This one states the contract and passes either way - a read that happens after
+// the claim reads the outcome. TestSetDisplayPreferencesRacingAnOutcome below is
+// the guard: it is what fails when the read-modify-write comes back.
+func TestSetDisplayPreferencesKeepsTheOutcome(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	const sessionID = "preference-session"
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "preference-state",
+		Status:    SessionStatusAwaitingPresentation,
+	}))
+
+	declined := &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "preference-state",
+		Status:    SessionStatusError,
+		Error:     "access_denied",
+	}
+	won, err := store.ClaimOutcome(ctx, declined)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	followsRedirect := true
+	require.NoError(t, store.SetDisplayPreferences(ctx, sessionID, true, &followsRedirect))
+
+	stored, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.True(t, HasOutcome(stored), "the decline must survive a preference written after it")
+	assert.Equal(t, SessionStatusError, stored.Status)
+	assert.Equal(t, "access_denied", stored.Error)
+	assert.True(t, stored.ShowCredentialDetails, "and the preference must land")
+	assert.True(t, stored.WalletFollowsRedirect)
+}
+
+// The same thing without the ordering handed to it: preference writes racing a
+// claim, the outcome recorded somewhere in the middle of them.
+func TestSetDisplayPreferencesRacingAnOutcome(t *testing.T) {
+	ctx := context.Background()
+
+	for round := range 16 {
+		store := NewMemoryStore(5 * time.Minute)
+		sessionID := fmt.Sprintf("racing-preference-%d", round)
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: sessionID,
+			State:     sessionID,
+			Status:    SessionStatusAwaitingPresentation,
+		}))
+
+		var start sync.WaitGroup
+		var done sync.WaitGroup
+		start.Add(1)
+		done.Add(2)
+
+		go func() {
+			defer done.Done()
+			start.Wait()
+			for range 64 {
+				assert.NoError(t, store.SetDisplayPreferences(ctx, sessionID, true, nil))
+			}
+		}()
+		go func() {
+			defer done.Done()
+			start.Wait()
+			won, err := store.ClaimOutcome(ctx, &AuthorizationContext{
+				SessionID: sessionID,
+				State:     sessionID,
+				Status:    SessionStatusError,
+				Error:     "access_denied",
+			})
+			assert.NoError(t, err)
+			assert.True(t, won, "nothing else claims this session")
+		}()
+
+		start.Done()
+		done.Wait()
+
+		stored, err := store.GetByID(ctx, sessionID)
+		require.NoError(t, err)
+		require.True(t, HasOutcome(stored), "round %d: the outcome must survive the preferences written around it", round)
+	}
+}
+
+// And a preference write must not race a caller that is holding the context
+// Get handed it.
+//
+// Get returns the STORED pointer - that is deliberate, and documented on
+// GetSnapshot - so the verification handlers copy the whole struct out of it
+// (`updated := *authCtx`) with no lock of the store's. A preference write that
+// assigned into that same struct would be an unsynchronised write beside an
+// unsynchronised read: a Go data race, whose result is undefined rather than
+// merely stale.
+//
+// Only -race can see this. Without it the test passes either way, which is why
+// the reader copies the whole struct rather than asserting on a value.
+func TestSetDisplayPreferencesDoesNotRaceAReaderHoldingTheContext(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	const sessionID = "preference-reader-session"
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: sessionID,
+		State:     "preference-reader-state",
+		Status:    SessionStatusAwaitingPresentation,
+	}))
+
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: sessionID})
+	require.NoError(t, err)
+
+	var start sync.WaitGroup
+	var done sync.WaitGroup
+	start.Add(1)
+	done.Add(2)
+
+	go func() {
+		defer done.Done()
+		start.Wait()
+		for range 256 {
+			// What the verification handlers do with the context they
+			// read before verification ran.
+			snapshot := *held
+			_ = snapshot.WalletFollowsRedirect
+		}
+	}()
+	go func() {
+		defer done.Done()
+		follows := true
+		start.Wait()
+		for range 256 {
+			assert.NoError(t, store.SetDisplayPreferences(ctx, sessionID, true, &follows))
+		}
+	}()
+
+	start.Done()
+	done.Wait()
+
+	stored, err := store.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.True(t, stored.WalletFollowsRedirect, "and the preference still lands")
 }

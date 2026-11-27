@@ -244,6 +244,32 @@ func (s *MongoStore) Update(ctx context.Context, doc *AuthorizationContext) erro
 	return nil
 }
 
+// SetDisplayPreferences sets only the preference fields. See
+// AuthContextStore.SetDisplayPreferences.
+//
+// A $set of two fields rather than a ReplaceOne of the whole document: the
+// caller's copy was read before the user had decided anything, and replacing
+// with it would put the session back the way it was found, outcome and all.
+func (s *MongoStore) SetDisplayPreferences(ctx context.Context, sessionID string, showCredentialDetails bool, walletFollowsRedirect *bool) error {
+	if sessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	set := bson.M{"show_credential_details": showCredentialDetails}
+	if walletFollowsRedirect != nil {
+		set["wallet_follows_redirect"] = *walletFollowsRedirect
+	}
+
+	result, err := s.coll.UpdateOne(ctx, bson.M{"session_id": sessionID}, bson.M{"$set": set})
+	if err != nil {
+		return fmt.Errorf("failed to set display preferences: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+	return nil
+}
+
 // Delete removes an authorization context by session ID.
 func (s *MongoStore) Delete(ctx context.Context, id string) error {
 	if id == "" {
@@ -703,6 +729,96 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	claimed.AuthSession = ""
 
 	return &claimed, nil
+}
+
+// ClaimOutcome records a final outcome on a still-unanswered session.
+// See AuthContextStore.ClaimOutcome.
+//
+// The filter is the check: one FindOneAndReplace on a session whose stored
+// status is not terminal and which carries no verifier response code. A
+// second caller matches nothing and is told it lost, with no document
+// written - which is the behaviour a read-then-Save could not give,
+// because between the read and the save the other request has already
+// replaced the document.
+func (s *MongoStore) ClaimOutcome(ctx context.Context, doc *AuthorizationContext) (bool, error) {
+	if doc == nil || doc.SessionID == "" {
+		return false, errors.New("document with session_id is required")
+	}
+	if err := doc.Validate(); err != nil {
+		return false, fmt.Errorf("validation failed: %w", err)
+	}
+
+	terminal := bson.A{}
+	for _, status := range []SessionStatus{
+		SessionStatusCodeIssued, SessionStatusTokenIssued,
+		SessionStatusCompleted, SessionStatusError, SessionStatusExpired,
+	} {
+		terminal = append(terminal, status)
+	}
+
+	// omitempty means a session with no response code has no such field
+	// at all, so "unset or empty" is both halves of the $in.
+	filter := bson.M{
+		"session_id":             doc.SessionID,
+		"status":                 bson.M{"$nin": terminal},
+		"verifier_response_code": bson.M{"$in": bson.A{nil, ""}},
+	}
+
+	// A replace would carry the caller's copy of the DISPLAY PREFERENCES
+	// too, and that copy is old.
+	//
+	// The caller read this context before credential verification ran,
+	// and verification takes as long as it takes. The browser posts the
+	// preference on its way to the wallet without awaiting the response
+	// (see wallet-handoff.js), so the write can land inside that window
+	// - and a wholesale replace then puts the session back the way it
+	// was found. For wallet_follows_redirect that is a same-device
+	// presentation that completes and then dead-ends instead of
+	// redirecting; for show_credential_details it is the user's choice
+	// quietly reverting.
+	//
+	// So: replace everything the claim brings, then merge the STORED
+	// preferences back over it, in one update. $literal keeps the
+	// replacement a document rather than an expression - without it a
+	// wallet-supplied error_description beginning with "$" would be read
+	// as a field path - and $ifNull normalises the omitempty absence of
+	// a false to an explicit false, so the merge carries a preference
+	// that was turned OFF as faithfully as one turned on.
+	replacement, err := bson.Marshal(doc)
+	if err != nil {
+		return false, fmt.Errorf("failed to claim the session outcome: encoding the outcome: %w", err)
+	}
+	var replacementDoc bson.D
+	if err := bson.Unmarshal(replacement, &replacementDoc); err != nil {
+		return false, fmt.Errorf("failed to claim the session outcome: encoding the outcome: %w", err)
+	}
+
+	update := mongo.Pipeline{bson.D{{Key: "$replaceWith", Value: bson.D{{Key: "$mergeObjects", Value: bson.A{
+		bson.D{{Key: "$literal", Value: replacementDoc}},
+		bson.D{
+			{Key: "_id", Value: "$_id"},
+			{Key: "show_credential_details", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$show_credential_details", false}}}},
+			{Key: "wallet_follows_redirect", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$wallet_follows_redirect", false}}}},
+		},
+	}}}}}}
+
+	// After-image, so the caller is told what was COMMITTED and the
+	// redirect decision it makes next reads the preference that won
+	// rather than the one it brought. The memory store does the same.
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var committed AuthorizationContext
+	err = s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&committed)
+	switch {
+	case errors.Is(err, mongo.ErrNoDocuments):
+		// Either the session is gone or it already has an outcome. Both
+		// mean this caller did not record one, which is what it needs to
+		// know; the caller re-reads if it needs to tell them apart.
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("failed to claim the session outcome: %w", err)
+	}
+	*doc = committed
+	return true, nil
 }
 
 // ClaimIssuerState atomically replaces the issuer-initiated handle with the
