@@ -73,13 +73,8 @@ export async function handOffToWallet(url, endpoint, preference, env) {
         return;
     }
 
-    // Opened inside the click so the browser still counts a live user
-    // activation when the fallback runs after the awaited fetch.
-    // The placeholder deliberately keeps an opener: `noopener` makes
-    // window.open return null, and then we could neither close nor
-    // navigate it. It is severed manually below (opener = null) before
-    // the wallet URL ever goes into it.
-    const fallbackWindow = env.openPlaceholder();
+    // Try to signal same-device flow and navigate to wallet, otherwise open wallet in new tab
+    // and keep verifier page open. The alternative method may blocked by pop-up detectors.
     try {
         const res = await env.fetch(endpoint, {
             method: "POST",
@@ -89,23 +84,10 @@ export async function handOffToWallet(url, endpoint, preference, env) {
         if (!res.ok) {
             throw new Error(`session-preference returned ${res.status}`);
         }
-        if (fallbackWindow && !fallbackWindow.closed) {
-            fallbackWindow.close();
-        }
         env.navigate(url);
     } catch (err) {
         console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
-        if (fallbackWindow && !fallbackWindow.closed) {
-            try { fallbackWindow.opener = null; } catch { /* cross-origin after nav */ }
-            fallbackWindow.location.href = url;
-        } else {
-            // Popup blocker denied the pre-opened tab; last-resort try
-            // (likely blocked too, but worth attempting). This one takes
-            // `noopener`: nothing here needs a handle on it, and a web
-            // wallet that keeps window.opener can navigate this tab -
-            // reverse tabnabbing, on the tab holding the presentation.
-            env.openExternal(url);
-        }
+        env.openExternal(url);
     }
 }
 
