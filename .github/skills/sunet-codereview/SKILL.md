@@ -95,10 +95,10 @@ Use exactly this structure:
 2–3 sentences: what the change does and your overall verdict — **Ready to push**, **Push after small fixes**, or **Needs work**.
 
 ### Open review comments
-One line per open finding from step 1b: source (Copilot / Code scanning / Sonar / @person), `path:line` with link, short description, and status (Valid / Already fixed / False positive / Needs discussion). End with counts and failing checks. Write "None" if there are none.
+One line per open finding from step 1b: source (Copilot / Code scanning / Sonar / @person), [path:line](path#Lline) as a workspace-relative link that opens in the editor (only if the local snapshot was collected, the file exists in the working tree, and the line is mapped through `git diff <headRefOid>` to the local file; otherwise plain `path:line` or the thread link), short description, and status (Valid / Already fixed / False positive / Needs discussion). End with counts and failing checks. Write "None" if there are none.
 
 ### Must fix
-Bugs, security issues, anything that will break. For each: `file:line`, what is wrong, why it matters, and a concrete suggested fix (short code snippet if useful).
+Bugs, security issues, anything that will break. For each: a [file:line](file#Lline) editor link (same rule as above), what is wrong, why it matters, and a concrete suggested fix (short code snippet if useful).
 
 ### Should fix
 Quality, tests, maintainability issues worth fixing before the PR.

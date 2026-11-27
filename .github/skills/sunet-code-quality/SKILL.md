@@ -110,7 +110,7 @@ Use exactly this structure:
 - Files changed and the kind of rewrite, or "No changes".
 
 ### Renames
-- `path:line`: `oldName` to `newName` (reason). Include error variables renamed to `err`. Write "None" if there are none.
+- [path:line](path#Lline): `oldName` to `newName` (reason). Include error variables renamed to `err`. Write "None" if there are none.
 
 ### Tests
 - Merged tests: old function names to `TestX/subtest`. Write "None" if there are none.

@@ -47,7 +47,7 @@ Use exactly this structure:
 What the PR does (2–3 sentences), which commits/files you reviewed, and your verdict: **Approve**, **Approve with nits**, **Request changes**, or **Needs discussion**.
 
 ### Blocking issues
-For each: `path:line`, the problem, why it matters (concrete failure scenario), and a suggested fix (short code snippet if helpful).
+For each: a [path:line](path#Lline) workspace-relative link that opens in the editor (only if `git rev-parse HEAD` equals `headRefOid`; otherwise plain `path:line`, and tell me once to check out the PR branch for clickable links), the problem, why it matters (concrete failure scenario), and a suggested fix (short code snippet if helpful).
 
 ### Non-blocking suggestions
 Quality, tests, docs.

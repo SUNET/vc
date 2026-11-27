@@ -77,7 +77,7 @@ PR title and link, head commit, and counts: open threads, body-only findings, co
 Grouped by severity (High → Medium → Low), one block per finding:
 
 **[#] Title** — source (Copilot / Code scanning / Sonar / @person) · severity · status (Valid / Already fixed / False positive / Needs discussion)
-- Where: `path:line` (link to the thread or alert)
+- Where: [path:line](path#Lline) as a workspace-relative link that opens in the editor (only if `git rev-parse HEAD` equals `headRefOid` and the file and line exist; otherwise plain `path:line`, and tell me once to check out the PR branch for clickable links), plus a link to the thread or alert
 - Problem: one or two sentences in your own words
 - Verdict: why you classified it this way
 - Fix: concrete suggestion (short snippet if helpful), or the commit that already fixed it
