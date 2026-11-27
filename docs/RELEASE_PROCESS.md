@@ -69,17 +69,6 @@ make release BUMP=minor    # v0.4.0 → v0.5.0
 make release BUMP=major    # v0.4.0 → v1.0.0
 ```
 
-### Releasing from a non-main branch
-
-By default, `make release` requires you to be on the `main` branch. If you need to release from another branch (e.g., during active development), use `FORCE=true`:
-
-```bash
-make release FORCE=true
-make release BUMP=minor FORCE=true
-```
-
-`FORCE=true` also skips the dirty working tree check.
-
 ## Promoting to Demo
 
 Promote a release to the demo environment by re-tagging as `:demo`:
@@ -155,16 +144,6 @@ make release-demo
 make release-prod
 ```
 
-### Hotfix from a feature branch
-
-```bash
-# Force release from current branch
-make release FORCE=true
-
-# Promote immediately
-make release-prod
-```
-
 ### Rollback production
 
 ```bash
@@ -176,8 +155,8 @@ make release-prod TAG=v0.3.0
 
 | Check                      | Behaviour                                    | Override     |
 | -------------------------- | -------------------------------------------- | ------------ |
-| Must be on `main` branch   | Errors if not on `main`                      | `FORCE=true` |
-| Working tree must be clean | Errors if uncommitted changes                | `FORCE=true` |
+| Must be on `main` branch   | Errors if not on `main`                      | —            |
+| Working tree must be clean | Errors if uncommitted changes                | —            |
 | `BUMP` must be valid       | Errors if not `major`, `minor`, or `patch`   | —            |
 | `TAG` must match `vX.Y.Z`  | Errors on invalid format                     | —            |
 | Reserved tag guard         | Blocks reserved tags on direct docker targets | —            |

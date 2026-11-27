@@ -1401,14 +1401,16 @@ get_release-tag: ## Show current release version from latest git tag
 #   make release                       # defaults to patch bump
 #   make release BUMP=minor            # minor bump
 #   make release BUMP=major            # major bump
-#   make release FORCE=true            # release from any branch
-#   make release BUMP=minor FORCE=true # combine options
-release: check_current_branch ## Create and push a git tag (BUMP=major|minor|patch)
+# Runs on main only: the changelog commit must not land on a feature branch.
+release: ## Create and push a git tag from main (BUMP=major|minor|patch)
 	@set -e; \
+	if [ "$(CURRENT_BRANCH)" != "main" ]; then \
+		echo "Error: make release runs on main only (current branch: $(CURRENT_BRANCH))"; exit 1; \
+	fi; \
 	echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
 		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }; \
-	if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
-		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	if ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first"; exit 1; \
 	fi; \
 	LATEST=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
 	if [ -z "$$LATEST" ]; then \
@@ -1436,12 +1438,12 @@ release: check_current_branch ## Create and push a git tag (BUMP=major|minor|pat
 	echo ""; \
 	bash scripts/release-changelog.sh "$$NEW_TAG" "$$LATEST"; \
 	git add CHANGELOG.md; \
-	git commit -m "chore: changelog for $$NEW_TAG" -- CHANGELOG.md || true; \
+	git diff --cached --quiet -- CHANGELOG.md || git commit -m "chore: changelog for $$NEW_TAG" -- CHANGELOG.md; \
 	echo ""; \
 	echo "==> Creating and pushing git tag..."; \
 	echo ""; \
 	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
-	git push origin HEAD "$$NEW_TAG"; \
+	git push --atomic origin HEAD "$$NEW_TAG"; \
 	echo ""; \
 	echo "==> Release $$NEW_TAG created and pushed"; \
 	echo ""; \
