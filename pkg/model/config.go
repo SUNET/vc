@@ -53,6 +53,40 @@ type APIServer struct {
 	// TrustProxyTLS forces the Secure flag on session cookies even when TLS is not
 	// enabled on this server. Use this when running behind a TLS-terminating reverse proxy.
 	TrustProxyTLS bool `yaml:"trust_proxy_tls" default:"false"`
+	// SessionCookie tunes the user-session cookie. Omitted: a host-only
+	// SameSite=Lax cookie, which only the origin that set it sends back.
+	//
+	// Read by the services that serve a user session - the verifier
+	// (verifier_user_session) and the apigw (oauth_user_session). The
+	// issuer has no session cookie, and the registry's admin cookie is
+	// deliberately Strict and scoped to /admin, so neither reads this.
+	SessionCookie *SessionCookie `yaml:"session_cookie,omitempty" validate:"omitempty"`
+}
+
+// SessionCookie holds the cross-site attributes of the user-session cookie.
+//
+// The zero value is what a service serving its own UI needs: a host-only
+// cookie that no cross-site request carries. Widening it is what an embedded
+// presentation request needs, and only an embedded one - so it is opt-in.
+type SessionCookie struct {
+	// SameSite decides which cross-site requests carry the cookie: "lax"
+	// (the default), "strict", or "none".
+	//
+	// "none" is required when the page driving the flow is on a different
+	// site from the verifier, because no other value survives a cross-site
+	// fetch. Browsers reject a SameSite=None cookie that is not Secure, so
+	// it requires TLS on this server or trust_proxy_tls; the configuration
+	// is refused at startup otherwise, rather than serving a cookie every
+	// browser drops.
+	SameSite string `yaml:"same_site" validate:"omitempty,oneof=lax strict none" default:"lax" doc_example:"none"`
+	// Domain scopes the cookie to a registrable domain and its subdomains,
+	// for example ".example.com", which is how one session reaches a
+	// verifier and a page on two hosts of the same site.
+	//
+	// Empty (the default) keeps the cookie host-only: it goes back only to
+	// the exact host that set it. A value here is trusted to be a domain
+	// this deployment controls - any host under it can read the session.
+	Domain string `yaml:"domain" validate:"omitempty" doc_example:".example.com"`
 }
 
 // CORS holds the CORS configuration

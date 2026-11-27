@@ -23,7 +23,9 @@ func TestUserSessionCookieHonoursSessionDuration(t *testing.T) {
 	// ... and the options the constructor actually installs, not just the
 	// helper - a literal put back in userSessionOptions leaves the helper
 	// correct and unused.
-	assert.Equal(t, 7200, userSessionOptions(cfg).MaxAge)
+	options, err := userSessionOptions(cfg)
+	require.NoError(t, err)
+	assert.Equal(t, 7200, options.MaxAge)
 }
 
 // The options stay otherwise as they were: HttpOnly, lax, and Secure only
@@ -31,14 +33,18 @@ func TestUserSessionCookieHonoursSessionDuration(t *testing.T) {
 func TestUserSessionCookieKeepsItsOtherOptions(t *testing.T) {
 	cfg := &model.Cfg{Verifier: &model.Verifier{}}
 
-	plain := userSessionOptions(cfg)
+	plain, err := userSessionOptions(cfg)
+	require.NoError(t, err)
 	assert.True(t, plain.HttpOnly)
 	assert.Equal(t, http.SameSiteLaxMode, plain.SameSite)
 	assert.Equal(t, "/", plain.Path)
+	assert.Empty(t, plain.Domain)
 	assert.False(t, plain.Secure)
 
 	cfg.Verifier.APIServer.TLS.Enable = true
-	assert.True(t, userSessionOptions(cfg).Secure)
+	secured, err := userSessionOptions(cfg)
+	require.NoError(t, err)
+	assert.True(t, secured.Secure)
 }
 
 // The documented default is 3600, so a deployment that never touched the key
@@ -69,4 +75,47 @@ func TestUserSessionCookieWithNothingConfigured(t *testing.T) {
 			assert.Equal(t, defaultUserSessionMaxAge, got)
 		})
 	}
+}
+
+// An embedded presentation request lives on a page the verifier does not
+// serve, so the session cookie has to survive a cross-site fetch. Both keys
+// reach the cookie through the verifier's own constructor, not just through
+// the shared helper.
+func TestUserSessionCookieTakesTheConfiguredCrossSiteAttributes(t *testing.T) {
+	cfg := &model.Cfg{Verifier: &model.Verifier{}}
+	cfg.Verifier.APIServer.TrustProxyTLS = true
+	cfg.Verifier.APIServer.SessionCookie = &model.SessionCookie{
+		SameSite: "none",
+		Domain:   ".example.com",
+	}
+
+	got, err := userSessionOptions(cfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.SameSiteNoneMode, got.SameSite)
+	assert.Equal(t, ".example.com", got.Domain)
+	assert.True(t, got.Secure, "SameSite=None is only stored on a Secure cookie")
+}
+
+// trust_proxy_tls documents itself as forcing Secure on session cookies, and
+// the apigw honoured it while the verifier read only tls.enable - so a
+// verifier behind a TLS-terminating proxy served its session cookie without
+// Secure.
+func TestUserSessionCookieHonoursTrustProxyTLS(t *testing.T) {
+	cfg := &model.Cfg{Verifier: &model.Verifier{}}
+	cfg.Verifier.APIServer.TrustProxyTLS = true
+
+	got, err := userSessionOptions(cfg)
+	require.NoError(t, err)
+	assert.True(t, got.Secure)
+}
+
+// A cookie no browser stores stops the verifier at startup, rather than
+// leaving every session to fail with nothing naming the cause.
+func TestUserSessionCookieRefusesCrossSiteWithoutSecure(t *testing.T) {
+	cfg := &model.Cfg{Verifier: &model.Verifier{}}
+	cfg.Verifier.APIServer.SessionCookie = &model.SessionCookie{SameSite: "none"}
+
+	_, err := userSessionOptions(cfg)
+	require.Error(t, err)
 }

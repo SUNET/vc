@@ -57,35 +57,32 @@ type Service struct {
 	credentialEncryption *openid4vci.CredentialEncryption
 }
 
+// oauthUserSessionMaxAge is the lifetime, in seconds, of oauth_user_session.
+const oauthUserSessionMaxAge = 900
+
 // New creates a new httpserver service
 func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, metricsHandler http.Handler, log *logger.Log) (*Service, error) {
 	// Register []string with gob so gin-contrib/sessions can serialize session values of that type
 	gob.Register([]string{})
 
-	s := &Service{
-		cfg:            cfg,
-		log:            log.New("httpserver"),
-		apiv1:          apiv1,
-		gin:            gin.New(),
-		tracer:         tracer,
-		server:         &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
-		eventPublisher: eventPublisher,
-		authProviders:  authProviders,
-		dataSources:    dataSources,
-		metricsHandler: metricsHandler,
-		sessionsName:   "oauth_user_session",
-		sessionsOptions: sessions.Options{
-			Path:     "/",
-			Domain:   "",
-			MaxAge:   900,
-			Secure:   false,
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-		},
+	sessionsOptions, err := httphelpers.SessionCookieOptions(cfg.APIGW.APIServer, oauthUserSessionMaxAge)
+	if err != nil {
+		return nil, err
 	}
 
-	if s.cfg.APIGW.APIServer.TLS.Enable || s.cfg.APIGW.APIServer.TrustProxyTLS {
-		s.sessionsOptions.Secure = true
+	s := &Service{
+		cfg:             cfg,
+		log:             log.New("httpserver"),
+		apiv1:           apiv1,
+		gin:             gin.New(),
+		tracer:          tracer,
+		server:          &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
+		eventPublisher:  eventPublisher,
+		authProviders:   authProviders,
+		dataSources:     dataSources,
+		metricsHandler:  metricsHandler,
+		sessionsName:    "oauth_user_session",
+		sessionsOptions: sessionsOptions,
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
@@ -93,7 +90,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.sessionsEncKey = cacheService.SessionEncKey
 	s.cacheService = cacheService
 
-	var err error
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
