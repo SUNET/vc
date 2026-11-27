@@ -271,11 +271,17 @@ func serverWideAccepts(t *testing.T, origins []string, origin string) bool {
 // with normalization or regular expressions.
 func TestAllowedServerWideAgreesWithTheCORSLibrary(t *testing.T) {
 	lists := map[string][]string{
-		"literal":              {serverWideOrign},
-		"uppercase host":       {"https://" + strings.ToUpper(strings.TrimPrefix(serverWideOrign, "https://"))},
-		"regular expression":   {`/^https:\/\/.*\.example\.com$/`},
-		"regex with flag":      {`/^https:\/\/.*\.example\.com$/i`},
-		"wildcard":             {"*"},
+		"literal":            {serverWideOrign},
+		"uppercase host":     {"https://" + strings.ToUpper(strings.TrimPrefix(serverWideOrign, "https://"))},
+		"regular expression": {`/^https:\/\/.*\.example\.com$/`},
+		"regex with flag":    {`/^https:\/\/.*\.example\.com$/i`},
+		"wildcard":           {"*"},
+		// Valid configuration (Validate skips its scheme check for anything
+		// containing "*") that is NOT the raw "*" the library turns into
+		// AllowAllOrigins - so it refuses every origin instead of accepting
+		// every origin.
+		"padded wildcard":      {" * "},
+		"wildcard and literal": {"*", "https://a.example.com"},
 		"two literals":         {"https://a.example.com", "https://b.example.com"},
 		"literal beside regex": {serverWideOrign, `/^https:\/\/.*\.example\.net$/`},
 	}
@@ -293,7 +299,7 @@ func TestAllowedServerWideAgreesWithTheCORSLibrary(t *testing.T) {
 			t.Run(name+" vs "+origin, func(t *testing.T) {
 				assert.Equal(t,
 					serverWideAccepts(t, list, origin),
-					allowedServerWide(normalizeServerWideOrigins(list), origin),
+					newServerWideMatcher(list).allows(origin),
 					"the selector must route this origin to the policy that will accept it")
 			})
 		}
