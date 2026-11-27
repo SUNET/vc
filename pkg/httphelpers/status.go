@@ -61,6 +61,27 @@ func StatusCode(ctx context.Context, err error) int {
 		}
 	}
 
+	// A *helpers.Error reached through %w, which the type switch above
+	// cannot see.
+	//
+	// NewErrorFromError already unwraps - it uses errors.AsType - so the
+	// RESPONSE BODY of a wrapped classified error is correct today while
+	// the status is decided down in inferStatusFromErrorString, from
+	// whatever words happen to appear in the wrapper's text. That is not
+	// a 500 by default so much as a status chosen by prose: a 400 refusal
+	// reads as 401 when the wrapper says "token" and as 404 when it says
+	// "missing". A client acting on 401 re-authenticates in response to a
+	// request it should simply not repeat.
+	//
+	// Placed after the sentinel checks below it would be equivalent, and
+	// before them is clearer: this is the general case those four
+	// errors.Is lines are specific instances of. They were each added
+	// when a particular wrapped sentinel surfaced wrong, one at a time;
+	// this is the rule they were approximating.
+	if classified, ok := errors.AsType[*helpers.Error](err); ok {
+		return StatusCode(ctx, classified)
+	}
+
 	// Check if it's wrapped in one of our known errors
 	if errors.Is(err, helpers.ErrNoDocumentFound) || errors.Is(err, helpers.ErrNoIdentityFound) {
 		return http.StatusNotFound
