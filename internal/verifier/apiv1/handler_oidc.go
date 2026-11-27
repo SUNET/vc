@@ -87,8 +87,7 @@ type AuthorizeResponse struct {
 //	@Description	OIDC authorization request. Returns the verifier's authorization page, or this response as JSON when the client sends `Accept: application/json`.
 //	@Tags			verifier
 //	@Produce		json
-//	@Produce		html
-//	@Success		200	{object}	AuthorizeResponse	"Success"
+//	@Success		200	{object}	AuthorizeResponse	"Returned when the request prefers application/json. A browser, which does not, receives the authorization page as text/html instead."
 //	@Param			response_type	query	string	true	"OAuth 2.0 response type; `code`"
 //	@Param			client_id		query	string	true	"The relying party's registered client id"
 //	@Param			redirect_uri	query	string	true	"Must match one registered for the client"
@@ -1045,7 +1044,7 @@ type GetQRCodeResponse struct {
 //	@Description	The session's authorization request as a PNG QR code. Requires no session cookie, so it can be embedded directly from another origin.
 //	@Tags			verifier
 //	@Produce		png
-//	@Success		200	{file}		binary	"PNG image"
+//	@Success		200	{string}	binary	"PNG image"
 //	@Failure		404	{object}	nil		"Unknown session"
 //	@Param			session_id	path	string	true	"Session id, as returned by /authorize"
 //	@Param			wallet		query	string	false	"Name of a configured web wallet, for the cross-device flow"

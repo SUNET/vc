@@ -515,8 +515,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 }
 
 type UIInteractionRequest struct {
-	DCQLQuery   *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
-	Validations map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" validate:"omitempty,dive,dive"`
+	// swaggertype:"object" on the two fields below stops swag descending
+	// into DCQL, which it cannot describe. ClaimQuery carries its wire
+	// format through a custom marshaler behind json:"-", so the generated
+	// schema is an empty object either way; and swag reads the
+	// `dive,required` that applies to the ELEMENTS of credential_sets and
+	// claim_sets as marking those fields themselves required, publishing
+	// constraints that reject valid queries. An opaque object says less
+	// and nothing false.
+
+	// DCQLQuery is the query this presentation asks for, in the DCQL that
+	// OpenID4VP specifies.
+	DCQLQuery   *openid4vp.DCQL                        `json:"dcql_query" validate:"required" swaggertype:"object"`
+	Validations map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" validate:"omitempty,dive,dive" swaggertype:"object"`
 
 	// SessionID is a reuse hint sourced ONLY from the request body (which
 	// mirrors the tab-scoped sessionStorage value). The HTTP layer

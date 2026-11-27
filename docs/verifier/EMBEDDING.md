@@ -44,6 +44,20 @@ Render `qr_code_data` as a QR code for the cross-device flow, and offer
 rather not draw the QR yourself, point an `<img>` at `qr_code_image_url` -
 it carries no cookie and needs none.
 
+`qr_code_image_url` and `poll_url` are root-relative, as is
+`wallet_links[].qr_code_image_url`. On a relying party's own page they would
+resolve against *its* host, so join them to the verifier's base URL as the
+page reaches it, keeping any mount prefix:
+
+```js
+const verifier = "https://rp.example.com/verify";   // or the verifier's own origin
+const qr   = verifier + response.qr_code_image_url; // …/verify/qr/0f1c…
+const poll = verifier + response.poll_url;          // …/verify/poll/0f1c…
+```
+
+`qr_code_data` and `deep_link_url` are absolute already - they are what the
+wallet resolves, not the browser - and need no joining.
+
 Then poll:
 
 ```http
@@ -97,6 +111,16 @@ is enabled, and is the request to hand to `navigator.credentials.get()`. It
 is a different request from `authorization_request`, because `response_mode`
 has to match the delivery channel.
 
+**It only works when the calling page is served from `verifier.public_url`.**
+The request's signed `expected_origins`, and the transcript the presentation
+is checked against, are both derived from that configured value rather than
+from the caller - accepting the caller's own word for its origin would be
+the same as not checking it. A page on a different origin produces a
+transcript the wallet did not build, and verification fails. Behind a
+reverse proxy this holds as long as `public_url` is the proxied URL the page
+is served from; for an embedding on a genuinely different origin, use the QR
+code and the deep link, which carry no such binding.
+
 Subscribe to the result rather than polling:
 
 ```js
@@ -117,12 +141,24 @@ verifier:
       allowed_origins: ["https://rp.example.com"]
 ```
 
-That is all the DCQL flow needs. `POST /ui/interaction`, `GET /qr/…`,
-`GET /poll/…` and `GET /ui/notify?session_id=…` each stand on their own and
-require no session cookie.
+That is all either flow needs. None of the endpoints above sits behind the
+session cookie: `/authorize`, `/qr/{session_id}` and `/poll/{session_id}`
+are registered outside the session middleware and address the authorization
+context by its id, `POST /ui/interaction` sets the cookie but does not
+require one, and `GET /ui/notify?session_id=` takes the session from the
+query parameter, falling back to the cookie only when it is absent.
 
-The OIDC flow does use the `verifier_user_session` cookie, and a cookie is
-not sent on a cross-site request unless it says so:
+### When the cookie settings are needed
+
+`verifier_user_session` backs the rest of `/ui/*` - `/ui/resume` and
+`/ui/completion` resolve their session from the cookie - along with `op/par`
+and the session-scoped `/verification/*` endpoints. An integration that
+stays on the endpoints above never sends it, and should leave these keys
+alone: widening a cookie that nothing in the flow reads exposes sessions to
+cross-site requests and to sibling hosts for no gain.
+
+For an integration that does reach a cookie-backed endpoint from another
+site:
 
 ```yaml
 verifier:

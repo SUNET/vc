@@ -83,7 +83,10 @@ components:
     apiv1.UIInteractionRequest:
       properties:
         dcql_query:
-          $ref: '#/components/schemas/openid4vp.DCQL'
+          description: |-
+            DCQLQuery is the query this presentation asks for, in the DCQL that
+            OpenID4VP specifies.
+          type: object
         payment:
           $ref: '#/components/schemas/apiv1.UIPaymentRequest'
           description: |-
@@ -107,10 +110,6 @@ components:
           maxLength: 128
           type: string
         validations:
-          additionalProperties:
-            items:
-              $ref: '#/components/schemas/openid4vp.ClaimValidation'
-            type: array
           type: object
       required:
       - dcql_query
@@ -160,289 +159,6 @@ components:
           type: string
         url:
           type: string
-      type: object
-    openid4vp.ClaimQuery:
-      type: object
-    openid4vp.ClaimValidation:
-      properties:
-        path:
-          description: Path is the claim path to validate, e.g., ["birthdate"].
-          items:
-            type: string
-          minItems: 1
-          type: array
-          uniqueItems: false
-        rule:
-          description: Rule is the validation rule to apply, e.g., "age_over".
-          enum:
-          - age_over
-          type: string
-        value:
-          description: Value is the threshold or expected value for the validation.
-      required:
-      - path
-      - rule
-      - value
-      type: object
-    openid4vp.CredentialQuery:
-      properties:
-        _req:
-          description: |-
-            Req is the circuit_zk format's list of requested calculations.
-
-            It replaces Claims rather than accompanying it: a circuit_zk
-            presentation discloses no issuer-signed attribute at all, so every
-            value a Verifier wants is the output of a function named here. A
-            query carrying both is one the planner rejects - which this does
-            not prevent, because sending it is how a wallet gets tested.
-          items:
-            $ref: '#/components/schemas/openid4vp.ReqItem'
-          type: array
-          uniqueItems: false
-        claim_sets:
-          description: ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers
-            for elements in claims that specifies which combinations of claims for
-            the Credential are requested. The rules for selecting claims to send are
-            defined in Section 6.4.1.
-          items:
-            items:
-              type: string
-            type: array
-          minItems: 1
-          type: array
-          uniqueItems: false
-        claims:
-          description: Claims OPTIONAL. A non-empty array of objects as defined in
-            Section 6.3 that specifies claims in the requested Credential. Verifiers
-            MUST NOT point to the same claim more than once in a single query. Wallets
-            SHOULD ignore such duplicate claim queries.
-          items:
-            $ref: '#/components/schemas/openid4vp.ClaimQuery'
-          type: array
-          uniqueItems: false
-        format:
-          description: Format REQUIRED. A string that specifies the format of the
-            requested Credential. Valid Credential Format Identifier values are defined
-            in Appendix B.
-          type: string
-        id:
-          description: ID REQUIRED. A string identifying the Credential in the response
-            and, if provided, the constraints in credential_sets. The value MUST be
-            a non-empty string consisting of alphanumeric, underscore (_), or hyphen
-            (-) characters. Within the Authorization Request, the same id MUST NOT
-            be present more than once.
-          type: string
-        meta:
-          $ref: '#/components/schemas/openid4vp.MetaQuery'
-          description: Meta REQUIRED. An object defining additional properties requested
-            by the Verifier that apply to the metadata and validity data of the Credential.
-            The properties of this object are defined per Credential Format. Examples
-            of those are in Appendix B.3.5 and Appendix B.2.3. If empty, no specific
-            constraints are placed on the metadata or validity of the requested Credential.
-        multiple:
-          description: |-
-            Multiple OPTIONAL. A boolean which indicates whether multiple Credentials can be returned for this Credential Query. If omitted, the default value is false.
-
-            A POINTER, for the same reason RequireCryptographicHolderBinding
-            below is one: with a plain bool, omitempty cannot tell an absent
-            member from an explicit false, so `"multiple": false` - an
-            ordinary, valid query - did not encode back to what arrived and
-            was kept as Raw. That is not a harmless detour: a raw query is
-            emitted from its original bytes, so augmentDCQLFromVCTM's rewrite
-            of the shadow Claims was silently discarded and the request went
-            out with the un-augmented paths.
-          type: boolean
-        require_cryptographic_holder_binding:
-          description: RequireCryptographicHolderBinding OPTIONAL. Spec default is
-            true when omitted; nil pointer preserves that distinction from an explicit
-            false.
-          type: boolean
-        trusted_authorities:
-          description: TrustedAuthorities OPTIONAL. A non-empty array of objects as
-            defined in Section 6.1.1 that specifies expected authorities or trust
-            frameworks that certify Issuers, that the Verifier will accept. Every
-            Credential returned by the Wallet SHOULD match at least one of the conditions
-            present in the corresponding trusted_authorities array if present.
-          items:
-            $ref: '#/components/schemas/openid4vp.TrustedAuthority'
-          type: array
-          uniqueItems: false
-      required:
-      - claim_sets
-      - format
-      - id
-      - meta
-      type: object
-    openid4vp.CredentialSetQuery:
-      properties:
-        options:
-          description: Options REQUIRED A non-empty array, where each value in the
-            array is a list of Credential Query identifiers representing one set of
-            Credentials that satisfies the use case. The value of each element in
-            the options array is a non-empty array of identifiers which reference
-            elements in credentials.
-          items:
-            items:
-              type: string
-            type: array
-          minItems: 1
-          type: array
-          uniqueItems: false
-        required:
-          description: Required OPTIONAL. Spec default is true when omitted; nil pointer
-            preserves that distinction from an explicit false.
-          type: boolean
-      required:
-      - options
-      type: object
-    openid4vp.DCQL:
-      properties:
-        credential_sets:
-          description: CredentialSets OPTIONAL. A non-empty array of Credential Set
-            Queries as defined in Section 6.2 that specifies additional constraints
-            on which of the requested Credentials to return.
-          items:
-            $ref: '#/components/schemas/openid4vp.CredentialSetQuery'
-          minItems: 1
-          type: array
-          uniqueItems: false
-        credentials:
-          description: Credentials REQUIRED. A non-empty array of Credential Queries
-            as defined in Section 6.1 that specify the requested Credentials.
-          items:
-            $ref: '#/components/schemas/openid4vp.CredentialQuery'
-          minItems: 1
-          type: array
-          uniqueItems: false
-      required:
-      - credential_sets
-      - credentials
-      type: object
-    openid4vp.MetaQuery:
-      properties:
-        doctype_value:
-          description: |-
-            DoctypeValue for ISO mdoc format (mso_mdoc) and ZK-mdoc format (mso_mdoc_zk).
-            String that specifies an allowed value for the doctype of the requested Verifiable Credential.
-          type: string
-        ppid_context:
-          description: |-
-            PPIDContext for ZK-mdoc format (mso_mdoc_zk) only.
-            An optional verifier-supplied string that further scopes a requested
-            pairwise pseudonym (PPID) beyond the verifier's own identity - see
-            pkg/mdoc.ComputeZkVerifierContext.
-          type: string
-        schema_id_value:
-          description: |-
-            SchemaIDValue is the type value for a bbs_cd source format, the
-            way DoctypeValue is for mso_mdoc. Exactly one of the two
-            belongs in a zkp_req query's meta, decided by source_format.
-          type: string
-        source_format:
-          description: |-
-            SourceFormat is the stored attestation a zkp_req proof is made
-            over: "mso_mdoc" or "bbs_cd". It decides whether proof_time is
-            required in the response - every approved mso_mdoc circuit checks
-            the MSO validity period, so it is required there.
-          type: string
-        type_values:
-          description: |-
-            TypeValues for W3C VC format (ldp_vc, jwt_vc_json).
-            A non-empty array of string arrays specifying the fully expanded types (IRIs) that the Verifier accepts.
-            Each top-level array specifies one alternative to match the fully expanded type values of the Verifiable Credential.
-            Each inner array specifies a set of fully expanded types that MUST be present in the credential's type property.
-          items:
-            items:
-              type: string
-            type: array
-          type: array
-          uniqueItems: false
-        vct_values:
-          description: |-
-            VCTValues for SD-JWT VC format (dc+sd-jwt).
-            A non-empty array of strings that specifies allowed values for the type of the requested Verifiable Credential.
-            All elements in the array MUST be valid type identifiers as defined in [I-D.ietf-oauth-sd-jwt-vc].
-            The Wallet MAY return Credentials that inherit from any of the specified types.
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-        zk_system_type:
-          description: |-
-            ZKSystemType for ZK-mdoc format (mso_mdoc_zk) only.
-            A non-empty array of ZK proof system/circuit variants the Verifier is
-            willing to accept (e.g. Longfellow circuits for different attribute
-            counts). See ZKSystemTypeSpec and dcql_zk.go.
-          items:
-            $ref: '#/components/schemas/openid4vp.ZKSystemTypeSpec'
-          type: array
-          uniqueItems: false
-      type: object
-    openid4vp.ReqItem:
-      properties:
-        fn_id:
-          description: |-
-            ID is the function identifier, "id" on the wire. Named ID rather
-            than Function to match the wire member, since the wire is what an
-            operator configures and reads back.
-          type: string
-        params:
-          additionalProperties: {}
-          description: Params are the function's parameters, passed through unchanged.
-          type: object
-        return:
-          description: |-
-            Return is the handle the result is keyed by in the response's
-            results map. The rulebook requires it to be unique within the
-            credential query; nothing here enforces that, because a duplicate
-            is a thing a wallet should be tested against.
-          type: string
-      type: object
-    openid4vp.TrustedAuthority:
-      properties:
-        type:
-          description: REQUIRED. A string uniquely identifying the type of information
-            about the issuer trust framework. Types defined by this specification
-            are listed below.
-          enum:
-          - aki
-          - etsi_tl
-          - openid_federation
-          type: string
-        values:
-          description: REQUIRED. A non-empty array of strings, where each string (value)
-            contains information specific to the used Trusted Authorities Query type
-            that allows the identification of an issuer, a trust framework, or a federation
-            that an issuer belongs to.
-          items:
-            type: string
-          minItems: 1
-          type: array
-          uniqueItems: false
-      required:
-      - type
-      - values
-      type: object
-    openid4vp.ZKSystemTypeSpec:
-      properties:
-        id:
-          description: |-
-            ID identifies this specific system+circuit combination
-            (e.g. "longfellow-libzk-v1_8_1_4259_2945"). A presented ZK document's
-            own `zkSystemId` (pkg/mdoc.ZkDocumentDataMdoc.ZkSystemID) is expected
-            to equal one of a request's ZKSystemType[].ID entries - this is how a
-            verifier confirms the wallet actually used a circuit it offered,
-            rather than some other one.
-          type: string
-        system:
-          description: |-
-            System is the ZK proof system identifier (e.g. "longfellow-libzk-v1").
-            Params other than "id"/"system" are format-specific (circuit_hash,
-            num_attributes, block_enc_hash, block_enc_sig for Longfellow).
-          type: string
-      required:
-      - id
-      - system
       type: object
 externalDocs:
   description: ""
@@ -500,10 +216,11 @@ paths:
       responses:
         "200":
           content:
-            text/html:
+            application/json:
               schema:
                 $ref: '#/components/schemas/apiv1.AuthorizeResponse'
-          description: Success
+          description: Returned when the request prefers application/json. A browser,
+            which does not, receives the authorization page as text/html instead.
       summary: Authorize
       tags:
       - verifier
@@ -555,7 +272,7 @@ paths:
           content:
             image/png:
               schema:
-                type: file
+                type: string
           description: PNG image
         "404":
           content:
