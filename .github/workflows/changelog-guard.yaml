@@ -1,0 +1,28 @@
+name: changelog-guard
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog-untouched:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Fail if CHANGELOG.md is modified
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Three-dot diff: only changes made on the PR branch since it forked from base.
+          # The pathspec disables rename detection, so a rename away shows as a deletion.
+          if ! git diff --quiet "$BASE_SHA"..."$HEAD_SHA" -- CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md must not be edited on PR branches. It is updated on main only, to avoid merge conflicts."
+            exit 1
+          fi
