@@ -141,6 +141,23 @@ func newCORSHandler(cfg cors.Config, key string) (gin.HandlerFunc, error) {
 		return nil, fmt.Errorf("%s: %w", key, err)
 	}
 
+	// Validate does not cover a malformed regular expression, and cannot be
+	// made to: it skips its own scheme check for any entry containing "*",
+	// which every useful pattern does. The library then compiles the pattern
+	// with MustCompile on each cross-origin request, so an entry like
+	// "/.*[/" starts the verifier and panics the first time a browser asks -
+	// taking down the flow it was configured to serve. Compile it here
+	// instead, once, where the answer is a startup error naming the entry.
+	for _, origin := range normalizeServerWideOrigins(cfg.AllowOrigins) {
+		match := serverWideOriginRegex.FindStringSubmatch(origin)
+		if match == nil {
+			continue
+		}
+		if _, err := regexp.Compile(match[1]); err != nil {
+			return nil, fmt.Errorf("%s: %q is not a usable regular expression: %w", key, origin, err)
+		}
+	}
+
 	return cors.New(cfg), nil
 }
 

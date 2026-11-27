@@ -347,3 +347,28 @@ func TestVerifierCORSRefusesAMalformedOrigin(t *testing.T) {
 	_, err = VerifierCORS(&model.CORS{AllowedOrigins: []string{" " + serverWideOrign}}, nil)
 	require.Error(t, err)
 }
+
+// A regex entry escapes cors.Config.Validate entirely - it skips the scheme
+// check for anything containing "*" - and the library then compiles the
+// pattern per request with MustCompile. A malformed one therefore starts the
+// verifier and panics on the first cross-origin request.
+func TestVerifierCORSRefusesAMalformedRegexOrigin(t *testing.T) {
+	for name, list := range map[string][]string{
+		"unclosed class":  {`/.*[/`},
+		"dangling repeat": {`/*foo/`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := VerifierCORS(&model.CORS{AllowedOrigins: list}, nil)
+			require.Error(t, err, "cors.Config.Validate accepts this; MustCompile would panic at request time")
+			assert.Contains(t, err.Error(), "api_server.cors.allowed_origins")
+
+			_, err = VerifierCORS(nil, &model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: list})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "verifier.embedded_presentation.allowed_origins")
+		})
+	}
+
+	// The valid pattern the differential test relies on still builds.
+	_, err := VerifierCORS(&model.CORS{AllowedOrigins: []string{`/^https:\/\/.*\.example\.com$/`}}, nil)
+	require.NoError(t, err)
+}
