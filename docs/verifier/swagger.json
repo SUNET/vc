@@ -1,5 +1,443 @@
 {
-    "components": {},
+    "components": {
+        "schemas": {
+            "apiv1.AuthorizeResponse": {
+                "properties": {
+                    "css_file": {
+                        "type": "string"
+                    },
+                    "deep_link_url": {
+                        "type": "string"
+                    },
+                    "logo_url": {
+                        "type": "string"
+                    },
+                    "poll_url": {
+                        "type": "string"
+                    },
+                    "preferred_formats": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "primary_color": {
+                        "type": "string"
+                    },
+                    "qr_code_data": {
+                        "type": "string"
+                    },
+                    "qr_code_image_url": {
+                        "type": "string"
+                    },
+                    "response_mode": {
+                        "type": "string"
+                    },
+                    "secondary_color": {
+                        "type": "string"
+                    },
+                    "session_id": {
+                        "type": "string"
+                    },
+                    "subtitle": {
+                        "type": "string"
+                    },
+                    "theme": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "wallet_links": {
+                        "items": {
+                            "$ref": "#/components/schemas/apiv1.WalletLink"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "apiv1.PollSessionResponse": {
+                "properties": {
+                    "redirect_uri": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "apiv1.UIInteractionReply": {
+                "properties": {
+                    "authorization_request": {
+                        "description": "AuthorizationRequest is the request reached through request_uri: the QR\ncode, the same-device link, and the polyfill's redirect fallback. Its\nresponse_mode is direct_post.jwt, because a wallet arriving this way\nhas no browser DC API call to answer inside.",
+                        "type": "string"
+                    },
+                    "dc_api_authorization_request": {
+                        "description": "DCAPIAuthorizationRequest is the request for navigator.credentials.get,\ncarrying response_mode dc_api.jwt. Empty when the Digital Credentials\nAPI is disabled.\n\nTwo requests rather than one, because response_mode has to follow the\ndelivery channel: dc_api modes are defined only for a request handed to\nthe browser DC API, where the response returns inside that call and the\ntranscript binds to the calling origin. Serving one request object to\nboth channels - which is what this flow did - meant every wallet that\nscanned the QR or followed the link got a mode it could not honour, and\nonly found out after the user had selected credentials and signed\n(SUNET/vc#652).",
+                        "type": "string"
+                    },
+                    "qr_code": {
+                        "type": "string"
+                    },
+                    "session_id": {
+                        "description": "SessionID identifies the authorization context this reply belongs to.\nReturned so the browser can address later POSTs (e.g. session-preference)\nto the exact request it was created for, rather than relying on the\nshared per-origin cookie session that any other tab can overwrite.",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "apiv1.UIInteractionRequest": {
+                "properties": {
+                    "dcql_query": {
+                        "$ref": "#/components/schemas/openid4vp.DCQL"
+                    },
+                    "payment": {
+                        "$ref": "#/components/schemas/apiv1.UIPaymentRequest",
+                        "description": "Payment, when set, makes this an EC TS12 payment SCA request: a\nurn:eudi:sca:payment:1 transaction_data entry is added to the request\nand the response is validated against it. Requires verifier.ts12.enable.\nA payment is never served from a reused session: every payment request\nis a new transaction."
+                    },
+                    "session_id": {
+                        "description": "SessionID is a reuse hint sourced ONLY from the request body (which\nmirrors the tab-scoped sessionStorage value). The HTTP layer\ndeliberately does NOT populate it from the shared gin cookie\nsession, because that cookie is overwritten by any sibling tab and\nwould otherwise let a fresh tab inherit another tab's in-flight\nauthorization context. When this id names a still-valid,\nstill-unclaimed context with the same DCQL / validations, the\nresponse returns that context's existing request_uri/QR so a\nreload mid-flow does not orphan the wallet's outstanding scan.\nOtherwise a fresh session id is minted and returned in the reply.",
+                        "maxLength": 128,
+                        "type": "string"
+                    },
+                    "validations": {
+                        "additionalProperties": {
+                            "items": {
+                                "$ref": "#/components/schemas/openid4vp.ClaimValidation"
+                            },
+                            "type": "array"
+                        },
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "dcql_query"
+                ],
+                "type": "object"
+            },
+            "apiv1.UIPaymentRequest": {
+                "properties": {
+                    "amount": {
+                        "description": "Amount is the payment amount in major currency units, as a JSON number or a numeric string (\"49.99\"). Must be greater than zero.",
+                        "type": "string"
+                    },
+                    "credential_id": {
+                        "description": "CredentialID is the DCQL credential query id of the SCA attestation that authorizes the payment. Required when the DCQL query has more than one credential query.",
+                        "maxLength": 128,
+                        "type": "string"
+                    },
+                    "currency": {
+                        "description": "Currency is an ISO 4217 alpha-3 code.",
+                        "type": "string"
+                    },
+                    "payee_id": {
+                        "maxLength": 256,
+                        "type": "string"
+                    },
+                    "payee_name": {
+                        "description": "PayeeName and PayeeID are REQUIRED by the TS12 payment schema.",
+                        "maxLength": 256,
+                        "type": "string"
+                    },
+                    "payee_website": {
+                        "maxLength": 512,
+                        "type": "string"
+                    },
+                    "transaction_id": {
+                        "description": "TransactionID is the relying party's identifier of the interaction (1..36 characters). A fresh UUID when omitted.",
+                        "maxLength": 36,
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "amount",
+                    "currency",
+                    "payee_id",
+                    "payee_name"
+                ],
+                "type": "object"
+            },
+            "apiv1.WalletLink": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "qr_code_image_url": {
+                        "description": "QR code image URL for cross-device flow",
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "openid4vp.ClaimQuery": {
+                "type": "object"
+            },
+            "openid4vp.ClaimValidation": {
+                "properties": {
+                    "path": {
+                        "description": "Path is the claim path to validate, e.g., [\"birthdate\"].",
+                        "items": {
+                            "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "rule": {
+                        "description": "Rule is the validation rule to apply, e.g., \"age_over\".",
+                        "enum": [
+                            "age_over"
+                        ],
+                        "type": "string"
+                    },
+                    "value": {
+                        "description": "Value is the threshold or expected value for the validation."
+                    }
+                },
+                "required": [
+                    "path",
+                    "rule",
+                    "value"
+                ],
+                "type": "object"
+            },
+            "openid4vp.CredentialQuery": {
+                "properties": {
+                    "_req": {
+                        "description": "Req is the circuit_zk format's list of requested calculations.\n\nIt replaces Claims rather than accompanying it: a circuit_zk\npresentation discloses no issuer-signed attribute at all, so every\nvalue a Verifier wants is the output of a function named here. A\nquery carrying both is one the planner rejects - which this does\nnot prevent, because sending it is how a wallet gets tested.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vp.ReqItem"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "claim_sets": {
+                        "description": "ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers for elements in claims that specifies which combinations of claims for the Credential are requested. The rules for selecting claims to send are defined in Section 6.4.1.",
+                        "items": {
+                            "items": {
+                                "type": "string"
+                            },
+                            "type": "array"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "claims": {
+                        "description": "Claims OPTIONAL. A non-empty array of objects as defined in Section 6.3 that specifies claims in the requested Credential. Verifiers MUST NOT point to the same claim more than once in a single query. Wallets SHOULD ignore such duplicate claim queries.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vp.ClaimQuery"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "format": {
+                        "description": "Format REQUIRED. A string that specifies the format of the requested Credential. Valid Credential Format Identifier values are defined in Appendix B.",
+                        "type": "string"
+                    },
+                    "id": {
+                        "description": "ID REQUIRED. A string identifying the Credential in the response and, if provided, the constraints in credential_sets. The value MUST be a non-empty string consisting of alphanumeric, underscore (_), or hyphen (-) characters. Within the Authorization Request, the same id MUST NOT be present more than once.",
+                        "type": "string"
+                    },
+                    "meta": {
+                        "$ref": "#/components/schemas/openid4vp.MetaQuery",
+                        "description": "Meta REQUIRED. An object defining additional properties requested by the Verifier that apply to the metadata and validity data of the Credential. The properties of this object are defined per Credential Format. Examples of those are in Appendix B.3.5 and Appendix B.2.3. If empty, no specific constraints are placed on the metadata or validity of the requested Credential."
+                    },
+                    "multiple": {
+                        "description": "Multiple OPTIONAL. A boolean which indicates whether multiple Credentials can be returned for this Credential Query. If omitted, the default value is false.\n\nA POINTER, for the same reason RequireCryptographicHolderBinding\nbelow is one: with a plain bool, omitempty cannot tell an absent\nmember from an explicit false, so `\"multiple\": false` - an\nordinary, valid query - did not encode back to what arrived and\nwas kept as Raw. That is not a harmless detour: a raw query is\nemitted from its original bytes, so augmentDCQLFromVCTM's rewrite\nof the shadow Claims was silently discarded and the request went\nout with the un-augmented paths.",
+                        "type": "boolean"
+                    },
+                    "require_cryptographic_holder_binding": {
+                        "description": "RequireCryptographicHolderBinding OPTIONAL. Spec default is true when omitted; nil pointer preserves that distinction from an explicit false.",
+                        "type": "boolean"
+                    },
+                    "trusted_authorities": {
+                        "description": "TrustedAuthorities OPTIONAL. A non-empty array of objects as defined in Section 6.1.1 that specifies expected authorities or trust frameworks that certify Issuers, that the Verifier will accept. Every Credential returned by the Wallet SHOULD match at least one of the conditions present in the corresponding trusted_authorities array if present.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vp.TrustedAuthority"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "required": [
+                    "claim_sets",
+                    "format",
+                    "id",
+                    "meta"
+                ],
+                "type": "object"
+            },
+            "openid4vp.CredentialSetQuery": {
+                "properties": {
+                    "options": {
+                        "description": "Options REQUIRED A non-empty array, where each value in the array is a list of Credential Query identifiers representing one set of Credentials that satisfies the use case. The value of each element in the options array is a non-empty array of identifiers which reference elements in credentials.",
+                        "items": {
+                            "items": {
+                                "type": "string"
+                            },
+                            "type": "array"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "required": {
+                        "description": "Required OPTIONAL. Spec default is true when omitted; nil pointer preserves that distinction from an explicit false.",
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "options"
+                ],
+                "type": "object"
+            },
+            "openid4vp.DCQL": {
+                "properties": {
+                    "credential_sets": {
+                        "description": "CredentialSets OPTIONAL. A non-empty array of Credential Set Queries as defined in Section 6.2 that specifies additional constraints on which of the requested Credentials to return.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vp.CredentialSetQuery"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "credentials": {
+                        "description": "Credentials REQUIRED. A non-empty array of Credential Queries as defined in Section 6.1 that specify the requested Credentials.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vp.CredentialQuery"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "required": [
+                    "credential_sets",
+                    "credentials"
+                ],
+                "type": "object"
+            },
+            "openid4vp.MetaQuery": {
+                "properties": {
+                    "doctype_value": {
+                        "description": "DoctypeValue for ISO mdoc format (mso_mdoc) and ZK-mdoc format (mso_mdoc_zk).\nString that specifies an allowed value for the doctype of the requested Verifiable Credential.",
+                        "type": "string"
+                    },
+                    "ppid_context": {
+                        "description": "PPIDContext for ZK-mdoc format (mso_mdoc_zk) only.\nAn optional verifier-supplied string that further scopes a requested\npairwise pseudonym (PPID) beyond the verifier's own identity - see\npkg/mdoc.ComputeZkVerifierContext.",
+                        "type": "string"
+                    },
+                    "schema_id_value": {
+                        "description": "SchemaIDValue is the type value for a bbs_cd source format, the\nway DoctypeValue is for mso_mdoc. Exactly one of the two\nbelongs in a zkp_req query's meta, decided by source_format.",
+                        "type": "string"
+                    },
+                    "source_format": {
+                        "description": "SourceFormat is the stored attestation a zkp_req proof is made\nover: \"mso_mdoc\" or \"bbs_cd\". It decides whether proof_time is\nrequired in the response - every approved mso_mdoc circuit checks\nthe MSO validity period, so it is required there.",
+                        "type": "string"
+                    },
+                    "type_values": {
+                        "description": "TypeValues for W3C VC format (ldp_vc, jwt_vc_json).\nA non-empty array of string arrays specifying the fully expanded types (IRIs) that the Verifier accepts.\nEach top-level array specifies one alternative to match the fully expanded type values of the Verifiable Credential.\nEach inner array specifies a set of fully expanded types that MUST be present in the credential's type property.",
+                        "items": {
+                            "items": {
+                                "type": "string"
+                            },
+                            "type": "array"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "vct_values": {
+                        "description": "VCTValues for SD-JWT VC format (dc+sd-jwt).\nA non-empty array of strings that specifies allowed values for the type of the requested Verifiable Credential.\nAll elements in the array MUST be valid type identifiers as defined in [I-D.ietf-oauth-sd-jwt-vc].\nThe Wallet MAY return Credentials that inherit from any of the specified types.",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "zk_system_type": {
+                        "description": "ZKSystemType for ZK-mdoc format (mso_mdoc_zk) only.\nA non-empty array of ZK proof system/circuit variants the Verifier is\nwilling to accept (e.g. Longfellow circuits for different attribute\ncounts). See ZKSystemTypeSpec and dcql_zk.go.",
+                        "items": {
+                            "$ref": "#/components/schemas/openid4vp.ZKSystemTypeSpec"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "openid4vp.ReqItem": {
+                "properties": {
+                    "fn_id": {
+                        "description": "ID is the function identifier, \"id\" on the wire. Named ID rather\nthan Function to match the wire member, since the wire is what an\noperator configures and reads back.",
+                        "type": "string"
+                    },
+                    "params": {
+                        "additionalProperties": {},
+                        "description": "Params are the function's parameters, passed through unchanged.",
+                        "type": "object"
+                    },
+                    "return": {
+                        "description": "Return is the handle the result is keyed by in the response's\nresults map. The rulebook requires it to be unique within the\ncredential query; nothing here enforces that, because a duplicate\nis a thing a wallet should be tested against.",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "openid4vp.TrustedAuthority": {
+                "properties": {
+                    "type": {
+                        "description": "REQUIRED. A string uniquely identifying the type of information about the issuer trust framework. Types defined by this specification are listed below.",
+                        "enum": [
+                            "aki",
+                            "etsi_tl",
+                            "openid_federation"
+                        ],
+                        "type": "string"
+                    },
+                    "values": {
+                        "description": "REQUIRED. A non-empty array of strings, where each string (value) contains information specific to the used Trusted Authorities Query type that allows the identification of an issuer, a trust framework, or a federation that an issuer belongs to.",
+                        "items": {
+                            "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "required": [
+                    "type",
+                    "values"
+                ],
+                "type": "object"
+            },
+            "openid4vp.ZKSystemTypeSpec": {
+                "properties": {
+                    "id": {
+                        "description": "ID identifies this specific system+circuit combination\n(e.g. \"longfellow-libzk-v1_8_1_4259_2945\"). A presented ZK document's\nown `zkSystemId` (pkg/mdoc.ZkDocumentDataMdoc.ZkSystemID) is expected\nto equal one of a request's ZKSystemType[].ID entries - this is how a\nverifier confirms the wallet actually used a circuit it offered,\nrather than some other one.",
+                        "type": "string"
+                    },
+                    "system": {
+                        "description": "System is the ZK proof system identifier (e.g. \"longfellow-libzk-v1\").\nParams other than \"id\"/\"system\" are format-specific (circuit_hash,\nnum_attributes, block_enc_hash, block_enc_sig for Longfellow).",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "system"
+                ],
+                "type": "object"
+            }
+        }
+    },
     "info": {
         "title": "",
         "version": ""
@@ -8,6 +446,212 @@
         "description": "",
         "url": ""
     },
-    "paths": {},
+    "paths": {
+        "/authorize": {
+            "get": {
+                "description": "OIDC authorization request. Returns the verifier's authorization page, or this response as JSON when the client sends `Accept: application/json`.",
+                "operationId": "oidc-authorize",
+                "parameters": [
+                    {
+                        "description": "OAuth 2.0 response type; `code`",
+                        "in": "query",
+                        "name": "response_type",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "The relying party's registered client id",
+                        "in": "query",
+                        "name": "client_id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Must match one registered for the client",
+                        "in": "query",
+                        "name": "redirect_uri",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Requested scopes",
+                        "in": "query",
+                        "name": "scope",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Returned unchanged on the callback",
+                        "in": "query",
+                        "name": "state",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Bound into the issued ID token",
+                        "in": "query",
+                        "name": "nonce",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "`application/json` for the embeddable response",
+                        "in": "header",
+                        "name": "Accept",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/apiv1.AuthorizeResponse"
+                                }
+                            }
+                        },
+                        "description": "Success"
+                    }
+                },
+                "summary": "Authorize",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        },
+        "/poll/{session_id}": {
+            "get": {
+                "description": "Current status of a presentation session. Requires no session cookie. `redirect_uri` is set once an authorization code has been issued.",
+                "operationId": "poll-session",
+                "parameters": [
+                    {
+                        "description": "Session id, as returned by /authorize",
+                        "in": "path",
+                        "name": "session_id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/apiv1.PollSessionResponse"
+                                }
+                            }
+                        },
+                        "description": "Success"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {}
+                        },
+                        "description": "Unknown session"
+                    }
+                },
+                "summary": "Poll session",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        },
+        "/qr/{session_id}": {
+            "get": {
+                "description": "The session's authorization request as a PNG QR code. Requires no session cookie, so it can be embedded directly from another origin.",
+                "operationId": "session-qr-code",
+                "parameters": [
+                    {
+                        "description": "Session id, as returned by /authorize",
+                        "in": "path",
+                        "name": "session_id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Name of a configured web wallet, for the cross-device flow",
+                        "in": "query",
+                        "name": "wallet",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "image/png": {
+                                "schema": {
+                                    "type": "file"
+                                }
+                            }
+                        },
+                        "description": "PNG image"
+                    },
+                    "404": {
+                        "content": {
+                            "image/png": {}
+                        },
+                        "description": "Unknown session"
+                    }
+                },
+                "summary": "QR code",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        },
+        "/ui/interaction": {
+            "post": {
+                "description": "Starts a presentation from a caller-supplied DCQL query and returns the authorization request, a QR code, and the session id. The reply is data, so the caller renders the request on its own page. Note that this endpoint authenticates no client.",
+                "operationId": "ui-interaction",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/apiv1.UIInteractionRequest",
+                                "summary": "req",
+                                "description": " "
+                            }
+                        }
+                    },
+                    "description": " ",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/apiv1.UIInteractionReply"
+                                }
+                            }
+                        },
+                        "description": "Success"
+                    }
+                },
+                "summary": "UI interaction",
+                "tags": [
+                    "verifier"
+                ]
+            }
+        }
+    },
     "openapi": "3.1.0"
 }

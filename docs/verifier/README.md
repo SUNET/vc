@@ -206,8 +206,17 @@ block has no effect once registration is closed.
 | `/verification/request-object/{session_id}` | GET | Signed request object for wallet |
 | `/verification/direct_post` | POST | Receives VP from wallet |
 | `/verification/callback` | GET | Redirect with authorization code |
-| `/qrcode/{session_id}` | GET | QR code for session |
+| `/qr/{session_id}` | GET | QR code for session |
 | `/poll/{session_id}` | GET | Poll session status |
+
+### Embedding the presentation request
+
+A relying party can render the request on its own page instead of using the
+verifier's authorization page: `GET /authorize` returns the request as JSON
+to a caller that sends `Accept: application/json`, and `POST /ui/interaction`
+does the same from a DCQL query. See [EMBEDDING.md](EMBEDDING.md) for both
+flows, the cross-origin configuration, and the security note on
+`/ui/interaction`.
 
 ### Session Management Endpoints
 

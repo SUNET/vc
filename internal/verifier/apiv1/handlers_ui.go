@@ -568,6 +568,16 @@ type UIInteractionReply struct {
 }
 
 // UIInteraction handles front-end interactions, replying with an Authorization Request that contains a Request URI and DCQL query, the latter for UI to show.
+//
+//	@Summary		UI interaction
+//	@ID				ui-interaction
+//	@Description	Starts a presentation from a caller-supplied DCQL query and returns the authorization request, a QR code, and the session id. The reply is data, so the caller renders the request on its own page. Note that this endpoint authenticates no client.
+//	@Tags			verifier
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	UIInteractionReply		"Success"
+//	@Param			req	body		UIInteractionRequest	true	" "
+//	@Router			/ui/interaction [post]
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
 	// A request carrying no query at all, which is not merely invalid:
 	// everything below dereferences it, so this PANICS without the

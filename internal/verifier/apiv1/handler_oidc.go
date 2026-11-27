@@ -74,7 +74,29 @@ type AuthorizeResponse struct {
 	LogoURL          string       `json:"logo_url"`
 }
 
-// Authorize handles the OIDC authorization request
+// Authorize handles the OIDC authorization request.
+//
+// The endpoint serves the verifier's own authorization page by default, and
+// this response as JSON to a caller that sends Accept: application/json -
+// which is how a relying party renders the presentation request on a page
+// of its own instead. Every field needed for that is here: the request URI
+// to encode as a QR code, the same-device link, and where to poll.
+//
+//	@Summary		Authorize
+//	@ID				oidc-authorize
+//	@Description	OIDC authorization request. Returns the verifier's authorization page, or this response as JSON when the client sends `Accept: application/json`.
+//	@Tags			verifier
+//	@Produce		json
+//	@Produce		html
+//	@Success		200	{object}	AuthorizeResponse	"Success"
+//	@Param			response_type	query	string	true	"OAuth 2.0 response type; `code`"
+//	@Param			client_id		query	string	true	"The relying party's registered client id"
+//	@Param			redirect_uri	query	string	true	"Must match one registered for the client"
+//	@Param			scope			query	string	true	"Requested scopes"
+//	@Param			state			query	string	false	"Returned unchanged on the callback"
+//	@Param			nonce			query	string	false	"Bound into the issued ID token"
+//	@Param			Accept			header	string	false	"`application/json` for the embeddable response"
+//	@Router			/authorize [get]
 func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*AuthorizeResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:authorize")
 	defer span.End()
@@ -1012,7 +1034,22 @@ type GetQRCodeResponse struct {
 	ImageData []byte
 }
 
-// GetQRCode generates a QR code image for a session
+// GetQRCode generates a QR code image for a session.
+//
+// A relying party that would rather not draw its own QR code can point an
+// <img> at this: it carries no session cookie and needs none, only the
+// session_id that /authorize returned.
+//
+//	@Summary		QR code
+//	@ID				session-qr-code
+//	@Description	The session's authorization request as a PNG QR code. Requires no session cookie, so it can be embedded directly from another origin.
+//	@Tags			verifier
+//	@Produce		png
+//	@Success		200	{file}		binary	"PNG image"
+//	@Failure		404	{object}	nil		"Unknown session"
+//	@Param			session_id	path	string	true	"Session id, as returned by /authorize"
+//	@Param			wallet		query	string	false	"Name of a configured web wallet, for the cross-device flow"
+//	@Router			/qr/{session_id} [get]
 func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCodeResponse, error) {
 	// Get session
 	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
@@ -1097,7 +1134,21 @@ type PollSessionResponse struct {
 	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
-// PollSession returns the current status of a session
+// PollSession returns the current status of a session.
+//
+// Carries no session cookie either, so an embedded page can poll it from
+// its own origin. When the status reaches code_issued, redirect_uri is the
+// relying party's callback with the authorization code already on it.
+//
+//	@Summary		Poll session
+//	@ID				poll-session
+//	@Description	Current status of a presentation session. Requires no session cookie. `redirect_uri` is set once an authorization code has been issued.
+//	@Tags			verifier
+//	@Produce		json
+//	@Success		200	{object}	PollSessionResponse	"Success"
+//	@Failure		404	{object}	nil					"Unknown session"
+//	@Param			session_id	path	string	true	"Session id, as returned by /authorize"
+//	@Router			/poll/{session_id} [get]
 func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*PollSessionResponse, error) {
 	// Get session
 	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
