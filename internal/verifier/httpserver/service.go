@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	verifierdocs "github.com/SUNET/vc/docs/verifier"
 	"github.com/SUNET/vc/internal/verifier/apiv1"
@@ -27,7 +26,6 @@ import (
 	"github.com/SUNET/vc/pkg/swaggerui"
 	"github.com/SUNET/vc/pkg/trace"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/sessions"
 
 	"github.com/gin-gonic/gin"
@@ -103,31 +101,20 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// OPTIONS preflight requests are handled correctly. Placing CORS on a
 	// router group causes preflight requests to hit Gin's NoRoute handler
 	// (404) because no explicit OPTIONS route is registered.
-	if s.cfg.Verifier.APIServer.CORS != nil && len(s.cfg.Verifier.APIServer.CORS.AllowedOrigins) > 0 {
-		corsConfig := cors.Config{
-			AllowOrigins:     s.cfg.Verifier.APIServer.CORS.AllowedOrigins,
-			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
-			AllowCredentials: true,
-			MaxAge:           12 * time.Hour,
-		}
-		s.gin.Use(cors.New(corsConfig))
-	}
-
-	// Scoped to the standalone presentation endpoints, and installed here
-	// for the same reason the block above is: a CORS handler on a router
-	// group never sees the preflight, because gin routes an OPTIONS it has
-	// no route for to NoRoute. Engine-level middleware runs for NoRoute too,
-	// so the preflight is answered wherever it lands.
-	embeddedCORS, err := middleware.EmbeddedPresentationCORS(s.cfg.Verifier.EmbeddedPresentation)
+	//
+	// One handler for both of the verifier's CORS keys - see VerifierCORS
+	// for why they cannot be two.
+	corsHandler, err := middleware.VerifierCORS(s.cfg.Verifier.APIServer.CORS, s.cfg.Verifier.EmbeddedPresentation)
 	if err != nil {
 		return nil, err
 	}
-	if embeddedCORS != nil {
+	if corsHandler != nil {
+		s.gin.Use(corsHandler)
+	}
+	if s.cfg.Verifier.EmbeddedPresentation.Enabled() {
 		s.log.Info("Standalone presentation endpoints are open to other origins",
 			"allowed_origins", s.cfg.Verifier.EmbeddedPresentation.AllowedOrigins,
 			"paths", slices.Sorted(maps.Keys(middleware.EmbeddedPresentationPaths)))
-		s.gin.Use(embeddedCORS)
 	}
 
 	// Built only when registration is served. The constructor reads the

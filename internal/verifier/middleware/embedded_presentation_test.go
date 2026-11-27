@@ -13,7 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const rpOrigin = "https://rp.example.com"
+const (
+	rpOrigin        = "https://rp.example.com"
+	serverWideOrign = "https://portal.example.com"
+)
 
 // engineWithEmbeddedCORS builds a server shaped like the verifier's: the CORS
 // handler at engine level, the flow's endpoints registered, and a NoRoute
@@ -22,9 +25,15 @@ const rpOrigin = "https://rp.example.com"
 // never run.
 func engineWithEmbeddedCORS(t *testing.T, cfg *model.EmbeddedPresentationConfig) *gin.Engine {
 	t.Helper()
+
+	return engineWithCORS(t, nil, cfg)
+}
+
+func engineWithCORS(t *testing.T, serverWide *model.CORS, cfg *model.EmbeddedPresentationConfig) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
-	handler, err := EmbeddedPresentationCORS(cfg)
+	handler, err := VerifierCORS(serverWide, cfg)
 	require.NoError(t, err)
 
 	engine := gin.New()
@@ -61,7 +70,7 @@ func TestEmbeddedPresentationCORSOmittedOrDisabled(t *testing.T) {
 		"disabled": {Enable: false, AllowedOrigins: []string{rpOrigin}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			handler, err := EmbeddedPresentationCORS(cfg)
+			handler, err := VerifierCORS(nil, cfg)
 			require.NoError(t, err)
 			assert.Nil(t, handler, "no handler is installed when the feature is off")
 
@@ -74,7 +83,7 @@ func TestEmbeddedPresentationCORSOmittedOrDisabled(t *testing.T) {
 }
 
 func TestEmbeddedPresentationCORSEnabledWithoutOriginsIsRefused(t *testing.T) {
-	handler, err := EmbeddedPresentationCORS(&model.EmbeddedPresentationConfig{Enable: true})
+	handler, err := VerifierCORS(nil, &model.EmbeddedPresentationConfig{Enable: true})
 	require.Error(t, err, "enabling without an origin allows nothing and must not start")
 	assert.Nil(t, handler)
 	assert.Contains(t, err.Error(), "allowed_origins")
@@ -153,4 +162,80 @@ func TestEmbeddedPresentationConfigValidationRejectsEnableWithoutOrigins(t *test
 		&model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: []string{rpOrigin}}))
 	require.NoError(t, helpers.CheckSimple(&model.EmbeddedPresentationConfig{}),
 		"the default, off, carries no requirement")
+}
+
+// The two keys are one handler because gin-contrib/cors answers an origin
+// outside its own list with 403 and aborts. As two middleware, whichever ran
+// first refused the other's origins - the case below was broken in both
+// directions.
+func TestVerifierCORSServesBothKeysWithDisjointOrigins(t *testing.T) {
+	engine := engineWithCORS(t,
+		&model.CORS{AllowedOrigins: []string{serverWideOrign}},
+		&model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: []string{rpOrigin}})
+
+	t.Run("the embedded origin reaches the flow", func(t *testing.T) {
+		rec := requestOrigin(engine, http.MethodPost, "/ui/interaction", rpOrigin)
+		assert.Equal(t, rpOrigin, rec.Header().Get("Access-Control-Allow-Origin"))
+		assert.NotEqual(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("and nothing else", func(t *testing.T) {
+		rec := requestOrigin(engine, http.MethodPost, "/token", rpOrigin)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("the server-wide origin keeps every route", func(t *testing.T) {
+		rec := requestOrigin(engine, http.MethodPost, "/token", serverWideOrign)
+		assert.Equal(t, serverWideOrign, rec.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
+	})
+
+	t.Run("including the four paths, under its own policy", func(t *testing.T) {
+		// Configuring embedded_presentation must not take away access a
+		// deployment already had, nor silently drop its credentials.
+		rec := requestOrigin(engine, http.MethodPost, "/ui/interaction", serverWideOrign)
+		assert.Equal(t, serverWideOrign, rec.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
+	})
+}
+
+func TestVerifierCORSOriginInBothListsKeepsTheServerWidePolicy(t *testing.T) {
+	engine := engineWithCORS(t,
+		&model.CORS{AllowedOrigins: []string{rpOrigin}},
+		&model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: []string{rpOrigin}})
+
+	rec := requestOrigin(engine, http.MethodPost, "/ui/interaction", rpOrigin)
+	assert.Equal(t, rpOrigin, rec.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
+}
+
+func TestVerifierCORSServerWideWildcardIsNotShadowed(t *testing.T) {
+	engine := engineWithCORS(t,
+		&model.CORS{AllowedOrigins: []string{"*"}},
+		&model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: []string{rpOrigin}})
+
+	rec := requestOrigin(engine, http.MethodPost, "/ui/interaction", "https://anywhere.example.net")
+	assert.NotEqual(t, http.StatusForbidden, rec.Code,
+		`a server-wide "*" already covers these paths; the embedded list must not narrow it`)
+}
+
+func TestVerifierCORSEmbeddedAloneLeavesOtherRoutesUntouched(t *testing.T) {
+	engine := engineWithCORS(t, nil,
+		&model.EmbeddedPresentationConfig{Enable: true, AllowedOrigins: []string{rpOrigin}})
+
+	// No server-wide key: /token answers as it always did, without CORS
+	// headers and without a 403 from a handler that was never configured.
+	rec := requestOrigin(engine, http.MethodPost, "/token", rpOrigin)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestVerifierCORSUnconfiguredInstallsNoHandler(t *testing.T) {
+	handler, err := VerifierCORS(nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, handler, "neither key set: the server is left exactly as it was")
+
+	handler, err = VerifierCORS(&model.CORS{}, &model.EmbeddedPresentationConfig{})
+	require.NoError(t, err)
+	assert.Nil(t, handler)
 }

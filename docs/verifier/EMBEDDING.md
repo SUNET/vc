@@ -269,6 +269,13 @@ only its own page is still reachable by everyone who can reach that page,
 and each call mints an authorization context, two request objects and a QR
 image.
 
+That limit is per client IP as the server sees it, and today the server
+believes `X-Forwarded-For` from anyone - gin trusts every proxy unless
+configured otherwise, and this one does not configure it. Behind your own
+reverse proxy, which rewrites the header, the limit holds; on a directly
+reachable verifier a client that rotates the header gets a fresh bucket.
+That is true of every limit on this server and is tracked separately.
+
 `/qr/{session_id}` and `/poll/{session_id}` take an unguessable session id
 and return nothing about the holder - a QR image and a status - but they do
 confirm that a session id exists.
