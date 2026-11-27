@@ -36,12 +36,6 @@ in_range() {
 	! git merge-base --is-ancestor "$oid" "$PREV_TAG" 2>/dev/null
 }
 
-# A re-run after a failed build must not add a second section.
-if grep -qE "^## $NEW_TAG( |$)" "$FILE"; then
-	echo "$FILE already has a section for $NEW_TAG, unchanged"
-	exit 0
-fi
-
 RANGE="$PREV_TAG..HEAD"
 git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null || RANGE=HEAD
 if [[ -z "$(git log --no-merges --format=%h "$RANGE")" ]]; then
@@ -108,13 +102,21 @@ trap 'rm -f "$section"' EXIT
 	fi
 } >"$section"
 
+# A re-run for the same tag replaces its section, so the notes match the current range.
+stripped=$(mktemp)
+awk -v tag="## $NEW_TAG" '
+	skip && /^## / { skip = 0 }
+	$0 == tag || index($0, tag " ") == 1 { skip = 1; next }
+	!skip { print }
+' "$FILE" >"$stripped"
+
 out=$(mktemp)
 {
-	sed -n '1p' "$FILE"
+	sed -n '1p' "$stripped"
 	echo
 	cat "$section"
-	sed '1,2d' "$FILE"
+	sed '1,2d' "$stripped"
 } >"$out"
 cat "$out" >"$FILE"
-rm -f "$out"
+rm -f "$out" "$stripped"
 echo "==> $FILE updated for $NEW_TAG"
