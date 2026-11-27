@@ -23,11 +23,11 @@ import (
 // access-token lookup does to a claims map.
 func bsonRoundTrip(t *testing.T, in map[string]any) map[string]any {
 	t.Helper()
-	raw, err := bson.Marshal(in)
+	raw, err := bson.Marshal(&pkgcache.AuthorizationContext{VerifiedClaims: in})
 	require.NoError(t, err)
-	var out map[string]any
+	var out pkgcache.AuthorizationContext
 	require.NoError(t, bson.Unmarshal(raw, &out))
-	return out
+	return out.VerifiedClaims
 }
 
 // The shapes fxamacker/cbor decodes mdoc element values into, and the two
@@ -44,14 +44,13 @@ func presentedShapes() map[string]any {
 	}
 }
 
-// A raw cbor.Tag comes back from BSON as a bson.D, which normaliseFullDate
+// A raw cbor.Tag comes back from BSON as an object, which normaliseFullDate
 // refuses.
 func TestARawCborTagDoesNotSurviveTheCache(t *testing.T) {
 	back := bsonRoundTrip(t, presentedShapes())
 
 	_, err := normaliseFullDate(back["full_date"])
 	require.Error(t, err, "this is the defect: a stored cbor.Tag is unreadable on the way out")
-	assert.Contains(t, err.Error(), "bson.D")
 }
 
 // documentObject converts every leaf, so the round trip changes none of
@@ -72,21 +71,6 @@ func TestNormalisedLeafClaimsSurviveTheCacheUnchanged(t *testing.T) {
 		require.NoErrorf(t, err, "claim %q must still normalise after the cache", claim)
 		assert.Equalf(t, "1990-01-15", got, "claim %q must mean the same day it did before storage", claim)
 	}
-}
-
-// A nested object reads back from BSON as a bson.D whatever its leaves
-// are: the decoder decides that on the way out. SD-JWT VC claims nest, so
-// they need a decoder registry; this test fails once one is in place.
-func TestNestedObjectsStillChangeTypeAcrossTheCache(t *testing.T) {
-	storable, err := documentObject(map[string]any{
-		"identity": map[string]any{"birthdate": "1990-01-15"},
-	})
-	require.NoError(t, err)
-	require.IsType(t, map[string]any{}, storable["identity"], "stored as a plain object")
-
-	back := bsonRoundTrip(t, storable)
-	assert.IsType(t, bson.D{}, back["identity"],
-		"a sub-document still reads back as bson.D; the leaves inside it are intact, the container is not")
 }
 
 // Each claim reads the same in process and after storage.

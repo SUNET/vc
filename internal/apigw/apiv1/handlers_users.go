@@ -12,7 +12,6 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vcclient"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // UserAuthenticSourceLookup resolves which authentic sources are available for a session,
@@ -139,12 +138,6 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthProvider)
 	}
 
-	// Normalize bson.D/bson.A values to map[string]any/[]any so that
-	// Presentation() and SVGValues() can traverse nested documents.
-	for k, v := range doc.DocumentData {
-		doc.DocumentData[k] = normalizeBSONValue(v)
-	}
-
 	// req.VCTM is nil for mso_mdoc scopes (GetVCTMFromScope only returns a
 	// VCTM for sd-jwt-based credentials) - use the MDDL schema's own
 	// Presentation/SVGValues instead.
@@ -202,44 +195,6 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 		return doc, nil
 	}
 	return nil, fmt.Errorf("no documents in cache")
-}
-
-// normalizeBSONValue recursively converts bson.D values to map[string]any
-// so that downstream code (e.g. walkPath in VCTM.Presentation) can traverse
-// nested documents with plain Go type assertions.
-// The MongoDB driver v2 decodes nested BSON documents inside any-typed fields
-// as bson.D rather than map[string]any.
-// It returns new maps and slices and never writes into v, which a cache can
-// share between requests.
-func normalizeBSONValue(v any) any {
-	switch val := v.(type) {
-	case bson.D:
-		m := make(map[string]any, len(val))
-		for _, e := range val {
-			m[e.Key] = normalizeBSONValue(e.Value)
-		}
-		return m
-	case map[string]any:
-		m := make(map[string]any, len(val))
-		for k, elem := range val {
-			m[k] = normalizeBSONValue(elem)
-		}
-		return m
-	case []any:
-		s := make([]any, len(val))
-		for i, elem := range val {
-			s[i] = normalizeBSONValue(elem)
-		}
-		return s
-	case bson.A:
-		m := make([]any, len(val))
-		for i, elem := range val {
-			m[i] = normalizeBSONValue(elem)
-		}
-		return m
-	default:
-		return v
-	}
 }
 
 // buildAuthorizationRedirectURL constructs the authorization response redirect URL

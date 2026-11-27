@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/plainbson"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -73,7 +74,9 @@ func (a AuthorizationContext) MarshalBSON() ([]byte, error) {
 	return retried, nil
 }
 
-// UnmarshalBSON prefers the exact copy when one is there.
+// UnmarshalBSON prefers the exact copy when one is there. It decodes the
+// nested objects and arrays of VerifiedClaims and PresentationSubmission as
+// map[string]any and []any.
 //
 // A document written before this change carries only dcql_query, and is
 // read exactly as it was before - rounded, which is what that build did
@@ -82,7 +85,7 @@ func (a AuthorizationContext) MarshalBSON() ([]byte, error) {
 func (a *AuthorizationContext) UnmarshalBSON(data []byte) error {
 	type plain AuthorizationContext
 	var document plain
-	if err := bson.Unmarshal(data, &document); err != nil {
+	if err := plainbson.Unmarshal(data, &document); err != nil {
 		return err
 	}
 	*a = AuthorizationContext(document)
