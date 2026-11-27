@@ -262,13 +262,11 @@ Bumps the latest `vX.Y.Z` git tag and builds/pushes Docker images.
 make release                        # patch bump (default)
 make release BUMP=minor             # minor bump
 make release BUMP=major             # major bump
-make release FORCE=true             # release from any branch
-make release BUMP=minor FORCE=true  # combine options
 ```
 
 This performs:
-1. Verifies you're on the `main` branch (unless `FORCE=true`)
-2. Verifies the working tree is clean (unless `FORCE=true`)
+1. Verifies you're on the `main` branch
+2. Verifies the working tree is clean
 3. Bumps the latest `vX.Y.Z` tag according to `BUMP`
 4. Builds all Docker images tagged `:vX.Y.Z` (fail-fast: no git tag is
    created if the build fails)
