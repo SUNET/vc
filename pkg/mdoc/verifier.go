@@ -338,12 +338,59 @@ func (v *Verifier) verifyCertificateChain(chain []*x509.Certificate) error {
 // This delegates all trust decisions to go-trust which can use mdociaca, ETSI TSL,
 // OpenID Federation, or other registries for dynamic trust anchor resolution.
 func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain []*x509.Certificate, docType string) error {
+	if err := VerifyIssuerChain(ctx, v.trustEvaluator, chain, docType, v.issuerURL, v.clock()); err != nil {
+		return err
+	}
+
+	// TODO: Check revocation status if not skipped
+	if !v.skipRevocationCheck {
+		// Revocation checking would go here (CRL/OCSP)
+	}
+
+	return nil
+}
+
+// ErrTrustEvaluation reports that the trust decision could not be MADE,
+// as distinct from a decision that the issuer is not trusted.
+//
+// A PDP that is unreachable, a timed-out evaluation and a verifier with
+// no evaluator at all all fail closed - nothing is accepted on the back
+// of them - but they are this deployment's failure, not the
+// credential's. A caller that turns an error into a status code owes the
+// client the difference: "your credential's issuer is not trusted" sends
+// a wallet author hunting for a defect that is not there, where a 5xx
+// says what actually happened and can be retried.
+var ErrTrustEvaluation = errors.New("trust evaluation failed")
+
+// VerifyIssuerChain checks an issuer certificate chain's validity dates
+// and asks go-trust whether the issuer is trusted for this docType.
+//
+// Exported so that a presentation format which carries the chain
+// WITHOUT carrying a credential - a circuit_zk nym_auth proof, where
+// the circuit proves "signed by Q" and the chain is what says Q
+// belongs to a trusted issuer - is judged by exactly this, and not by
+// a second implementation that could come to disagree about what
+// "trusted issuer" means.
+//
+// issuerURL overrides the identifier taken from the certificate when a
+// deployment configures one; otherwise it comes from the DS
+// certificate's SANs. docType is the REQUEST's, never the response's:
+// it is what selects the issuer policy, so letting a response choose
+// it would let a holder pick the policy it is judged by.
+func VerifyIssuerChain(ctx context.Context, evaluator trust.TrustEvaluator, chain []*x509.Certificate, docType, issuerURL string, now time.Time) error {
 	if len(chain) == 0 {
 		return errors.New("empty certificate chain")
 	}
+	if evaluator == nil {
+		// Fail closed. An evaluator-less verifier cannot say whether
+		// an issuer is trusted, and "cannot say" must not read as
+		// "yes". ErrTrustEvaluation for the same reason as below: this
+		// is a deployment that cannot judge, not a credential that
+		// failed to be trusted.
+		return fmt.Errorf("%w: no trust evaluator configured, so no issuer can be trusted", ErrTrustEvaluation)
+	}
 
 	dsCert := chain[0]
-	now := v.clock()
 
 	// Check certificate validity period
 	if now.Before(dsCert.NotBefore) {
@@ -355,13 +402,13 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 
 	// Extract issuer identifier for trust evaluation.
 	// Priority: configured IssuerURL > certificate URI SAN > certificate Organization.
-	issuerID := v.issuerURL
+	issuerID := issuerURL
 	if issuerID == "" {
 		issuerID = extractMDocIssuerID(dsCert)
 	}
 
 	// Delegate trust decision to TrustEvaluator (go-trust)
-	decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
+	decision, err := evaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		SubjectID: issuerID,
 		KeyType:   trust.KeyTypeX5C,
 		Key:       chain,
@@ -369,18 +416,18 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 		DocType:   docType,
 	})
 	if err != nil {
-		return fmt.Errorf("trust evaluation failed: %w", err)
+		// An evaluation that could not be MADE - the PDP is unreachable,
+		// the request timed out - is not a decision that the issuer is
+		// untrusted. Both fail closed here, and must: "cannot say" never
+		// reads as "yes". But a caller that reports them to a client has
+		// to tell them apart, because one is the credential's fault and
+		// the other is this deployment's.
+		return fmt.Errorf("%w: %w", ErrTrustEvaluation, err)
 	}
 
 	if !decision.Trusted {
 		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
 	}
-
-	// TODO: Check revocation status if not skipped
-	if !v.skipRevocationCheck {
-		// Revocation checking would go here (CRL/OCSP)
-	}
-
 	return nil
 }
 

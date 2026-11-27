@@ -293,6 +293,36 @@ type AuthorizationContext struct {
 	// at the time, not against whatever the receiving node is configured with
 	// now.
 	TransactionDataResponseModes []string `json:"transaction_data_response_modes,omitempty" bson:"transaction_data_response_modes,omitempty"`
+	// OfferedZkpReqSystemIDs are the zkp_req system ids this session's
+	// request object offered the wallet, in
+	// client_metadata.vp_formats_supported.zkp_req.system_id_values.
+	//
+	// Same reason as TransactionDataResponseModes above: the response is
+	// checked against what was offered at the time, not against whatever
+	// the receiving node is configured with now. A wallet proves with a
+	// circuit the request named, and on a rolling deployment the node
+	// that reads the response may already carry a narrowed
+	// verifier.preferred_vp_formats - at which case a wallet that did
+	// exactly as it was told is refused, and the operator sees a wallet
+	// problem.
+	//
+	// Absent means this session predates the field, and verification
+	// falls back to the configuration, which is the behaviour it had.
+	// That keeps a rolling upgrade working in both directions: a session
+	// opened by an old replica is still verifiable by a new one.
+	//
+	// NO omitempty, on either tag, and that is the whole correctness of
+	// the field. Absent and empty mean opposite things here - fall back
+	// to the configuration, versus offer nothing and refuse everything -
+	// and omitempty cannot tell them apart: it drops a zero-length slice,
+	// so an empty offer is written as no field at all and reads back nil.
+	// A session that deliberately offered nothing would come out of Mongo
+	// looking like a session from before this existed, and accept a
+	// system it never offered. Written plainly, an empty offer stores as
+	// [] and a nil one as null, and the two survive the round trip.
+	// Measured, not assumed - see
+	// TestAuthorizationContextKeepsAnEmptyOfferDistinctFromNoneThroughBSON.
+	OfferedZkpReqSystemIDs []string `json:"offered_zkp_req_system_ids" bson:"offered_zkp_req_system_ids"`
 
 	// DCQLQueryExact carries the same query as JSON text, which is the
 	// only representation that keeps its numbers.

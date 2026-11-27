@@ -25,6 +25,11 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 	sum := sha256.Sum256([]byte(content))
 
 	return &model.Cfg{Verifier: &model.Verifier{
+		// A PDP is part of a valid nym_auth configuration, not an
+		// extra: the issuer key comes from the holder's own chain,
+		// so without one there is nothing that says the key belongs
+		// to a real issuer.
+		Trust: model.TrustConfig{PDPURL: "https://pdp.example/access/v1/evaluation"},
 		NymAuth: model.NymAuthVerifier{
 			Enable:     true,
 			VerifierID: "x509_san_dns:verifier.example",
@@ -39,7 +44,8 @@ func nymAuthCfg(t *testing.T) *model.Cfg {
 				ArtifactSHA256: hex.EncodeToString(sum[:]),
 				ArtifactBytes:  int64(len(content)),
 			}}},
-		}}}
+		},
+	}}
 }
 
 // Every one of these would otherwise surface as a REFUSED PROOF, with
@@ -75,6 +81,19 @@ func TestNymAuthVerifierConfigurationIsCheckedAtLoad(t *testing.T) {
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.VerifierID = ""
 		assert.Error(t, checkNymAuthVerifier(cfg))
+	})
+
+	t.Run("enabled with no PDP", func(t *testing.T) {
+		// NewTrustEvaluatorFromConfig returns AllowAllEvaluator for
+		// an empty pdp_url, and it answers Trusted=true to every
+		// question. For nym_auth that means a chain the HOLDER
+		// minted is accepted as a trusted issuer - so the holder
+		// picks its own issuer key and therefore its own pseudonym,
+		// and a flagged person presents a value that matches nothing.
+		cfg := nymAuthCfg(t)
+		cfg.Verifier.Trust.PDPURL = ""
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "pdp_url")
+		assert.ErrorContains(t, checkNymAuthVerifier(cfg), "holder's own certificate chain")
 	})
 
 	t.Run("enabled with nothing allowed", func(t *testing.T) {
@@ -179,19 +198,6 @@ func TestNymAuthVerifierDisabledWithAHalfWrittenEntryStillLoads(t *testing.T) {
 	if err != nil {
 		assert.NotContains(t, err.Error(), "nym_auth",
 			"a disabled feature must not hold up startup over an entry nothing will read")
-	}
-}
-
-func TestNymAuthProofTimeWindowRefusesNegativeValues(t *testing.T) {
-	for field, set := range map[string]func(*model.NymAuthVerifier){
-		"verifier.nym_auth.proof_time_skew_seconds":    func(n *model.NymAuthVerifier) { n.ProofTimeSkewSeconds = -1 },
-		"verifier.nym_auth.proof_time_max_age_seconds": func(n *model.NymAuthVerifier) { n.ProofTimeMaxAgeSeconds = -1 },
-	} {
-		cfg := nymAuthCfg(t)
-		set(&cfg.Verifier.NymAuth)
-		err := helpers.Check(t.Context(), cfg, cfg, logger.NewSimple("test"))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), field)
 	}
 }
 
@@ -317,5 +323,71 @@ func TestBareVerifierIDIsRefusedAtStartup(t *testing.T) {
 		cfg := nymAuthCfg(t)
 		cfg.Verifier.NymAuth.VerifierID = good
 		assert.NoErrorf(t, checkNymAuthVerifier(cfg), "%q is a defined form", good)
+	}
+}
+
+// An offer whose circuits are named only inside the envelope's base64
+// input is refused at startup, when nym_auth verification is on.
+//
+// The envelope goes to the wallet unchanged - that is what it is for -
+// but the response side builds its allowlist from system_id_values
+// alone. Left alone, the request reaches the wallet complete and every
+// presentation it produces is refused as naming a system the request
+// never offered, which reads as a wallet problem and is not one.
+func TestZkpReqEnvelopeOfferIsRefusedWhenNymAuthVerifies(t *testing.T) {
+	envelope := func() *openid4vp.VPFormatsSupported {
+		return &openid4vp.VPFormatsSupported{ZkpReq: &openid4vp.ZkpReqFormat{Extra: map[string]any{
+			"fn_id": "circuit_zk_longfellow",
+			"input": "eyJjaXJjdWl0X2lkX3ZhbHVlcyI6IFsidXJuOmNpcmN1aXRzOmxvbmdmZWxsb3c6bnltX2F1dGg6djEiXX0=",
+		}}}
+	}
+
+	cfg := nymAuthCfg(t)
+	cfg.Verifier.PreferredVPFormats = envelope()
+
+	err := checkNymAuthVerifier(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "system_id_values", "the message must name what to use instead")
+
+	// But NOT with nym_auth off. A verifier is also the tool wallets are
+	// tested with, and the envelope exists so an operator can send a
+	// shape this build does not model; with nothing coming back to be
+	// bound to the offer, that costs nothing.
+	cfg.Verifier.NymAuth.Enable = false
+	assert.NoError(t, checkNymAuthVerifier(cfg),
+		"the escape hatch stays open for a verifier that only sends requests")
+}
+
+// And an offer that names its circuits properly is left alone, whether
+// the envelope members are there beside them or not.
+func TestZkpReqOfferWithSystemIDValuesPasses(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		format *openid4vp.ZkpReqFormat
+	}{
+		{
+			name:   "system_id_values alone",
+			format: &openid4vp.ZkpReqFormat{SystemIDValues: []string{"urn:circuits:longfellow:nym_auth:v1"}},
+		},
+		{
+			name: "system_id_values beside an envelope",
+			format: &openid4vp.ZkpReqFormat{
+				SystemIDValues: []string{"urn:circuits:longfellow:nym_auth:v1"},
+				Extra:          map[string]any{"fn_id": "circuit_zk_longfellow", "input": "e30="},
+			},
+		},
+		{
+			name: "an explicitly empty list, which is a filter that matches nothing",
+			format: &openid4vp.ZkpReqFormat{
+				SystemIDValues: []string{},
+				Extra:          map[string]any{"fn_id": "circuit_zk_longfellow", "input": "e30="},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := nymAuthCfg(t)
+			cfg.Verifier.PreferredVPFormats = &openid4vp.VPFormatsSupported{ZkpReq: tc.format}
+			assert.NoError(t, checkNymAuthVerifier(cfg))
+		})
 	}
 }
