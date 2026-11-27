@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -33,22 +35,23 @@ import (
 
 // Service is the service object for httpserver
 type Service struct {
-	cfg              *model.Cfg
-	log              *logger.Log
-	server           *http.Server
-	apiv1            Apiv1
-	gin              *gin.Engine
-	tracer           *trace.Tracer
-	httpHelpers      *httphelpers.Client
-	notify           *notify.Service
-	sessionsOptions  sessions.Options
-	sessionsEncKey   string
-	sessionsAuthKey  string
-	sessionsName     string
-	tokenLimiter     *middleware.RateLimiter
-	authorizeLimiter *middleware.RateLimiter
-	registerLimiter  *middleware.RateLimiter
-	registerAuth     gin.HandlerFunc
+	cfg                *model.Cfg
+	log                *logger.Log
+	server             *http.Server
+	apiv1              Apiv1
+	gin                *gin.Engine
+	tracer             *trace.Tracer
+	httpHelpers        *httphelpers.Client
+	notify             *notify.Service
+	sessionsOptions    sessions.Options
+	sessionsEncKey     string
+	sessionsAuthKey    string
+	sessionsName       string
+	tokenLimiter       *middleware.RateLimiter
+	authorizeLimiter   *middleware.RateLimiter
+	registerLimiter    *middleware.RateLimiter
+	interactionLimiter *middleware.RateLimiter
+	registerAuth       gin.HandlerFunc
 
 	// openidFederationService is nil when OpenID Federation is not enabled.
 	// Built once here rather than per-request, since constructing a signer
@@ -79,8 +82,12 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
-		registerAuth:     func(c *gin.Context) { c.Next() },
-		sessionsOptions:  sessionsOptions,
+		// Unconditional, not gated on embedded_presentation: the endpoint
+		// authenticates no client either way, and a verifier serving its
+		// own page only is reachable by everyone who can reach that page.
+		interactionLimiter: middleware.NewRateLimiter(rateLimitConfig.InteractionRequestsPerMinute, rateLimitConfig.InteractionBurst),
+		registerAuth:       func(c *gin.Context) { c.Next() },
+		sessionsOptions:    sessionsOptions,
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
@@ -105,6 +112,22 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			MaxAge:           12 * time.Hour,
 		}
 		s.gin.Use(cors.New(corsConfig))
+	}
+
+	// Scoped to the standalone presentation endpoints, and installed here
+	// for the same reason the block above is: a CORS handler on a router
+	// group never sees the preflight, because gin routes an OPTIONS it has
+	// no route for to NoRoute. Engine-level middleware runs for NoRoute too,
+	// so the preflight is answered wherever it lands.
+	embeddedCORS, err := middleware.EmbeddedPresentationCORS(s.cfg.Verifier.EmbeddedPresentation)
+	if err != nil {
+		return nil, err
+	}
+	if embeddedCORS != nil {
+		s.log.Info("Standalone presentation endpoints are open to other origins",
+			"allowed_origins", s.cfg.Verifier.EmbeddedPresentation.AllowedOrigins,
+			"paths", slices.Sorted(maps.Keys(middleware.EmbeddedPresentationPaths)))
+		s.gin.Use(embeddedCORS)
 	}
 
 	// Built only when registration is served. The constructor reads the
@@ -207,7 +230,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "payment", http.StatusOK, s.endpointPaymentPage)
 
 	rgUI := rgOAuthSession.Group("/ui")
-	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
+	s.registerUIInteraction(ctx, rgUI)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/notify", http.StatusOK, s.endpointUINotify)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/metadata", http.StatusOK, s.endpointUIMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/result", http.StatusOK, s.endpointUIResult)
@@ -261,6 +284,17 @@ func (s *Service) registerDynamicClientRegistrationEndpoints(ctx context.Context
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "register/:client_id", http.StatusOK, s.endpointGetClientConfiguration)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPut, "register/:client_id", http.StatusOK, s.endpointUpdateClient)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodDelete, "register/:client_id", http.StatusNoContent, s.endpointDeleteClient)
+}
+
+// registerUIInteraction registers POST /ui/interaction behind the rate
+// limiter.
+//
+// A group of its own only because RegEndpoint takes no middleware; the path
+// and the session middleware are the group's. A function of its own so a
+// test exercises this registration rather than a copy of it.
+func (s *Service) registerUIInteraction(ctx context.Context, rgUI *gin.RouterGroup) {
+	rgUIInteraction := rgUI.Group("", s.interactionLimiter.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUIInteraction, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
 }
 
 // Close closing httpserver

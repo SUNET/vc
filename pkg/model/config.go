@@ -89,6 +89,41 @@ type SessionCookie struct {
 	Domain string `yaml:"domain" validate:"omitempty" doc_example:".example.com"`
 }
 
+// EmbeddedPresentationConfig opens the standalone DCQL presentation flow to
+// pages served from another origin, for a verifier run by and for a single
+// relying party.
+//
+// The key names the four endpoints that flow calls - POST /ui/interaction,
+// GET /ui/notify, GET /ui/completion and GET /ui/result - and nothing else.
+// It is deliberately separate from api_server.cors, which applies to every
+// route this server has: an origin listed there reaches /token, /register
+// and /verification/direct_post as well.
+//
+// The endpoints it opens authenticate no client, so anyone who can reach
+// POST /ui/interaction can have this verifier sign a presentation request
+// carrying its identity. That is tolerable where the verifier belongs to
+// the one relying party it serves, and is why this is off by default and
+// must never be enabled on a verifier shared between tenants. See
+// docs/verifier/EMBEDDING.md.
+type EmbeddedPresentationConfig struct {
+	// Enable turns on cross-origin access to those endpoints for the
+	// origins below. Off: none, and the verifier's own page is unaffected
+	// either way - it is same-origin and needs no CORS at all.
+	Enable bool `yaml:"enable" default:"false"`
+	// AllowedOrigins is the list of origins permitted to call those
+	// endpoints.
+	// Required when enable is set: enabling without one would open nothing
+	// while reading as though it had, so startup refuses it rather than
+	// serving a configuration that cannot work.
+	AllowedOrigins []string `yaml:"allowed_origins" validate:"required_if=Enable true,omitempty,dive,required" doc_example:"[\"https://rp.example.com\"]"`
+}
+
+// Enabled reports whether the standalone presentation endpoints are open to
+// other origins. Nil-safe: an omitted stanza is "not enabled".
+func (c *EmbeddedPresentationConfig) Enabled() bool {
+	return c != nil && c.Enable
+}
+
 // CORS holds the CORS configuration
 type CORS struct {
 	// AllowedOrigins is the list of allowed CORS origins
@@ -1208,6 +1243,11 @@ type Verifier struct {
 	// Revocation configures credential revocation checking at presentation time (ARF 3.0 §6.6.3.7).
 	// When enabled, the Verifier checks Token Status List references in presented credentials.
 	Revocation *RevocationConfig `yaml:"revocation,omitempty"`
+	// EmbeddedPresentation turns on cross-origin access to the standalone
+	// presentation endpoints, so a relying party can drive a presentation
+	// from its own page. Omitted: they answer the verifier's own page and
+	// nothing else, which is what a shared deployment wants.
+	EmbeddedPresentation *EmbeddedPresentationConfig `yaml:"embedded_presentation,omitempty" validate:"omitempty"`
 	// ZkCircuits configures the zk-circuits catalog service used to resolve
 	// "mso_mdoc_zk" (Longfellow ZK/PPID) proof circuits for native
 	// verification. Only consulted by builds with the "zknative" Go build

@@ -156,7 +156,32 @@ the same reason. `/ui/result` is keyed by the `response_code` that
 
 ## Cross-origin configuration
 
-List the relying party's origin, or the verifier answers no preflight:
+List the relying party's origin, or the verifier answers no preflight.
+
+The standalone DCQL flow has a key of its own, off by default:
+
+```yaml
+verifier:
+  embedded_presentation:
+    enable: true
+    allowed_origins: ["https://rp.example.com"]
+```
+
+That opens exactly four endpoints - `POST /ui/interaction`, `GET /ui/notify`,
+`GET /ui/completion` and `GET /ui/result` - to the origins listed, and
+nothing else on the server. All four or none: a page that may start a
+presentation but may not learn how it ended has nothing to render.
+
+`/ui/resume` and `/ui/metadata` stay closed. The first serves the Digital
+Credentials API, which is bound to `public_url` and cannot work from another
+origin whatever CORS says; the second publishes the deployment's credential
+catalogue, which an embedded page building its own DCQL does not read.
+
+Enabling with an empty `allowed_origins` is refused at startup rather than
+served: it opens nothing while reading as though it had, and the operator
+would find out from a browser console instead.
+
+The OIDC flow uses the server-wide key instead:
 
 ```yaml
 verifier:
@@ -165,8 +190,13 @@ verifier:
       allowed_origins: ["https://rp.example.com"]
 ```
 
-That is all either flow needs. None of the endpoints above sits behind the
-session cookie: `/authorize`, `/qr/{session_id}` and `/poll/{session_id}`
+Note what that one does: it applies to **every** route this server has, so
+an origin listed there also reaches `/token`, `/register` and
+`/verification/direct_post`. Use it for the OIDC flow, whose endpoints are
+behind a registered client, and prefer `embedded_presentation` for the
+standalone flow.
+
+Either way, none of the endpoints above sits behind the session cookie: `/authorize`, `/qr/{session_id}` and `/poll/{session_id}`
 are registered outside the session middleware and address the authorization
 context by its id, `POST /ui/interaction` sets the cookie but does not
 require one, and `GET /ui/notify?session_id=` takes the session from the
@@ -227,8 +257,17 @@ verifier's identity.
 
 Treat it as an endpoint to put behind the relying party's own
 authentication, on a deployment dedicated to that relying party. It is not
-suitable for a verifier shared between tenants, and it is why this flow is
-not offered on a multi-tenant hosted deployment.
+suitable for a verifier shared between tenants.
+
+`verifier.embedded_presentation` is therefore off unless an operator sets
+it, and what it opens is deliberately narrow. Turning it on is a statement
+that this verifier belongs to the relying party whose origins are listed.
+
+`POST /ui/interaction` is rate limited per client IP whether or not the key
+is set, because it authenticates no client either way: a verifier serving
+only its own page is still reachable by everyone who can reach that page,
+and each call mints an authorization context, two request objects and a QR
+image.
 
 `/qr/{session_id}` and `/poll/{session_id}` take an unguessable session id
 and return nothing about the holder - a QR image and a status - but they do
