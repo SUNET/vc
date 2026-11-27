@@ -109,6 +109,12 @@
 
 ### Fixed
 
+- **`Replace` keeps a document's `created_at`**: the store assigns `created_at`
+  at first save and it never changes afterwards, on MongoDB, Postgres and
+  MariaDB. `PUT /api/v1/datastore` ignores `created_at` in the request and
+  keeps the stored value. Documents already stored with a zero `created_at`
+  keep it. A MongoDB document stored without one reads as zero and stores zero
+  at its next `Replace`.
 - **mdoc integers at the top of their range are refused**: an mdoc element the
   MDDL declares as `int` with the value 2^63 overflowed into a signed credential.
   On amd64 it was issued as -2^63, and a `uint` of 2^64 or more as 2^63. Issuance

@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -11,6 +12,7 @@ import (
 	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -86,6 +88,20 @@ func TestDatastoreColl_Mongo(t *testing.T) {
 	require.NoError(t, store.createIndex(t.Context()))
 
 	testDatastoreStoreContract(t, store)
+
+	// A document stored before created_at existed has no value to keep, and the
+	// request's value must not take its place.
+	_, err := store.Coll.InsertOne(t.Context(), bson.D{{Key: "meta", Value: bson.D{
+		{Key: "authentic_source", Value: "SUNET"}, {Key: "scope", Value: "pid"}, {Key: "document_id", Value: "no-created-at"},
+	}}})
+	require.NoError(t, err)
+	replaced := mkDoc("SUNET", "pid", "no-created-at", []string{"identity-1"}, map[string]any{"family_name": "Replaced"})
+	replaced.Meta.CreatedAt = time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	require.NoError(t, store.Replace(t.Context(), replaced))
+	full, err := store.GetByKey(t.Context(), "SUNET", "pid", "no-created-at")
+	require.NoError(t, err)
+	assert.Truef(t, full.Meta.CreatedAt.IsZero(), "created_at: read back %s", full.Meta.CreatedAt)
+	assert.Equal(t, "Replaced", full.DocumentData["family_name"])
 }
 
 func startMongoContainerForTest(t *testing.T) (*mongo.Client, func()) {
