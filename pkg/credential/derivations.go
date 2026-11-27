@@ -3,10 +3,13 @@ package credential
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ApplyDerivations runs each configured derivation against `claims` and
@@ -223,8 +226,10 @@ func MergeNestedClaims(dst, src map[string]any) {
 }
 
 // cloneValue deep-copies a claim value so nothing handed out shares
-// mutable structure with the original. Maps and slices only: everything
-// else a claim carries is immutable.
+// mutable structure with the original. It copies each container a claims
+// map holds: map[string]any and []any from a decoder, []string from the
+// attribute mapper and the external APIs, bson.D and bson.A from a MongoDB
+// read. Everything else a claim carries is immutable.
 func cloneValue(v any) any {
 	switch typed := v.(type) {
 	case map[string]any:
@@ -234,27 +239,38 @@ func cloneValue(v any) any {
 		}
 		return out
 	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = cloneValue(item)
+		return cloneArray(typed)
+	case bson.A:
+		return cloneArray(typed)
+	case bson.D:
+		out := make(bson.D, len(typed))
+		for i, element := range typed {
+			out[i] = bson.E{Key: element.Key, Value: cloneValue(element.Value)}
 		}
 		return out
+	case []string:
+		return slices.Clone(typed)
 	default:
 		return v
 	}
 }
 
-// CloneNestedClaims returns a copy of src with nested map[string]any values
-// cloned recursively so later in-place merges on the working map do not
-// mutate the caller's original claims map.
+// cloneArray deep-copies each element of an array of claim values.
+func cloneArray[S ~[]any](array S) S {
+	out := make(S, len(array))
+	for i, item := range array {
+		out[i] = cloneValue(item)
+	}
+	return out
+}
+
+// CloneNestedClaims returns a deep copy of src, with every container
+// cloneValue names copied, so a write into the copy leaves the caller's
+// claims unchanged.
 func CloneNestedClaims(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for k, v := range src {
-		if m, ok := v.(map[string]any); ok {
-			out[k] = CloneNestedClaims(m)
-			continue
-		}
-		out[k] = v
+		out[k] = cloneValue(v)
 	}
 	return out
 }

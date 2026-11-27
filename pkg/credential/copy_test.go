@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // A derivation reads a claim as presented after an earlier one copied the
@@ -88,4 +89,57 @@ func TestASkippedCopyClearsNothing(t *testing.T) {
 	doc := CloneNestedClaims(claims)
 	MergeDerived(doc, out, replaced)
 	assert.Equal(t, map[string]any{"name": "alice", "country": "SE"}, doc["identity"])
+}
+
+// A write through the clone leaves the caller's document unchanged, inside
+// arrays as well as objects.
+func TestCloneNestedClaims_WriteLeavesTheOriginalUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		original map[string]any
+		write    func(clone map[string]any)
+		want     map[string]any
+	}{
+		{
+			name:     "an array of maps",
+			original: map[string]any{"items": []any{map[string]any{"name": "first"}}},
+			write: func(clone map[string]any) {
+				clone["items"].([]any)[0].(map[string]any)["name"] = "CLOBBERED"
+			},
+			want: map[string]any{"items": []any{map[string]any{"name": "first"}}},
+		},
+		{
+			name:     "a plain array nested inside a cloned map",
+			original: map[string]any{"nested": map[string]any{"deep": []any{"a", "b"}}},
+			write: func(clone map[string]any) {
+				clone["nested"].(map[string]any)["deep"].([]any)[1] = "CLOBBERED"
+			},
+			want: map[string]any{"nested": map[string]any{"deep": []any{"a", "b"}}},
+		},
+		{
+			name: "a mapped []string and the arrays of a stored document",
+			original: map[string]any{
+				"roles":  []string{"reader"},
+				"list":   bson.A{"a"},
+				"object": bson.D{{Key: "k", Value: bson.A{"v"}}},
+			},
+			write: func(clone map[string]any) {
+				clone["roles"].([]string)[0] = "CLOBBERED"
+				clone["list"].(bson.A)[0] = "CLOBBERED"
+				object := clone["object"].(bson.D)
+				object[0].Value.(bson.A)[0] = "CLOBBERED"
+				object[0].Key = "CLOBBERED"
+			},
+			want: map[string]any{
+				"roles":  []string{"reader"},
+				"list":   bson.A{"a"},
+				"object": bson.D{{Key: "k", Value: bson.A{"v"}}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.write(CloneNestedClaims(tc.original))
+			assert.Equal(t, tc.want, tc.original)
+		})
+	}
 }
