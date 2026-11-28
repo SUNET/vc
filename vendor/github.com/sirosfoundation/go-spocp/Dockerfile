@@ -3,7 +3,7 @@ WORKDIR /src
 COPY . .
 RUN go build -trimpath -o /spocpd ./cmd/spocpd
 
-FROM alpine:3.22
+FROM alpine:3.24.4
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /spocpd /usr/local/bin/spocpd
 ENTRYPOINT ["/usr/local/bin/spocpd"]
